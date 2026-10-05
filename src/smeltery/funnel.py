@@ -16,6 +16,7 @@ import numpy as np
 from .model import Candidate, Measurement
 
 if TYPE_CHECKING:  # keep the funnel importable without RDKit
+    from .gates import SensitivityReport
     from .tiers import Tier
 
 
@@ -119,11 +120,20 @@ def resolved(a: Measurement, b: Measurement, z: float, floor: float) -> bool:
 def cut(
     measurements: dict[str, Measurement], keep: int, z: float = 2.0, floor: float = 0.0,
     *, tier: Tier | None = None, quantity: str | None = None,
+    sensitivity: SensitivityReport | None = None,
 ) -> CutResult:
     """Cut to `keep` survivors. With `tier` and `quantity`, the floor is the tier's
     own systematic floor and an unmeasured one raises `UnmeasuredFloorError`;
     an explicit `floor=` is then not accepted. The cut's unit is the tier's
-    declared unit for `quantity`, and every measurement must carry it."""
+    declared unit for `quantity`, and every measurement must carry it.
+
+    `sensitivity` (from `gates.charge_sensitivity`) raises the floor to
+    max(base floor, sensitivity.floor), where the base floor is the tier's
+    systematic floor (with tier=) or `floor=`. We take the MAX, not a
+    quadrature sum: the tier's floor may already include charge-model error, so
+    adding the two in quadrature could double-count, and max never lets the cut
+    resolve a pair that either source says is unresolved. With tier=, the
+    report must be for the same `quantity`."""
     if tier is not None:
         if quantity is None or floor != 0.0:
             raise ValueError("with tier=, pass quantity= and no explicit floor=")
@@ -132,6 +142,10 @@ def cut(
         wrong = sorted(k for k, v in measurements.items() if v.unit != unit)
         if wrong:
             raise ValueError(f"{wrong} are not in the tier's declared unit {unit!r} for {quantity!r}")
+    if sensitivity is not None:
+        if tier is not None and sensitivity.quantity != quantity:
+            raise ValueError(f"sensitivity report is for {sensitivity.quantity!r}, not {quantity!r}")
+        floor = max(floor, sensitivity.floor)
     order = sorted(measurements, key=lambda k: measurements[k].mean)
     groups: list[list[str]] = []
     for name in order:
