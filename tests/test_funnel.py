@@ -7,7 +7,7 @@ import pytest
 
 from smeltery import (
     ANGSTROM_TO_BOHR, Candidate, IncomparableError, Measurement, PointCharge, Pose, RunRecord,
-    cut, require_same_formula,
+    UnmeasuredFloorError, cut, paired_delta, require_same_formula,
 )
 
 
@@ -48,6 +48,52 @@ def test_no_sem_never_resolves():
 def _cand(name, symbols):
     xyz = np.zeros((len(symbols), 3))
     return Candidate(name, "", poses=[Pose(tuple(symbols), xyz)])
+
+
+class _FakeTier:
+    """A structural Tier (Protocol, no base class) with a settable floor and unit."""
+
+    name = "fake"
+
+    def __init__(self, floor, unit="kcal/mol"):
+        self._floor, self._unit = floor, unit
+
+    def produces(self):
+        return {"q": self._unit}
+
+    def systematic_floor(self, quantity):
+        return self._floor
+
+
+def test_cut_refuses_when_tier_floor_is_unmeasured():
+    ms = {"a": m(-1.0, 0.01), "b": m(0.0, 0.01)}
+    with pytest.raises(UnmeasuredFloorError) as exc:
+        cut(ms, keep=1, tier=_FakeTier(None), quantity="q")
+    assert str(exc.value) == (
+        "refusing to cut on 'q': tier 'fake' has not measured its systematic floor "
+        "(systematic_floor() is None). Measure it, or pass an explicit floor= to cut() without tier=."
+    )
+
+
+def test_cut_takes_its_floor_from_the_tier():
+    ms = {"a": m(-1.0, 0.01), "b": m(0.0, 0.01)}
+    assert cut(ms, keep=1, tier=_FakeTier(0.5), quantity="q").survivors == ["a"]
+    res = cut(ms, keep=1, tier=_FakeTier(2.0), quantity="q")
+    assert res.floor == 2.0 and res.unranked_at_boundary
+
+
+def test_cut_rejects_explicit_floor_alongside_a_tier():
+    with pytest.raises(ValueError, match="no explicit floor"):
+        cut({"a": m(0.0, 0.1)}, keep=1, floor=1.0, tier=_FakeTier(0.5), quantity="q")
+
+
+def test_funnel_reads_the_unit_from_the_tier_not_kcal():
+    parent, other = Candidate("p", ""), Candidate("o", "")
+    parent.per_pose["q"], other.per_pose["q"] = [1.0, 2.0, 3.0], [2.0, 3.0, 5.0]
+    dd = paired_delta(parent, other, "q", tier=_FakeTier(0.1, unit="eV"))
+    assert dd.unit == "eV"
+    with pytest.raises(ValueError, match="declared unit 'eV'"):
+        cut({"a": m(0.0, 0.1)}, keep=1, tier=_FakeTier(0.1, unit="eV"), quantity="q")
 
 
 def test_total_quantity_refused_across_formulas():

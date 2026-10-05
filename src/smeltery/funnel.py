@@ -9,10 +9,14 @@ orders two candidates their uncertainties can't separate.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .model import Candidate, Measurement
+
+if TYPE_CHECKING:  # keep the funnel importable without RDKit
+    from .tiers import Tier
 
 
 class IncomparableError(ValueError):
@@ -35,13 +39,36 @@ def require_same_formula(candidates: list[Candidate], quantity: str) -> None:
         )
 
 
-def paired_delta(parent: Candidate, analogue: Candidate, quantity: str) -> Measurement:
-    """ΔΔ over paired poses: analogue pose i minus parent pose i."""
+class UnmeasuredFloorError(ValueError):
+    """Raised when asked to cut on a quantity whose tier has not measured its systematic floor."""
+
+
+def tier_floor(tier: Tier, quantity: str) -> float:
+    """The tier's systematic floor for `quantity`; refuse (raise) if it is unmeasured."""
+    floor = tier.systematic_floor(quantity)
+    if floor is None:
+        raise UnmeasuredFloorError(
+            f"refusing to cut on {quantity!r}: tier {tier.name!r} has not measured its "
+            "systematic floor (systematic_floor() is None). Measure it, or pass an "
+            "explicit floor= to cut() without tier=."
+        )
+    return floor
+
+
+def paired_delta(parent: Candidate, analogue: Candidate, quantity: str, tier: Tier | None = None) -> Measurement:
+    """ΔΔ over paired poses: analogue pose i minus parent pose i.
+
+    With `tier`, the unit is read from `tier.produces()[quantity]`; without it
+    the Measurement keeps its default unit.
+    """
     p = parent.per_pose[quantity]
     a = analogue.per_pose[quantity]
     if len(p) != len(a):
         raise ValueError(f"{analogue.name}: {len(a)} poses vs parent's {len(p)}; cannot pair")
-    return Measurement.from_samples(np.asarray(a) - np.asarray(p))
+    samples = np.asarray(a) - np.asarray(p)
+    if tier is None:
+        return Measurement.from_samples(samples)
+    return Measurement.from_samples(samples, tier.produces()[quantity])
 
 
 def unpaired_delta(parent: Candidate, analogue: Candidate, quantity: str) -> Measurement:
@@ -89,7 +116,22 @@ def resolved(a: Measurement, b: Measurement, z: float, floor: float) -> bool:
     return d > z * np.hypot(a.sem, b.sem) and d > floor
 
 
-def cut(measurements: dict[str, Measurement], keep: int, z: float = 2.0, floor: float = 0.0) -> CutResult:
+def cut(
+    measurements: dict[str, Measurement], keep: int, z: float = 2.0, floor: float = 0.0,
+    *, tier: Tier | None = None, quantity: str | None = None,
+) -> CutResult:
+    """Cut to `keep` survivors. With `tier` and `quantity`, the floor is the tier's
+    own systematic floor and an unmeasured one raises `UnmeasuredFloorError`;
+    an explicit `floor=` is then not accepted. The cut's unit is the tier's
+    declared unit for `quantity`, and every measurement must carry it."""
+    if tier is not None:
+        if quantity is None or floor != 0.0:
+            raise ValueError("with tier=, pass quantity= and no explicit floor=")
+        floor = tier_floor(tier, quantity)
+        unit = tier.produces()[quantity]
+        wrong = sorted(k for k, v in measurements.items() if v.unit != unit)
+        if wrong:
+            raise ValueError(f"{wrong} are not in the tier's declared unit {unit!r} for {quantity!r}")
     order = sorted(measurements, key=lambda k: measurements[k].mean)
     groups: list[list[str]] = []
     for name in order:

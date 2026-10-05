@@ -88,7 +88,7 @@ class Candidate:
 class Measurement:
     """A per-candidate estimate with its uncertainty.
 
-    `per_pose` are the samples (kcal/mol). `sem` is the standard error of their
+    `per_pose` are the samples, in `unit`. `sem` is the standard error of their
     mean. A Measurement with n < 2 has no uncertainty estimate and cannot be
     used to separate candidates.
     """
@@ -100,9 +100,9 @@ class Measurement:
     unit: str = "kcal/mol"
 
     @classmethod
-    def from_samples(cls, samples: list[float] | np.ndarray) -> Measurement:
+    def from_samples(cls, samples: list[float] | np.ndarray, unit: str = "kcal/mol") -> Measurement:
         a = np.asarray(samples, dtype=float)
         if a.ndim != 1 or a.size == 0:
             raise ValueError("need a non-empty 1-D sample")
         sem = float(a.std(ddof=1) / np.sqrt(a.size)) if a.size > 1 else float("nan")
-        return cls(float(a.mean()), sem, int(a.size), tuple(float(v) for v in a))
+        return cls(float(a.mean()), sem, int(a.size), tuple(float(v) for v in a), unit)
