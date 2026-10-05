@@ -2,7 +2,8 @@
 
 ferric's own version string is not yet a build identity (every build
 reports 0.1.0), so the record also reads where the installed ferric came
-from. A git install records its exact commit in the package's
+from. An install from a package index is pinned by its version, because
+index releases are immutable. A git install records its exact commit in the package's
 `direct_url.json` (PEP 610), which is VERIFIED provenance: it is what was
 built. A local-directory install records only a path; the record then reads
 that checkout's git state and labels it INFERRED, because the directory may
@@ -39,6 +40,10 @@ def ferric_identity() -> dict:
     ident["version"] = dist.version
     raw = dist.read_text("direct_url.json")
     if not raw:
+        # Installed from a package index. Index versions are immutable, so the
+        # version string itself pins the exact build.
+        ident.update(source="package index", commit=None, dirty=False,
+                     provenance=f"VERIFIED: index release {dist.version} (immutable)")
         return ident
     du = json.loads(raw)
     ident["source"] = du.get("url")

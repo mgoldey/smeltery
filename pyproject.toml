@@ -5,14 +5,30 @@ description = "A tiered, measurement-disciplined funnel for biochemical systems,
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
 authors = [{ name = "Matthew Goldey" }]
+keywords = ["computational-chemistry", "drug-discovery", "quantum-chemistry", "virtual-screening"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    # Declared, never symlinked. Pinned below to an exact ferric commit so a
-    # result is reproducible from this repo alone.
-    "ferric",
+    # ferric publishes only pre-releases so far; the explicit pre-release floor
+    # lets pip select them. For development, [tool.uv.sources] below pins an
+    # exact ferric commit instead.
+    "ferric>=0.1.0rc6",
     "rdkit>=2024.3",
     "numpy>=1.26",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mgoldey/smeltery"
+Repository = "https://github.com/mgoldey/smeltery"
+Issues = "https://github.com/mgoldey/smeltery/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

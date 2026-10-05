@@ -78,7 +78,7 @@ def main(out_dir: Path = Path("out")) -> int:
     path = out_dir / f"run-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     fer = rec.ferric
-    print(f"\nrun record: {path}  (ferric {fer['commit']}, {fer['provenance']})")
+    print(f"\nrun record: {path}  (ferric {fer['version']} @ {fer['commit'] or fer['source']}: {fer['provenance']})")
     return 0
 
 

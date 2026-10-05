@@ -75,3 +75,11 @@ def test_run_record_round_trips_and_digest_tracks_inputs():
 def test_formula_is_hill_ordered():
     assert _cand("x", ["O", "C", "F", "H", "C", "Cl"]).formula == "C2HClFO"
     assert _cand("y", ["O", "H", "H"]).formula == "H2O"
+
+
+def test_ferric_identity_is_never_unknown_when_ferric_is_installed():
+    from smeltery import ferric_identity
+
+    ident = ferric_identity()
+    assert ident["version"], ident
+    assert ident["provenance"].startswith(("VERIFIED", "INFERRED")), ident
