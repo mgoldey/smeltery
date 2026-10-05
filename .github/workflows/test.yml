@@ -1,0 +1,57 @@
+# Test the tree on every push and PR to main, so a broken anchor cannot reach
+# main unnoticed.
+#
+# ferric is pinned to an exact git commit in [tool.uv.sources], so `uv sync`
+# builds it from source (Rust toolchain; preinstalled on ubuntu-24.04 runners).
+# That makes a cold run slow; the uv cache (keyed on uv.lock) keeps the built
+# wheel for warm runs. Record the measured cold time in issue #1.
+#
+# Actions are pinned by commit SHA, in the style of release.yml.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # ferric's convention: no oversubscribed BLAS threads in tests.
+  OPENBLAS_NUM_THREADS: "1"
+  # Fail if fewer tests than this are collected (15 as committed:
+  # tests/test_anchors.py + tests/test_funnel.py). Raise it when tests are added.
+  MIN_TESTS: "15"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install (builds ferric from source on a cold cache)
+        run: uv sync --extra dev
+
+      - name: Collected test count must not drop
+        run: |
+          uv run pytest --collect-only -q | tee /tmp/collect.txt
+          n=$(grep -oE '^[0-9]+ tests? collected' /tmp/collect.txt | grep -oE '^[0-9]+' || true)
+          echo "collected=$n min=$MIN_TESTS"
+          if [ -z "$n" ] || [ "$n" -lt "$MIN_TESTS" ]; then
+            echo "::error::collected ${n:-0} tests, expected at least $MIN_TESTS"
+            exit 1
+          fi
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Example (benzoic acid)
+        run: uv run python examples/mwe_benzoic.py
