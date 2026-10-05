@@ -1,0 +1,34 @@
+[project]
+name = "smeltery"
+version = "0.0.1"
+description = "A tiered, measurement-disciplined funnel for biochemical systems, over ferric."
+readme = "README.md"
+license = { text = "MIT OR Apache-2.0" }
+authors = [{ name = "Matthew Goldey" }]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Declared, never symlinked. Pinned below to an exact ferric commit so a
+    # result is reproducible from this repo alone.
+    "ferric",
+    "rdkit>=2024.3",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.uv.sources]
+# An exact commit, not a branch: the run record reports this SHA, read back
+# from the installed package's metadata. To develop against a local ferric
+# checkout instead, point this at it: ferric = { path = "../ferric" }
+ferric = { git = "https://github.com/mgoldey/ferric", rev = "8637a5d50b8f0a5ea1953159ac5c775d9e2009ff" }
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smeltery"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
