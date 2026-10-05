@@ -5,10 +5,11 @@ from .funnel import (
     tier_floor, unpaired_delta,
 )
 from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, Measurement, PointCharge, Pose
+from .pocket import PocketField, load_pocket
 from .record import RunRecord, ferric_identity
 
 __all__ = [
     "ANGSTROM_TO_BOHR", "HARTREE_TO_KCAL", "Candidate", "CutResult", "IncomparableError",
-    "Measurement", "PointCharge", "Pose", "RunRecord", "UnmeasuredFloorError", "cut", "ferric_identity",
+    "Measurement", "PocketField", "PointCharge", "Pose", "RunRecord", "UnmeasuredFloorError", "cut", "ferric_identity", "load_pocket",
     "paired_delta", "require_same_formula", "tier_floor", "unpaired_delta",
 ]
