@@ -23,6 +23,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdFMCS
 from rdkit.Chem.rdMolAlign import AlignMol
 
+from .cost import rhf_calibration, sto3g_basis_functions_strict
 from .model import HARTREE_TO_KCAL, Candidate, PointCharge, Pose
 
 
@@ -31,7 +32,9 @@ class Tier(Protocol):
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None: ...
 
-    def estimate_cost(self, candidates: list[Candidate]) -> dict: ...
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        """{quantity, unit, predicted, basis}; `predicted` is None when unmeasured, never a guess."""
+        ...
 
     def settings(self) -> dict: ...
 
@@ -123,7 +126,8 @@ class PairedPoses:
         raise _unknown_quantity(self, quantity)
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
-        return {"embeddings": len(candidates) * self.n_poses, "kind": "rdkit, milliseconds"}
+        return {"quantity": "wall_time", "unit": "s", "predicted": None,
+                "basis": f"unmeasured: no recorded timing for {len(candidates) * self.n_poses} RDKit embeddings"}
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         parent = ctx["parent"]
@@ -212,8 +216,29 @@ class FieldInteraction:
         return None  # charge-model / basis sensitivity not yet measured
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        """Measured reference time scaled by nbf^p (see `smeltery.cost`); None outside what was measured."""
+        quantity, unit = "wall_time", "s"
+
+        def none(why: str) -> dict:
+            return {"quantity": quantity, "unit": unit, "predicted": None, "basis": f"unmeasured: {why}"}
+
+        cal = rhf_calibration()
+        if self.basis != cal.basis:
+            return none(f"calibrated for {cal.basis} only, tier is {self.basis}")
+        if not candidates or any(not c.poses for c in candidates):
+            return none("poses not built yet, so the SCF count is unknown")
+        total = 0.0
+        for c in candidates:
+            for pose in c.poses:
+                nbf = sto3g_basis_functions_strict(list(pose.symbols))
+                if nbf is None:
+                    return none(f"{c.name}: element outside the STO-3G table")
+                total += cal.predicted_seconds_per_pose(nbf)
         n = sum(len(c.poses) for c in candidates)
-        return {"scf_runs": 2 * n, "kind": "ferric RHF, ~0.1-1 s each at STO-3G for <20 atoms"}
+        return {"quantity": quantity, "unit": unit, "predicted": total,
+                "basis": f"{n} poses x (vacuum + field RHF) at {cal.basis}; measured {cal.reference_name} "
+                         f"({cal.reference_nbf} bf) {cal.reference_seconds:.3g} s scaled by nbf^{cal.exponent:.2f} "
+                         f"(fit on calibration set), reference iteration count assumed; {cal.machine}"}
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         import ferric
