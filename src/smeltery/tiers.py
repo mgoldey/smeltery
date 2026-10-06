@@ -202,10 +202,11 @@ class FieldInteraction:
     energy_conv: float = 1e-10
     density_conv: float = 1e-8
     name: str = "field_interaction"
+    field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
 
     def settings(self) -> dict:
         return {"method": "RHF", "basis": self.basis, "energy_conv": self.energy_conv,
-                "density_conv": self.density_conv, "engine": "ferric"}
+                "density_conv": self.density_conv, "engine": "ferric", "field": self.field_provenance}
 
     def produces(self) -> dict[str, str]:
         return {"dE_int": "kcal/mol"}
@@ -244,6 +245,7 @@ class FieldInteraction:
         import ferric
 
         field: list[PointCharge] = ctx["field"]
+        self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
         for cand in candidates:
