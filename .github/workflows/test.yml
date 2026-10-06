@@ -1,10 +1,11 @@
 # Test the tree on every push and PR to main, so a broken anchor cannot reach
 # main unnoticed.
 #
-# ferric is pinned to an exact git commit in [tool.uv.sources], so `uv sync`
-# builds it from source (Rust toolchain; preinstalled on ubuntu-24.04 runners).
-# That makes a cold run slow; the uv cache (keyed on uv.lock) keeps the built
-# wheel for warm runs. Record the measured cold time in issue #1.
+# ferric is installed from its PyPI wheel (`--no-sources` ignores the git pin in
+# [tool.uv.sources]): building ferric from source needs libint2, which the
+# runner does not have. This is the same ferric a user gets from
+# `pip install smeltery`. `uv run --no-sync` keeps uv from re-resolving
+# against the git pin afterwards.
 #
 # Actions are pinned by commit SHA, in the style of release.yml.
 name: test
@@ -21,9 +22,10 @@ permissions:
 env:
   # ferric's convention: no oversubscribed BLAS threads in tests.
   OPENBLAS_NUM_THREADS: "1"
-  # Fail if fewer tests than this are collected (15 as committed:
-  # tests/test_anchors.py + tests/test_funnel.py). Raise it when tests are added.
-  MIN_TESTS: "15"
+  # Fail if fewer tests than this are collected (53 as of the M1 integration;
+  # the xtb tests skip on the runner but are still collected). Raise it when
+  # tests are added.
+  MIN_TESTS: "53"
 
 jobs:
   test:
@@ -37,12 +39,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - name: Install (builds ferric from source on a cold cache)
-        run: uv sync --extra dev
+      - name: Install (ferric from PyPI)
+        run: uv sync --extra dev --no-sources
 
       - name: Collected test count must not drop
         run: |
-          uv run pytest --collect-only -q | tee /tmp/collect.txt
+          uv run --no-sync pytest --collect-only -q | tee /tmp/collect.txt
           n=$(grep -oE '^[0-9]+ tests? collected' /tmp/collect.txt | grep -oE '^[0-9]+' || true)
           echo "collected=$n min=$MIN_TESTS"
           if [ -z "$n" ] || [ "$n" -lt "$MIN_TESTS" ]; then
@@ -51,7 +53,7 @@ jobs:
           fi
 
       - name: Tests
-        run: uv run pytest -q
+        run: uv run --no-sync pytest -q
 
       - name: Example (benzoic acid)
-        run: uv run python examples/mwe_benzoic.py
+        run: uv run --no-sync python examples/mwe_benzoic.py
