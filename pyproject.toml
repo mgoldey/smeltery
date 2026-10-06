@@ -32,6 +32,11 @@ Issues = "https://github.com/mgoldey/smeltery/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Optional readers for smeltery.structure. A missing one raises MissingBackend
+# naming the extra. gemmi is currently also pulled in by ferric itself; rdkit is
+# also a core dependency while smeltery.tiers imports it at module level.
+gemmi = ["gemmi"]
+rdkit = ["rdkit>=2024.3"]
 
 [tool.uv.sources]
 # An exact commit, not a branch: the run record reports this SHA, read back
