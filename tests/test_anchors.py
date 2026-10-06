@@ -5,9 +5,10 @@ one fails, no ΔΔE the funnel reports can be trusted.
 """
 
 import ferric
+import pytest
 
 from smeltery import ANGSTROM_TO_BOHR, Candidate, PointCharge, paired_delta
-from smeltery.tiers import FieldInteraction, PairedPoses
+from smeltery.tiers import FieldInteraction, PairedPoses, UndeclaredQuantityError, run_checked
 
 ACID = "OC(=O)c1ccccc1"
 
@@ -50,3 +51,25 @@ def test_bohr_factor_is_exactly_the_one_ferric_uses_for_xyz():
     """Point charges (converted here) and atoms (converted by ferric) must share a frame."""
     he = ferric.Molecule.from_xyz_string("1\n\nHe 1.0 0.0 0.0\n")
     assert he.coords_bohr()[0][0] == ANGSTROM_TO_BOHR
+
+
+def test_field_interaction_declares_its_quantity_and_unit():
+    tier = FieldInteraction()
+    assert tier.produces() == {"dE_int": "kcal/mol"}
+    assert tier.systematic_floor("dE_int") is None  # unmeasured, so the funnel must refuse
+    assert PairedPoses().produces() == {}
+
+
+def test_tier_writing_an_undeclared_per_pose_key_fails_validation():
+    class Sneaky(FieldInteraction):
+        def run(self, candidates, ctx):
+            super().run(candidates, ctx)
+            for c in candidates:
+                c.per_pose["E_total"] = [0.0] * len(c.poses)
+
+    c = Candidate("c", ACID)
+    PairedPoses(n_poses=2).run([c], {"parent": c})
+    with pytest.raises(UndeclaredQuantityError, match=r"undeclared per_pose key\(s\) \['E_total'\]"):
+        run_checked(Sneaky(), [c], {"field": []})
+    # a tier that writes only what it declared passes
+    run_checked(FieldInteraction(), [c], {"field": []})

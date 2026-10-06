@@ -1,6 +1,9 @@
 """Tiers: each one reads candidates and adds per-pose results.
 
-A tier implements `run(candidates, ctx)` and `estimate_cost(candidates)`. It
+A tier implements `run(candidates, ctx)` and `estimate_cost(candidates)`, and
+declares what it writes: `produces()` maps each `Candidate.per_pose` key to its
+unit, and `systematic_floor(quantity)` is the tier's own systematic error in that
+unit, or None while unmeasured (the funnel then refuses to cut on it). It
 reports in its native settings; nothing here hides a knob behind a "generic
 energy" interface. Two tiers ship in the MWE:
 
@@ -31,6 +34,38 @@ class Tier(Protocol):
     def estimate_cost(self, candidates: list[Candidate]) -> dict: ...
 
     def settings(self) -> dict: ...
+
+    def produces(self) -> dict[str, str]:
+        """`Candidate.per_pose` keys this tier writes, mapped to their unit."""
+        ...
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        """Systematic error of `quantity` in its declared unit; None if unmeasured."""
+        ...
+
+
+class UndeclaredQuantityError(ValueError):
+    """Raised when a tier writes a `per_pose` key it did not declare in `produces()`."""
+
+
+def run_checked(tier: Tier, candidates: list[Candidate], ctx: dict) -> None:
+    """Run `tier`, then fail if it added or replaced a `per_pose` key it didn't declare."""
+    before = {id(c): dict(c.per_pose) for c in candidates}
+    tier.run(candidates, ctx)
+    declared = set(tier.produces())
+    for c in candidates:
+        old = before[id(c)]
+        written = {k for k, v in c.per_pose.items() if k not in old or old[k] is not v}
+        undeclared = sorted(written - declared)
+        if undeclared:
+            raise UndeclaredQuantityError(
+                f"tier {tier.name!r} wrote undeclared per_pose key(s) {undeclared} on "
+                f"{c.name!r}; declared: {sorted(declared)}"
+            )
+
+
+def _unknown_quantity(tier: Tier, quantity: str) -> KeyError:
+    return KeyError(f"tier {tier.name!r} does not produce {quantity!r}; produces {sorted(tier.produces())}")
 
 
 def _mol_with_h(smiles: str) -> Chem.Mol:
@@ -80,6 +115,12 @@ class PairedPoses:
 
     def settings(self) -> dict:
         return {k: getattr(self, k) for k in ("n_poses", "seed", "jitter_deg", "jitter_ang")}
+
+    def produces(self) -> dict[str, str]:
+        return {}  # writes poses, no per_pose quantity
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        raise _unknown_quantity(self, quantity)
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
         return {"embeddings": len(candidates) * self.n_poses, "kind": "rdkit, milliseconds"}
@@ -161,6 +202,14 @@ class FieldInteraction:
     def settings(self) -> dict:
         return {"method": "RHF", "basis": self.basis, "energy_conv": self.energy_conv,
                 "density_conv": self.density_conv, "engine": "ferric"}
+
+    def produces(self) -> dict[str, str]:
+        return {"dE_int": "kcal/mol"}
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity != "dE_int":
+            raise _unknown_quantity(self, quantity)
+        return None  # charge-model / basis sensitivity not yet measured
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
         n = sum(len(c.poses) for c in candidates)
