@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import ferric
+from ._ferric import ferric
 
 from .embedding import EmbeddedLigand
 
