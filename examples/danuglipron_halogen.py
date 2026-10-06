@@ -29,16 +29,31 @@ WHAT IS AND IS NOT REPRODUCED (read before citing anything here)
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from itertools import pairwise
 from pathlib import Path
+
+os.environ.setdefault("RAYON_NUM_THREADS", "1")  # parallelism is across poses (processes), not inside ferric
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 
 from smeltery import (
-    Candidate, Measurement, Pose, RunRecord, charge_sensitivity, cut, load_pocket, paired_delta, unpaired_delta,
+    Candidate,
+    Measurement,
+    Pose,
+    RunRecord,
+    charge_sensitivity,
+    cut,
+    load_pocket,
+    paired_delta,
+    unpaired_delta,
 )
 from smeltery.tiers import FieldInteraction, PairedPoses, _mol_with_h, _rigid_jitter
 
@@ -164,6 +179,40 @@ class BoundPosePairedPoses(PairedPoses):
                 cand.poses = self._paired(pmol, parent_poses, cand)
 
 
+def _one_pose(name: str, smiles: str, pose: Pose, field) -> float:
+    """Worker: dE_int of one pose, through the real `FieldInteraction` tier."""
+    c = Candidate(name, smiles, [pose])
+    FieldInteraction().run([c], {"field": field})
+    return c.per_pose["dE_int"][0]
+
+
+def run_field_tier(cands: list[Candidate], field, tag: str, workers: int, cache_path: Path) -> FieldInteraction:
+    """`FieldInteraction` over every pose of every candidate, one process per pose, with a resumable cache.
+
+    Results are identical to `FieldInteraction().run(cands, ...)`; only scheduling differs. The cache key is
+    the pose geometry plus the field's input digest and force field, so a stale entry cannot be reused.
+    """
+    cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
+    tier = FieldInteraction()
+    tier.field_provenance = getattr(field, "provenance", None)
+    fkey = json.dumps({k: tier.field_provenance.get(k) for k in ("input_sha256", "pdb2pqr_ff", "cutoff_ang")}, sort_keys=True)
+    keys = {(c.name, i): hashlib.sha256((fkey + tag + c.name + p.to_xyz()).encode()).hexdigest()
+            for c in cands for i, p in enumerate(c.poses)}
+    todo = [(c, i) for c in cands for i in range(len(c.poses)) if keys[(c.name, i)] not in cache]
+    print(f"  {tag}: {len(keys) - len(todo)} cached, {len(todo)} to run on {workers} workers", flush=True)
+    if todo:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_one_pose, c.name, c.smiles, c.poses[i], field): (c, i) for c, i in todo}
+            for fut in as_completed(futs):
+                c, i = futs[fut]
+                cache[keys[(c.name, i)]] = fut.result()
+                cache_path.write_text(json.dumps(cache))
+                print(f"  {tag}: {c.name} pose {i} done ({len(cache)} cached)", flush=True)
+    for c in cands:
+        c.per_pose["dE_int"] = [cache[keys[(c.name, i)]] for i in range(len(c.poses))]
+    return tier
+
+
 def compare_to_campaign(paired: dict[str, Measurement]) -> tuple[list[dict], str]:
     """Criterion 2: rows (name, ours, recorded, within SEM) and a status: UNVERIFIED if nothing recorded."""
     rows, checked = [], 0
@@ -185,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--poses", type=int, default=6)
     ap.add_argument("--out", type=Path, default=Path("out"))
+    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     args = ap.parse_args(argv)
 
     data = find_data_dir()
@@ -201,12 +251,12 @@ def main(argv: list[str] | None = None) -> int:
     poses = BoundPosePairedPoses(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), n_poses=args.poses)
     poses.run(cands, {"parent": parent})
 
-    tier_a = FieldInteraction()
-    tier_a.run(cands, {"field": field_a})
+    args.out.mkdir(exist_ok=True)
+    cache = args.out / f"halogen-scf-cache-{args.poses}poses.json"
+    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache)
     # Model B: the SAME poses under CHARMM charges, in separate candidates so per_pose stays model-specific.
     cands_b = [Candidate(c.name, c.smiles, c.poses) for c in cands if c is not selfpair]
-    tier_b = FieldInteraction()
-    tier_b.run(cands_b, {"field": field_b})
+    tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache)
     parent_b = cands_b[0]
 
     # Criterion 1: self-anchor, exactly 0.0 on every pose, and a non-zero field.
@@ -252,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"    cut(keep=3, z=2, floor={res.floor:.3f}): groups={res.groups}")
     print("    ", "UNRANKED at the boundary" if res.unranked_at_boundary else f"survivors={res.survivors}", *res.notes)
     order = sorted(paired, key=lambda k: paired[k].mean)
-    gaps = {(a, b): paired[b].mean - paired[a].mean for a, b in zip(order, order[1:])}
+    gaps = {(a, b): paired[b].mean - paired[a].mean for a, b in pairwise(order)}
     in_group = {n: i for i, g in enumerate(res.groups) for n in g}
     for (a, b), gap in gaps.items():
         if gap <= res.floor:  # a gap under the floor must never be reported as a resolved order
@@ -280,7 +330,6 @@ def main(argv: list[str] | None = None) -> int:
                     "floor": res.floor, "notes": res.notes},
         },
     )
-    args.out.mkdir(exist_ok=True)
     path = args.out / f"danuglipron-halogen-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     fer = rec.ferric
