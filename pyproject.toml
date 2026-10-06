@@ -37,6 +37,11 @@ dev = ["pytest>=8"]
 # also a core dependency while smeltery.tiers imports it at module level.
 gemmi = ["gemmi"]
 rdkit = ["rdkit>=2024.3"]
+# Vina search + Meeko ligand/receptor prep for smeltery.docking. An extra, not a
+# core dependency: PyPI's vina ships wheels for CPython 3.8-3.12 only and builds
+# from source (needing Boost) elsewhere. rdkit, scipy and gemmi are listed
+# because meeko 0.8.0 declares no dependencies yet imports all three.
+docking = ["vina>=1.2.7", "meeko>=0.8.0", "rdkit>=2024.3", "scipy>=1.11", "gemmi"]
 
 [tool.uv.sources]
 # An exact commit, not a branch: the run record reports this SHA, read back
