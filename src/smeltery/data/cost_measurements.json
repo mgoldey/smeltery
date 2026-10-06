@@ -1,0 +1,103 @@
+{
+  "quantity": "FieldInteraction wall time per pose (vacuum + point-charge-field RHF)",
+  "basis": "sto-3g",
+  "settings": {
+    "method": "RHF",
+    "basis": "sto-3g",
+    "energy_conv": 1e-10,
+    "density_conv": 1e-08,
+    "engine": "ferric"
+  },
+  "ferric": {
+    "version": "0.1.0",
+    "source": "https://github.com/mgoldey/ferric",
+    "commit": "8637a5d50b8f0a5ea1953159ac5c775d9e2009ff",
+    "dirty": false,
+    "provenance": "VERIFIED from direct_url.json (git install)"
+  },
+  "machine": "x86_64, RAYON_NUM_THREADS=1, OPENBLAS_NUM_THREADS=1",
+  "repeats": 5,
+  "statistic": "median",
+  "samples": [
+    {
+      "role": "calibration",
+      "name": "ethanol",
+      "smiles": "CCO",
+      "n_atoms": 9,
+      "n_basis_functions": 21,
+      "scf_iterations": 26,
+      "seconds_per_pose": 0.7650446750340052,
+      "seconds_all_repeats": [
+        0.7352211870020255,
+        0.7711265370016918,
+        0.773658799007535,
+        0.7348942069802433,
+        0.7650446750340052
+      ]
+    },
+    {
+      "role": "calibration",
+      "name": "benzoic acid",
+      "smiles": "OC(=O)c1ccccc1",
+      "n_atoms": 15,
+      "n_basis_functions": 51,
+      "scf_iterations": 36,
+      "seconds_per_pose": 14.868212385044899,
+      "seconds_all_repeats": [
+        14.868212385044899,
+        14.001380442990921,
+        16.287063995026983,
+        15.460382074990775,
+        14.526863466016948
+      ]
+    },
+    {
+      "role": "calibration",
+      "name": "ibuprofen",
+      "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+      "n_atoms": 33,
+      "n_basis_functions": 93,
+      "scf_iterations": 57,
+      "seconds_per_pose": 91.5992786490242,
+      "seconds_all_repeats": [
+        91.82278894301271,
+        91.16504373197677,
+        91.32836960995337,
+        91.5992786490242,
+        91.84324871498393
+      ]
+    },
+    {
+      "role": "validation",
+      "name": "aspirin",
+      "smiles": "CC(=O)Oc1ccccc1C(=O)O",
+      "n_atoms": 21,
+      "n_basis_functions": 73,
+      "scf_iterations": 41,
+      "seconds_per_pose": 43.536270538985264,
+      "seconds_all_repeats": [
+        43.536270538985264,
+        43.94227277999744,
+        44.00416634097928,
+        43.22446616599336,
+        43.31193753203843
+      ]
+    },
+    {
+      "role": "validation",
+      "name": "4-fluorobenzoic acid",
+      "smiles": "OC(=O)c1ccc(F)cc1",
+      "n_atoms": 15,
+      "n_basis_functions": 55,
+      "scf_iterations": 37,
+      "seconds_per_pose": 16.115804204018787,
+      "seconds_all_repeats": [
+        16.107747654023115,
+        16.191303858009633,
+        16.115804204018787,
+        16.13105401804205,
+        16.093620283005293
+      ]
+    }
+  ]
+}

@@ -11,11 +11,19 @@ energy" interface. Two tiers ship in the MWE:
   pose i built on the parent's pose i, which is what makes ΔΔE pairable.
 * `FieldInteraction`: ΔE_int = E(in field) − E(vacuum) at the same geometry,
   with ferric RHF. It is a difference, so it compares across formulas.
+
+`Gfn2` (GFN2-xTB through the external `xtb` binary) is a GATE, not a ranker.
 """
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -23,6 +31,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdFMCS
 from rdkit.Chem.rdMolAlign import AlignMol
 
+from .cost import rhf_calibration, sto3g_basis_functions_strict
 from .model import HARTREE_TO_KCAL, Candidate, PointCharge, Pose
 
 
@@ -31,7 +40,9 @@ class Tier(Protocol):
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None: ...
 
-    def estimate_cost(self, candidates: list[Candidate]) -> dict: ...
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        """{quantity, unit, predicted, basis}; `predicted` is None when unmeasured, never a guess."""
+        ...
 
     def settings(self) -> dict: ...
 
@@ -123,7 +134,8 @@ class PairedPoses:
         raise _unknown_quantity(self, quantity)
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
-        return {"embeddings": len(candidates) * self.n_poses, "kind": "rdkit, milliseconds"}
+        return {"quantity": "wall_time", "unit": "s", "predicted": None,
+                "basis": f"unmeasured: no recorded timing for {len(candidates) * self.n_poses} RDKit embeddings"}
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         parent = ctx["parent"]
@@ -198,10 +210,11 @@ class FieldInteraction:
     energy_conv: float = 1e-10
     density_conv: float = 1e-8
     name: str = "field_interaction"
+    field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
 
     def settings(self) -> dict:
         return {"method": "RHF", "basis": self.basis, "energy_conv": self.energy_conv,
-                "density_conv": self.density_conv, "engine": "ferric"}
+                "density_conv": self.density_conv, "engine": "ferric", "field": self.field_provenance}
 
     def produces(self) -> dict[str, str]:
         return {"dE_int": "kcal/mol"}
@@ -212,13 +225,35 @@ class FieldInteraction:
         return None  # charge-model / basis sensitivity not yet measured
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        """Measured reference time scaled by nbf^p (see `smeltery.cost`); None outside what was measured."""
+        quantity, unit = "wall_time", "s"
+
+        def none(why: str) -> dict:
+            return {"quantity": quantity, "unit": unit, "predicted": None, "basis": f"unmeasured: {why}"}
+
+        cal = rhf_calibration()
+        if self.basis != cal.basis:
+            return none(f"calibrated for {cal.basis} only, tier is {self.basis}")
+        if not candidates or any(not c.poses for c in candidates):
+            return none("poses not built yet, so the SCF count is unknown")
+        total = 0.0
+        for c in candidates:
+            for pose in c.poses:
+                nbf = sto3g_basis_functions_strict(list(pose.symbols))
+                if nbf is None:
+                    return none(f"{c.name}: element outside the STO-3G table")
+                total += cal.predicted_seconds_per_pose(nbf)
         n = sum(len(c.poses) for c in candidates)
-        return {"scf_runs": 2 * n, "kind": "ferric RHF, ~0.1-1 s each at STO-3G for <20 atoms"}
+        return {"quantity": quantity, "unit": unit, "predicted": total,
+                "basis": f"{n} poses x (vacuum + field RHF) at {cal.basis}; measured {cal.reference_name} "
+                         f"({cal.reference_nbf} bf) {cal.reference_seconds:.3g} s scaled by nbf^{cal.exponent:.2f} "
+                         f"(fit on calibration set), reference iteration count assumed; {cal.machine}"}
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         import ferric
 
         field: list[PointCharge] = ctx["field"]
+        self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
         for cand in candidates:
@@ -232,3 +267,137 @@ class FieldInteraction:
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
             cand.per_pose["dE_int"] = vals
+
+
+# ---------------------------------------------------------------- GFN2-xTB
+
+XTB = "xtb"
+# Measured xtb-vs-DFT mean absolute error; the floor may not be reported below it.
+XTB_VS_DFT_MAE_KCAL = 0.825
+_XTB_ENERGY_RE = re.compile(r"TOTAL ENERGY\s+(-?\d+\.\d+)\s+Eh")
+
+
+class XtbUnavailableError(RuntimeError):
+    """Raised when the `xtb` binary is not on PATH."""
+
+
+XTB_MISSING_MESSAGE = (
+    "the `xtb` binary is not on PATH. xtb is a pinned external binary, not a Python "
+    "dependency (tblite has no external point charges): install xtb 6.7.x and put it "
+    "on PATH, or set XTB_PREFIX to its install prefix"
+)
+
+
+def xtb_path() -> str | None:
+    return shutil.which(XTB)
+
+
+def _xtb_env() -> dict[str, str]:
+    """Environment for xtb: libxtb/parameter paths, and every thread pool forced to 1.
+
+    Parallelism is across processes (one xtb per pose); libxtb is not thread-safe.
+    """
+    prefix = Path(os.environ.get("XTB_PREFIX", Path.home() / ".local"))
+    env = dict(os.environ)
+    libdirs = [str(prefix / "lib" / "x86_64-linux-gnu"), str(prefix / "lib")]
+    if env.get("LD_LIBRARY_PATH"):
+        libdirs.append(env["LD_LIBRARY_PATH"])
+    env["LD_LIBRARY_PATH"] = ":".join(libdirs)
+    env.setdefault("XTBPATH", str(prefix / "share" / "xtb"))
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        env[var] = "1"
+    return env
+
+
+def xtb_version() -> str | None:
+    """Version reported by `xtb --version`, or None if xtb is absent."""
+    if xtb_path() is None:
+        return None
+    out = subprocess.run([XTB, "--version"], capture_output=True, text=True, env=_xtb_env())
+    text = out.stdout + out.stderr
+    m = re.search(r"xtb version\s+(\S+)", text)
+    return m.group(1) if m else (text.strip() or None)
+
+
+def xtb_singlepoint(
+    symbols, coords_ang, charge: int = 0, point_charges_bohr=(), timeout: float = 600.0
+) -> float:
+    """GFN2-xTB total energy in Hartree. `point_charges_bohr` rows are (q, x, y, z), x y z in BOHR.
+
+    xtb reads the `pcharge` file in its working directory, in Bohr. A file passed
+    through `--input` is silently ignored, so it is written to the work dir instead.
+    Raises on any failure; never returns a placeholder energy.
+    """
+    if xtb_path() is None:
+        raise XtbUnavailableError(XTB_MISSING_MESSAGE)
+    if len(symbols) != len(coords_ang):
+        raise ValueError(f"{len(symbols)} symbols but {len(coords_ang)} coordinates")
+    with tempfile.TemporaryDirectory(prefix="smeltery-xtb-") as wd_name:
+        wd = Path(wd_name)
+        lines = [str(len(symbols)), ""]
+        lines += [f"{s:<3s} {x:16.10f} {y:16.10f} {z:16.10f}" for s, (x, y, z) in zip(symbols, coords_ang, strict=True)]
+        (wd / "mol.xyz").write_text("\n".join(lines) + "\n")
+        rows = list(point_charges_bohr)
+        if rows:
+            body = [str(len(rows))] + [f"{q:18.10f} {x:18.10f} {y:18.10f} {z:18.10f}" for q, x, y, z in rows]
+            (wd / "pcharge").write_text("\n".join(body) + "\n")
+        proc = subprocess.run(
+            [XTB, "mol.xyz", "--gfn", "2", "--chrg", str(charge)],
+            cwd=wd, env=_xtb_env(), capture_output=True, text=True, timeout=timeout,
+        )
+    m = _XTB_ENERGY_RE.search(proc.stdout)
+    if proc.returncode != 0 or m is None:
+        raise RuntimeError(f"xtb exited {proc.returncode} without a TOTAL ENERGY: {proc.stderr.strip()[:300]}")
+    return float(m.group(1))
+
+
+def _net_charge(smiles: str) -> int:
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"unparseable SMILES: {smiles!r}")
+    return sum(a.GetFormalCharge() for a in mol.GetAtoms())
+
+
+@dataclass
+class Gfn2:
+    """GFN2-xTB total energy per pose, in the pocket's point-charge field. A GATE, not a RANKER.
+
+    Use it to reject wrong ionization states and gross failures. Do NOT use it to
+    order conformers or analogues that are close in energy: over a 3 kcal/mol span
+    xtb-vs-DFT Spearman was 0.011 (n=20), i.e. no ordering information. Its
+    measured xtb-vs-DFT MAE is 0.825 kcal/mol, which `systematic_floor` reports.
+
+    xtb is driven as a subprocess (threads forced to 1) and reads point charges in
+    BOHR; `PointCharge` is Angstrom and is converted once, via `as_ferric_bohr`.
+    The net charge comes from the SMILES formal charges. With no field, the value
+    is the vacuum energy.
+    """
+
+    name: str = "gfn2"
+    field_provenance: dict | None = None
+
+    def settings(self) -> dict:
+        return {"method": "GFN2-xTB", "engine": "xtb subprocess, threads=1", "role": "gate, not ranker",
+                "xtb_path": xtb_path(), "xtb_version": xtb_version(), "point_charge_unit": "bohr",
+                "field": self.field_provenance}
+
+    def produces(self) -> dict[str, str]:
+        return {"E_gfn2": "kcal/mol"}  # total energy: a gate on ionization state / failure, NOT a ranker
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity != "E_gfn2":
+            raise _unknown_quantity(self, quantity)
+        return XTB_VS_DFT_MAE_KCAL
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        return {"xtb_runs": sum(len(c.poses) for c in candidates), "kind": "xtb subprocess, ~0.1-1 s each"}
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        field = ctx.get("field", [])
+        self.field_provenance = getattr(field, "provenance", None)
+        charges = [c.as_ferric_bohr() for c in field]  # Bohr
+        for cand in candidates:
+            q = _net_charge(cand.smiles)
+            cand.per_pose["E_gfn2"] = [
+                xtb_singlepoint(p.symbols, p.coords_ang, q, charges) * HARTREE_TO_KCAL for p in cand.poses
+            ]
