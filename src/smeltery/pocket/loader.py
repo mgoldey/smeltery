@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .model import PointCharge
+from ..model import PointCharge
 
 PDB2PQR = "pdb2pqr30"
 
