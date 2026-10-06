@@ -22,7 +22,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -33,6 +33,10 @@ from rdkit.Chem.rdMolAlign import AlignMol
 
 from .cost import rhf_calibration, sto3g_basis_functions_strict
 from .model import HARTREE_TO_KCAL, Candidate, PointCharge, Pose
+
+
+class NoCommonCoreError(RuntimeError):
+    """Raised when the MCS gate refuses a pair instead of returning a degraded mapping."""
 
 
 class Tier(Protocol):
@@ -116,16 +120,29 @@ class PairedPoses:
     has been aligned onto the mapped core. Pairing an analogue with ITSELF
     therefore maps every atom, copies every coordinate, and gives a
     per-pose ΔΔE of exactly 0.0. That is the self-pair anchor.
+
+    The MCS gate REFUSES rather than degrades: a pair with no common core, a
+    core below `min_core_heavy` heavy atoms, a search that hit its timeout, or
+    a molecule paired with an identical one whose core misses atoms, raises
+    `NoCommonCoreError`. A partial mapping would leave most atoms to a free
+    re-embedding, which is a different quantity from a paired difference (a
+    campaign saw self-MCS collapse to 19 of 41 atoms on poses whose bonds were
+    perceived from coordinates). Topology here always comes from SMILES.
     """
 
     n_poses: int = 6
     seed: int = 20261005
     jitter_deg: float = 15.0
     jitter_ang: float = 0.5
+    min_core_heavy: int = 3
+    mcs_timeout_s: int = 10
     name: str = "paired_poses"
+    #: Per analogue name: (analogue atom, parent atom) pairs copied exactly. Read
+    #: by `smeltery.generate.pairs_from_candidates`; reset on every `run`.
+    scaffold_maps: dict[str, list[tuple[int, int]]] = field(default_factory=dict, repr=False, compare=False)
 
     def settings(self) -> dict:
-        return {k: getattr(self, k) for k in ("n_poses", "seed", "jitter_deg", "jitter_ang")}
+        return {k: getattr(self, k) for k in ("n_poses", "seed", "jitter_deg", "jitter_ang", "min_core_heavy")}
 
     def produces(self) -> dict[str, str]:
         return {}  # writes poses, no per_pose quantity
@@ -152,6 +169,7 @@ class PairedPoses:
             parent_poses.append(xyz if cid == cids[0] else _rigid_jitter(xyz, rng, self.jitter_deg, self.jitter_ang))
         psym = tuple(a.GetSymbol() for a in pmol.GetAtoms())
         parent.poses = [Pose(psym, x) for x in parent_poses]
+        self.scaffold_maps = {}
 
         for cand in candidates:
             if cand is parent:
@@ -166,14 +184,28 @@ class PairedPoses:
             bondCompare=rdFMCS.BondCompare.CompareOrder,
             ringMatchesRingOnly=True,
             completeRingsOnly=True,
-            timeout=10,
+            timeout=self.mcs_timeout_s,
         )
-        core = Chem.MolFromSmarts(mcs.smartsString)
-        p_idx = pmol.GetSubstructMatch(core)
-        a_idx = amol.GetSubstructMatch(core)
+        if mcs.canceled:
+            raise NoCommonCoreError(f"{cand.name}: MCS search timed out; an unfinished core is not a core")
+        core = Chem.MolFromSmarts(mcs.smartsString) if mcs.smartsString else None
+        p_idx = pmol.GetSubstructMatch(core) if core is not None else ()
+        a_idx = amol.GetSubstructMatch(core) if core is not None else ()
         if not p_idx or not a_idx:
-            raise RuntimeError(f"{cand.name}: no common core with the parent")
+            raise NoCommonCoreError(f"{cand.name}: no common core with the parent")
         mapping = list(zip(a_idx, p_idx, strict=True))  # (analogue atom, parent atom)
+        n_heavy = sum(1 for a, _ in mapping if amol.GetAtomWithIdx(a).GetAtomicNum() > 1)
+        if n_heavy < self.min_core_heavy:
+            raise NoCommonCoreError(
+                f"{cand.name}: common core has {n_heavy} heavy atom(s), fewer than "
+                f"min_core_heavy={self.min_core_heavy}; refusing a degraded mapping"
+            )
+        if Chem.MolToSmiles(Chem.RemoveHs(amol)) == Chem.MolToSmiles(Chem.RemoveHs(pmol)) and len(mapping) != amol.GetNumAtoms():
+            raise NoCommonCoreError(
+                f"{cand.name}: identical to the parent but the core maps {len(mapping)} of "
+                f"{amol.GetNumAtoms()} atoms; refusing a degraded self-mapping"
+            )
+        self.scaffold_maps[cand.name] = mapping
         sym = tuple(a.GetSymbol() for a in amol.GetAtoms())
         poses = []
         for i, pxyz in enumerate(parent_poses):
