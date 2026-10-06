@@ -167,7 +167,7 @@ class _EchoVina:
 
 @pytest.fixture
 def echo_vina(monkeypatch, tmp_path):
-    pytest.importorskip("meeko")
+    pytest.importorskip("meeko", reason="needs the docking extra: pip install 'smeltery[docking]'")
     mod = types.ModuleType("vina")
     mod.Vina = _EchoVina
     monkeypatch.setitem(sys.modules, "vina", mod)
