@@ -73,6 +73,13 @@ Gaps the issues do not settle, flagged for the maintainer:
   issue does not do. `solvate.py` also lives in `tools/active_site` and is not
   in #11's list; it is not ported here and needs the same move-or-drop decision
   before #13.
+- #11 claims `compute_binding_energy` on the 7LCJ fixture gives delta_e
+  -17.41 kcal/mol. Measured with the ported code (ferric 8637a5d, def2-svp RHF,
+  `conf_00_cryo_em.xyz` + `7LCJ_pocket.pdb`, 6458 charges): -28.758. The only
+  -17.41 in the pinned ferric tree is a synthetic number in a viz test. The
+  figure is NOT reproduced; the heavy test pins the measured value instead.
+  Parser overlap with #9: `smeltery.pocket.loader.parse_pqr` (Angstrom,
+  last-5-columns) vs the `structure` branch's own parser; reconcile to one.
 - #11 pocket loader: `smeltery.pocket` became a package. `loader.py` (from #3)
   is the single PQR reader; ferric's `pqr_parser.py` / `pocket_charges.py` are
   superseded by it (Angstrom `PointCharge`s rather than Bohr tuples; residue

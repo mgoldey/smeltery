@@ -76,10 +76,17 @@ def test_binding_energy_accepts_a_pqr_path_and_keeps_every_charge(tmp_path):
 @pytest.mark.skipif(shutil.which("pdb2pqr30") is None,
                     reason="pdb2pqr30 not installed (pip install pdb2pqr): the 7LCJ binding-energy anchor not run")
 @pytest.mark.skipif(os.environ.get("SMELTERY_RUN_HEAVY") != "1",
-                    reason="~2.5 min: two SCFs at 71 atoms / 6458 charges. Run with SMELTERY_RUN_HEAVY=1")
-def test_7lcj_binding_energy_reproduces_campaign_value():
+                    reason="~2.5 min on a free machine (75 min on 2 niced cores): two SCFs at 71 atoms / "
+                           "6458 charges. Run with SMELTERY_RUN_HEAVY=1")
+def test_7lcj_binding_energy_is_pinned_and_does_not_match_the_issue_figure():
+    # MEASURED here (ferric 8637a5d, def2-svp RHF, conf_00_cryo_em + 7LCJ_pocket.pdb, pdb2pqr30 AMBER):
+    # e_vac -1860.9857485790, e_field -1861.0315781550, dE -28.758 kcal/mol, 6458 charges.
+    # Issue #11 states -17.41 for "the committed 7LCJ fixture"; the only -17.41 found in the pinned
+    # ferric tree is a synthetic number in tools/viz/tests/test_energy_plots.py. This pins what the
+    # code actually produces and records the discrepancy rather than fitting to the claim.
     r = P.compute_binding_energy(LIGAND_XYZ, POCKET_PDB)
-    assert r.delta_e_kcal_mol == pytest.approx(-17.41, abs=0.05)
+    assert r.delta_e_kcal_mol == pytest.approx(-28.758, abs=0.05)
+    assert abs(r.delta_e_kcal_mol - (-17.41)) > 1.0  # the issue's figure is NOT reproduced
     assert r.n_pocket_charges > 6000
     assert r.e_vacuum != r.e_field and r.e_field - r.e_vacuum == r.delta_e_hartree
 
