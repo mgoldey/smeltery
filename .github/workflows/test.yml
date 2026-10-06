@@ -25,7 +25,7 @@ env:
   # Fail if fewer tests than this are collected (53 as of the M1 integration;
   # the xtb tests skip on the runner but are still collected). Raise it when
   # tests are added.
-  MIN_TESTS: "53"
+  MIN_TESTS: "56"
 
 jobs:
   test:
