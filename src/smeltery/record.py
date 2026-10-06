@@ -1,8 +1,9 @@
 """The campaign run record: enough to reproduce a result from its inputs.
 
 ferric's own version string is not yet a build identity (every build
-reports 0.1.0), so the record also reads where the installed ferric came
-from. An install from a package index is pinned by its version, because
+reports 0.1.0). When ferric exposes `ferric.__build__` (git SHA and dirty
+flag stamped at build time) that is used and is VERIFIED. Otherwise the
+record reads where the installed ferric came from. An install from a package index is pinned by its version, because
 index releases are immutable. A git install records its exact commit in the package's
 `direct_url.json` (PEP 610), which is VERIFIED provenance: it is what was
 built. A local-directory install records only a path; the record then reads
@@ -13,6 +14,7 @@ have changed since the build.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import platform
 import subprocess
@@ -31,8 +33,32 @@ def _git(path: Path, *args: str) -> str | None:
         return None
 
 
+def _ferric_build() -> dict | None:
+    """The engine's own build stamp, `ferric.__build__`, if it exposes one.
+
+    Expected shape (proposed upstream): {"git_sha": str, "dirty": bool}. Anything
+    else (absent, wrong type, missing sha) counts as no stamp.
+    """
+    try:
+        build = getattr(importlib.import_module("ferric"), "__build__", None)
+    except ImportError:
+        return None
+    if isinstance(build, dict) and isinstance(build.get("git_sha"), str) and build["git_sha"]:
+        return build
+    return None
+
+
 def ferric_identity() -> dict:
     ident: dict = {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"}
+    build = _ferric_build()
+    if build is not None:
+        try:
+            ident["version"] = metadata.version("ferric")
+        except metadata.PackageNotFoundError:
+            pass
+        ident.update(source="ferric.__build__", commit=build["git_sha"], dirty=bool(build.get("dirty")),
+                     provenance="VERIFIED from ferric.__build__ (stamped at build time)")
+        return ident
     try:
         dist = metadata.distribution("ferric")
     except metadata.PackageNotFoundError:
