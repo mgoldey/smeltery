@@ -227,12 +227,20 @@ dependencies = [
 dev = [
     { name = "pytest" },
 ]
+gemmi = [
+    { name = "gemmi" },
+]
+rdkit = [
+    { name = "rdkit" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "ferric", git = "https://github.com/mgoldey/ferric?rev=8637a5d50b8f0a5ea1953159ac5c775d9e2009ff" },
+    { name = "gemmi", marker = "extra == 'gemmi'" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "rdkit", specifier = ">=2024.3" },
+    { name = "rdkit", marker = "extra == 'rdkit'", specifier = ">=2024.3" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "gemmi", "rdkit"]
