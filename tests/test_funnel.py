@@ -129,3 +129,41 @@ def test_ferric_identity_is_never_unknown_when_ferric_is_installed():
     ident = ferric_identity()
     assert ident["version"], ident
     assert ident["provenance"].startswith(("VERIFIED", "INFERRED")), ident
+
+
+def _fake_ferric_with_build(monkeypatch, build):
+    import sys
+    import types
+
+    mod = types.ModuleType("ferric")
+    if build is not ...:
+        mod.__build__ = build
+    monkeypatch.setitem(sys.modules, "ferric", mod)
+
+
+def test_build_stamp_is_preferred_and_verified(monkeypatch):
+    from smeltery import ferric_identity
+
+    _fake_ferric_with_build(monkeypatch, {"git_sha": "abc123", "dirty": True})
+    ident = ferric_identity()
+    assert ident["provenance"].startswith("VERIFIED")
+    assert ident["commit"] == "abc123" and ident["dirty"] is True
+
+
+def test_missing_or_malformed_build_stamp_falls_back_to_installed_metadata(monkeypatch):
+    from smeltery import ferric_identity
+
+    for build in (..., {}, {"git_sha": ""}, "abc123", None):
+        _fake_ferric_with_build(monkeypatch, build)
+        ident = ferric_identity()
+        assert ident["source"] != "ferric.__build__", build
+        assert not ident["provenance"].startswith("VERIFIED from ferric.__build__"), build
+        assert ident["provenance"].startswith(("VERIFIED", "INFERRED", "UNKNOWN")), build
+
+
+def test_identity_is_never_unknown_whenever_ferric_is_importable(monkeypatch):
+    from smeltery import ferric_identity
+
+    for build in (..., {"git_sha": "deadbeef", "dirty": False}):
+        _fake_ferric_with_build(monkeypatch, build)
+        assert ferric_identity()["provenance"] != "UNKNOWN"
