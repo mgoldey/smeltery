@@ -1,6 +1,6 @@
 [project]
 name = "smeltery"
-version = "0.0.1"
+dynamic = ["version"]
 description = "A tiered, measurement-disciplined funnel for biochemical systems, over ferric."
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
@@ -50,8 +50,13 @@ docking = ["vina>=1.2.7", "meeko>=0.8.0", "rdkit>=2024.3", "scipy>=1.11", "gemmi
 ferric = { git = "https://github.com/mgoldey/ferric", rev = "8637a5d50b8f0a5ea1953159ac5c775d9e2009ff" }
 
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
+
+# The version is the git tag (v0.0.2 -> 0.0.2); untagged builds get
+# .devN+g<sha>, which PyPI rejects, so a misfire cannot publish.
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/smeltery"]
