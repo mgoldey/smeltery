@@ -79,7 +79,7 @@ jobs:
         run: |
           set -o pipefail
           uv run --no-sync pytest -q -rs tests/test_docking_*.py | tee /tmp/docking.txt
-          if grep -E '^SKIPPED.*(vina|meeko|rdkit|docking extra)' /tmp/docking.txt; then
+          if grep -iE '^SKIPPED.*(vina|meeko|rdkit|docking extra)' /tmp/docking.txt; then
             echo "::error::a docking test skipped for a missing vina/meeko/rdkit; the docking extra is not effective"
             exit 1
           fi
