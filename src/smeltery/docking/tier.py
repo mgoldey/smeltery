@@ -60,16 +60,16 @@ class Docking:
 
     def systematic_floor(self, quantity: str) -> float | None:
         if quantity != self.QUANTITY:
-            raise KeyError(
-                f"tier {self.name!r} does not produce {quantity!r}; produces {sorted(self.produces())}"
-            )
+            raise KeyError(f"tier {self.name!r} does not produce {quantity!r}; produces {sorted(self.produces())}")
         return None  # an empirical score: its systematic error is not measured
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
         return {
-            "quantity": "wall_time", "unit": "s", "predicted": None,
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
             "basis": f"unmeasured: no timing recorded in smeltery for {self.provider.name} "
-                     f"at exhaustiveness {self.exhaustiveness} x {len(self.seeds)} seeds",
+            f"at exhaustiveness {self.exhaustiveness} x {len(self.seeds)} seeds",
         }
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:

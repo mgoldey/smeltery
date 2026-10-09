@@ -22,9 +22,13 @@ permissions:
 env:
   # ferric's convention: no oversubscribed BLAS threads in tests.
   OPENBLAS_NUM_THREADS: "1"
-  # Fail if fewer tests than this are collected (282 as of dev-check; the xtb tests
+  # Fail if fewer tests than this are collected (284 as of dev-check; the xtb tests
   # skip on the runner but are still collected). Raise it when tests are added.
-  MIN_TESTS: "282"
+  MIN_TESTS: "284"
+  # Exact ruff pin; must equal the ruff== pin in pyproject.toml's dev extras
+  # (tests/test_ruff_pin.py fails if they disagree). The lint step also checks
+  # the installed version against it.
+  RUFF_VERSION: "0.16.10"
 
 jobs:
   test:
@@ -40,6 +44,14 @@ jobs:
 
       - name: Install (ferric from PyPI)
         run: uv sync --extra dev --no-sources
+
+      - name: Lint (ruff check)
+        run: |
+          uv run --no-sync ruff --version | grep -qx "ruff $RUFF_VERSION"
+          uv run --no-sync ruff check .
+
+      - name: Format (ruff format --check)
+        run: uv run --no-sync ruff format --check .
 
       - name: Collected test count must not drop
         run: |

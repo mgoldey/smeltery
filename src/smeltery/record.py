@@ -27,8 +27,9 @@ from urllib.parse import unquote, urlparse
 
 def _git(path: Path, *args: str) -> str | None:
     try:
-        return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True,
-                              check=True, timeout=10).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(path), *args], capture_output=True, text=True, check=True, timeout=10
+        ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -56,8 +57,12 @@ def ferric_identity() -> dict:
             ident["version"] = metadata.version("ferric")
         except metadata.PackageNotFoundError:
             pass
-        ident.update(source="ferric.__build__", commit=build["git_sha"], dirty=bool(build.get("dirty")),
-                     provenance="VERIFIED from ferric.__build__ (stamped at build time)")
+        ident.update(
+            source="ferric.__build__",
+            commit=build["git_sha"],
+            dirty=bool(build.get("dirty")),
+            provenance="VERIFIED from ferric.__build__ (stamped at build time)",
+        )
         return ident
     try:
         dist = metadata.distribution("ferric")
@@ -68,8 +73,12 @@ def ferric_identity() -> dict:
     if not raw:
         # Installed from a package index. Index versions are immutable, so the
         # version string itself pins the exact build.
-        ident.update(source="package index", commit=None, dirty=False,
-                     provenance=f"VERIFIED: index release {dist.version} (immutable)")
+        ident.update(
+            source="package index",
+            commit=None,
+            dirty=False,
+            provenance=f"VERIFIED: index release {dist.version} (immutable)",
+        )
         return ident
     du = json.loads(raw)
     ident["source"] = du.get("url")

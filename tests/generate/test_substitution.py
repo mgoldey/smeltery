@@ -82,9 +82,7 @@ def test_a_heavier_substituent_adds_more_mass_than_a_lighter_one():
     for p in props:
         if not p.is_parent:
             by_label.setdefault(p.label, p.d_mw)
-    assert by_label["CF3"] > by_label["F"], (
-        f"CF3 (+68) must add more mass than F (+18); got {by_label}"
-    )
+    assert by_label["CF3"] > by_label["F"], f"CF3 (+68) must add more mass than F (+18); got {by_label}"
 
 
 def test_relative_descriptors_is_zero_against_self():
@@ -116,9 +114,7 @@ def test_a_canonicalised_parent_is_zero_only_to_a_TOLERANCE():
 
     spelling_a = "c1ccccc1C(=O)O"
     spelling_b = Chem.CanonSmiles(spelling_a)
-    assert spelling_a != spelling_b, (
-        "this test needs two SPELLINGS of one molecule; pick another input"
-    )
+    assert spelling_a != spelling_b, "this test needs two SPELLINGS of one molecule; pick another input"
 
     d = relative_descriptors(spelling_b, spelling_a)
     assert d != (0.0, 0.0, 0.0), (
@@ -167,8 +163,7 @@ def test_a_substitution_that_breaks_a_required_feature_is_rejected_when_gated():
     )
     assert [p for p in props if p.is_parent], "the parent row must survive gating"
     assert not [p for p in props if not p.is_parent], (
-        "every substitution should have been rejected by a SMARTS no product "
-        "can match; the gate is not being applied"
+        "every substitution should have been rejected by a SMARTS no product can match; the gate is not being applied"
     )
 
 
@@ -219,8 +214,7 @@ def test_embedded_geometry_is_three_dimensional():
     for axis, name in enumerate("xyz"):
         spread = max(c[axis] for c in e.coords) - min(c[axis] for c in e.coords)
         assert spread > 0.5, (
-            f"the {name} extent is {spread:.3f} A -- the geometry is flat or "
-            "collapsed, not a real 3-D embedding"
+            f"the {name} extent is {spread:.3f} A -- the geometry is flat or collapsed, not a real 3-D embedding"
         )
 
 
@@ -233,8 +227,7 @@ def test_embedding_is_deterministic():
     a = embed_proposals(props)
     b = embed_proposals(props)
     assert [x.coords for x in a] == [x.coords for x in b], (
-        "two embeddings of the same proposals disagree -- the ETKDG seed is "
-        "not being pinned"
+        "two embeddings of the same proposals disagree -- the ETKDG seed is not being pinned"
     )
 
 
@@ -322,8 +315,7 @@ def test_embed_proposals_warns_in_its_OWN_docstring_about_placement():
     doc = embed_proposals.__doc__ or ""
     assert "ORIGIN" in doc, "the docstring must say the coordinates are origin-centred"
     assert "226" in doc, (
-        "the docstring must carry the MEASURED separation -- a warning without "
-        "a number reads as a theoretical caveat"
+        "the docstring must carry the MEASURED separation -- a warning without a number reads as a theoretical caveat"
     )
     for remedy in ("dock", "coords_angstrom"):
         assert remedy in doc, f"the docstring must name the remedy ({remedy!r})"

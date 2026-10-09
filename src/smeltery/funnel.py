@@ -118,8 +118,13 @@ def resolved(a: Measurement, b: Measurement, z: float, floor: float) -> bool:
 
 
 def cut(
-    measurements: dict[str, Measurement], keep: int, z: float = 2.0, floor: float = 0.0,
-    *, tier: Tier | None = None, quantity: str | None = None,
+    measurements: dict[str, Measurement],
+    keep: int,
+    z: float = 2.0,
+    floor: float = 0.0,
+    *,
+    tier: Tier | None = None,
+    quantity: str | None = None,
     sensitivity: SensitivityReport | None = None,
 ) -> CutResult:
     """Cut to `keep` survivors. With `tier` and `quantity`, the floor is the tier's
@@ -161,7 +166,11 @@ def cut(
             if len(kept) == keep:
                 return CutResult(groups, kept, False, z, floor)
             return CutResult(
-                groups, None, True, z, floor,
+                groups,
+                None,
+                True,
+                z,
+                floor,
                 [f"keep={keep} falls inside the unresolved group {g}; refusing to cut it"],
             )
     return CutResult(groups, kept, False, z, floor)

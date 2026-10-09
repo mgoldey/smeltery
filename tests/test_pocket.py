@@ -78,8 +78,9 @@ def test_unit_charge_at_20_bohr_shifts_a_cation_by_one_over_r_in_bohr():
 def test_default_cutoff_is_none_and_a_distant_charge_survives(tmp_path):
     assert inspect.signature(load_pocket).parameters["cutoff_ang"].default is None
     far = tmp_path / "far.pqr"
-    far.write_text(PQR.read_text().replace(
-        "TER", "ATOM     99  X   ION     9    1000.000   0.000   0.000  1.0000 1.0000\nTER"))
+    far.write_text(
+        PQR.read_text().replace("TER", "ATOM     99  X   ION     9    1000.000   0.000   0.000  1.0000 1.0000\nTER")
+    )
     field = load_pocket(far)
     assert field.provenance["cutoff_ang"] is None
     assert PointCharge(1.0, (1000.0, 0.0, 0.0)) in field

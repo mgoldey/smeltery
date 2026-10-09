@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-import math
 import sys
 import types
 
 import pytest
 
 from smeltery.docking import (
-    Box, DockResult, Docking, DockingTarget, Receptor, box_from_coords,
-    box_from_ligand, box_from_residues, ensemble_score, vina_dock,
+    Box,
+    Docking,
+    DockingTarget,
+    DockResult,
+    Receptor,
+    box_from_coords,
+    box_from_ligand,
+    box_from_residues,
+    ensemble_score,
+    vina_dock,
 )
 from smeltery.docking.vina_dock import _parse_pdbqt_models, parse_flex_blocks
 from smeltery.model import Candidate
@@ -107,10 +114,10 @@ def test_flexible_receptor_reaches_vina_and_flex_comes_back(monkeypatch, tmp_pat
     monkeypatch.setitem(sys.modules, "vina", mod)
     monkeypatch.setattr(vina_dock, "_ligand_pdbqt_from_rdkit", lambda mol: "L")
     rigid, flex = tmp_path / "r_rigid.pdbqt", tmp_path / "r_flex.pdbqt"
-    rigid.write_text("x"); flex.write_text("x")
+    rigid.write_text("x")
+    flex.write_text("x")
     run = vina_dock.dock_ligand(object(), Receptor(rigid, flex), (0, 0, 0))
-    assert _FakeVina.calls["kw"] == {
-        "rigid_pdbqt_filename": str(rigid), "flex_pdbqt_filename": str(flex)}
+    assert _FakeVina.calls["kw"] == {"rigid_pdbqt_filename": str(rigid), "flex_pdbqt_filename": str(flex)}
     assert "BEGIN_RES" in run.poses[0].flex_pdbqt and run.poses[1].flex_pdbqt == ""
     # rigid path unchanged
     vina_dock.dock_ligand(object(), rigid, (0, 0, 0))
@@ -121,19 +128,26 @@ def test_missing_flex_file_is_an_error_not_a_rigid_fallback(tmp_path, monkeypatc
     mod = types.ModuleType("vina")
     mod.Vina = _FakeVina
     monkeypatch.setitem(sys.modules, "vina", mod)
-    r = tmp_path / "r.pdbqt"; r.write_text("x")
+    r = tmp_path / "r.pdbqt"
+    r.write_text("x")
     run = vina_dock.dock_ligand(object(), Receptor(r, tmp_path / "nope"), (0, 0, 0))
     assert not run.ok and "not found" in run.error
 
 
 def test_tier_records_flex_sidechains_sorted_with_poses():
     import numpy as np
+
     from smeltery.model import Pose
 
     class P:
         name = "p"
-        def settings(self): return {}
-        def score_unit(self): return "kcal/mol"
+
+        def settings(self):
+            return {}
+
+        def score_unit(self):
+            return "kcal/mol"
+
         def dock(self, mol, receptor, box, seed, exhaustiveness=4):
             ps = [Pose(("H",), np.zeros((1, 3)))] * 2
             return DockResult(poses=ps, scores=[-1.0, -9.0], flex_receptor=["a", "b"])
@@ -155,8 +169,10 @@ def test_target_ctx_rigid_is_path_flexible_is_receptor(tmp_path):
     assert DockingTarget(fx, box).ctx()["receptor"] is fx
 
 
-def _w(text, _n=[0]):
-    import pathlib, tempfile
+def _w(text):
+    import pathlib
+    import tempfile
+
     d = pathlib.Path(tempfile.mkdtemp()) / "t.pdb"
     d.write_text(text)
     return d
