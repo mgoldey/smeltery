@@ -17,6 +17,7 @@ def _field():
     return [PointCharge(1.0, (3.0, 0.0, 0.0)), PointCharge(-0.5, (0.0, 3.5, 0.0))]
 
 
+@pytest.mark.needs_ferric
 def test_self_pair_gives_exactly_zero_on_every_pose():
     parent = Candidate("parent", ACID)
     twin = Candidate("twin", ACID)  # same molecule, separate candidate
@@ -29,6 +30,7 @@ def test_self_pair_gives_exactly_zero_on_every_pose():
     assert all(abs(v) > 1e-3 for v in parent.per_pose["dE_int"])
 
 
+@pytest.mark.needs_ferric
 def test_empty_field_gives_exactly_zero_interaction():
     c = Candidate("c", ACID)
     PairedPoses(n_poses=2).run([c], {"parent": c})
@@ -47,6 +49,7 @@ def test_analogue_core_is_copied_exactly_from_the_parent_pose():
         assert missing == ["H"], missing
 
 
+@pytest.mark.needs_ferric
 def test_bohr_factor_is_exactly_the_one_ferric_uses_for_xyz():
     """Point charges (converted here) and atoms (converted by ferric) must share a frame."""
     he = ferric.Molecule.from_xyz_string("1\n\nHe 1.0 0.0 0.0\n")
@@ -60,6 +63,7 @@ def test_field_interaction_declares_its_quantity_and_unit():
     assert PairedPoses().produces() == {}
 
 
+@pytest.mark.needs_ferric
 def test_tier_writing_an_undeclared_per_pose_key_fails_validation():
     class Sneaky(FieldInteraction):
         def run(self, candidates, ctx):

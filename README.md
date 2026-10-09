@@ -34,6 +34,11 @@ OPENBLAS_NUM_THREADS=1 uv run pytest -q
 OPENBLAS_NUM_THREADS=1 uv run python examples/mwe_benzoic.py
 ```
 
+No ferric (e.g. a cloud sandbox where it won't build)? `scripts/dev-check.sh` runs
+the tests in a venv without it: a labelled stub is installed and tests marked
+`needs_ferric` are skipped, not failed. It is a smoke check, not a substitute for
+CI, and prints passed / skipped-needs-ferric / failed (non-zero on any failure).
+
 ## Example
 
 `examples/mwe_benzoic.py` places benzoic acid and two para-substituted

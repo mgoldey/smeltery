@@ -40,6 +40,7 @@ def test_pqr_records_with_and_without_chain_id_read_identically():
     assert parse_pqr(line) == parse_pqr(line.replace("GLY     1", "GLY A   1")) == [PQR_FIRST]
 
 
+@pytest.mark.needs_ferric
 def test_empty_field_gives_exactly_zero_through_field_interaction():
     c = _one_pose(ACID, 2)
     FieldInteraction().run([c], {"field": PocketField([], {"input": "none"})})
@@ -61,6 +62,7 @@ def _assert_coulomb_in_bohr(shift, r_bohr, rel=0.02):
     assert shift == pytest.approx(1.0 / r_bohr, rel=rel), f"shift {shift} vs 1/R = {1.0 / r_bohr}"
 
 
+@pytest.mark.needs_ferric
 def test_unit_charge_at_20_bohr_shifts_a_cation_by_one_over_r_in_bohr():
     r_bohr = 20.0
     pc = PointCharge(1.0, (r_bohr / ANGSTROM_TO_BOHR, 0.0, 0.0))  # Angstrom in, as the loader returns
@@ -84,6 +86,7 @@ def test_default_cutoff_is_none_and_a_distant_charge_survives(tmp_path):
     assert len(field) == PQR_N_CHARGES + 1
 
 
+@pytest.mark.needs_ferric
 def test_cutoff_is_explicit_and_recorded_in_settings():
     with pytest.raises(ValueError, match="center_ang"):
         load_pocket(PQR, cutoff_ang=5.0)
@@ -98,6 +101,7 @@ def test_cutoff_is_explicit_and_recorded_in_settings():
     assert tier.settings()["field"]["cutoff_ang"] is None
 
 
+@pytest.mark.needs_ferric
 def test_settings_record_input_digest():
     tier, c = FieldInteraction(), _one_pose()
     tier.run([c], {"field": load_pocket(PQR)})

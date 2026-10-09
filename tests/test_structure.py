@@ -39,11 +39,16 @@ def _have_ferric() -> bool:
     return True
 
 
-needs_ferric = pytest.mark.skipif(
+_skip_without_ferric = pytest.mark.skipif(
     not _have_ferric(),
     reason="the compiled `ferric` extension is not importable; build it with "
     "`cargo build --release -p ferric-python` (see CLAUDE.md)",
 )
+
+
+def needs_ferric(fn):
+    """Skip when ferric is absent; the marker also lets SMELTERY_NO_FERRIC=1 (stub) skip it."""
+    return pytest.mark.needs_ferric(_skip_without_ferric(fn))
 
 WATER_XYZ = textwrap.dedent(
     """\
