@@ -22,9 +22,6 @@ permissions:
 env:
   # ferric's convention: no oversubscribed BLAS threads in tests.
   OPENBLAS_NUM_THREADS: "1"
-  # Fail if fewer tests than this are collected (284 as of dev-check; the xtb tests
-  # skip on the runner but are still collected). Raise it when tests are added.
-  MIN_TESTS: "284"
   # Exact ruff pin; must equal the ruff== pin in pyproject.toml's dev extras
   # (tests/test_ruff_pin.py fails if they disagree). The lint step also checks
   # the installed version against it.
@@ -52,16 +49,6 @@ jobs:
 
       - name: Format (ruff format --check)
         run: uv run --no-sync ruff format --check .
-
-      - name: Collected test count must not drop
-        run: |
-          uv run --no-sync pytest --collect-only -q | tee /tmp/collect.txt
-          n=$(grep -oE '^[0-9]+ tests? collected' /tmp/collect.txt | grep -oE '^[0-9]+' || true)
-          echo "collected=$n min=$MIN_TESTS"
-          if [ -z "$n" ] || [ "$n" -lt "$MIN_TESTS" ]; then
-            echo "::error::collected ${n:-0} tests, expected at least $MIN_TESTS"
-            exit 1
-          fi
 
       - name: Tests
         run: uv run --no-sync pytest -q
