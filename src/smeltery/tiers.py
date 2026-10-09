@@ -32,6 +32,7 @@ from rdkit.Chem import AllChem, rdFMCS
 from rdkit.Chem.rdMolAlign import AlignMol
 
 from .cost import rhf_calibration, sto3g_basis_functions_strict
+from .gates import require_passing_poses
 from .model import HARTREE_TO_KCAL, Candidate, PointCharge, Pose
 
 
@@ -299,6 +300,8 @@ class FieldInteraction:
         }
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        for cand in candidates:
+            require_passing_poses(cand, ctx)
         import ferric
 
         field: list[PointCharge] = ctx["field"]
@@ -450,6 +453,8 @@ class Gfn2:
         return {"xtb_runs": sum(len(c.poses) for c in candidates), "kind": "xtb subprocess, ~0.1-1 s each"}
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        for cand in candidates:
+            require_passing_poses(cand, ctx)
         field = ctx.get("field", [])
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]  # Bohr

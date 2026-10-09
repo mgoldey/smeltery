@@ -13,7 +13,16 @@ from .funnel import (
     tier_floor,
     unpaired_delta,
 )
-from .gates import SensitivityReport, charge_sensitivity, spearman
+from .gates import (
+    PoseGateError,
+    PoseReport,
+    SensitivityReport,
+    charge_sensitivity,
+    check_candidate_poses,
+    posebusters_check,
+    require_passing_poses,
+    spearman,
+)
 from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, Measurement, PointCharge, Pose
 from .pocket import PocketField, load_pocket
 from .record import RunRecord, ferric_identity
@@ -25,6 +34,11 @@ except PackageNotFoundError:  # running from a source tree that was never instal
     __version__ = "0+unknown"
 
 __all__ = [
+    "PoseGateError",
+    "PoseReport",
+    "check_candidate_poses",
+    "posebusters_check",
+    "require_passing_poses",
     "__version__",
     "Rescoring",
     "Score",

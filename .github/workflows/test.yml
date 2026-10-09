@@ -42,7 +42,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install (ferric from PyPI)
-        run: uv sync --extra dev --no-sources
+        run: uv sync --extra dev --extra posebusters --no-sources
 
       - name: Lint (ruff check)
         run: |
