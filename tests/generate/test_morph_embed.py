@@ -54,11 +54,7 @@ def test_bond_lengths_are_physical():
     atoms must be a plausible bond (>0.85 A), and no two atoms coincident."""
     e = embed_analogue(SMALL, n_conformers=1)
     coords = e.conformers[0]
-    dmin = min(
-        math.dist(coords[i], coords[j])
-        for i in range(len(coords))
-        for j in range(i + 1, len(coords))
-    )
+    dmin = min(math.dist(coords[i], coords[j]) for i in range(len(coords)) for j in range(i + 1, len(coords)))
     assert 0.85 < dmin < 2.0, f"closest atom pair {dmin:.3f} A is not a bond length"
 
 
@@ -105,9 +101,7 @@ def test_unparseable_smiles_is_reported_not_raised():
     assert not e.usable
     assert e.error is not None and "unparseable" in e.error
     assert e.n_conformers == 0
-    assert e.best_index is None, (
-        "an unevaluated analogue must not expose a best conformer"
-    )
+    assert e.best_index is None, "an unevaluated analogue must not expose a best conformer"
 
 
 def test_impossible_geometry_is_reported_as_unevaluated():

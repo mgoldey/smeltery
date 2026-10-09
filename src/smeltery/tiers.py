@@ -151,8 +151,12 @@ class PairedPoses:
         raise _unknown_quantity(self, quantity)
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
-        return {"quantity": "wall_time", "unit": "s", "predicted": None,
-                "basis": f"unmeasured: no recorded timing for {len(candidates) * self.n_poses} RDKit embeddings"}
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": f"unmeasured: no recorded timing for {len(candidates) * self.n_poses} RDKit embeddings",
+        }
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         parent = ctx["parent"]
@@ -200,7 +204,10 @@ class PairedPoses:
                 f"{cand.name}: common core has {n_heavy} heavy atom(s), fewer than "
                 f"min_core_heavy={self.min_core_heavy}; refusing a degraded mapping"
             )
-        if Chem.MolToSmiles(Chem.RemoveHs(amol)) == Chem.MolToSmiles(Chem.RemoveHs(pmol)) and len(mapping) != amol.GetNumAtoms():
+        if (
+            Chem.MolToSmiles(Chem.RemoveHs(amol)) == Chem.MolToSmiles(Chem.RemoveHs(pmol))
+            and len(mapping) != amol.GetNumAtoms()
+        ):
             raise NoCommonCoreError(
                 f"{cand.name}: identical to the parent but the core maps {len(mapping)} of "
                 f"{amol.GetNumAtoms()} atoms; refusing a degraded self-mapping"
@@ -245,8 +252,14 @@ class FieldInteraction:
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
 
     def settings(self) -> dict:
-        return {"method": "RHF", "basis": self.basis, "energy_conv": self.energy_conv,
-                "density_conv": self.density_conv, "engine": "ferric", "field": self.field_provenance}
+        return {
+            "method": "RHF",
+            "basis": self.basis,
+            "energy_conv": self.energy_conv,
+            "density_conv": self.density_conv,
+            "engine": "ferric",
+            "field": self.field_provenance,
+        }
 
     def produces(self) -> dict[str, str]:
         return {"dE_int": "kcal/mol"}
@@ -276,10 +289,14 @@ class FieldInteraction:
                     return none(f"{c.name}: element outside the STO-3G table")
                 total += cal.predicted_seconds_per_pose(nbf)
         n = sum(len(c.poses) for c in candidates)
-        return {"quantity": quantity, "unit": unit, "predicted": total,
-                "basis": f"{n} poses x (vacuum + field RHF) at {cal.basis}; measured {cal.reference_name} "
-                         f"({cal.reference_nbf} bf) {cal.reference_seconds:.3g} s scaled by nbf^{cal.exponent:.2f} "
-                         f"(fit on calibration set), reference iteration count assumed; {cal.machine}"}
+        return {
+            "quantity": quantity,
+            "unit": unit,
+            "predicted": total,
+            "basis": f"{n} poses x (vacuum + field RHF) at {cal.basis}; measured {cal.reference_name} "
+            f"({cal.reference_nbf} bf) {cal.reference_seconds:.3g} s scaled by nbf^{cal.exponent:.2f} "
+            f"(fit on calibration set), reference iteration count assumed; {cal.machine}",
+        }
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         import ferric
@@ -351,9 +368,7 @@ def xtb_version() -> str | None:
     return m.group(1) if m else (text.strip() or None)
 
 
-def xtb_singlepoint(
-    symbols, coords_ang, charge: int = 0, point_charges_bohr=(), timeout: float = 600.0
-) -> float:
+def xtb_singlepoint(symbols, coords_ang, charge: int = 0, point_charges_bohr=(), timeout: float = 600.0) -> float:
     """GFN2-xTB total energy in Hartree. `point_charges_bohr` rows are (q, x, y, z), x y z in BOHR.
 
     xtb reads the `pcharge` file in its working directory, in Bohr. A file passed
@@ -375,7 +390,11 @@ def xtb_singlepoint(
             (wd / "pcharge").write_text("\n".join(body) + "\n")
         proc = subprocess.run(
             [XTB, "mol.xyz", "--gfn", "2", "--chrg", str(charge)],
-            cwd=wd, env=_xtb_env(), capture_output=True, text=True, timeout=timeout,
+            cwd=wd,
+            env=_xtb_env(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
     m = _XTB_ENERGY_RE.search(proc.stdout)
     if proc.returncode != 0 or m is None:
@@ -409,9 +428,15 @@ class Gfn2:
     field_provenance: dict | None = None
 
     def settings(self) -> dict:
-        return {"method": "GFN2-xTB", "engine": "xtb subprocess, threads=1", "role": "gate, not ranker",
-                "xtb_path": xtb_path(), "xtb_version": xtb_version(), "point_charge_unit": "bohr",
-                "field": self.field_provenance}
+        return {
+            "method": "GFN2-xTB",
+            "engine": "xtb subprocess, threads=1",
+            "role": "gate, not ranker",
+            "xtb_path": xtb_path(),
+            "xtb_version": xtb_version(),
+            "point_charge_unit": "bohr",
+            "field": self.field_provenance,
+        }
 
     def produces(self) -> dict[str, str]:
         return {"E_gfn2": "kcal/mol"}  # total energy: a gate on ionization state / failure, NOT a ranker

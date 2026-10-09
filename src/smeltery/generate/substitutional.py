@@ -61,9 +61,7 @@ def substituent_scan(
             p = products[0]
             site_atoms = [a for a in p.GetAtoms() if a.HasProp("old_mapno") and a.GetIntProp("old_mapno") == 1]
             if len(site_atoms) != 1:
-                raise ValueError(
-                    f"site_smarts {site_smarts!r} must map exactly one atom as :1 to name a site"
-                )
+                raise ValueError(f"site_smarts {site_smarts!r} must map exactly one atom as :1 to name a site")
             site = classes[site_atoms[0].GetIntProp("react_atom_idx")]
             try:
                 Chem.SanitizeMol(p)

@@ -51,9 +51,7 @@ def _electron_count(smiles: str) -> int:
     from rdkit import Chem
 
     mol = Chem.MolFromSmiles(smiles)
-    return sum(
-        a.GetAtomicNum() for a in Chem.AddHs(mol).GetAtoms()
-    ) - Chem.GetFormalCharge(mol)
+    return sum(a.GetAtomicNum() for a in Chem.AddHs(mol).GetAtoms()) - Chem.GetFormalCharge(mol)
 
 
 def test_deprotonation_conserves_electron_count():
