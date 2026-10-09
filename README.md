@@ -77,8 +77,12 @@ energy, or passing charges in Å each makes a test fail.
 ## Status
 
 This is an early working example. The tier protocol, the paired-ΔΔE funnel,
-the resolution-aware cut and the run record work end to end. Docking, a
-force-field tier and real receptor pockets are next.
+the resolution-aware cut and the run record work end to end. Vina docking works with a
+flexible ligand and, optionally, flexible receptor sidechains
+(`prepare_target(pdb, workdir, flex_residues=["A:45"])` also picks the box from the
+co-crystal ligand or pocket residues; `ensemble_score` pools a pose ensemble's
+scores). Scores are an empirical ranking heuristic, not binding free energies.
+A force-field tier and real receptor pockets are next.
 
 ## License
 
