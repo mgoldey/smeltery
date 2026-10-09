@@ -64,6 +64,7 @@ def _mols(tmp_path, sdf_text):
     )
 
 
+@pytest.mark.needs_ferric
 def test_xyz_pdb_sdf_give_identical_ferric_coordinates(tmp_path):
     x, p, s = _mols(tmp_path, _sdf(GEOM))
     assert x.symbols() == p.symbols() == s.symbols() == ["O", "H", "H"]
@@ -73,6 +74,7 @@ def test_xyz_pdb_sdf_give_identical_ferric_coordinates(tmp_path):
     assert all(v != 0.0 for row in x.coords_bohr() for v in row)  # guard the fixture
 
 
+@pytest.mark.needs_ferric
 def test_bit_identity_check_can_fail(tmp_path):
     """Negative control: nudge one SDF coordinate by 1e-4 A (SDF's last digit)."""
     nudged = [("O", (0.3111, 0.204, 0.117))] + GEOM[1:]
@@ -113,6 +115,7 @@ def test_no_inference_from_the_file(tmp_path):
     assert read_structure(path, 3, 1).charge == 3
 
 
+@pytest.mark.needs_ferric
 def test_only_from_smiles_may_default_charge():
     sig = inspect.signature(structure.from_smiles).parameters
     assert sig["charge"].default is None

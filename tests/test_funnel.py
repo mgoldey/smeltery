@@ -132,6 +132,7 @@ def test_formula_is_hill_ordered():
     assert _cand("y", ["O", "H", "H"]).formula == "H2O"
 
 
+@pytest.mark.needs_ferric
 def test_ferric_identity_is_never_unknown_when_ferric_is_installed():
     from smeltery import ferric_identity
 
@@ -170,6 +171,7 @@ def test_missing_or_malformed_build_stamp_falls_back_to_installed_metadata(monke
         assert ident["provenance"].startswith(("VERIFIED", "INFERRED", "UNKNOWN")), build
 
 
+@pytest.mark.needs_ferric
 def test_identity_is_never_unknown_whenever_ferric_is_importable(monkeypatch):
     from smeltery import ferric_identity
 

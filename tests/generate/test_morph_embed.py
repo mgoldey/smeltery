@@ -154,6 +154,7 @@ def test_write_xyz_round_trips_through_an_independent_reader():
             assert got[3] == pytest.approx(want[2], abs=1e-7)
 
 
+@pytest.mark.needs_ferric
 def test_write_xyz_refuses_a_conformer_that_does_not_match_the_symbols():
     """A mismatch would write a header disagreeing with the body.
 

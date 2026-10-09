@@ -65,6 +65,9 @@ packages = ["src/smeltery"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "needs_ferric: needs the real ferric engine; skipped only under SMELTERY_NO_FERRIC=1 (scripts/dev-check.sh)",
+]
 
 [tool.ruff]
 line-length = 120
