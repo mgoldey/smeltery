@@ -73,6 +73,8 @@ class Candidate:
     #: Flexible-receptor sidechain PDBQT text per pose (aligned with `poses`);
     #: empty when docked against a rigid receptor.
     receptor_flex: list[str] = field(default_factory=list)
+    #: `gates.PoseReport` from `check_candidate_poses`, or None if the gate has not run.
+    pose_report: object | None = None
 
     @property
     def formula(self) -> str:
