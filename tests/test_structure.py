@@ -148,9 +148,7 @@ def test_the_bitwise_fixture_stays_asymmetric():
     test.
     """
     rows = [
-        tuple(float(v) for v in line.split()[5:8])
-        for line in ASYMMETRIC_PDB.splitlines()
-        if line.startswith("ATOM")
+        tuple(float(v) for v in line.split()[5:8]) for line in ASYMMETRIC_PDB.splitlines() if line.startswith("ATOM")
     ]
     assert len(rows) == 3
     for axis, name in enumerate("xyz"):
@@ -383,9 +381,7 @@ def test_an_atom_name_with_no_letters_is_refused_not_guessed():
     from smeltery.structure import element_from_pdb_atom_name as element
 
     for bad in ("", "   ", "123", "4"):
-        with pytest.raises(
-            StructureError, match="no element letters|carries no element"
-        ):
+        with pytest.raises(StructureError, match="no element letters|carries no element"):
             element(bad)
 
 
@@ -421,9 +417,7 @@ def test_python_and_rust_element_heuristics_agree():
     # Rust excludes CA inside the loop body rather than from the list.
     if 'two != "CA"' in body:
         rust.discard("CA")
-    assert "CA" not in rust and "CA" not in _TWO_LETTER_OK, (
-        "CA must resolve to carbon on BOTH sides"
-    )
+    assert "CA" not in rust and "CA" not in _TWO_LETTER_OK, "CA must resolve to carbon on BOTH sides"
     missing_in_rust = _TWO_LETTER_OK - rust
     missing_in_python = rust - _TWO_LETTER_OK
     assert not missing_in_rust, f"Python accepts {missing_in_rust}, Rust does not"
@@ -602,9 +596,7 @@ def test_gro_with_a_truncated_atom_line_is_refused_not_padded():
         with pytest.raises(StructureError, match="field width cannot be determined"):
             read_structure(a, charge=0, multiplicity=1)
 
-        b = _write(
-            Path(d), "short_later.gro", f"t\n    2\n{full}\n{one}\n   1.0 1.0 1.0\n"
-        )
+        b = _write(Path(d), "short_later.gro", f"t\n    2\n{full}\n{one}\n   1.0 1.0 1.0\n")
         with pytest.raises(StructureError, match="need at least"):
             read_structure(b, charge=0, multiplicity=1)
 

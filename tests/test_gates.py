@@ -75,8 +75,11 @@ def test_floor_is_the_range_of_per_candidate_deltas():
 
 def test_cut_returns_tie_group_for_pair_inside_the_sensitivity_floor():
     rep = _pair_report()
-    ms = {"x": Measurement(-1.0, 0.01, 10, ()), "y": Measurement(0.0, 0.01, 10, ()),
-          "z": Measurement(10.0, 0.01, 10, ())}
+    ms = {
+        "x": Measurement(-1.0, 0.01, 10, ()),
+        "y": Measurement(0.0, 0.01, 10, ()),
+        "z": Measurement(10.0, 0.01, 10, ()),
+    }
     # without the gate x and y are resolved: an order, x before y
     assert cut(ms, keep=1).groups == [["x"], ["y"], ["z"]]
     res = cut(ms, keep=1, sensitivity=rep)

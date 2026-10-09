@@ -82,8 +82,7 @@ class EmbeddedAnalogue:
             p = out_dir / f"{prefix}_conf_{i:02d}.xyz"
             lines = [
                 str(len(self.symbols)),
-                f"{self.analogue.label} conf {i} "
-                f"mmff={self.mmff_energies[i]:.4f}kcal/mol",
+                f"{self.analogue.label} conf {i} mmff={self.mmff_energies[i]:.4f}kcal/mol",
             ]
             for sym, (x, y, z) in zip(self.symbols, coords):
                 lines.append(f"{sym:<3s} {x:14.8f} {y:14.8f} {z:14.8f}")
@@ -139,9 +138,7 @@ def embed_analogue(
     # tests/test_embed.py::test_impossible_geometry_is_reported_as_unevaluated,
     # which is exactly the failure path it exists to exercise.
     try:
-        cids = AllChem.EmbedMultipleConfs(
-            mol, numConfs=n_conformers * max_attempts_multiplier, params=params
-        )
+        cids = AllChem.EmbedMultipleConfs(mol, numConfs=n_conformers * max_attempts_multiplier, params=params)
     except Exception as e:  # noqa: BLE001 - RDKit raises RuntimeError here
         result.error = (
             f"ETKDGv3 embedding aborted ({type(e).__name__}: "
@@ -166,7 +163,7 @@ def embed_analogue(
         if props is None:
             raise ValueError("MMFFGetMoleculeProperties returned None (untypable atom)")
         opt = AllChem.MMFFOptimizeMoleculeConfs(mol, maxIters=2000)
-        for cid, (converged, energy) in zip(cids, opt):
+        for cid, (_converged, energy) in zip(cids, opt):
             # converged == 0 means the optimization converged (RDKit convention:
             # nonzero means it hit maxIters). Keep the non-converged ones but
             # they are the first to be dropped by the energy window.
@@ -188,10 +185,7 @@ def embed_analogue(
     kept: list[int] = []
     try:
         for cid in order:
-            if all(
-                rdMolAlign.GetBestRMS(heavy, heavy, prbId=cid, refId=k) > rmsd_threshold
-                for k in kept
-            ):
+            if all(rdMolAlign.GetBestRMS(heavy, heavy, prbId=cid, refId=k) > rmsd_threshold for k in kept):
                 kept.append(cid)
             if len(kept) >= n_conformers:
                 break
@@ -211,8 +205,6 @@ def embed_analogue(
     result.symbols = [a.GetSymbol() for a in mol.GetAtoms()]
     for cid in kept:
         conf = mol.GetConformer(cid)
-        result.conformers.append(
-            [tuple(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())]
-        )
+        result.conformers.append([tuple(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
         result.mmff_energies.append(energies[cid])
     return result

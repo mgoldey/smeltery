@@ -6,6 +6,7 @@ EXECUTABLE code. Prose (docstrings, comments) may cite campaign measurements as
 provenance; a citation is not a dependency. Each detector is a function over
 source text so a reachability test can prove it fires on a violation.
 """
+
 from __future__ import annotations
 
 import ast
@@ -21,14 +22,31 @@ SRC = REPO / "src" / "smeltery"
 CAMPAIGN_TOKENS = ("danuglipron", "DANUGLIPRON", "7LCJ", "GLP1R", "PF-06882961")
 
 TOOLS_PACKAGES = (
-    "active_site", "campaign", "docking", "isomers", "morph",
-    "pipeline", "structure", "tox", "viz",
+    "active_site",
+    "campaign",
+    "docking",
+    "isomers",
+    "morph",
+    "pipeline",
+    "structure",
+    "tox",
+    "viz",
 )
 PINNED_SYMBOLS = (
-    "Molecule", "BasisSet", "run_rhf", "run_dft", "run_optimize",
-    "run_optimize_qmmm", "QmmmSystem", "MmTopology", "ConformerEnsemble",
-    "hirshfeld_charges", "hirshfeld_polarizability", "lowdin_charges",
-    "run_saddle", "run_irc",
+    "Molecule",
+    "BasisSet",
+    "run_rhf",
+    "run_dft",
+    "run_optimize",
+    "run_optimize_qmmm",
+    "QmmmSystem",
+    "MmTopology",
+    "ConformerEnsemble",
+    "hirshfeld_charges",
+    "hirshfeld_polarizability",
+    "lowdin_charges",
+    "run_saddle",
+    "run_irc",
 )
 
 
@@ -56,9 +74,12 @@ def campaign_names_in_code(src: str) -> list[tuple[int, str]]:
     for n in ast.walk(tree):
         if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             b = n.body
-            if b and isinstance(b[0], ast.Expr) and \
-                    isinstance(getattr(b[0], "value", None), ast.Constant) and \
-                    isinstance(b[0].value.value, str):
+            if (
+                b
+                and isinstance(b[0], ast.Expr)
+                and isinstance(getattr(b[0], "value", None), ast.Constant)
+                and isinstance(b[0].value.value, str)
+            ):
                 doc_lines.update(range(b[0].lineno, (b[0].end_lineno or b[0].lineno) + 1))
     out = []
     for i, line in enumerate(src.splitlines(), 1):
@@ -104,18 +125,17 @@ def ferric_declaration_problems(pyproject: dict) -> list[str]:
 
 # ---- acceptance 1: no experiments import, no campaign names in code ----------
 
+
 def test_no_library_module_imports_experiments():
     offenders = [
-        f"{f.relative_to(REPO)}:{ln} imports {m}"
-        for f in _modules() for ln, m in experiments_imports(f.read_text())
+        f"{f.relative_to(REPO)}:{ln} imports {m}" for f in _modules() for ln, m in experiments_imports(f.read_text())
     ]
     assert not offenders, "src/smeltery must not import experiments:\n  " + "\n  ".join(offenders)
 
 
 def test_no_campaign_names_in_library_executable_code():
     offenders = [
-        f"{f.relative_to(REPO)}:{ln}: {tok!r}"
-        for f in _modules() for ln, tok in campaign_names_in_code(f.read_text())
+        f"{f.relative_to(REPO)}:{ln}: {tok!r}" for f in _modules() for ln, tok in campaign_names_in_code(f.read_text())
     ]
     assert not offenders, "campaign names in src/smeltery code:\n  " + "\n  ".join(offenders)
 
@@ -136,14 +156,14 @@ def test_boundary_detectors_can_fail():
 
 # ---- acceptance 2: no symlinks -----------------------------------------------
 
+
 def test_repo_contains_no_symlinks(tmp_path):
     assert find_symlinks(REPO) == []
     try:
-        ls = subprocess.run(["git", "ls-files", "-s"], cwd=REPO, capture_output=True,
-                            text=True, check=True).stdout
+        ls = subprocess.run(["git", "ls-files", "-s"], cwd=REPO, capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return  # no git available: the walk above is the check
-    tracked = [l.split("\t", 1)[1] for l in ls.splitlines() if l.startswith("120000")]
+    tracked = [ln.split("\t", 1)[1] for ln in ls.splitlines() if ln.startswith("120000")]
     assert not tracked, f"tracked symlinks: {tracked}"
 
 
@@ -158,6 +178,7 @@ def test_symlink_detector_can_fail(tmp_path):
 
 
 # ---- acceptance 3: docs/migration.md ------------------------------------------
+
 
 def test_migration_doc_lists_every_package_and_pinned_symbol():
     doc = (REPO / "docs" / "migration.md").read_text()
@@ -178,6 +199,7 @@ def test_migration_doc_has_a_move_order():
 
 # ---- acceptance 4: pyproject declares ferric explicitly ------------------------
 
+
 def test_pyproject_declares_ferric_explicitly():
     py = tomllib.loads((REPO / "pyproject.toml").read_text())
     assert ferric_declaration_problems(py) == []
@@ -191,5 +213,4 @@ def test_ferric_declaration_check_can_fail():
     assert ferric_declaration_problems({"project": {"dependencies": ["ferric @ file:///x"]}})
     bad_git = {**ok, "tool": {"uv": {"sources": {"ferric": {"git": "u", "rev": "main"}}}}}
     assert ferric_declaration_problems(bad_git)
-    assert ferric_declaration_problems(
-        {**ok, "tool": {"uv": {"sources": {"ferric": {"workspace": True}}}}})
+    assert ferric_declaration_problems({**ok, "tool": {"uv": {"sources": {"ferric": {"workspace": True}}}}})

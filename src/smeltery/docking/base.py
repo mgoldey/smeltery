@@ -50,13 +50,9 @@ class DockResult:
 
     def __post_init__(self) -> None:
         if len(self.poses) != len(self.scores):
-            raise ValueError(
-                f"{len(self.poses)} poses but {len(self.scores)} scores"
-            )
+            raise ValueError(f"{len(self.poses)} poses but {len(self.scores)} scores")
         if self.flex_receptor and len(self.flex_receptor) != len(self.poses):
-            raise ValueError(
-                f"{len(self.poses)} poses but {len(self.flex_receptor)} flex-receptor blocks"
-            )
+            raise ValueError(f"{len(self.poses)} poses but {len(self.flex_receptor)} flex-receptor blocks")
 
     @property
     def ok(self) -> bool:

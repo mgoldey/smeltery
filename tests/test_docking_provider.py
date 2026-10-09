@@ -40,8 +40,8 @@ from smeltery.docking import (  # noqa: E402
     parse_smiles_idx_remark,
     pose_to_structure,
     restore_hydrogens,
+    vina_dock,  # noqa: E402
 )
-from smeltery.docking import vina_dock  # noqa: E402
 from smeltery.funnel import tier_floor  # noqa: E402
 from smeltery.model import Pose  # noqa: E402
 
@@ -53,16 +53,14 @@ ETHYL_ESTER = "CCC(=O)Oc1ccccc1C(=O)O"
 
 def _need_extra():
     for mod in ("vina", "meeko"):
-        pytest.importorskip(
-            mod, reason=f"needs the docking extra: pip install 'smeltery[docking]' ({mod} missing)"
-        )
+        pytest.importorskip(mod, reason=f"needs the docking extra: pip install 'smeltery[docking]' ({mod} missing)")
 
 
 def _fixture_pose():
     """Symbols and coordinates of the REAL united-atom pose, as parsed from the PDBQT."""
     text = FIXTURE.read_text()
     models = vina_dock._parse_pdbqt_models("MODEL 1\n" + text + "ENDMDL\n")
-    (syms, coords, _score, serials), = models
+    ((syms, coords, _score, serials),) = models
     return text, syms, coords, serials
 
 
@@ -74,6 +72,7 @@ def _embedded(smiles):
 
 
 # --- criterion 1: atom-count guard, real united-atom PDBQT ----------------------
+
 
 def test_fixture_is_a_real_united_atom_pose():
     """Premise: 14 atoms out of 21 in (7 nonpolar H merged), 13 heavy atoms."""
@@ -125,6 +124,7 @@ def test_restore_refuses_wrong_heavy_count_on_the_fixture():
 
 
 # --- criterion 2: per-atom element check on the real Meeko map ------------------
+
 
 def _fixture_heavy_and_map():
     text, syms, coords, serials = _fixture_pose()
@@ -183,6 +183,7 @@ def test_same_element_swap_is_not_an_element_error():
 
 # --- criterion 3: default exhaustiveness 4, recorded in settings() --------------
 
+
 def test_default_exhaustiveness_is_4_everywhere():
     assert DEFAULT_EXHAUSTIVENESS == 4
     assert vina_dock.DEFAULT_EXHAUSTIVENESS == 4
@@ -237,6 +238,7 @@ def test_default_exhaustiveness_reaches_vina(monkeypatch, tmp_path):
 
 # --- criterion 4: a second engine needs no funnel change ------------------------
 
+
 class FakeProvider:
     """A second docking engine, written without importing anything from vina_dock."""
 
@@ -266,8 +268,10 @@ def test_test_double_satisfies_the_protocol():
 
 def test_object_missing_dock_is_not_a_provider():
     """Negative control: the protocol check is not vacuous."""
+
     class NotAProvider:
         name = "x"
+
     assert not isinstance(NotAProvider(), DockingProvider)
 
 
@@ -305,9 +309,7 @@ def test_tier_without_context_explains_instead_of_keyerror():
 
 def test_tier_rejects_multi_fragment_ligand():
     with pytest.raises(DockingError, match="connected"):
-        Docking(FakeProvider()).run(
-            [Candidate("salt", "CC(=O)[O-].[Na+]")], {"receptor": "r", "box": Box((0, 0, 0))}
-        )
+        Docking(FakeProvider()).run([Candidate("salt", "CC(=O)[O-].[Na+]")], {"receptor": "r", "box": Box((0, 0, 0))})
 
 
 def test_tier_needs_a_seed():
@@ -316,6 +318,7 @@ def test_tier_needs_a_seed():
 
 
 # --- charge and multiplicity stay explicit at the structure boundary -------------
+
 
 def test_pose_to_structure_requires_charge_and_multiplicity():
     pose = Pose(("O", "H", "H"), np.array([[0.0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]]))
@@ -327,6 +330,7 @@ def test_pose_to_structure_requires_charge_and_multiplicity():
 
 # --- the optional extra: real Meeko + the extra's import hint --------------------
 
+
 def test_missing_extra_gives_an_actionable_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "vina", None)  # import raises ImportError
     with pytest.raises(ImportError, match=r"smeltery\[docking\]"):
@@ -336,10 +340,7 @@ def test_missing_extra_gives_an_actionable_error(monkeypatch):
 def test_importing_the_package_does_not_import_vina_or_meeko():
     import subprocess
 
-    code = (
-        "import sys, smeltery.docking; "
-        "sys.exit(1 if {'vina','meeko'} & set(sys.modules) else 0)"
-    )
+    code = "import sys, smeltery.docking; sys.exit(1 if {'vina','meeko'} & set(sys.modules) else 0)"
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 
 
@@ -362,9 +363,7 @@ def test_real_vina_dock_end_to_end(tmp_path):
     for x in (-3.0, 3.0):
         for y in (-3.0, 3.0):
             for z in (-3.0, 3.0):
-                lines.append(
-                    f"ATOM  {k:5d}  C   ALA A   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00    +0.000 C "
-                )
+                lines.append(f"ATOM  {k:5d}  C   ALA A   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00    +0.000 C ")
                 k += 1
     rec.write_text("\n".join(lines) + "\n")
     mol = _embedded("CCO")

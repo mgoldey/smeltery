@@ -28,9 +28,7 @@ from smeltery.docking.united_atom import restore_hydrogens  # noqa: E402
 
 # The candidate that killed the 2026-09-12 run on the branch: 42 heavy atoms,
 # one declared stereocentre, and a Meeko order that differs from RDKit's.
-KILLER = (
-    "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)[O-])cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
-)
+KILLER = "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)[O-])cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
 
 # Where the fake "docked" pose is put: far from any embedding, so a
 # re-embedding cannot be mistaken for the pose.
@@ -63,10 +61,7 @@ def _perceived_skeleton(symbols, coords) -> str:
     """
     from rdkit.Chem import rdDetermineBonds
 
-    xyz = "\n".join(
-        [str(len(symbols)), ""]
-        + [f"{s} {x:.6f} {y:.6f} {z:.6f}" for s, (x, y, z) in zip(symbols, coords)]
-    )
+    xyz = "\n".join([str(len(symbols)), ""] + [f"{s} {x:.6f} {y:.6f} {z:.6f}" for s, (x, y, z) in zip(symbols, coords)])
     mol = Chem.MolFromXYZBlock(xyz)
     rdDetermineBonds.DetermineConnectivity(mol)
     return _skeleton_smiles(mol)
@@ -102,9 +97,7 @@ def test_a_map_that_puts_atoms_on_the_wrong_element_is_refused():
     # permutation check cannot be what catches it) and really does misassign
     # elements (so there is something to catch).
     assert sorted(reversed_map) == sorted(heavy)
-    assert any(
-        mol.GetAtomWithIdx(t).GetSymbol() != s for t, s in zip(reversed_map, syms)
-    )
+    assert any(mol.GetAtomWithIdx(t).GetSymbol() != s for t, s in zip(reversed_map, syms))
 
     with pytest.raises(ValueError, match="element"):
         restore_hydrogens(FLUOROPHENOL, syms, coords, rdkit_index_of_heavy=reversed_map)
@@ -120,9 +113,7 @@ def test_the_correct_map_still_passes():
     pos = mol.GetConformer().GetPositions()
     syms = [mol.GetAtomWithIdx(i).GetSymbol() for i in heavy]
     coords = [tuple(float(v) for v in pos[i]) for i in heavy]
-    out_syms, _ = restore_hydrogens(
-        FLUOROPHENOL, syms, coords, rdkit_index_of_heavy=list(heavy)
-    )
+    out_syms, _ = restore_hydrogens(FLUOROPHENOL, syms, coords, rdkit_index_of_heavy=list(heavy))
     assert len(out_syms) == mol.GetNumAtoms()
 
 
@@ -156,10 +147,7 @@ class _EchoVina:
         for line in self._ligand.splitlines():
             if line.startswith(("ATOM", "HETATM")):
                 x, y, z = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
-                line = (
-                    f"{line[:30]}{x + POSE_SHIFT:8.3f}{y + POSE_SHIFT:8.3f}"
-                    f"{z + POSE_SHIFT:8.3f}{line[54:]}"
-                )
+                line = f"{line[:30]}{x + POSE_SHIFT:8.3f}{y + POSE_SHIFT:8.3f}{z + POSE_SHIFT:8.3f}{line[54:]}"
             out.append(line)
         out.append("ENDMDL")
         return "\n".join(out) + "\n"
@@ -233,6 +221,4 @@ def test_tier1_returns_the_docked_molecule_with_its_own_connectivity(echo_vina):
     # The docked heavy atoms are DATA: every one must sit in the shifted frame,
     # i.e. it is the pose and not a re-embedding.
     heavy = [c for s, c in zip(syms, coords) if s != "H"]
-    assert all(min(c) > POSE_SHIFT / 2 for c in heavy), (
-        "heavy atoms are not at the docked coordinates"
-    )
+    assert all(min(c) > POSE_SHIFT / 2 for c in heavy), "heavy atoms are not at the docked coordinates"

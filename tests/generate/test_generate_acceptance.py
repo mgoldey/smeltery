@@ -14,8 +14,15 @@ from rdkit.Chem import rdFMCS
 
 from smeltery import Candidate, paired_delta
 from smeltery.generate import (
-    Isomer, SubstitutionProposal, paired_ddE, pairs_from_candidates, propose_substitutions, proposals_by_key,
-    relative_descriptors, substituent_scan, to_candidates,
+    Isomer,
+    SubstitutionProposal,
+    paired_ddE,
+    pairs_from_candidates,
+    proposals_by_key,
+    propose_substitutions,
+    relative_descriptors,
+    substituent_scan,
+    to_candidates,
 )
 from smeltery.tiers import NoCommonCoreError, PairedPoses
 
@@ -42,6 +49,7 @@ def _run_pairing(analogue_smiles, name="analogue", n_poses=4):
 
 
 # ---- criterion 1: exactly one pairing implementation; self-anchor is 0.0 ------
+
 
 def test_self_pair_anchor_is_exactly_zero_per_pose_through_the_one_pairing():
     parent, twin, tier = _run_pairing(ACID, "twin")
@@ -72,11 +80,14 @@ def test_pairing_lives_in_exactly_one_module():
     src = pathlib.Path(smeltery.__file__).parent
     mcs_users = sorted(str(f.relative_to(src)) for f in src.rglob("*.py") if "FindMCS(" in f.read_text())
     assert mcs_users == ["tiers.py"]
-    assert not any(hasattr(__import__("smeltery.generate", fromlist=["x"]), n)
-                   for n in ("pair_poses_by_scaffold", "relax_substituent"))
+    assert not any(
+        hasattr(__import__("smeltery.generate", fromlist=["x"]), n)
+        for n in ("pair_poses_by_scaffold", "relax_substituent")
+    )
 
 
 # ---- criterion 2: the MCS gate refuses, never degrades ------------------------
+
 
 def test_gate_refuses_a_pair_with_no_common_core():
     parent, nn = Candidate("parent", ACID), Candidate("nn", "N#N")
@@ -117,6 +128,7 @@ def test_gate_negative_control_a_legitimate_analogue_passes():
 
 
 # ---- criterion 3: proposals are keyed by (substituent, SITE) ---------------------
+
 
 def test_ortho_meta_para_give_different_keys():
     props = [p for p in propose_substitutions(ACID, {"F": "F"}) if not p.is_parent]
@@ -166,7 +178,7 @@ def test_site_keys_do_not_depend_on_how_the_parent_is_spelled():
 
 def test_only_substitutional_isomers_have_a_key():
     with pytest.raises(ValueError, match="no \\(substituent, site\\) key"):
-        Isomer("c1ccccc1", "parent", "none", "c1ccccc1").key
+        Isomer("c1ccccc1", "parent", "none", "c1ccccc1").key  # noqa: B018 -- the access itself raises
 
 
 def test_keyed_proposals_flow_through_the_pairing_tier_as_candidates():
