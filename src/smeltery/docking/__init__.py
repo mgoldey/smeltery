@@ -24,16 +24,25 @@ from .united_atom import (
 )
 
 __all__ = [
-    "DEFAULT_EXHAUSTIVENESS", "Box", "Docking", "DockingError", "DockingProvider",
-    "DockResult", "PoseMismatchError", "StereochemistryError", "VinaProvider",
-    "check_full_pose", "check_heavy_atom_count", "parse_smiles_idx_remark",
-    "pose_to_structure", "restore_hydrogens", "smiles_from_pdbqt_remark",
+    "DEFAULT_EXHAUSTIVENESS",
+    "Box",
+    "Docking",
+    "DockingError",
+    "DockingProvider",
+    "DockResult",
+    "PoseMismatchError",
+    "StereochemistryError",
+    "VinaProvider",
+    "check_full_pose",
+    "check_heavy_atom_count",
+    "parse_smiles_idx_remark",
+    "pose_to_structure",
+    "restore_hydrogens",
+    "smiles_from_pdbqt_remark",
 ]
 
 
-def pose_to_structure(
-    pose: Pose, charge: int, multiplicity: int, source: str = "<docked pose>"
-) -> Structure:
+def pose_to_structure(pose: Pose, charge: int, multiplicity: int, source: str = "<docked pose>") -> Structure:
     """A `smeltery.structure.Structure` for a pose, with charge and multiplicity explicit.
 
     Neither is optional: a pose carries no charge, and guessing one is how a

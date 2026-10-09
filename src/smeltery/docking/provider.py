@@ -59,8 +59,14 @@ class VinaProvider:
 
         ex = self.exhaustiveness if exhaustiveness is None else exhaustiveness
         run = dock_ligand(
-            mol, receptor, box.center, box.size, exhaustiveness=ex,
-            n_poses=self.n_poses, seed=seed, cpu=self.cpu,
+            mol,
+            receptor,
+            box.center,
+            box.size,
+            exhaustiveness=ex,
+            n_poses=self.n_poses,
+            seed=seed,
+            cpu=self.cpu,
         )
         if not run.ok:
             return DockResult(error=run.error)

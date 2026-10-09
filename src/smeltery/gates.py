@@ -65,7 +65,10 @@ class SensitivityReport:
 
 
 def charge_sensitivity(
-    candidates: Sequence[Candidate], quantity: str, model_a: ChargeModel, model_b: ChargeModel,
+    candidates: Sequence[Candidate],
+    quantity: str,
+    model_a: ChargeModel,
+    model_b: ChargeModel,
 ) -> SensitivityReport:
     """Score every candidate under both models and report the disagreement."""
     if len(candidates) < 2:

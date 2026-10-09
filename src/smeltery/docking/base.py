@@ -47,9 +47,7 @@ class DockResult:
 
     def __post_init__(self) -> None:
         if len(self.poses) != len(self.scores):
-            raise ValueError(
-                f"{len(self.poses)} poses but {len(self.scores)} scores"
-            )
+            raise ValueError(f"{len(self.poses)} poses but {len(self.scores)} scores")
 
     @property
     def ok(self) -> bool:

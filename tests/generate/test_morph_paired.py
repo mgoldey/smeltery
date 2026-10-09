@@ -26,9 +26,7 @@ def _self_pairs(n=6):
     out = []
     for i in range(n):
         c = [(rng.uniform(-3, 3), rng.uniform(-3, 3), rng.uniform(-3, 3)) for _ in syms]
-        out.append(
-            PairedPose(i, syms, c, syms, list(c), [(j, j) for j in range(len(syms))])
-        )
+        out.append(PairedPose(i, syms, c, syms, list(c), [(j, j) for j in range(len(syms))]))
     return out
 
 
@@ -90,11 +88,7 @@ def test_pairing_reduces_variance_when_the_noise_is_common():
     pairs = []
     for i in range(40):
         shared = rng.gauss(0, 30.0)  # pose-conformational, COMMON
-        pairs.append(
-            PairedPose(
-                i, ["C"], [(shared, 0.0, 0.0)], ["N"], [(shared, 0.0, 0.0)], [(0, 0)]
-            )
-        )
+        pairs.append(PairedPose(i, ["C"], [(shared, 0.0, 0.0)], ["N"], [(shared, 0.0, 0.0)], [(0, 0)]))
 
     def e(symbols, coords):
         # The shared coordinate dominates; the element shifts by exactly 2.
@@ -163,8 +157,7 @@ def test_paired_and_unpaired_estimates_are_ALGEBRAICALLY_EQUAL():
     res = paired_ddE(pairs, lambda s, c: c[0][0] + (2.0 if s[0] == "N" else 0.0))
     assert res.ddE_paired == pytest.approx(res.ddE_unpaired, abs=1e-9)
     assert res.sd_paired != pytest.approx(res.sd_unpaired, rel=1e-6), (
-        "the SDs must differ even though the means cannot -- otherwise this "
-        "test proves nothing about pairing"
+        "the SDs must differ even though the means cannot -- otherwise this test proves nothing about pairing"
     )
 
 
@@ -270,9 +263,7 @@ def test_there_is_exactly_one_pairing_implementation():
     assert not hasattr(paired, "pair_poses_by_scaffold")
     assert not hasattr(paired, "relax_substituent")
     src = pathlib.Path(paired.__file__).parents[1]
-    builders = sorted(
-        str(f.relative_to(src)) for f in src.rglob("*.py") if "FindMCS(" in f.read_text()
-    )
+    builders = sorted(str(f.relative_to(src)) for f in src.rglob("*.py") if "FindMCS(" in f.read_text())
     assert builders == ["tiers.py"], f"pairing (MCS + coordinate copy) must live only in tiers.py: {builders}"
 
 
@@ -290,10 +281,7 @@ def test_total_variance_removal_reports_inf_not_nan():
 
     res = paired_ddE(_self_pairs(6), _spread_energy())
     assert res.sem_paired == 0.0
-    assert math.isinf(res.sem_ratio), (
-        f"got {res.sem_ratio}; total spread removal must not read "
-        "as a failed computation"
-    )
+    assert math.isinf(res.sem_ratio), f"got {res.sem_ratio}; total spread removal must not read as a failed computation"
 
 
 def test_the_drift_tolerance_is_actually_consulted():
@@ -358,6 +346,5 @@ def test_sem_ratio_is_a_SEM_ratio_not_a_variance_ratio():
         "way the docstring claims"
     )
     assert not hasattr(res, "variance_reduction"), (
-        "the misleading name is back; a SEM ratio called variance_reduction "
-        "reads as a claim nobody measured"
+        "the misleading name is back; a SEM ratio called variance_reduction reads as a claim nobody measured"
     )
