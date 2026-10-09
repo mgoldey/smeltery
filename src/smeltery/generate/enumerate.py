@@ -50,9 +50,7 @@ def enumerate_with_report(
 
     rep = EnumerationReport()
     generated: list[Isomer] = [Isomer(parent_smiles, "parent", "none", parent_smiles)]
-    generated += substituent_scan(
-        parent_smiles, substituents or COMMON_SUBSTITUENTS, site_smarts
-    )
+    generated += substituent_scan(parent_smiles, substituents or COMMON_SUBSTITUENTS, site_smarts)
     if include_bioisosteres:
         generated += bioisostere_swaps(parent_smiles)
     if include_rings:
@@ -66,9 +64,7 @@ def enumerate_with_report(
     # Parent first, then a stable (kind, transform, canonical) order.
     seen: set[str] = set()
     deduped: list[Isomer] = []
-    for iso in sorted(
-        generated, key=lambda i: (not i.is_parent, i.kind, i.transform, i.canonical)
-    ):
+    for iso in sorted(generated, key=lambda i: (not i.is_parent, i.kind, i.transform, i.canonical)):
         if iso.canonical in seen:
             continue
         seen.add(iso.canonical)
@@ -84,24 +80,17 @@ def enumerate_with_report(
         # fails much later (in ligand prep) with an opaque message if kept.
         n_frags = len(Chem.GetMolFrags(mol))
         if n_frags > 1:
-            rep.rejected.append(
-                f"{iso.transform} ({iso.canonical}): {n_frags} disconnected fragments"
-            )
+            rep.rejected.append(f"{iso.transform} ({iso.canonical}): {n_frags} disconnected fragments")
             continue
         mw = Descriptors.MolWt(mol)
         if not (lo <= mw <= hi):
-            rep.rejected.append(
-                f"{iso.transform} ({iso.canonical}): MW {mw:.1f} outside [{lo}, {hi}]"
-            )
+            rep.rejected.append(f"{iso.transform} ({iso.canonical}): MW {mw:.1f} outside [{lo}, {hi}]")
             continue
         kept.append(iso)
         if len(kept) >= max_candidates:
             remaining = len(deduped) - deduped.index(iso) - 1
             if remaining > 0:
-                rep.rejected.append(
-                    f"max_candidates={max_candidates} reached; "
-                    f"{remaining} candidates not evaluated"
-                )
+                rep.rejected.append(f"max_candidates={max_candidates} reached; {remaining} candidates not evaluated")
             break
     rep.n_after_filter = len(kept)
     return kept, rep

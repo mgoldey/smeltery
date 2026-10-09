@@ -29,7 +29,7 @@ about what happens in an organism.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -52,9 +52,7 @@ class PharmacophoreSpec:
         for name, smarts, min_count in self.features:
             patt = Chem.MolFromSmarts(smarts)
             if patt is None:
-                raise ValueError(
-                    f"pharmacophore feature {name!r} has invalid SMARTS {smarts!r}"
-                )
+                raise ValueError(f"pharmacophore feature {name!r} has invalid SMARTS {smarts!r}")
             out[name] = len(mol.GetSubstructMatches(patt)) >= min_count
         return out
 
@@ -114,9 +112,7 @@ class Analogue:
 
         mol = Chem.MolFromSmiles(self.smiles)
         if mol is None:
-            raise ValueError(
-                f"analogue {self.label!r} has unparseable SMILES: {self.smiles}"
-            )
+            raise ValueError(f"analogue {self.label!r} has unparseable SMILES: {self.smiles}")
         return self.pharmacophore.check(mol)
 
     @property

@@ -48,12 +48,8 @@ def test_the_docked_heavy_atoms_DO_NOT_MOVE():
     syms, coords = restore_hydrogens(TOLUENE, TOLUENE_HEAVY, TOLUENE_COORDS)
     heavy_out = [c for s, c in zip(syms, coords) if s != "H"]
     assert len(heavy_out) == len(TOLUENE_COORDS)
-    worst = max(
-        max(abs(a - b) for a, b in zip(p, q)) for p, q in zip(TOLUENE_COORDS, heavy_out)
-    )
-    assert worst == pytest.approx(0.0, abs=1e-9), (
-        f"heavy atoms moved by {worst} A -- they are FIXED during H placement"
-    )
+    worst = max(max(abs(a - b) for a, b in zip(p, q)) for p, q in zip(TOLUENE_COORDS, heavy_out))
+    assert worst == pytest.approx(0.0, abs=1e-9), f"heavy atoms moved by {worst} A -- they are FIXED during H placement"
 
 
 def test_a_heavy_atom_COUNT_MISMATCH_is_refused_not_truncated():
@@ -154,17 +150,13 @@ def test_an_UNDEFINED_stereocentre_does_not_cause_a_false_rejection():
 
     # Guard the guard: the fixture must actually have an undefined centre,
     # or this test passes for the wrong reason.
-    declared = Chem.FindMolChiralCenters(
-        Chem.MolFromSmiles(MIXED_STEREO), useLegacyImplementation=False
-    )
+    declared = Chem.FindMolChiralCenters(Chem.MolFromSmiles(MIXED_STEREO), useLegacyImplementation=False)
     everything = Chem.FindMolChiralCenters(
         Chem.MolFromSmiles(MIXED_STEREO),
         useLegacyImplementation=True,
         includeUnassigned=True,
     )
-    assert len(everything) > len(declared), (
-        "fixture has no undefined stereocentre, so it cannot exercise the bug"
-    )
+    assert len(everything) > len(declared), "fixture has no undefined stereocentre, so it cannot exercise the bug"
 
     out_syms, out_coords = restore_hydrogens(MIXED_STEREO, syms, coords)
     assert len(out_syms) == len(syms)

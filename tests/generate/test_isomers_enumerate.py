@@ -58,8 +58,6 @@ def test_report_counts_are_consistent():
 
 def test_generators_can_be_switched_off_individually():
     full = enumerate_isomers(BENZOIC)
-    subs_only = enumerate_isomers(
-        BENZOIC, include_stereo=False, include_rings=False, include_bioisosteres=False
-    )
+    subs_only = enumerate_isomers(BENZOIC, include_stereo=False, include_rings=False, include_bioisosteres=False)
     assert len(subs_only) < len(full)
     assert {i.kind for i in subs_only} <= {"parent", "substitutional"}

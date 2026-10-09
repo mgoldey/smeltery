@@ -55,9 +55,7 @@ def fake_vina(monkeypatch, tmp_path):
     mod = types.ModuleType("vina")
     mod.Vina = _FakeVina
     monkeypatch.setitem(sys.modules, "vina", mod)
-    monkeypatch.setattr(
-        vina_dock, "_ligand_pdbqt_from_rdkit", lambda mol: "LIGAND PDBQT"
-    )
+    monkeypatch.setattr(vina_dock, "_ligand_pdbqt_from_rdkit", lambda mol: "LIGAND PDBQT")
     receptor = tmp_path / "r.pdbqt"
     receptor.write_text("ATOM\n")
     return receptor

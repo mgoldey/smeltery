@@ -60,18 +60,28 @@ def main() -> None:
             fld = ferric.run_rhf(mol, bs, point_charges=charges, **kw)
             secs.append(time.perf_counter() - t)
             iters = vac.iterations + fld.iterations
-        out.append({
-            "role": role, "name": name, "smiles": smiles, "n_atoms": len(pose.symbols),
-            "n_basis_functions": sto3g_basis_functions(list(pose.symbols)),
-            "scf_iterations": iters, "seconds_per_pose": statistics.median(secs),
-            "seconds_all_repeats": secs,
-        })
+        out.append(
+            {
+                "role": role,
+                "name": name,
+                "smiles": smiles,
+                "n_atoms": len(pose.symbols),
+                "n_basis_functions": sto3g_basis_functions(list(pose.symbols)),
+                "scf_iterations": iters,
+                "seconds_per_pose": statistics.median(secs),
+                "seconds_all_repeats": secs,
+            }
+        )
         print(out[-1])
     record = {
         "quantity": "FieldInteraction wall time per pose (vacuum + point-charge-field RHF)",
-        "basis": tier.basis, "settings": tier.settings(), "ferric": ferric_identity(),
+        "basis": tier.basis,
+        "settings": tier.settings(),
+        "ferric": ferric_identity(),
         "machine": f"{platform.processor() or platform.machine()}, RAYON_NUM_THREADS=1, OPENBLAS_NUM_THREADS=1",
-        "repeats": REPEATS, "statistic": "median", "samples": out,
+        "repeats": REPEATS,
+        "statistic": "median",
+        "samples": out,
     }
     path = Path(__file__).resolve().parents[1] / "src/smeltery/data/cost_measurements.json"
     path.parent.mkdir(exist_ok=True)

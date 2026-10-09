@@ -23,9 +23,7 @@ RING_CONTRACTIONS: dict[str, tuple[str, str]] = {
 }
 
 
-def _replace(
-    parent_smiles: str, kind: str, table: dict[str, tuple[str, str]]
-) -> list[Isomer]:
+def _replace(parent_smiles: str, kind: str, table: dict[str, tuple[str, str]]) -> list[Isomer]:
     """Apply each (find, replace) pair once, deduplicating on canonical form."""
     from rdkit import Chem
 
@@ -65,9 +63,7 @@ def _replace(
     return out
 
 
-def bioisostere_swaps(
-    parent_smiles: str, swaps: "dict[str, tuple[str, str]] | None" = None
-) -> list[Isomer]:
+def bioisostere_swaps(parent_smiles: str, swaps: "dict[str, tuple[str, str]] | None" = None) -> list[Isomer]:
     """Replace a functional group with bioisosteres that keep its role.
 
     Returns [] when the group is absent -- a no-op, not an error: running a
@@ -98,9 +94,7 @@ def stereoisomers(parent_smiles: str, max_isomers: int = 32) -> list[Isomer]:
     parent = Chem.MolFromSmiles(parent_smiles)
     if parent is None:
         raise ValueError(f"unparseable parent SMILES: {parent_smiles}")
-    opts = StereoEnumerationOptions(
-        onlyUnassigned=True, maxIsomers=max_isomers, unique=True
-    )
+    opts = StereoEnumerationOptions(onlyUnassigned=True, maxIsomers=max_isomers, unique=True)
     out = [
         Isomer(
             smiles=Chem.MolToSmiles(m),

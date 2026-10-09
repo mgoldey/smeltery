@@ -36,7 +36,6 @@ lower. Cheap scoring is what MAKES a search possible.
 
 from __future__ import annotations
 
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -274,8 +273,7 @@ def _element_from_autodock_type(raw: str) -> str:
     lead = "".join(ch for ch in t if ch.isalpha())
     return (
         lead[:2]
-        if len(lead) >= 2
-        and lead[:2].upper() in ("CL", "BR", "SI", "SE", "ZN", "FE", "MG", "MN", "CA")
+        if len(lead) >= 2 and lead[:2].upper() in ("CL", "BR", "SI", "SE", "ZN", "FE", "MG", "MN", "CA")
         else lead[:1]
     ).capitalize()
 
