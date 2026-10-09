@@ -93,6 +93,9 @@ class DockedPose:
     #: A caller passing `rdkit_index_of_heavy` must build the topology from
     #: THIS, not from its own SMILES.
     meeko_smiles: str | None = None
+    #: PDBQT text of the flexible receptor residues in this pose's MODEL, "" for
+    #: a rigid receptor. Moves with the ligand: keep them together.
+    flex_pdbqt: str = ""
 
 
 @dataclass
@@ -117,18 +120,54 @@ class VinaRun:
         return self.poses[0] if self.poses else None
 
 
-def prepare_receptor(pdb_path: str | Path, out_pdbqt: str | Path) -> Path:
+@dataclass(frozen=True)
+class Receptor:
+    """A prepared receptor: a rigid PDBQT and, optionally, a flexible-sidechain PDBQT.
+
+    Vina treats the `flex` residues' sidechain torsions as extra degrees of
+    freedom of the search, so they relax around the ligand (partial induced fit).
+    A bare path is accepted everywhere and means a fully rigid receptor.
+    """
+
+    rigid: Path
+    flex: Path | None = None
+
+    @classmethod
+    def coerce(cls, receptor) -> Receptor:
+        if isinstance(receptor, Receptor):
+            return receptor
+        return cls(Path(receptor))
+
+    @property
+    def is_flexible(self) -> bool:
+        return self.flex is not None
+
+
+def prepare_receptor(
+    pdb_path: str | Path,
+    out_pdbqt: str | Path,
+    flex_residues: tuple[str, ...] | list[str] = (),
+) -> Path | Receptor:
     """Convert a receptor PDB to the PDBQT Vina requires.
 
     Uses Meeko's receptor path. Raises with an actionable message rather than
     returning a half-prepared file, because a silently malformed receptor gives
     poses that look plausible and are meaningless.
+
+    `flex_residues` ("A:42", chain:resnumber, as Meeko's `--flexres`) makes those
+    residues' sidechains flexible. Then a `Receptor(rigid, flex)` is returned,
+    not a bare path. With none (the default) the return is the rigid PDBQT path,
+    as before.
     """
     _require("meeko")  # fail here, not inside the CLI subprocess below
 
     pdb_path, out_pdbqt = Path(pdb_path), Path(out_pdbqt)
     if not pdb_path.is_file():
         raise FileNotFoundError(f"receptor PDB not found: {pdb_path}")
+    flex_residues = tuple(flex_residues)
+    for r in flex_residues:
+        if ":" not in r:
+            raise ValueError(f"flex residue {r!r} must look like 'A:42' (chain:resnum)")
 
     # Meeko's polymer/receptor prep is version-sensitive; shell out to its CLI,
     # which is the supported entry point and gives a readable error.
@@ -142,19 +181,28 @@ def prepare_receptor(pdb_path: str | Path, out_pdbqt: str | Path) -> Path:
     # residues within 6 A of the bound ligand were lost (atom count rose
     # 3223 -> 3882, which is Meeko adding hydrogens). Re-run that check for any
     # new receptor rather than assuming it carries over.
-    proc = subprocess.run(
-        [
-            "mk_prepare_receptor.py",
-            "--read_pdb",
-            str(pdb_path),
-            "-o",
-            str(out_pdbqt.with_suffix("")),
-            "-p",
-            "--allow_bad_res",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    cmd = [
+        "mk_prepare_receptor.py",
+        "--read_pdb",
+        str(pdb_path),
+        "-o",
+        str(out_pdbqt.with_suffix("")),
+        "-p",
+        "--allow_bad_res",
+    ]
+    for r in flex_residues:
+        cmd += ["--flexres", r]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    stem = out_pdbqt.with_suffix("")
+    if flex_residues:
+        rigid = stem.parent / f"{stem.name}_rigid.pdbqt"
+        flex = stem.parent / f"{stem.name}_flex.pdbqt"
+        if not (rigid.is_file() and flex.is_file()):
+            raise RuntimeError(
+                "mk_prepare_receptor.py did not produce rigid and flex PDBQTs.\n"
+                f"stdout: {proc.stdout[-800:]}\nstderr: {proc.stderr[-800:]}"
+            )
+        return Receptor(rigid, flex)
     produced = out_pdbqt.with_suffix(".pdbqt")
     if not produced.is_file():
         raise RuntimeError(
@@ -242,14 +290,19 @@ def _parse_pdbqt_models(text: str):
     of 13 heavy atoms on aspirin and misplaces one by up to 4.9 A.
     """
     models, cur, score, syms, crds, sers = [], False, None, [], [], []
+    in_flex = False
     for line in text.splitlines():
         if line.startswith("MODEL"):
-            cur, score, syms, crds, sers = True, None, [], [], []
+            cur, in_flex, score, syms, crds, sers = True, False, None, [], [], []
+        elif line.startswith("BEGIN_RES"):
+            in_flex = True  # flexible receptor sidechains follow the ligand; not ligand atoms
+        elif line.startswith("END_RES"):
+            in_flex = False
         elif line.startswith("REMARK VINA RESULT"):
             parts = line.split()
             if len(parts) >= 4:
                 score = float(parts[3])
-        elif line.startswith(("ATOM", "HETATM")) and cur:
+        elif line.startswith(("ATOM", "HETATM")) and cur and not in_flex:
             raw = line[77:79].strip() or line[12:16].strip()
             syms.append(_element_from_autodock_type(raw))
             crds.append((float(line[30:38]), float(line[38:46]), float(line[46:54])))
@@ -261,6 +314,30 @@ def _parse_pdbqt_models(text: str):
             models.append((syms, crds, score, sers))
             cur = False
     return models
+
+
+def parse_flex_blocks(text: str) -> list[str]:
+    """Per MODEL, the flexible-receptor residue records (`BEGIN_RES`..`END_RES`) as PDBQT text.
+
+    Empty strings for a rigid run. These are the receptor sidechain coordinates
+    that GO WITH the ligand pose of the same MODEL: a flexible dock moves both,
+    so a pose is only meaningful together with its sidechains.
+    """
+    out, cur, buf, keep = [], False, [], False
+    for line in text.splitlines():
+        if line.startswith("MODEL"):
+            cur, buf, keep = True, [], False
+        elif line.startswith("BEGIN_RES"):
+            keep = True
+            buf.append(line)
+        elif keep and cur and not line.startswith("ENDMDL"):
+            buf.append(line)
+            if line.startswith("END_RES"):
+                keep = False
+        elif line.startswith("ENDMDL") and cur:
+            out.append("\n".join(buf) + ("\n" if buf else ""))
+            cur = False
+    return out
 
 
 def heavy_atom_mapping(
@@ -297,7 +374,7 @@ def heavy_atom_mapping(
 
 def dock_ligand(
     mol,
-    receptor_pdbqt: str | Path,
+    receptor_pdbqt: str | Path | Receptor,
     box_center: tuple[float, float, float],
     box_size: tuple[float, float, float] = (24.0, 24.0, 24.0),
     exhaustiveness: int = DEFAULT_EXHAUSTIVENESS,
@@ -341,9 +418,10 @@ def dock_ligand(
     """
     Vina = _require("vina").Vina
 
-    receptor_pdbqt = Path(receptor_pdbqt)
-    if not receptor_pdbqt.is_file():
-        return VinaRun(error=f"receptor PDBQT not found: {receptor_pdbqt}")
+    receptor = Receptor.coerce(receptor_pdbqt)
+    for f in (receptor.rigid, receptor.flex):
+        if f is not None and not Path(f).is_file():
+            return VinaRun(error=f"receptor PDBQT not found: {f}")
 
     try:
         lig_pdbqt = _ligand_pdbqt_from_rdkit(mol)
@@ -352,7 +430,13 @@ def dock_ligand(
 
     try:
         v = Vina(sf_name="vina", cpu=cpu, seed=seed, verbosity=0)
-        v.set_receptor(str(receptor_pdbqt))
+        if receptor.is_flexible:
+            v.set_receptor(
+                rigid_pdbqt_filename=str(receptor.rigid),
+                flex_pdbqt_filename=str(receptor.flex),
+            )
+        else:
+            v.set_receptor(str(receptor.rigid))
         v.set_ligand_from_string(lig_pdbqt)
         v.compute_vina_maps(center=list(box_center), box_size=list(box_size))
         v.dock(exhaustiveness=exhaustiveness, n_poses=n_poses)
@@ -365,6 +449,7 @@ def dock_ligand(
         )
 
     models = _parse_pdbqt_models(out)
+    flex_blocks = parse_flex_blocks(out)
     # Meeko's `REMARK SMILES IDX` maps PDBQT serial -> RDKit index. It is
     # written by the LIGAND preparation, so read it from the input PDBQT; Vina
     # copies remarks through to its output, so either source works, and reading
@@ -401,6 +486,7 @@ def dock_ligand(
                 rank=i,
                 rdkit_index_of_heavy=mapping,
                 meeko_smiles=mk_smiles,
+                flex_pdbqt=flex_blocks[i] if i < len(flex_blocks) else "",
             )
         )
     if not poses:
