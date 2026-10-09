@@ -57,3 +57,30 @@ jobs:
 
       - name: Example (benzoic acid)
         run: uv run --no-sync python examples/mwe_benzoic.py
+
+  # Real Vina + Meeko docking. The `test` job above has no `docking` extra, so
+  # every test that needs vina/meeko skips there; this job installs the extra
+  # and fails if any docking test still skips for a missing module. Vina ships
+  # wheels for CPython <= 3.12 only, hence 3.11.
+  docking:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install (dev + docking extras, ferric from PyPI)
+        run: uv sync --extra dev --extra docking --no-sources
+
+      - name: Docking tests (real Vina + Meeko)
+        run: |
+          set -o pipefail
+          uv run --no-sync pytest -q -rs tests/test_docking_*.py | tee /tmp/docking.txt
+          if grep -iE '^SKIPPED.*(vina|meeko|rdkit|docking extra)' /tmp/docking.txt; then
+            echo "::error::a docking test skipped for a missing vina/meeko/rdkit; the docking extra is not effective"
+            exit 1
+          fi
