@@ -22,9 +22,9 @@ permissions:
 env:
   # ferric's convention: no oversubscribed BLAS threads in tests.
   OPENBLAS_NUM_THREADS: "1"
-  # Fail if fewer tests than this are collected (271 as of the docking CI job; the xtb tests
+  # Fail if fewer tests than this are collected (283 as of docking-CI; the xtb tests
   # skip on the runner but are still collected). Raise it when tests are added.
-  MIN_TESTS: "271"
+  MIN_TESTS: "283"
 
 jobs:
   test:
