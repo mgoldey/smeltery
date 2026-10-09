@@ -315,7 +315,6 @@ wheels = [
 
 [[package]]
 name = "smeltery"
-version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "ferric" },
@@ -359,7 +358,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'docking'", specifier = ">=1.11" },
     { name = "vina", marker = "extra == 'docking'", specifier = ">=1.2.7" },
 ]
-provides-extras = ["dev", "gemmi", "rdkit", "docking"]
+provides-extras = ["dev", "docking", "gemmi", "rdkit"]
 
 [[package]]
 name = "vina"
