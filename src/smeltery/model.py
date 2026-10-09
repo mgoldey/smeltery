@@ -70,6 +70,9 @@ class Candidate:
     smiles: str
     poses: list[Pose] = field(default_factory=list)
     per_pose: dict[str, list[float]] = field(default_factory=dict)
+    #: Flexible-receptor sidechain PDBQT text per pose (aligned with `poses`);
+    #: empty when docked against a rigid receptor.
+    receptor_flex: list[str] = field(default_factory=list)
 
     @property
     def formula(self) -> str:

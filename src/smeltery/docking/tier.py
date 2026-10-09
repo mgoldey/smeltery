@@ -12,7 +12,8 @@ Measured on a campaign target (ferric RESULTS.md M11), 8x more exhaustiveness
 moved the mean redock RMSD less than the seed-to-seed SEM, so the default is
 exhaustiveness 4 and effort is added by adding seeds.
 
-`ctx` keys: `receptor` (what the provider takes: a PDBQT path for Vina) and
+`ctx` keys: `receptor` (what the provider takes: a PDBQT path or a flexible
+`Receptor` for Vina; `DockingTarget.ctx()` builds both keys) and
 `box` (a `Box`). A missing key is an explained error, not a KeyError.
 """
 
@@ -77,7 +78,7 @@ class Docking:
             raise DockingError(f"docking needs ctx{missing}: a prepared receptor and a Box")
         box: Box = ctx["box"]
         for cand in candidates:
-            poses, scores = [], []
+            poses, scores, flex = [], [], []
             errors = []
             for seed in self.seeds:
                 mol = self._embed(cand, seed)
@@ -87,11 +88,15 @@ class Docking:
                     continue
                 poses += res.poses
                 scores += res.scores
+                flex += res.flex_receptor or [""] * len(res.poses)
             if not poses:
                 raise DockingError(f"{cand.name}: " + "; ".join(errors))
             order = sorted(range(len(poses)), key=lambda i: scores[i])
             cand.poses = [poses[i] for i in order]
             cand.per_pose[self.QUANTITY] = [float(scores[i]) for i in order]
+            if any(flex):
+                # Sidechains that went with each pose, aligned with cand.poses.
+                cand.receptor_flex = [flex[i] for i in order]
 
     @staticmethod
     def _embed(cand: Candidate, seed: int):

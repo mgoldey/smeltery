@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from ..model import Pose
 from ..structure import Structure
+from .affinity import ensemble_score
+from .autobox import box_from_coords, box_from_ligand, box_from_residues
 from .base import DEFAULT_EXHAUSTIVENESS, Box, DockingProvider, DockResult
 from .provider import VinaProvider
+from .target import DockingTarget, prepare_target
 from .tier import Docking, DockingError
 from .united_atom import (
     PoseMismatchError,
@@ -22,9 +25,18 @@ from .united_atom import (
     restore_hydrogens,
     smiles_from_pdbqt_remark,
 )
+from .vina_dock import Receptor, prepare_receptor
 
 __all__ = [
     "DEFAULT_EXHAUSTIVENESS",
+    "DockingTarget",
+    "Receptor",
+    "box_from_coords",
+    "box_from_ligand",
+    "box_from_residues",
+    "ensemble_score",
+    "prepare_receptor",
+    "prepare_target",
     "Box",
     "Docking",
     "DockingError",
