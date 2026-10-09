@@ -62,6 +62,12 @@ def paired_delta(parent: Candidate, analogue: Candidate, quantity: str, tier: Ti
     With `tier`, the unit is read from `tier.produces()[quantity]`; without it
     the Measurement keeps its default unit.
     """
+    if tier is not None and getattr(tier, "is_delta_g", True) is False:
+        raise IncomparableError(
+            f"refusing to difference {quantity!r} from tier {tier.name!r}: it is not a free "
+            "energy (is_delta_g=False), e.g. a rank-only score. Its ordering may be informative; "
+            "its differences are not. Rank by it, do not subtract it."
+        )
     p = parent.per_pose[quantity]
     a = analogue.per_pose[quantity]
     if len(p) != len(a):

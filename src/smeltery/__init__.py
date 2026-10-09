@@ -17,6 +17,7 @@ from .gates import SensitivityReport, charge_sensitivity, spearman
 from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, Measurement, PointCharge, Pose
 from .pocket import PocketField, load_pocket
 from .record import RunRecord, ferric_identity
+from .scoring import Rescoring, Score, ScoringProvider, VinaScoreProvider
 
 try:
     __version__ = _version("smeltery")
@@ -25,6 +26,10 @@ except PackageNotFoundError:  # running from a source tree that was never instal
 
 __all__ = [
     "__version__",
+    "Rescoring",
+    "Score",
+    "ScoringProvider",
+    "VinaScoreProvider",
     "ANGSTROM_TO_BOHR",
     "HARTREE_TO_KCAL",
     "SensitivityReport",
