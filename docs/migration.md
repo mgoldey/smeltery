@@ -60,9 +60,30 @@ Gaps the issues do not settle, flagged for the maintainer:
   `pipeline` imports `campaign`, `isomers`, `docking`, `structure`, `tox`.
   #9 therefore needs either `pqr_parser` moved with it or a reader of its own;
   the issue does not mention this.
-- #11 asks for `mm_topology`'s destination to be recorded here. Not yet
-  decided; the spec says it returns to ferric. Record the decision in the #11
-  PR.
+- `mm_topology` (#11), DECIDED: dropped from smeltery, no re-export; it
+  returns to ferric. It is the only `active_site` module importing OpenMM, it
+  only assigns AMBER parameters for `ferric.MmTopology.from_amber_units`, and
+  it exists to generate ferric-mm validation references (with ferric's
+  `scripts/gen_openmm_mm_refs.py`), which is ferric's job. Nothing ported to
+  smeltery calls it: `smeltery.pocket.relax_pose_in_pocket` takes an already
+  built `ferric.MmTopology`. A re-export would force OpenMM into smeltery (as
+  an extra at best) for no smeltery code path, so OpenMM is not a dependency at
+  all. Consequence for #13: ferric must hold `mm_topology.py` (and its test)
+  before `tools/` is deleted; copying it into ferric is ferric-side work this
+  issue does not do. `solvate.py` also lives in `tools/active_site` and is not
+  in #11's list; it is not ported here and needs the same move-or-drop decision
+  before #13.
+- #11 claims `compute_binding_energy` on the 7LCJ fixture gives delta_e
+  -17.41 kcal/mol. Measured with the ported code (ferric 8637a5d, def2-svp RHF,
+  `conf_00_cryo_em.xyz` + `7LCJ_pocket.pdb`, 6458 charges): -28.758. The only
+  -17.41 in the pinned ferric tree is a synthetic number in a viz test. The
+  figure is NOT reproduced; the heavy test pins the measured value instead.
+  Parser overlap with #9: `smeltery.pocket.loader.parse_pqr` (Angstrom,
+  last-5-columns) vs the `structure` branch's own parser; reconcile to one.
+- #11 pocket loader: `smeltery.pocket` became a package. `loader.py` (from #3)
+  is the single PQR reader; ferric's `pqr_parser.py` / `pocket_charges.py` are
+  superseded by it (Angstrom `PointCharge`s rather than Bohr tuples; residue
+  ids/atom names are not carried, nothing in #11's scope used them).
 
 ## Pinned ferric symbols
 
