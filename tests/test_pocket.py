@@ -106,7 +106,7 @@ def test_settings_record_input_digest():
 
 
 def test_pdb_goes_through_pdb2pqr30_and_records_its_version():
-    if shutil.which("pdb2pqr30") is None:
+    if pdb2pqr_version() is None:
         with pytest.raises(Pdb2PqrUnavailableError, match="pip install pdb2pqr"):
             load_pocket(PDB)
         pytest.skip("pdb2pqr30 not installed (pip install pdb2pqr); PDB path not exercised")
@@ -116,3 +116,16 @@ def test_pdb_goes_through_pdb2pqr30_and_records_its_version():
     assert field.provenance["pdb2pqr_version"] == pdb2pqr_version()
     assert field.provenance["pdb2pqr_version"]
     assert field.provenance["input_sha256"] == hashlib.sha256(PDB.read_bytes()).hexdigest()
+
+
+def test_broken_pdb2pqr30_shim_is_not_installed(tmp_path, monkeypatch):
+    """A pyenv-style shim that exits 127 means 'not installed', not CalledProcessError."""
+    shim = tmp_path / "pdb2pqr30"
+    shim.write_text("#!/bin/sh\nexit 127\n")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    assert shutil.which("pdb2pqr30") == str(shim)
+    assert pdb2pqr_version() is None
+    with pytest.raises(Pdb2PqrUnavailableError, match=r"pip install pdb2pqr.*|--version fails") as e:
+        load_pocket(PDB)
+    assert "pip install pdb2pqr" in str(e.value) and str(shim) in str(e.value)

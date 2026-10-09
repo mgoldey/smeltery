@@ -1,5 +1,8 @@
 """smeltery: a tiered, measurement-disciplined funnel for biochemical systems."""
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
 from .funnel import (
     CutResult,
     IncomparableError,
@@ -16,7 +19,13 @@ from .pocket import PocketField, load_pocket
 from .record import RunRecord, ferric_identity
 from .scoring import Rescoring, Score, ScoringProvider, VinaScoreProvider
 
+try:
+    __version__ = _version("smeltery")
+except PackageNotFoundError:  # running from a source tree that was never installed
+    __version__ = "0+unknown"
+
 __all__ = [
+    "__version__",
     "Rescoring",
     "Score",
     "ScoringProvider",
