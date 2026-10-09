@@ -216,9 +216,7 @@ def pairs_from_candidates(
     set rather than dropped, so the ensemble is never silently shortened.
     """
     if len(parent.poses) != len(analogue.poses):
-        raise ValueError(
-            f"{analogue.name}: {len(analogue.poses)} poses vs parent's {len(parent.poses)}; cannot pair"
-        )
+        raise ValueError(f"{analogue.name}: {len(analogue.poses)} poses vs parent's {len(parent.poses)}; cannot pair")
     out: list[PairedPose] = []
     for i, (pp, ap) in enumerate(zip(parent.poses, analogue.poses, strict=True)):
         pairs = [(int(p), int(a)) for a, p in scaffold_map]  # (parent atom, analogue atom)
@@ -296,11 +294,7 @@ def paired_ddE(
     # rho is the MECHANISM: the SEM ratio is 1/sqrt(1-rho) when the two
     # sds are equal, so reporting it says WHY the pairing did or did not help.
     if sa > 0 and sb > 0:
-        cov = (
-            statistics.fmean((a - ma) * (b - mb_) for a, b in zip(ea, eb))
-            * len(ea)
-            / (len(ea) - 1)
-        )
+        cov = statistics.fmean((a - ma) * (b - mb_) for a, b in zip(ea, eb)) * len(ea) / (len(ea) - 1)
         res.rho = max(-1.0, min(1.0, cov / (sa * sb)))
     else:
         res.notes.append(
@@ -322,7 +316,8 @@ def paired_ddE(
     else:
         res.notes.append(
             "no self-anchor supplied, so the re-embedding bias is UNMEASURED. "
-            "Pass self_anchor_ddE=paired_ddE(<the parent paired with itself>, energy).ddE_paired -- on the one system measured it was "
+            "Pass self_anchor_ddE=paired_ddE(<the parent paired with itself>, energy).ddE_paired "
+            "-- on the one system measured it was "
             "+13.8 kcal/mol, which is larger than any substituent effect."
         )
     return res

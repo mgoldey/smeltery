@@ -54,8 +54,7 @@ def prepare_target(
             box = box_from_residues(pdb_path, list(pocket_residues) or list(flex_residues), padding)
         else:
             raise ValueError(
-                "no box: pass box=, a co-crystal ligand (ligand_resname=), or "
-                "pocket_residues=/flex_residues="
+                "no box: pass box=, a co-crystal ligand (ligand_resname=), or pocket_residues=/flex_residues="
             )
     prepared = prepare_receptor(pdb_path, workdir / pdb_path.stem, tuple(flex_residues))
     rec = prepared if isinstance(prepared, Receptor) else Receptor(prepared)

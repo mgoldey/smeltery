@@ -183,9 +183,7 @@ def propose_substitutions(
             raise ValueError(f"could not parse require_smarts pattern: {pattern!r}")
 
     scored = []
-    for iso in substituent_scan(
-        parent_canonical, substituents, site_smarts=site_smarts
-    ):
+    for iso in substituent_scan(parent_canonical, substituents, site_smarts=site_smarts):
         m = Chem.MolFromSmiles(iso.canonical)
         if m is None:
             continue  # substituent_scan already skips these; belt and braces
@@ -320,7 +318,5 @@ def embed_proposals(
                 )
             )
         except Exception as exc:  # noqa: BLE001 -- report, never drop
-            out.append(
-                EmbeddedProposal(proposal=p, symbols=(), coords=None, error=f"{type(exc).__name__}: {exc}")
-            )
+            out.append(EmbeddedProposal(proposal=p, symbols=(), coords=None, error=f"{type(exc).__name__}: {exc}"))
     return out

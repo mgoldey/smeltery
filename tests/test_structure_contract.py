@@ -3,6 +3,7 @@
 Each test maps to one acceptance criterion and, where the issue implies one,
 carries a negative control showing the check can fail.
 """
+
 from __future__ import annotations
 
 import ast
@@ -36,14 +37,8 @@ PDB = textwrap.dedent(
 
 
 def _sdf(rows, charge_line=""):
-    atoms = "\n".join(
-        f"{x:10.4f}{y:10.4f}{z:10.4f} {s:<3} 0  0  0  0  0  0  0  0  0  0  0  0"
-        for s, (x, y, z) in rows
-    )
-    return (
-        f"water\n  test\n\n{len(rows):3d}  0  0  0  0  0  0  0  0  0999 V2000\n"
-        f"{atoms}\n{charge_line}M  END\n$$$$\n"
-    )
+    atoms = "\n".join(f"{x:10.4f}{y:10.4f}{z:10.4f} {s:<3} 0  0  0  0  0  0  0  0  0  0  0  0" for s, (x, y, z) in rows)
+    return f"water\n  test\n\n{len(rows):3d}  0  0  0  0  0  0  0  0  0999 V2000\n{atoms}\n{charge_line}M  END\n$$$$\n"
 
 
 GEOM = [("O", (0.311, 0.204, 0.117)), ("H", (1.288, 0.961, -0.469)), ("H", (-0.752, -0.643, -0.288))]
@@ -56,6 +51,7 @@ def _w(tmp_path, name, text):
 
 
 # ---- criterion 2: bit-identity across xyz / pdb / sdf --------------------------
+
 
 def _mols(tmp_path, sdf_text):
     pytest.importorskip("ferric")
@@ -85,6 +81,7 @@ def test_bit_identity_check_can_fail(tmp_path):
 
 
 # ---- criterion 3: charge/multiplicity required, never inferred -----------------
+
 
 @pytest.mark.parametrize("fn", [structure.read, structure.read_structure, structure.Structure])
 def test_charge_and_multiplicity_have_no_default(fn):
@@ -130,6 +127,7 @@ def test_only_from_smiles_may_default_charge():
 
 
 # ---- criterion 4: optional backends, MissingBackend names the extra ------------
+
 
 def _block(monkeypatch, *names):
     real = builtins.__import__
@@ -186,6 +184,7 @@ def test_builtin_formats_need_no_backend(monkeypatch, tmp_path):
 
 
 # ---- lazy ferric, no unmigrated dependency -------------------------------------
+
 
 def test_import_does_not_need_ferric_or_backends(tmp_path):
     p = _w(tmp_path, "w.xyz", XYZ)

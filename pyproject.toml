@@ -31,7 +31,9 @@ Repository = "https://github.com/mgoldey/smeltery"
 Issues = "https://github.com/mgoldey/smeltery/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# ruff is pinned EXACTLY, and must equal the pin in .github/workflows/test.yml
+# (tests/test_ruff_pin.py enforces it): a drifting linter moves the baseline.
+dev = ["pytest>=8", "ruff==0.16.10"]
 # Optional readers for smeltery.structure. A missing one raises MissingBackend
 # naming the extra. gemmi is currently also pulled in by ferric itself; rdkit is
 # also a core dependency while smeltery.tiers imports it at module level.
@@ -58,3 +60,13 @@ packages = ["src/smeltery"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Deliberately conservative: pycodestyle errors, pyflakes, isort, bugbear.
+select = ["E", "F", "I", "B"]
+# B905 (zip strict=) would change runtime behaviour at 35 sites; not a style fix.
+ignore = ["B905"]

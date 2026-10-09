@@ -60,9 +60,7 @@ class DftSize:
     @property
     def ao_cache_bytes(self) -> int:
         """Resident chi + grad-chi cache: 4 * nbf * npts * 8."""
-        return (
-            AO_CACHE_PLANES * self.n_basis_functions * self.grid_points * BYTES_PER_F64
-        )
+        return AO_CACHE_PLANES * self.n_basis_functions * self.grid_points * BYTES_PER_F64
 
     @property
     def ao_cache_gb(self) -> float:
@@ -111,9 +109,7 @@ class DftSize:
         """
         return (self.n_basis_functions**2) * self.grid_points
 
-    def predicted_seconds(
-        self, reference: "DftSize", reference_seconds: float
-    ) -> float:
+    def predicted_seconds(self, reference: "DftSize", reference_seconds: float) -> float:
         """Scale a measured runtime from `reference` to this system.
 
         Uses `xc_fock_work`, NOT atom count and NOT nbf alone -- both of those
@@ -225,8 +221,7 @@ def load_measurements() -> dict:
 
 
 def fit_rhf_calibration(record: dict) -> RhfCalibration:
-    cal = sorted((s for s in record["samples"] if s["role"] == "calibration"),
-                 key=lambda s: s["n_basis_functions"])
+    cal = sorted((s for s in record["samples"] if s["role"] == "calibration"), key=lambda s: s["n_basis_functions"])
     if len(cal) < 3:
         raise ValueError("need >= 3 calibration samples to fit a size exponent")
     x = [math.log(s["n_basis_functions"]) for s in cal]
@@ -234,8 +229,9 @@ def fit_rhf_calibration(record: dict) -> RhfCalibration:
     mx, my = sum(x) / len(x), sum(y) / len(y)
     exponent = sum((a - mx) * (b - my) for a, b in zip(x, y, strict=True)) / sum((a - mx) ** 2 for a in x)
     ref = cal[len(cal) // 2]  # median-sized calibration molecule
-    return RhfCalibration(record["basis"], ref["name"], ref["n_basis_functions"],
-                          ref["seconds_per_pose"], exponent, record["machine"])
+    return RhfCalibration(
+        record["basis"], ref["name"], ref["n_basis_functions"], ref["seconds_per_pose"], exponent, record["machine"]
+    )
 
 
 @lru_cache(maxsize=1)
