@@ -101,3 +101,57 @@ def test_nan_and_mixed_semantics_rejected():
 
     with pytest.raises(ValueError, match="mixed"):
         Rescoring(Mixed([], True)).run([_cand("x", 2)], {})
+
+
+def test_rerun_replaces_state_instead_of_accumulating():
+    tier = Rescoring(Double([0] * 8, True, 1.0))
+    tier.run([_cand("a", 2)], {})
+    assert tier.systematic_floor("rescore") == pytest.approx(1.0)
+    tier.provider.unc = 3.0
+    tier.run([_cand("a", 2)], {})
+    assert tier.systematic_floor("rescore") == pytest.approx(3.0)  # not sqrt((1+9)/2)
+
+
+def test_failed_run_leaves_no_floor_and_swapped_provider_may_change_unit():
+    class Unit(Double):
+        def score(self, poses, receptor):
+            return [Score(1.0, "au", True, 0.1) for _ in poses]
+
+    tier = Rescoring(Double([0] * 4, True, 0.5))
+    tier.run([_cand("a", 2)], {})
+    with pytest.raises(ValueError):
+        tier.run([_cand("a", 2), Candidate("empty", "C")], {})  # second candidate has no poses
+    assert tier.systematic_floor("rescore") is None
+    tier.provider = Unit([], True)
+    tier.run([_cand("a", 2)], {})
+    assert tier.produces() == {"rescore": "au"}
+
+
+def test_produces_before_run_is_an_error_not_a_made_up_unit():
+    with pytest.raises(RuntimeError, match="until run"):
+        Rescoring(Double([], True)).produces()
+
+
+def test_infinite_uncertainty_rejected():
+    with pytest.raises(ValueError):
+        Score(1.0, "kcal/mol", True, float("inf"))
+    with pytest.raises(ValueError):
+        Score(float("inf"), "kcal/mol", True)
+
+
+def test_docking_scores_are_refused_by_paired_delta():
+    from smeltery.docking import Docking
+
+    class P:
+        name = "p"
+
+        def settings(self):
+            return {}
+
+        def score_unit(self):
+            return "kcal/mol"
+
+    parent, a = _cand("p"), _cand("a")
+    parent.per_pose["dock_score"] = a.per_pose["dock_score"] = [-1.0, -2.0, -3.0]
+    with pytest.raises(IncomparableError, match="not a free energy"):
+        paired_delta(parent, a, "dock_score", Docking(P()))

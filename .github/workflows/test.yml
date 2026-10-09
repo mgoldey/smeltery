@@ -22,9 +22,9 @@ permissions:
 env:
   # ferric's convention: no oversubscribed BLAS threads in tests.
   OPENBLAS_NUM_THREADS: "1"
-  # Fail if fewer tests than this are collected (288 as of #21; the xtb tests
+  # Fail if fewer tests than this are collected (293 as of #21; the xtb tests
   # skip on the runner but are still collected). Raise it when tests are added.
-  MIN_TESTS: "288"
+  MIN_TESTS: "293"
 
 jobs:
   test:

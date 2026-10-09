@@ -33,6 +33,8 @@ class DockingError(RuntimeError):
 class Docking:
     name = "docking"
     QUANTITY = "dock_score"
+    #: Vina scores are an empirical ranking heuristic, not free energies: `paired_delta` refuses them.
+    is_delta_g = False
 
     def __init__(
         self,

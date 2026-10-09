@@ -37,10 +37,10 @@ class Score:
     uncertainty: float | None = None
 
     def __post_init__(self) -> None:
-        if math.isnan(self.value):
-            raise ValueError("NaN score: an unmeasured pose must raise, not score")
-        if self.uncertainty is not None and not (self.uncertainty >= 0):
-            raise ValueError(f"uncertainty must be >= 0, got {self.uncertainty}")
+        if not math.isfinite(self.value):
+            raise ValueError(f"non-finite score {self.value}: an unmeasured pose must raise, not score")
+        if self.uncertainty is not None and not (math.isfinite(self.uncertainty) and self.uncertainty >= 0):
+            raise ValueError(f"uncertainty must be finite and >= 0, got {self.uncertainty}")
 
 
 @runtime_checkable
@@ -109,13 +109,18 @@ class Rescoring:
         }
 
     def produces(self) -> dict[str, str]:
-        return {self.quantity: self._unit or "unitless"}
+        if self._unit is None:
+            raise RuntimeError("Rescoring.produces() is unknown until run(): the unit comes from the provider's Scores")
+        return {self.quantity: self._unit}
 
     def systematic_floor(self, quantity: str) -> float | None:
         if quantity != self.quantity:
-            raise KeyError(f"tier {self.name!r} does not produce {quantity!r}; produces {sorted(self.produces())}")
+            raise KeyError(f"tier {self.name!r} does not produce {quantity!r}; produces {[self.quantity]}")
         if self._explicit_floor is not None:
             return self._explicit_floor
+        # RMS of per-pose uncertainties: a typical SINGLE-pose error, applied as-is to a mean
+        # difference. It does not shrink with n and ignores error doubling between parent and
+        # analogue, so it is conservative; it is a floor, not an SEM.
         u = self._uncertainties
         if not u or any(x is None for x in u):
             return None  # unmeasured: the funnel refuses to cut on it
@@ -127,18 +132,28 @@ class Rescoring:
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         receptor = ctx.get("receptor")
-        for cand in candidates:
-            if not cand.poses:
-                raise ValueError(f"{cand.name}: no poses to rescore")
-            scores = self.provider.score(cand.poses, receptor)
-            if len(scores) != len(cand.poses):
-                raise ValueError(f"{cand.name}: provider returned {len(scores)} scores for {len(cand.poses)} poses")
-            for s in scores:
-                self._note(s)
-            cand.per_pose[self.quantity] = [s.value for s in scores]
-            self._uncertainties += [s.uncertainty for s in scores]
+        # State describes THIS run only: build locally, commit on success, so a re-run
+        # (or a swapped provider) cannot inherit stale units or uncertainties.
+        self._unit = self._is_delta_g = None
+        self._uncertainties = []
+        try:
+            for cand in candidates:
+                if not cand.poses:
+                    raise ValueError(f"{cand.name}: no poses to rescore")
+                scores = self.provider.score(cand.poses, receptor)
+                if len(scores) != len(cand.poses):
+                    raise ValueError(f"{cand.name}: provider returned {len(scores)} scores for {len(cand.poses)} poses")
+                for s in scores:
+                    self._note(s)
+                cand.per_pose[self.quantity] = [s.value for s in scores]
+                self._uncertainties += [s.uncertainty for s in scores]
+        except BaseException:
+            # A half-finished run must not leave a plausible-looking floor behind.
+            self._unit = self._is_delta_g = None
+            self._uncertainties = []
+            raise
 
-    def _note(self, s: Score) -> None:
+    def _note(self, s: Score) -> None:  # called during run(); run() resets first
         if self._unit is None:
             self._unit, self._is_delta_g = s.unit, s.is_delta_g
         elif (s.unit, s.is_delta_g) != (self._unit, self._is_delta_g):
