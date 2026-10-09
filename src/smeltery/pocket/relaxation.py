@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._ferric import ferric
-
 from .embedding import EmbeddedLigand
 
 _NEEDS_FIELD = (
@@ -42,7 +41,10 @@ def relax_pose_in_pocket_field(embedded: EmbeddedLigand, max_steps: int = 100, e
     if not embedded.charges:
         raise ValueError(_NEEDS_FIELD.format(fn="relax_pose_in_pocket_field"))
     result = ferric.run_optimize(
-        embedded.mol, embedded.basis_name, max_steps=max_steps, e_conv=e_conv,
+        embedded.mol,
+        embedded.basis_name,
+        max_steps=max_steps,
+        e_conv=e_conv,
         point_charges=embedded.point_charges,
     )
     return RelaxedPose(
@@ -93,8 +95,12 @@ def relax_pose_in_pocket(
         qm_indices=list(range(n_lig)),
     )
     result = ferric.run_optimize_qmmm(
-        system, embedded.basis_name, move_mm=move_mm, mm_topology=mm_topology,
-        max_steps=max_steps, e_conv=e_conv,
+        system,
+        embedded.basis_name,
+        move_mm=move_mm,
+        mm_topology=mm_topology,
+        max_steps=max_steps,
+        e_conv=e_conv,
     )
     coords = result.system().qm_molecule().coords()[:n_lig]
     return RelaxedPoseQmmm(

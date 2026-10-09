@@ -23,8 +23,10 @@ POCKET_PDB, LIGAND_XYZ = DATA / "7LCJ_pocket.pdb", DATA / "conf_00_cryo_em.xyz"
 
 WATER = ["O", "H", "H"], [(0.0, 0.0, 0.0), (0.7586, 0.0, 0.5043), (-0.7586, 0.0, 0.5043)]
 # Charges 4-5 A from the water, none within the 1.5 A overlap cutoff.
-FIELD = P.PocketField([PointCharge(0.5, (0.0, 0.0, 4.0)), PointCharge(-0.5, (4.0, 0.0, 0.0)),
-                       PointCharge(0.3, (0.0, 4.5, -1.0))], {"input": "synthetic"})
+FIELD = P.PocketField(
+    [PointCharge(0.5, (0.0, 0.0, 4.0)), PointCharge(-0.5, (4.0, 0.0, 0.0)), PointCharge(0.3, (0.0, 4.5, -1.0))],
+    {"input": "synthetic"},
+)
 # One gentle charge for relaxation: with the three-charge FIELD above ferric's optimizer cycles
 # (energy alternates by ~4e-4 Ha for 100 steps, converged=False), which is a ferric matter, not ours.
 GENTLE = P.PocketField([PointCharge(0.2, (0.0, 0.0, 5.0))])
@@ -39,8 +41,10 @@ def _xyz(tmp_path, name="w.xyz", coords=None):
 
 
 def _pqr(tmp_path, charges):
-    lines = [f"ATOM  {i:5d}  X   ION     1    {x:8.3f}{y:8.3f}{z:8.3f} {q:7.4f} 1.0000"
-             for i, (q, (x, y, z)) in enumerate(charges, 1)]
+    lines = [
+        f"ATOM  {i:5d}  X   ION     1    {x:8.3f}{y:8.3f}{z:8.3f} {q:7.4f} 1.0000"
+        for i, (q, (x, y, z)) in enumerate(charges, 1)
+    ]
     p = tmp_path / "f.pqr"
     p.write_text("\n".join(lines) + "\nTER\nEND\n")
     return p
@@ -51,6 +55,7 @@ def _embed(coords=None, pocket=FIELD, basis="sto-3g"):
 
 
 # ---- acceptance 1: two SCFs reported separately ----------------------------------
+
 
 def test_binding_energy_reports_two_separate_scf_energies(tmp_path):
     r = P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0)
@@ -73,11 +78,15 @@ def test_binding_energy_accepts_a_pqr_path_and_keeps_every_charge(tmp_path):
     assert inspect.signature(P.compute_binding_energy).parameters.keys().isdisjoint({"cutoff_ang", "cutoff"})
 
 
-@pytest.mark.skipif(shutil.which("pdb2pqr30") is None,
-                    reason="pdb2pqr30 not installed (pip install pdb2pqr): the 7LCJ binding-energy anchor not run")
-@pytest.mark.skipif(os.environ.get("SMELTERY_RUN_HEAVY") != "1",
-                    reason="~2.5 min on a free machine (75 min on 2 niced cores): two SCFs at 71 atoms / "
-                           "6458 charges. Run with SMELTERY_RUN_HEAVY=1")
+@pytest.mark.skipif(
+    shutil.which("pdb2pqr30") is None,
+    reason="pdb2pqr30 not installed (pip install pdb2pqr): the 7LCJ binding-energy anchor not run",
+)
+@pytest.mark.skipif(
+    os.environ.get("SMELTERY_RUN_HEAVY") != "1",
+    reason="~2.5 min on a free machine (75 min on 2 niced cores): two SCFs at 71 atoms / "
+    "6458 charges. Run with SMELTERY_RUN_HEAVY=1",
+)
 def test_7lcj_binding_energy_is_pinned_and_does_not_match_the_issue_figure():
     # MEASURED here (ferric 8637a5d, def2-svp RHF, conf_00_cryo_em + 7LCJ_pocket.pdb, pdb2pqr30 AMBER):
     # e_vac -1860.9857485790, e_field -1861.0315781550, dE -28.758 kcal/mol, 6458 charges.
@@ -97,6 +106,7 @@ def test_7lcj_fixture_is_committed_and_has_71_atoms():
 
 
 # ---- acceptance 2: vacuum anchor ---------------------------------------------------
+
 
 def _vacuum(emb):
     return ferric.run_rhf(emb.mol, emb.basis_set, **KW)
@@ -126,6 +136,7 @@ def test_empty_field_and_no_field_are_vacuum_and_say_so():
 
 # ---- acceptance 3: noise floor exposed programmatically ----------------------------
 
+
 def test_noise_floor_and_no_ranking_are_exposed_as_data_not_only_prose(tmp_path):
     assert P.DDE_NOISE_FLOOR_KCAL_MOL == 4.07 and P.RANKS_ANALOGUES is False
     r = P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0)
@@ -137,6 +148,7 @@ def test_noise_floor_and_no_ranking_are_exposed_as_data_not_only_prose(tmp_path)
 
 
 # ---- loader reuse, overlap filtering, embedding ------------------------------------
+
 
 def test_there_is_one_pqr_parser_and_it_is_the_loaders():
     assert P.parse_pqr is P.loader.parse_pqr
@@ -189,6 +201,7 @@ def test_memory_guard():
 
 # ---- prescreen ---------------------------------------------------------------------
 
+
 def test_field_at_atoms_matches_hand_coulomb_and_rejects_a_coincident_site():
     one = [PointCharge(2.0, (3.0, 0.0, 0.0))]
     f = P.pocket_field_at_atoms(one, [(0.0, 0.0, 0.0)])
@@ -225,6 +238,7 @@ def test_batch_prescreen_ranks_ascending_and_puts_failures_last(tmp_path):
 
 
 # ---- relaxation --------------------------------------------------------------------
+
 
 def test_relaxation_refuses_a_missing_field_rather_than_falling_back_to_vacuum():
     for pocket in (None, P.PocketField([])):

@@ -3,6 +3,7 @@
 Attribute access imports ferric on first use; the call sites keep reading
 `ferric.run_rhf(...)`. Mirrors how `smeltery.structure` defers the import.
 """
+
 from __future__ import annotations
 
 

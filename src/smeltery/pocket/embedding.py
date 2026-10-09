@@ -12,10 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._ferric import ferric
 import numpy as np
 
 from ..model import PointCharge
+from ._ferric import ferric
 from .loader import PocketField
 
 
@@ -105,10 +105,13 @@ def embed_ligand_from_coords(
             f"embed_ligand_from_coords: {len(symbols)} symbols but {len(coords_angstrom)} coordinate "
             "rows -- these are per-atom and must match, or the xyz header will disagree with its body"
         )
-    xyz = "\n".join(
-        [str(len(symbols)), "embed_ligand_from_coords"]
-        + [f"{s} {x:.10f} {y:.10f} {z:.10f}" for s, (x, y, z) in zip(symbols, coords_angstrom)]
-    ) + "\n"
+    xyz = (
+        "\n".join(
+            [str(len(symbols)), "embed_ligand_from_coords"]
+            + [f"{s} {x:.10f} {y:.10f} {z:.10f}" for s, (x, y, z) in zip(symbols, coords_angstrom)]
+        )
+        + "\n"
+    )
     return EmbeddedLigand(
         mol=ferric.Molecule.from_xyz_string(xyz, charge, multiplicity),
         basis_set=ferric.BasisSet.bundled(basis),

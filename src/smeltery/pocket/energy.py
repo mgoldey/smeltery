@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._ferric import ferric
 import numpy as np
 
+from ._ferric import ferric
 from .embedding import EmbeddedLigand
 
 
@@ -86,6 +86,9 @@ def compute_alpha_atomic(
         if auxbasis is None:
             raise ValueError(f"no default RI-fit auxbasis for '{embedded.basis_name}' -- pass auxbasis explicitly")
     return ferric.hirshfeld_polarizability(
-        embedded.mol, embedded.basis_set, ferric.BasisSet.bundled(auxbasis), energy.raw,
+        embedded.mol,
+        embedded.basis_set,
+        ferric.BasisSet.bundled(auxbasis),
+        energy.raw,
         memory_budget_gb=memory_budget_gb,
     )
