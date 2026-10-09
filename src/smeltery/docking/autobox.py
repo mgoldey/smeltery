@@ -31,14 +31,17 @@ def _atoms(pdb_text: str):
             raise ValueError(f"bad coordinates in PDB line: {line!r}") from e
         el = (line[76:78].strip() or line[12:16].strip().lstrip("0123456789")[:1]).upper()
         yield (
-            line[:6].strip(), line[12:16].strip(), line[17:20].strip(),
-            line[21].strip(), line[22:26].strip(), el, xyz,
+            line[:6].strip(),
+            line[12:16].strip(),
+            line[17:20].strip(),
+            line[21].strip(),
+            line[22:26].strip(),
+            el,
+            xyz,
         )
 
 
-def box_from_coords(
-    coords, padding: float = 8.0, min_size: float = 20.0
-) -> Box:
+def box_from_coords(coords, padding: float = 8.0, min_size: float = 20.0) -> Box:
     """Box around `coords` ((n,3), Angstrom): their bounding box plus `padding` per side."""
     a = np.asarray(coords, dtype=float)
     if a.ndim != 2 or a.shape[1] != 3 or len(a) == 0:
@@ -68,9 +71,7 @@ def box_from_ligand(
         raise ValueError(f"{pdb_path}: no HETATM ligand found")
     if resname is None:
         if len(het) > 1:
-            raise ValueError(
-                f"{pdb_path}: several HETATM residues {sorted(het)}; pass resname="
-            )
+            raise ValueError(f"{pdb_path}: several HETATM residues {sorted(het)}; pass resname=")
         resname = next(iter(het))
     if resname not in het:
         raise ValueError(f"{pdb_path}: no HETATM residue {resname!r}; found {sorted(het)}")

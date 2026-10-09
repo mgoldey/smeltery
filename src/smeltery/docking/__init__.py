@@ -16,7 +16,6 @@ from .base import DEFAULT_EXHAUSTIVENESS, Box, DockingProvider, DockResult
 from .provider import VinaProvider
 from .target import DockingTarget, prepare_target
 from .tier import Docking, DockingError
-from .vina_dock import Receptor, prepare_receptor
 from .united_atom import (
     PoseMismatchError,
     StereochemistryError,
@@ -26,20 +25,36 @@ from .united_atom import (
     restore_hydrogens,
     smiles_from_pdbqt_remark,
 )
+from .vina_dock import Receptor, prepare_receptor
 
 __all__ = [
-    "DockingTarget", "Receptor", "box_from_coords", "box_from_ligand",
-    "box_from_residues", "ensemble_score", "prepare_receptor", "prepare_target",
-    "DEFAULT_EXHAUSTIVENESS", "Box", "Docking", "DockingError", "DockingProvider",
-    "DockResult", "PoseMismatchError", "StereochemistryError", "VinaProvider",
-    "check_full_pose", "check_heavy_atom_count", "parse_smiles_idx_remark",
-    "pose_to_structure", "restore_hydrogens", "smiles_from_pdbqt_remark",
+    "DEFAULT_EXHAUSTIVENESS",
+    "DockingTarget",
+    "Receptor",
+    "box_from_coords",
+    "box_from_ligand",
+    "box_from_residues",
+    "ensemble_score",
+    "prepare_receptor",
+    "prepare_target",
+    "Box",
+    "Docking",
+    "DockingError",
+    "DockingProvider",
+    "DockResult",
+    "PoseMismatchError",
+    "StereochemistryError",
+    "VinaProvider",
+    "check_full_pose",
+    "check_heavy_atom_count",
+    "parse_smiles_idx_remark",
+    "pose_to_structure",
+    "restore_hydrogens",
+    "smiles_from_pdbqt_remark",
 ]
 
 
-def pose_to_structure(
-    pose: Pose, charge: int, multiplicity: int, source: str = "<docked pose>"
-) -> Structure:
+def pose_to_structure(pose: Pose, charge: int, multiplicity: int, source: str = "<docked pose>") -> Structure:
     """A `smeltery.structure.Structure` for a pose, with charge and multiplicity explicit.
 
     Neither is optional: a pose carries no charge, and guessing one is how a

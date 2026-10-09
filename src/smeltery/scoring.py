@@ -127,8 +127,12 @@ class Rescoring:
         return math.sqrt(sum(x * x for x in u) / len(u))
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
-        return {"quantity": "wall_time", "unit": "s", "predicted": None,
-                "basis": f"unmeasured: no timing recorded for provider {self.provider.name!r}"}
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": f"unmeasured: no timing recorded for provider {self.provider.name!r}",
+        }
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         receptor = ctx.get("receptor")

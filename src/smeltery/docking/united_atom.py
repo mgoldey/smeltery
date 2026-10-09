@@ -119,9 +119,7 @@ def restore_hydrogens(
         raise ValueError(f"unparseable SMILES: {smiles!r}")
     mol = Chem.AddHs(parsed)
     heavy_idx = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
-    docked_heavy = [
-        (s, c) for s, c in zip(heavy_symbols, heavy_coords) if s.upper() != "H"
-    ]
+    docked_heavy = [(s, c) for s, c in zip(heavy_symbols, heavy_coords) if s.upper() != "H"]
     if len(heavy_idx) != len(docked_heavy):
         raise ValueError(
             f"{len(docked_heavy)} docked heavy atoms but the SMILES has "
@@ -204,15 +202,11 @@ def restore_hydrogens(
         # MEASURED on C[C@H](N)C(C)(O)CC(C)F: declared [(1,'S')], after 3D
         # [(1,'S'),(3,'S'),(7,'S')]. An undefined centre has no correct value
         # to check against, so it is not evidence of anything.
-        declared = dict(
-            Chem.FindMolChiralCenters(parsed, useLegacyImplementation=False)
-        )
+        declared = dict(Chem.FindMolChiralCenters(parsed, useLegacyImplementation=False))
         if declared:
             probe = Chem.Mol(mol)
             Chem.AssignStereochemistryFrom3D(probe)
-            got_all = dict(
-                Chem.FindMolChiralCenters(probe, useLegacyImplementation=False)
-            )
+            got_all = dict(Chem.FindMolChiralCenters(probe, useLegacyImplementation=False))
             got = {i: v for i, v in got_all.items() if i in declared}
             if got != declared:
                 raise StereochemistryError(
@@ -237,9 +231,7 @@ def smiles_from_pdbqt_remark(pdbqt_text: str) -> str | None:
     molecule -- measured as an (R)/(S) inversion on danuglipron.
     """
     for line in pdbqt_text.splitlines():
-        if line.startswith("REMARK SMILES") and not line.startswith(
-            "REMARK SMILES IDX"
-        ):
+        if line.startswith("REMARK SMILES") and not line.startswith("REMARK SMILES IDX"):
             parts = line.split(None, 2)
             if len(parts) == 3:
                 return parts[2].strip()

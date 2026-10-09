@@ -4,8 +4,17 @@ import numpy as np
 import pytest
 
 from smeltery import (
-    Candidate, IncomparableError, Pose, Rescoring, Score, ScoringProvider, UnmeasuredFloorError,
-    VinaScoreProvider, cut, paired_delta, tier_floor,
+    Candidate,
+    IncomparableError,
+    Pose,
+    Rescoring,
+    Score,
+    ScoringProvider,
+    UnmeasuredFloorError,
+    VinaScoreProvider,
+    cut,
+    paired_delta,
+    tier_floor,
 )
 from smeltery.model import Measurement
 
@@ -67,11 +76,14 @@ def test_vina_replay_is_rank_only():
 def test_uncertainty_becomes_the_floor_and_creates_ties():
     def groups(unc):
         tier, (p, a) = _run(Double([0, 0, 0, 3, 3.1, 2.9], True, unc))
-        ms = {"a": paired_delta(p, a, "rescore", tier), "parent": Measurement.from_samples([0.0, 0.1, -0.1], "kcal/mol")}
+        ms = {
+            "a": paired_delta(p, a, "rescore", tier),
+            "parent": Measurement.from_samples([0.0, 0.1, -0.1], "kcal/mol"),
+        }
         return cut(ms, keep=1, tier=tier, quantity="rescore").groups
 
     assert groups(0.1) == [["parent"], ["a"]]  # sharp provider ranks
-    assert groups(5.0) == [["parent", "a"]]    # noisy provider: a tie
+    assert groups(5.0) == [["parent", "a"]]  # noisy provider: a tie
 
 
 def test_no_uncertainty_means_unmeasured_floor_unless_explicit():
@@ -82,10 +94,13 @@ def test_no_uncertainty_means_unmeasured_floor_unless_explicit():
     assert tier_floor(t2, "rescore") == 0.7
 
 
-@pytest.mark.parametrize("make", [
-    lambda: Double([0, 0, 0, 1, 1, 1], True, 0.01),
-    lambda: Double([5, 5, 5, 6, 6, 6], True, 0.01, name="other"),
-])
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: Double([0, 0, 0, 1, 1, 1], True, 0.01),
+        lambda: Double([5, 5, 5, 6, 6, 6], True, 0.01, name="other"),
+    ],
+)
 def test_swapping_providers_needs_no_funnel_change(make):
     tier, (p, a) = _run(make())
     assert paired_delta(p, a, "rescore", tier).mean == pytest.approx(1.0)

@@ -63,8 +63,14 @@ class VinaProvider:
 
         ex = self.exhaustiveness if exhaustiveness is None else exhaustiveness
         run = dock_ligand(
-            mol, receptor, box.center, box.size, exhaustiveness=ex,
-            n_poses=self.n_poses, seed=seed, cpu=self.cpu,
+            mol,
+            receptor,
+            box.center,
+            box.size,
+            exhaustiveness=ex,
+            n_poses=self.n_poses,
+            seed=seed,
+            cpu=self.cpu,
         )
         if not run.ok:
             return DockResult(error=run.error)
@@ -89,6 +95,7 @@ class VinaProvider:
             scores.append(p.vina_score)
             flex.append(p.flex_pdbqt)
         return DockResult(
-            poses=poses, scores=scores,
+            poses=poses,
+            scores=scores,
             flex_receptor=flex if any(flex) else [],
         )

@@ -100,5 +100,5 @@ def test_dft_constants_name_their_ferric_source_file():
     src = Path(cost.__file__).read_text().splitlines()
     for const, fname in (("N_RADIAL", "grid.rs"), ("AO_CACHE_PLANES", "ks.rs")):
         i = next(k for k, line in enumerate(src) if line.startswith(const))
-        window = "\n".join(src[max(0, i - 6):i])
+        window = "\n".join(src[max(0, i - 6) : i])
         assert re.search(rf"# Source: ferric .*{re.escape(fname)}", window), const

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from smeltery.generate.structural import (
-    ACID_BIOISOSTERES,
     bioisostere_swaps,
     ring_contractions,
     stereoisomers,

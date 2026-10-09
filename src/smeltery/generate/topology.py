@@ -61,23 +61,18 @@ def assert_graph_is_sane(mol, *, expect_heavy: int | None = None) -> None:
     for atom in mol.GetAtoms():
         cap = _MAX_DEGREE.get(atom.GetSymbol())
         if cap is not None and atom.GetDegree() > cap:
-            offenders.append(
-                f"{atom.GetSymbol()}{atom.GetIdx()} has {atom.GetDegree()} "
-                f"bonds (max {cap})"
-            )
+            offenders.append(f"{atom.GetSymbol()}{atom.GetIdx()} has {atom.GetDegree()} bonds (max {cap})")
     if offenders:
         raise GraphSanityError(
             "impossible connectivity -- this graph is not chemistry, and any "
-            "MCS/scaffold match computed on it is meaningless: "
-            + "; ".join(offenders[:6])
+            "MCS/scaffold match computed on it is meaningless: " + "; ".join(offenders[:6])
         )
 
     if expect_heavy is not None:
         heavy = sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() > 1)
         if heavy != expect_heavy:
             raise GraphSanityError(
-                f"{heavy} heavy atoms but the topology declares {expect_heavy} "
-                "-- these are different molecules"
+                f"{heavy} heavy atoms but the topology declares {expect_heavy} -- these are different molecules"
             )
 
 
@@ -100,7 +95,6 @@ def mol_with_coords(
     zipped away.
     """
     from rdkit import Chem
-    from rdkit.Chem import AllChem
     from rdkit.Geometry import Point3D
 
     if len(symbols) != len(coords):

@@ -41,9 +41,7 @@ class Isomer:
         much as WHICH group (measured within/between-site ratio 0.94-0.95).
         """
         if self.substituent is None or self.site is None:
-            raise ValueError(
-                f"{self.transform!r} is not a substitutional isomer; it has no (substituent, site) key"
-            )
+            raise ValueError(f"{self.transform!r} is not a substitutional isomer; it has no (substituent, site) key")
         return (self.substituent, self.site)
 
     @cached_property
@@ -58,9 +56,7 @@ class Isomer:
 
         mol = Chem.MolFromSmiles(self.smiles)
         if mol is None:
-            raise ValueError(
-                f"unparseable SMILES for transform {self.transform!r}: {self.smiles}"
-            )
+            raise ValueError(f"unparseable SMILES for transform {self.transform!r}: {self.smiles}")
         return Chem.MolToSmiles(mol)
 
     def deprotonated(self) -> "Isomer | None":

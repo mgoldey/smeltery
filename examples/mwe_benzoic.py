@@ -32,8 +32,9 @@ def pocket_from(parent: Candidate) -> list[PointCharge]:
     pose = parent.poses[0]
     sym, xyz = pose.symbols, pose.coords_ang
     o_idx = [i for i, s in enumerate(sym) if s == "O"]
-    c_idx = next(i for i, s in enumerate(sym) if s == "C" and
-                 sum(np.linalg.norm(xyz[i] - xyz[o]) < 1.5 for o in o_idx) == 2)
+    c_idx = next(
+        i for i, s in enumerate(sym) if s == "C" and sum(np.linalg.norm(xyz[i] - xyz[o]) < 1.5 for o in o_idx) == 2
+    )
     out = []
     for o in o_idx:
         u = xyz[o] - xyz[c_idx]
@@ -61,15 +62,22 @@ def main(out_dir: Path = Path("out")) -> int:
         print(f"{c.name:10} {c.formula:10} {m.mean:+10.4f} ± {m.sem:.4f} kcal/mol {u:>13}")
 
     res = cut({k: v for k, v in paired.items() if k != parent.name}, keep=1, z=2.0)
-    print("\ncut (keep=1, z=2):", "UNRANKED at the boundary" if res.unranked_at_boundary
-          else f"survivors={res.survivors}", "| groups:", res.groups, *res.notes)
+    print(
+        "\ncut (keep=1, z=2):",
+        "UNRANKED at the boundary" if res.unranked_at_boundary else f"survivors={res.survivors}",
+        "| groups:",
+        res.groups,
+        *res.notes,
+    )
 
     rec = RunRecord(
         campaign="mwe-benzoic",
         inputs={"candidates": CANDIDATES, "field": [(c.q, c.xyz_ang) for c in field], "parent": parent.name},
         tiers=[{"name": t.name, **t.settings()} for t in (poses, tier)],
         results={
-            "paired_ddE": {k: {"mean": v.mean, "sem": v.sem, "n": v.n, "per_pose": v.per_pose} for k, v in paired.items()},
+            "paired_ddE": {
+                k: {"mean": v.mean, "sem": v.sem, "n": v.n, "per_pose": v.per_pose} for k, v in paired.items()
+            },
             "unpaired_sem": {k: v.sem for k, v in unpaired.items()},
             "cut": {"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary},
         },

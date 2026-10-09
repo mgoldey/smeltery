@@ -38,9 +38,7 @@ def test_the_topology_comes_from_smiles_and_the_geometry_from_coords():
     assert mol.GetNumAtoms() == len(syms)
     got = mol.GetConformer().GetPositions()
     for want, row in zip(coords, got):
-        assert tuple(round(float(v), 6) for v in row) == tuple(
-            round(v, 6) for v in want
-        )
+        assert tuple(round(float(v), 6) for v in row) == tuple(round(v, 6) for v in want)
 
 
 def test_a_squashed_geometry_does_NOT_corrupt_the_graph():
@@ -61,9 +59,7 @@ def test_a_squashed_geometry_does_NOT_corrupt_the_graph():
     # must actually break, or this test proves nothing about the fix.
     from rdkit.Chem import rdDetermineBonds
 
-    xyz = f"{len(syms)}\n\n" + "".join(
-        f"{s} {c[0]:.8f} {c[1]:.8f} {c[2]:.8f}\n" for s, c in zip(syms, squashed)
-    )
+    xyz = f"{len(syms)}\n\n" + "".join(f"{s} {c[0]:.8f} {c[1]:.8f} {c[2]:.8f}\n" for s, c in zip(syms, squashed))
     perceived = Chem.MolFromXYZBlock(xyz)
     rdDetermineBonds.DetermineConnectivity(perceived)
     worst_h = max(
@@ -85,9 +81,7 @@ def test_an_impossible_graph_is_REFUSED():
     squashed = [(x * 0.3, y * 0.3, z * 0.3) for x, y, z in coords]
     from rdkit.Chem import rdDetermineBonds
 
-    xyz = f"{len(syms)}\n\n" + "".join(
-        f"{s} {c[0]:.8f} {c[1]:.8f} {c[2]:.8f}\n" for s, c in zip(syms, squashed)
-    )
+    xyz = f"{len(syms)}\n\n" + "".join(f"{s} {c[0]:.8f} {c[1]:.8f} {c[2]:.8f}\n" for s, c in zip(syms, squashed))
     bad = Chem.MolFromXYZBlock(xyz)
     rdDetermineBonds.DetermineConnectivity(bad)
     with pytest.raises(GraphSanityError, match="not chemistry"):
