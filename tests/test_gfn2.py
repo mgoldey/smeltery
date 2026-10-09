@@ -5,8 +5,7 @@ import shutil
 import numpy as np
 import pytest
 
-from smeltery import ANGSTROM_TO_BOHR, Candidate, PointCharge, Pose
-from smeltery import tiers
+from smeltery import ANGSTROM_TO_BOHR, Candidate, PointCharge, Pose, tiers
 from smeltery.tiers import XTB_VS_DFT_MAE_KCAL, Gfn2, XtbUnavailableError, run_checked, xtb_singlepoint
 
 needs_xtb = pytest.mark.skipif(
@@ -15,8 +14,10 @@ needs_xtb = pytest.mark.skipif(
 )
 
 _H = 0.5951
-NH4 = (["N", "H", "H", "H", "H"],
-       np.array([[0, 0, 0], [_H, _H, _H], [-_H, -_H, _H], [-_H, _H, -_H], [_H, -_H, -_H]], dtype=float))
+NH4 = (
+    ["N", "H", "H", "H", "H"],
+    np.array([[0, 0, 0], [_H, _H, _H], [-_H, -_H, _H], [-_H, _H, -_H], [_H, -_H, -_H]], dtype=float),
+)
 
 
 def _nh4_candidate() -> Candidate:

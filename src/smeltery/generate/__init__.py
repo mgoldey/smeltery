@@ -16,19 +16,46 @@ from .enumerate import EnumerationReport, enumerate_isomers, enumerate_with_repo
 from .model import Isomer
 from .paired import PairedPose, PairedResult, paired_ddE, pairs_from_candidates
 from .structural import bioisostere_swaps, ring_contractions, stereoisomers
-from .substitutional import COMMON_SUBSTITUENTS, substituent_scan
 from .substitution import (
-    EmbeddedProposal, SubstitutionProposal, embed_proposals, propose_substitutions, proposal_name,
-    proposals_by_key, relative_descriptors, to_candidates,
+    EmbeddedProposal,
+    SubstitutionProposal,
+    embed_proposals,
+    proposal_name,
+    proposals_by_key,
+    propose_substitutions,
+    relative_descriptors,
+    to_candidates,
 )
+from .substitutional import COMMON_SUBSTITUENTS, substituent_scan
 from .topology import GraphSanityError, assert_graph_is_sane, mol_with_coords
 
 __all__ = [
-    "Analogue", "PharmacophoreSpec", "EmbeddedAnalogue", "embed_analogue",
-    "EnumerationReport", "enumerate_isomers", "enumerate_with_report", "Isomer",
-    "PairedPose", "PairedResult", "paired_ddE", "pairs_from_candidates",
-    "bioisostere_swaps", "ring_contractions", "stereoisomers", "COMMON_SUBSTITUENTS", "substituent_scan",
-    "EmbeddedProposal", "SubstitutionProposal", "embed_proposals", "propose_substitutions", "proposal_name",
-    "proposals_by_key", "relative_descriptors", "to_candidates",
-    "GraphSanityError", "assert_graph_is_sane", "mol_with_coords",
+    "Analogue",
+    "PharmacophoreSpec",
+    "EmbeddedAnalogue",
+    "embed_analogue",
+    "EnumerationReport",
+    "enumerate_isomers",
+    "enumerate_with_report",
+    "Isomer",
+    "PairedPose",
+    "PairedResult",
+    "paired_ddE",
+    "pairs_from_candidates",
+    "bioisostere_swaps",
+    "ring_contractions",
+    "stereoisomers",
+    "COMMON_SUBSTITUENTS",
+    "substituent_scan",
+    "EmbeddedProposal",
+    "SubstitutionProposal",
+    "embed_proposals",
+    "propose_substitutions",
+    "proposal_name",
+    "proposals_by_key",
+    "relative_descriptors",
+    "to_candidates",
+    "GraphSanityError",
+    "assert_graph_is_sane",
+    "mol_with_coords",
 ]

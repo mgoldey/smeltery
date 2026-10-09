@@ -44,12 +44,15 @@ class DockResult:
     poses: list[Pose] = field(default_factory=list)
     scores: list[float] = field(default_factory=list)
     error: str | None = None
+    #: Per pose, PDBQT text of the flexible receptor residues in that pose ("" if
+    #: rigid). Empty list is accepted and means "no flexible receptor".
+    flex_receptor: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if len(self.poses) != len(self.scores):
-            raise ValueError(
-                f"{len(self.poses)} poses but {len(self.scores)} scores"
-            )
+            raise ValueError(f"{len(self.poses)} poses but {len(self.scores)} scores")
+        if self.flex_receptor and len(self.flex_receptor) != len(self.poses):
+            raise ValueError(f"{len(self.poses)} poses but {len(self.flex_receptor)} flex-receptor blocks")
 
     @property
     def ok(self) -> bool:

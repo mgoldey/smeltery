@@ -179,22 +179,15 @@ class Structure:
 
     def __post_init__(self) -> None:
         if len(self.symbols) != len(self.coords):
-            raise StructureError(
-                f"{self.source}: {len(self.symbols)} symbols but "
-                f"{len(self.coords)} coordinate rows"
-            )
+            raise StructureError(f"{self.source}: {len(self.symbols)} symbols but {len(self.coords)} coordinate rows")
         if not self.symbols:
             raise StructureError(f"{self.source}: no atoms found")
         for i, row in enumerate(self.coords):
             if len(row) != 3:
-                raise StructureError(
-                    f"{self.source}: atom {i} has {len(row)} coordinates, expected 3"
-                )
+                raise StructureError(f"{self.source}: atom {i} has {len(row)} coordinates, expected 3")
             for v in row:
                 if v != v or v in (float("inf"), float("-inf")):
-                    raise StructureError(
-                        f"{self.source}: atom {i} has a non-finite coordinate"
-                    )
+                    raise StructureError(f"{self.source}: atom {i} has a non-finite coordinate")
         if self.multiplicity < 1:
             raise StructureError(
                 f"{self.source}: multiplicity is the spin multiplicity 2S+1 and "
@@ -226,9 +219,7 @@ class Structure:
         """
         import ferric
 
-        return ferric.Molecule.from_xyz_string(
-            self.to_xyz(), self.charge, self.multiplicity
-        )
+        return ferric.Molecule.from_xyz_string(self.to_xyz(), self.charge, self.multiplicity)
 
 
 def _require(module: str, fmt: str, extra: str):
@@ -248,9 +239,7 @@ def _read_xyz(path: Path, charge: int, multiplicity: int) -> Structure:
     try:
         n = int(lines[0].strip())
     except ValueError as exc:
-        raise StructureError(
-            f"{path}: first line is not an atom count: {lines[0]!r}"
-        ) from exc
+        raise StructureError(f"{path}: first line is not an atom count: {lines[0]!r}") from exc
     body = lines[2 : 2 + n]
     if len(body) != n:
         raise StructureError(f"{path}: header says {n} atoms, file has {len(body)}")
@@ -258,9 +247,7 @@ def _read_xyz(path: Path, charge: int, multiplicity: int) -> Structure:
     for i, line in enumerate(body):
         parts = line.split()
         if len(parts) < 4:
-            raise StructureError(
-                f"{path}: atom {i}: expected 4 fields, got {len(parts)}"
-            )
+            raise StructureError(f"{path}: atom {i}: expected 4 fields, got {len(parts)}")
         symbols.append(parts[0])
         coords.append(tuple(float(v) for v in parts[1:4]))
     return Structure(tuple(symbols), tuple(coords), charge, multiplicity, str(path))
@@ -332,16 +319,11 @@ def _read_pqr(path: Path, charge: int, multiplicity: int) -> Structure:
                 continue
             fields = line.split()
             if len(fields) != 10:
-                raise StructureError(
-                    f"{path}: unexpected PQR field count ({len(fields)}, "
-                    f"expected 10): {line!r}"
-                )
+                raise StructureError(f"{path}: unexpected PQR field count ({len(fields)}, expected 10): {line!r}")
             try:
                 x, y, z = (float(v) for v in fields[5:8])
             except ValueError as exc:
-                raise StructureError(
-                    f"{path}: could not read coordinates from {line!r}"
-                ) from exc
+                raise StructureError(f"{path}: could not read coordinates from {line!r}") from exc
             symbols.append(element_from_pdb_atom_name(fields[2]))
             coords.append((x, y, z))
     if not symbols:
@@ -428,8 +410,7 @@ def _gro_coord_width(path: Path, line: str) -> int:
     width = second - first
     if width < 4 or width > 20:
         raise StructureError(
-            f"{path}: implausible GRO coordinate width {width} inferred from "
-            f"decimal spacing in {line!r}"
+            f"{path}: implausible GRO coordinate width {width} inferred from decimal spacing in {line!r}"
         )
     return width
 
@@ -462,22 +443,16 @@ def _read_gro(path: Path, charge: int, multiplicity: int) -> Structure:
     """
     lines = path.read_text().splitlines()
     if len(lines) < 3:
-        raise StructureError(
-            f"{path}: a GRO file needs at least a title, a count and a box line"
-        )
+        raise StructureError(f"{path}: a GRO file needs at least a title, a count and a box line")
     try:
         n = int(lines[1].strip())
     except ValueError as exc:
-        raise StructureError(
-            f"{path}: line 2 is not an atom count: {lines[1]!r}"
-        ) from exc
+        raise StructureError(f"{path}: line 2 is not an atom count: {lines[1]!r}") from exc
     if n <= 0:
         raise StructureError(f"{path}: atom count is {n}")
     body = lines[2 : 2 + n]
     if len(body) != n:
-        raise StructureError(
-            f"{path}: header says {n} atoms, file has {len(body)} atom lines"
-        )
+        raise StructureError(f"{path}: header says {n} atoms, file has {len(body)} atom lines")
     symbols, coords = [], []
     width = _gro_coord_width(path, body[0])
     need = 20 + 3 * width
@@ -494,9 +469,7 @@ def _read_gro(path: Path, charge: int, multiplicity: int) -> Structure:
         try:
             x, y, z = (float(f) for f in fields)
         except ValueError as exc:
-            raise StructureError(
-                f"{path}:{i + 3}: could not read nm coordinates from {line[20:need]!r}"
-            ) from exc
+            raise StructureError(f"{path}:{i + 3}: could not read nm coordinates from {line[20:need]!r}") from exc
         symbols.append(element_from_pdb_atom_name(name))
         coords.append((x * NM_TO_ANGSTROM, y * NM_TO_ANGSTROM, z * NM_TO_ANGSTROM))
     if len(lines) <= 2 + n or not _is_gro_box(lines[2 + n]):
@@ -531,15 +504,12 @@ def _read_rdkit(path: Path, charge: int, multiplicity: int, fmt: str) -> Structu
         raise StructureError(f"{path}: rdkit could not parse this file")
     if mol.GetNumConformers() == 0:
         raise StructureError(
-            f"{path}: has no 3-D coordinates. Use `from_smiles` to generate a "
-            f"geometry from connectivity."
+            f"{path}: has no 3-D coordinates. Use `from_smiles` to generate a geometry from connectivity."
         )
     return _from_rdkit_mol(mol, charge, multiplicity, str(path))
 
 
-def _from_rdkit_mol(
-    mol, charge: int | None, multiplicity: int, source: str
-) -> Structure:
+def _from_rdkit_mol(mol, charge: int | None, multiplicity: int, source: str) -> Structure:
     conf = mol.GetConformer()
     symbols, coords = [], []
     for i, atom in enumerate(mol.GetAtoms()):
@@ -603,14 +573,11 @@ def read_structure(
     if fmt is None:
         suffix = path.suffix.lower()
         if suffix == ".gz":
-            raise StructureError(
-                f"{path}: gzipped input is not supported; decompress it first"
-            )
+            raise StructureError(f"{path}: gzipped input is not supported; decompress it first")
         if suffix not in SUPPORTED_SUFFIXES:
             known = ", ".join(sorted(SUPPORTED_SUFFIXES))
             raise StructureError(
-                f"{path}: unrecognised suffix {suffix!r}. Known: {known}. "
-                f"Pass fmt= to override detection."
+                f"{path}: unrecognised suffix {suffix!r}. Known: {known}. Pass fmt= to override detection."
             )
         key = SUPPORTED_SUFFIXES[suffix]
     else:

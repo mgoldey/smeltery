@@ -40,12 +40,21 @@ def file_digest(path: str | Path) -> str:
 
 
 def pdb2pqr_version() -> str | None:
-    """Version string of the installed `pdb2pqr30`, or None if it is not installed."""
+    """Version string of the installed `pdb2pqr30`, or None if it is not usable.
+
+    "On PATH" is not "installed": a pyenv shim is on PATH for every interpreter
+    and exits 127 when the active one lacks the package. Any failure to run
+    `--version` (non-zero exit, missing or non-executable file, empty output)
+    therefore means not installed, and never raises.
+    """
     exe = shutil.which(PDB2PQR)
     if exe is None:
         return None
-    out = subprocess.run([exe, "--version"], capture_output=True, text=True, check=True)
-    return (out.stdout or out.stderr).strip()
+    try:
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError, OSError):
+        return None
+    return (out.stdout or out.stderr).strip() or None
 
 
 def parse_pqr(text: str) -> list[PointCharge]:
@@ -96,13 +105,20 @@ def load_pocket(
     if suffix == ".pqr":
         text = path.read_text()
     elif suffix == ".pdb":
-        exe = shutil.which(PDB2PQR)
-        if exe is None:
+        version = pdb2pqr_version()
+        if version is None:
+            found = shutil.which(PDB2PQR)
+            why = (
+                f"`{PDB2PQR}` is not on PATH"
+                if found is None
+                else f"`{found}` is on PATH but `--version` fails (a broken shim?)"
+            )
             raise Pdb2PqrUnavailableError(
-                f"{path.name} is a PDB and needs `{PDB2PQR}` on PATH to assign charges; "
+                f"{path.name} is a PDB and needs a working `{PDB2PQR}` to assign charges: {why}; "
                 "install it (pip install pdb2pqr) or pass a pre-made .pqr"
             )
-        prov["pdb2pqr_version"] = pdb2pqr_version()
+        exe = shutil.which(PDB2PQR)
+        prov["pdb2pqr_version"] = version
         prov["pdb2pqr_ff"] = ff
         with tempfile.TemporaryDirectory() as tmp:
             pqr = Path(tmp) / "out.pqr"

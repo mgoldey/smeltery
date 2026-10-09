@@ -13,6 +13,10 @@ from .vina_dock import dock_ligand
 class VinaProvider:
     """`DockingProvider` over AutoDock Vina + Meeko.
 
+    `receptor` is a PDBQT path (rigid) or a `Receptor` (rigid + flexible
+    sidechains); the sidechain coordinates of each pose come back in
+    `DockResult.flex_receptor`.
+
     Returns poses with every hydrogen restored (`restore_hydrogens`, heavy atoms
     pinned at the docked coordinates), after checking each against the input
     molecule: heavy-atom count, per-atom element on the Meeko mapping, and the
@@ -59,14 +63,20 @@ class VinaProvider:
 
         ex = self.exhaustiveness if exhaustiveness is None else exhaustiveness
         run = dock_ligand(
-            mol, receptor, box.center, box.size, exhaustiveness=ex,
-            n_poses=self.n_poses, seed=seed, cpu=self.cpu,
+            mol,
+            receptor,
+            box.center,
+            box.size,
+            exhaustiveness=ex,
+            n_poses=self.n_poses,
+            seed=seed,
+            cpu=self.cpu,
         )
         if not run.ok:
             return DockResult(error=run.error)
 
         fallback_smiles = Chem.MolToSmiles(Chem.RemoveHs(mol))
-        poses, scores = [], []
+        poses, scores, flex = [], [], []
         for p in run.poses:
             heavy = [(s, c) for s, c in zip(p.symbols, p.coords_angstrom) if s != "H"]
             check_heavy_atom_count(mol, [s for s, _ in heavy])
@@ -83,4 +93,9 @@ class VinaProvider:
             check_full_pose(mol, syms)
             poses.append(Pose(tuple(syms), np.asarray(coords, dtype=float)))
             scores.append(p.vina_score)
-        return DockResult(poses=poses, scores=scores)
+            flex.append(p.flex_pdbqt)
+        return DockResult(
+            poses=poses,
+            scores=scores,
+            flex_receptor=flex if any(flex) else [],
+        )

@@ -34,6 +34,11 @@ OPENBLAS_NUM_THREADS=1 uv run pytest -q
 OPENBLAS_NUM_THREADS=1 uv run python examples/mwe_benzoic.py
 ```
 
+No ferric (e.g. a cloud sandbox where it won't build)? `scripts/dev-check.sh` runs
+the tests in a venv without it: a labelled stub is installed and tests marked
+`needs_ferric` are skipped, not failed. It is a smoke check, not a substitute for
+CI, and prints passed / skipped-needs-ferric / failed (non-zero on any failure).
+
 ## Example
 
 `examples/mwe_benzoic.py` places benzoic acid and two para-substituted
@@ -72,8 +77,12 @@ energy, or passing charges in Å each makes a test fail.
 ## Status
 
 This is an early working example. The tier protocol, the paired-ΔΔE funnel,
-the resolution-aware cut and the run record work end to end. Docking, a
-force-field tier and real receptor pockets are next.
+the resolution-aware cut and the run record work end to end. Vina docking works with a
+flexible ligand and, optionally, flexible receptor sidechains
+(`prepare_target(pdb, workdir, flex_residues=["A:45"])` also picks the box from the
+co-crystal ligand or pocket residues; `ensemble_score` pools a pose ensemble's
+scores). Scores are an empirical ranking heuristic, not binding free energies.
+A force-field tier and real receptor pockets are next.
 
 ## License
 

@@ -30,10 +30,7 @@ class Pose:
 
     def __post_init__(self) -> None:
         if self.coords_ang.shape != (len(self.symbols), 3):
-            raise ValueError(
-                f"coords shape {self.coords_ang.shape} does not match "
-                f"{len(self.symbols)} atoms"
-            )
+            raise ValueError(f"coords shape {self.coords_ang.shape} does not match {len(self.symbols)} atoms")
 
     @property
     def formula(self) -> str:
@@ -44,10 +41,7 @@ class Pose:
 
     def to_xyz(self, comment: str = "") -> str:
         lines = [str(len(self.symbols)), comment]
-        lines += [
-            f"{s} {x:.10f} {y:.10f} {z:.10f}"
-            for s, (x, y, z) in zip(self.symbols, self.coords_ang, strict=True)
-        ]
+        lines += [f"{s} {x:.10f} {y:.10f} {z:.10f}" for s, (x, y, z) in zip(self.symbols, self.coords_ang, strict=True)]
         return "\n".join(lines) + "\n"
 
 
@@ -76,6 +70,9 @@ class Candidate:
     smiles: str
     poses: list[Pose] = field(default_factory=list)
     per_pose: dict[str, list[float]] = field(default_factory=dict)
+    #: Flexible-receptor sidechain PDBQT text per pose (aligned with `poses`);
+    #: empty when docked against a rigid receptor.
+    receptor_flex: list[str] = field(default_factory=list)
 
     @property
     def formula(self) -> str:
