@@ -142,3 +142,26 @@ jobs:
         if: matrix.extra == 'none'
         run: python scripts/wheel_smoke.py check dist/*.whl --extra none --example examples/mwe_benzoic.py
 
+  # The PoseBusters gate on Python 3.12 (issue #68). The `test` job runs 3.11
+  # only, which hid a segfault in posebusters_check on uv's CPython 3.12.11+
+  # (numpy iterating RDKit Point3D -> C++ throw -> boost stacktrace hook ->
+  # _Unwind_Backtrace). gates.py works around it; this job fails if that
+  # regresses. Not continue-on-error: the workaround is verified.
+  posebusters-py312:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install (dev + posebusters extras, ferric from PyPI)
+        run: uv sync --extra dev --extra posebusters --no-sources
+
+      - name: PoseBusters tests on 3.12
+        run: uv run --no-sync pytest -q tests/test_posebusters_gate.py
