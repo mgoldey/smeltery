@@ -128,3 +128,16 @@ Test-only (2):
 - Not re-verified: the issue's claims that `~/qc/ferric-mainline` has no
   symlinks and no crate imports `tools/`. That checkout was not inspected;
   smeltery's symlink test covers smeltery only.
+
+## Decided in #13 (ferric side)
+
+Recorded 2026-10-10, before `tools/` is deleted from ferric:
+
+- `experiments/danuglipron/` moves to smeltery as a **frozen record**, together with the 38 `tools/`
+  modules it imports (`experiments/danuglipron/frozen_tools/`; see `experiments/README.md`). The drivers
+  are not rebased on `smeltery.*` yet: that is #6 and #35.
+- `campaign` (the part the campaign imports), and the `tox` modules it imports, are inside that
+  frozen set. They have no `smeltery` equivalent and no migration issue.
+- **Dropped from `main`, kept in ferric history at commit `922a3b9b6203e10fedbb4e143ac24f0352e55230`** (nothing in the campaign imports them):
+  `viz/*`, `active_site/solvate.py`, `tox/__main__.py`, `campaign/jsonl.py`.
+- `mm_topology.py` and its test stay in ferric (`scripts/validation/gen_mm.py` needs it).

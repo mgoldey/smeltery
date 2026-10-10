@@ -42,7 +42,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install (ferric from PyPI)
-        run: uv sync --extra dev --extra posebusters --no-sources
+        run: uv sync --extra dev --extra posebusters --extra experiments --no-sources
 
       - name: Lint (ruff check)
         run: |
@@ -54,6 +54,9 @@ jobs:
 
       - name: Tests
         run: uv run --no-sync pytest -q
+
+      - name: Frozen campaign record (experiments/)
+        run: uv run --no-sync pytest -q experiments
 
       - name: Example (benzoic acid)
         run: uv run --no-sync python examples/mwe_benzoic.py
