@@ -27,12 +27,67 @@ tracking); that it resolves says nothing about adopting it.
 
 ## Force-field tier
 
-`smeltery.tiers.ForceField` has one path, `mmff` (RDKit, core). It relaxes a copy of
-each pose and never writes coordinates back, so a quantum tier after it scores the
-pose it was handed (`tests/test_forcefield.py`, and dock -> FF -> quantum with real
-Vina in `tests/test_docking_forcefield.py`; reintroducing the in-place write fails
-both). There is **no OpenMM path yet**: where ligand parameters would come from
-(GAFF via openmmforcefields, or OpenFF via pixi) is undecided (issue #18).
+`smeltery.tiers.ForceField` has two paths with one contract: `mmff` (RDKit, core;
+writes `E_mmff`, `E_mmff_relaxed`) and `openmm` (optional environment; writes
+`E_openmm`, `E_openmm_relaxed`). Both relax a copy of each pose and never write
+coordinates back, so a quantum tier after it scores the pose it was handed
+(`tests/test_forcefield.py`, `tests/test_forcefield_openmm.py`, and dock -> FF ->
+quantum with real Vina in `tests/test_docking_forcefield.py`, parametrised over both
+paths; reintroducing the in-place write fails them).
+
+### OpenMM force-field path: where ligand parameters come from
+
+Decided on evidence, 2026-10-10. The route is **SMIRNOFF (OpenFF Sage
+`openff_unconstrained-2.2.1.offxml`) through openmmforcefields'
+`SMIRNOFFTemplateGenerator`, in a conda-forge environment**. It is not a pip extra:
+
+| Route | Result |
+|---|---|
+| pip only: `openmm openmmforcefields rdkit` (openmmforcefields 0.15.1 sdist) | installs and imports, but `import openff` fails: no ligand parameter source. No `ambertools`, `openff-toolkit-base` or `openff-forcefields` project exists on PyPI (404); the PyPI `openff-toolkit`, `openff-interchange`, `openff-units`, `openff-utilities` releases are all yanked |
+| GAFF2 via `GAFFTemplateGenerator` | needs AmberTools `antechamber` (conda) and openff-toolkit; same environment, no gain |
+| micromamba + conda-forge (`environment-openff.yml`) | works end to end, measured below |
+
+micromamba 2.9.0-0 (`micromamba-linux-64`) was fetched from the mamba-org/micromamba-releases
+GitHub release; sha256 `366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3`
+matched both the release's `.sha256` file and the API digest. The environment resolved
+to python 3.11, openmm 8.6.1, openmmforcefields 0.16.0, openff-toolkit 0.18.0 (the
+conda-forge build; a different artifact from the yanked PyPI upload), ambertools 26.0,
+rdkit 2026.03.1 (about 3 GB download because conda-forge pulled a CUDA build of libtorch;
+not pruned). Create it with `micromamba create -n smeltery-ff -f environment-openff.yml`;
+`sqm` must be on PATH (activate the environment: openff-toolkit finds it there), and
+smeltery's own `ferric` goes in with pip. Without it, `ForceField(path="openmm")`
+raises `ForceFieldBackendMissing` naming this file, and the tests skip with the same
+instruction. CI does not have the environment, so CI skips them: the OpenMM path is
+exercised only where someone builds it.
+
+Measured behaviour, same day, in that environment:
+
+* Tests: `tests/test_forcefield.py` + `tests/test_forcefield_openmm.py`: 18 passed;
+  `tests/test_docking_forcefield.py` (real Vina, both parametrisations): 2 passed.
+  Mutations that each fail a test: no kJ -> kcal conversion, no convergence check,
+  relaxed coordinates written back (also fails the docking test), atom-order check
+  removed, `E_openmm` taken after relaxation.
+* Units: OpenMM reports kJ/mol; divided by 4.184. A test rebuilds the system by hand
+  and compares kJ directly.
+* Platform: `Reference` (double precision). The `CPU` platform is single precision:
+  at RMS-force tolerance 1 kJ/mol/nm it stalled on aspirin (once raising "did not
+  converge" on a geometry that had converged a moment earlier), took about 160 ms, and
+  its relaxed energy scattered by about 0.0004 kcal/mol; Reference was deterministic and
+  about 6 ms. Convergence is judged by us (RMS force <= 0.1 kJ/mol/nm after
+  `LocalEnergyMinimizer`), because that call does not report it.
+* Charges: AM1-BCC via sqm, computed once per SMILES per tier instance. Fresh
+  instances agreed exactly for benzoic acid and aspirin but differed by 0.016 kcal/mol
+  for ibuprofen (conformer-dependent charges; cause not isolated). Not pinned to the
+  pose.
+* Parameter-assignment failure: `C[Se]C` raises `ForceFieldTypingError`; the cause is
+  that sqm/AM1-BCC cannot handle selenium, not Sage lacking it (not isolated further).
+* Warnings seen, not investigated: openff-interchange's "preset charges alongside
+  virtual-site parameters" and a torch `reduce_op` deprecation.
+* The vacuum, ligand-only energy is not comparable across formulas and no systematic
+  floor is measured (`systematic_floor` is None).
+* pip-installing vina/meeko/scipy/gemmi/pdb2pqr/posebusters into the conda env (for the
+  docking test) upgraded numpy to 2.4.6, which conflicts with another package's pin in
+  that environment (`proprep`); the tests passed regardless.
 
 ### Measured cost, one pose, `ForceField().run` (SMILES parse + MMFF94 minimize of a copy)
 
@@ -45,7 +100,27 @@ ETKDG seed 1 embedding, 50 repeats, 2026-10-10:
 | aspirin | 21 | 3.9 ms | 3.9 - 4.5 ms |
 | ibuprofen | 33 | 12.4 ms | 12.2 - 13.7 ms |
 
-Issue #18 cites "~9 ms at 21 atoms" and asks for agreement within a factor of 2. The
-source and protocol of that figure are not recorded in this repository, and 3.9 ms
-is 2.3x below it (outside the factor-2 band). It was not tuned toward 9 ms. The
-likely cause is a different protocol, but that is not established.
+#### Origin of the issue's "~9 ms at 21 atoms"
+
+Found (ferric, read-only history search for "9 ms"): ferric commit `2e0eee64`
+(2026-09-20) re-measured `tiers.tier2_forcefield` on aspirin, 21 atoms, n=9 after a
+warm-up call, median 9.0 ms (min 8.8, max 10.3). That function is a different protocol
+from this tier's: it parses SMILES, adds Hs, **embeds with ETKDGv3
+(`useSmallRingTorsions`)** and runs `MMFFOptimizeMoleculeConfs(maxIters=2000)`, i.e.
+embed + optimize, where `ForceField.run` relaxes a pose it is given. Reproduced here
+(code copied from ferric `70f0cb3c^:tools/pipeline/tiers.py`), RDKit 2026.03.6,
+2026-10-10, **load average about 36 on 12 cores** (not a quiet box):
+
+| Molecule | n=9 median (min) | n=50 median (min) |
+|---|---|---|
+| benzoic acid (15) | 9.4 (8.3) ms | 9.0 (8.0) ms |
+| aspirin (21) | 14.9 (12.0) ms | 15.1 (12.7) ms |
+| ibuprofen (33) | 40.5 (36.5) ms | 40.1 (32.1) ms |
+
+Aspirin is 1.7x the 9.0 ms figure (within the issue's factor of 2); the load makes
+that ratio an upper bound on protocol agreement rather than a clean match. The
+earlier 3.9 ms is a different quantity (relaxation only, no embedding). Under the same
+load, `ForceField().run` measured 7.1 ms (aspirin, mmff) and the OpenMM path 13.3 ms
+(cached parameters; median of 30). First call for a new SMILES: 2.3 s benzoic acid,
+7.8 s aspirin, 48 s ibuprofen, dominated by AM1-BCC. Maxima of hundreds of ms to
+seconds in those runs were load. Nothing was tuned toward 9 ms.
