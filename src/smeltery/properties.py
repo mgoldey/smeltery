@@ -46,6 +46,9 @@ class PropertyProvider(Protocol):
         """{endpoint: note}; every note must state that the value is rank-only."""
         ...
 
+    # Not Protocol members (that would break existing providers under isinstance), but required by
+    # `smeltery.providers.conformance`: `license_id: str` (SPDX) and `endpoint_units() -> {endpoint: unit}`.
+
     def applicability(self, smiles: str) -> bool:
         """Is this molecule inside what the provider can answer? False -> predict returns Nones."""
         ...
@@ -114,6 +117,12 @@ class RdkitAlertProvider:
 
     name = "rdkit-alerts"
     requires_network = False
+    license_id = "MIT OR Apache-2.0"  # this code: smeltery's own (pyproject.toml)
+    # Wrapped engine: RDKit is BSD-3-Clause (https://raw.githubusercontent.com/rdkit/rdkit/master/license.txt,
+    # fetched 2026-10-10). The PAINS/Brenk/NIH catalogs are RDKit-bundled data whose own licence terms were
+    # NOT checked, hence UNVERIFIED rather than a guess.
+    engine_licenses = {"RDKit": "BSD-3-Clause"}
+    data_license_id = "UNVERIFIED"
     _CATALOGS = {"pains_alerts": "PAINS", "brenk_alerts": "BRENK", "nih_alerts": "NIH"}
 
     def __init__(self) -> None:
@@ -121,6 +130,9 @@ class RdkitAlertProvider:
 
     def settings(self) -> dict:
         return {"catalogs": sorted(self._CATALOGS.values()), "network": False}
+
+    def endpoint_units(self) -> dict[str, str]:
+        return {k: "alert matches (count)" for k in self._CATALOGS}
 
     def endpoint_notes(self) -> dict[str, str]:
         return {k: f"{v} alert match count; {RANK_ONLY_NOTE}" for k, v in self._CATALOGS.items()}

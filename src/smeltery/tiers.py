@@ -638,42 +638,106 @@ class Gfn2:
 
 
 class ForceFieldTypingError(RuntimeError):
-    """MMFF has no parameters for this molecule; no energy is fabricated."""
+    """The force field has no parameters for this molecule; no energy is fabricated."""
+
+
+class ForceFieldBackendMissing(ImportError):
+    """The OpenMM path needs packages pip alone cannot install; the message says how to get them."""
+
+
+KJ_PER_KCAL = 4.184  # thermochemical calorie (exact by definition); OpenMM reports kJ/mol
+OPENMM_ENVIRONMENT_HINT = (
+    "the force-field path 'openmm' needs openmm, openmmforcefields and openff-toolkit, and "
+    "openff-toolkit (with AmberTools for AM1-BCC charges) is not installable from PyPI "
+    "(its only release is yanked). Create the conda-forge environment: "
+    "`micromamba create -n smeltery-ff -f environment-openff.yml` "
+    "(see docs/environments.md, section 'OpenMM force-field path')"
+)
+
+
+def _import_openmm_stack():
+    """(openmm, unit, Molecule, SMIRNOFFTemplateGenerator, versions); raise with the install route."""
+    try:
+        import openff.toolkit
+        import openmm
+        import openmmforcefields
+        from openff.toolkit import Molecule
+        from openmm import unit
+        from openmmforcefields.generators import SMIRNOFFTemplateGenerator
+    except ImportError as exc:
+        raise ForceFieldBackendMissing(f"{OPENMM_ENVIRONMENT_HINT} (import failed: {exc})") from exc
+    versions = {
+        "openmm": openmm.__version__,
+        "openff-toolkit": openff.toolkit.__version__,
+        "openmmforcefields": openmmforcefields.__version__,
+    }
+    return openmm, unit, Molecule, SMIRNOFFTemplateGenerator, versions
 
 
 @dataclass
 class ForceField:
-    """MMFF94 energies per pose (RDKit, core): at the pose as given, and after relaxing a COPY.
+    """Force-field energies per pose: at the pose as given, and after relaxing a COPY.
 
-    `E_mmff` is the MMFF energy at the incoming geometry; `E_mmff_relaxed` is the
-    energy after minimizing a copy, so their difference is the pose's strain. The
-    tier NEVER writes coordinates back: a quantum tier after it scores the pose it
-    was handed, not a force-field-relaxed one (the ferric PR #325 defect). A
-    non-converged minimization raises rather than reporting a half-relaxed energy.
+    Two paths, the same contract. `path="mmff"` (RDKit, core) writes `E_mmff` and
+    `E_mmff_relaxed`; `path="openmm"` (OpenMM + a SMIRNOFF/OpenFF ligand force field,
+    an optional environment) writes `E_openmm` and `E_openmm_relaxed`. The first is
+    the energy at the incoming geometry, the second after minimizing a copy, so their
+    difference is the pose's strain. The tier NEVER writes coordinates back: a quantum
+    tier after it scores the pose it was handed, not a force-field-relaxed one (the
+    ferric PR #325 defect). A non-converged minimization raises rather than reporting
+    a half-relaxed energy, and so does a molecule the force field cannot parameterize.
 
-    A descriptor and a gate, not a ranker: MMFF energies are not comparable
-    across formulas and no systematic floor has been measured. Only `path="mmff"`
-    exists; an OpenMM path (issue #18) has no parameter source decided yet.
+    A descriptor and a gate, not a ranker: force-field energies are not comparable
+    across formulas and no systematic floor has been measured. OpenMM energies are
+    kJ/mol and are converted to kcal/mol (`KJ_PER_KCAL`). The OpenMM path is a
+    vacuum, ligand-only calculation (no receptor, no solvent, no cutoff). Its partial
+    charges (AM1-BCC) are computed once per SMILES per tier instance, independent of the pose (a fresh
+    instance may differ: 0.016 kcal/mol on ibuprofen, none on aspirin; docs/environments.md), so
+    strain is not contaminated by charges that follow the geometry.
     """
 
     path: str = "mmff"
     variant: str = "MMFF94"
     max_iters: int = 2000
+    ligand_ff: str = "openff_unconstrained-2.2.1.offxml"
+    force_tolerance_kj_mol_nm: float = 0.1
     name: str = "forcefield"
+    _cache: dict = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.path != "mmff":
-            raise ValueError(f"unsupported force-field path {self.path!r}: only 'mmff' is implemented (issue #18)")
-        if self.variant not in ("MMFF94", "MMFF94s"):
+        if self.path not in ("mmff", "openmm"):
+            raise ValueError(f"unsupported force-field path {self.path!r}: use 'mmff' or 'openmm' (issue #18)")
+        if self.path == "mmff" and self.variant not in ("MMFF94", "MMFF94s"):
             raise ValueError(f"unknown MMFF variant {self.variant!r}; use 'MMFF94' or 'MMFF94s'")
+        if self.path == "openmm":
+            _import_openmm_stack()  # fail at construction, with the install route
+
+    @property
+    def _keys(self) -> tuple[str, str]:
+        return ("E_mmff", "E_mmff_relaxed") if self.path == "mmff" else ("E_openmm", "E_openmm_relaxed")
 
     def settings(self) -> dict:
         import rdkit
 
-        return {"path": self.path, "variant": self.variant, "max_iters": self.max_iters, "rdkit": rdkit.__version__}
+        if self.path == "mmff":
+            return {"path": self.path, "variant": self.variant, "max_iters": self.max_iters, "rdkit": rdkit.__version__}
+        *_, versions = _import_openmm_stack()
+        return {
+            "path": self.path,
+            "ligand_ff": self.ligand_ff,
+            "charges": "AM1-BCC (sqm via openff-toolkit), once per SMILES per tier instance, pose-independent",
+            "system": "ligand in vacuum, no cutoff",
+            "platform": "Reference",  # double precision; CPU (single) never reached RMS force 1 kJ/mol/nm reliably
+            "max_iters": self.max_iters,
+            "force_tolerance_kj_mol_nm": self.force_tolerance_kj_mol_nm,
+            "energy_unit_native": "kJ/mol",
+            "kj_per_kcal": KJ_PER_KCAL,
+            "rdkit": rdkit.__version__,
+            **versions,
+        }
 
     def produces(self) -> dict[str, str]:
-        return {"E_mmff": "kcal/mol", "E_mmff_relaxed": "kcal/mol"}
+        return {k: "kcal/mol" for k in self._keys}
 
     def systematic_floor(self, quantity: str) -> float | None:
         if quantity not in self.produces():
@@ -688,12 +752,19 @@ class ForceField:
             "basis": "unmeasured as a tier: see docs/environments.md for the one-molecule timing",
         }
 
-    def _energies(self, cand: Candidate, pose: Pose, i: int) -> tuple[float, float]:
-        from rdkit.Chem import rdForceFieldHelpers as ffh
-
+    @staticmethod
+    def _check_atom_order(cand: Candidate, pose: Pose, i: int) -> Chem.Mol:
         mol = _mol_with_h(cand.smiles)
         if tuple(a.GetSymbol() for a in mol.GetAtoms()) != tuple(pose.symbols):
             raise ValueError(f"{cand.name} pose {i}: atom order does not match the SMILES (with H added)")
+        return mol
+
+    def _energies(self, cand: Candidate, pose: Pose, i: int) -> tuple[float, float]:
+        mol = self._check_atom_order(cand, pose, i)
+        if self.path == "openmm":
+            return self._energies_openmm(cand, pose, i)
+        from rdkit.Chem import rdForceFieldHelpers as ffh
+
         conf = Chem.Conformer(mol.GetNumAtoms())
         for k, xyz in enumerate(pose.coords_ang):
             conf.SetAtomPosition(k, [float(v) for v in xyz])
@@ -708,13 +779,69 @@ class ForceField:
             raise RuntimeError(f"{cand.name} pose {i}: {self.variant} did not converge in {self.max_iters} iterations")
         return e_pose, ff.CalcEnergy()
 
+    def _openmm_system(self, cand: Candidate):
+        """The OpenMM System for the candidate's SMILES; cached, because parameters do not depend on the pose."""
+        key = (cand.smiles, self.ligand_ff)
+        if key in self._cache:
+            return self._cache[key]
+        _openmm, _unit, Molecule, SMIRNOFFTemplateGenerator, _ = _import_openmm_stack()
+        from openmm import app
+
+        try:
+            off_mol = Molecule.from_rdkit(_mol_with_h(cand.smiles), allow_undefined_stereo=True)
+            off_mol.assign_partial_charges("am1bcc")  # computed from the molecule alone, never from a pose
+            generator = SMIRNOFFTemplateGenerator(molecules=off_mol, forcefield=self.ligand_ff)
+            omm_ff = app.ForceField()
+            omm_ff.registerTemplateGenerator(generator.generator)
+            topology = off_mol.to_topology().to_openmm()
+            system = omm_ff.createSystem(topology, nonbondedMethod=app.NoCutoff, constraints=None)
+        except Exception as exc:  # noqa: BLE001 - the toolkits raise many unrelated types
+            raise ForceFieldTypingError(
+                f"{cand.name}: {self.ligand_ff} could not parameterize {cand.smiles!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+        self._cache[key] = system
+        return system
+
+    def _energies_openmm(self, cand: Candidate, pose: Pose, i: int) -> tuple[float, float]:
+        openmm, unit, *_ = _import_openmm_stack()
+        system = self._openmm_system(cand)
+        if system.getNumParticles() != len(pose.symbols):
+            raise ValueError(
+                f"{cand.name} pose {i}: system has {system.getNumParticles()} atoms, pose has {len(pose.symbols)}"
+            )
+        integrator = openmm.VerletIntegrator(0.001)  # never stepped: a Context needs one
+        context = openmm.Context(system, integrator, openmm.Platform.getPlatformByName("Reference"))
+        # a fresh array in nm: `pose.coords_ang` is only read
+        context.setPositions(np.array(pose.coords_ang, dtype=float) * 0.1)
+
+        def kcal() -> float:
+            kj = context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+            return kj / KJ_PER_KCAL
+
+        e_pose = kcal()
+        tol = self.force_tolerance_kj_mol_nm
+        openmm.LocalEnergyMinimizer.minimize(context, tol, self.max_iters)
+        forces = (
+            context.getState(getForces=True)
+            .getForces(asNumpy=True)
+            .value_in_unit(unit.kilojoule_per_mole / unit.nanometer)
+        )
+        rms = float(np.sqrt(np.mean(np.asarray(forces) ** 2)))
+        if not rms <= tol:  # also catches NaN
+            raise RuntimeError(
+                f"{cand.name} pose {i}: OpenMM did not converge in {self.max_iters} iterations "
+                f"(RMS force {rms:.3g} kJ/mol/nm > tolerance {tol:g})"
+            )
+        return e_pose, kcal()
+
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         for cand in candidates:
             require_passing_poses(cand, ctx)
+        k_pose, k_relaxed = self._keys
         for cand in candidates:
             pairs = [self._energies(cand, p, i) for i, p in enumerate(cand.poses)]
-            cand.per_pose["E_mmff"] = [a for a, _ in pairs]
-            cand.per_pose["E_mmff_relaxed"] = [b for _, b in pairs]
+            cand.per_pose[k_pose] = [a for a, _ in pairs]
+            cand.per_pose[k_relaxed] = [b for _, b in pairs]
 
 
 # ---------------------------------------------------------------- QM/MM with a covalent cut
