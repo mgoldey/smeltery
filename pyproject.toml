@@ -84,8 +84,9 @@ markers = [
 [tool.ruff]
 line-length = 120
 # experiments/ is a frozen record of ferric code, moved unmodified except for mechanical import and path
-# rewrites (experiments/README.md); restyling it would defeat that.
-extend-exclude = ["experiments"]
+# rewrites (experiments/README.md); restyling it would defeat that. docs/archive/ is ferric's site pages,
+# kept verbatim (this ruff also formats fenced code in .md files).
+extend-exclude = ["experiments", "docs/archive"]
 target-version = "py311"
 
 [tool.ruff.lint]
