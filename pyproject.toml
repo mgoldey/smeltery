@@ -49,6 +49,9 @@ rdkit = ["rdkit>=2024.3"]
 # PoseBusters validity gate (smeltery.gates.posebusters_check).
 posebusters = ["posebusters>=0.4", "rdkit>=2024.3"]
 docking = ["vina>=1.2.7", "meeko>=0.8.0", "rdkit>=2024.3", "scipy>=1.11", "gemmi"]
+# Third-party imports of the frozen ferric code under experiments/ (psutil: binding_energy's memory check;
+# scipy: the run_* scripts). Not core: nothing under src/smeltery imports them.
+experiments = ["psutil>=5.9", "scipy>=1.11"]
 
 [tool.uv.sources]
 # An exact commit, not a branch: the run record reports this SHA, read back
@@ -70,12 +73,20 @@ packages = ["src/smeltery"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root is on sys.path so `experiments.danuglipron...` imports resolve (no packages needed).
+# experiments/ is run as its own `pytest experiments` (a separate CI step): its test files share basenames with
+# tests/ (test_funnel.py, ...), so one combined run would collide.
+pythonpath = ["."]
 markers = [
     "needs_ferric: needs the real ferric engine; skipped only under SMELTERY_NO_FERRIC=1 (scripts/dev-check.sh)",
 ]
 
 [tool.ruff]
 line-length = 120
+# experiments/ is a frozen record of ferric code, moved unmodified except for mechanical import and path
+# rewrites (experiments/README.md); restyling it would defeat that. docs/archive/ is ferric's site pages,
+# kept verbatim (this ruff also formats fenced code in .md files).
+extend-exclude = ["experiments", "docs/archive"]
 target-version = "py311"
 
 [tool.ruff.lint]
