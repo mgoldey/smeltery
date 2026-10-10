@@ -104,9 +104,24 @@ def _rescoring():
 
 
 #: How to build each tier for inspection. A tier that needs arguments gets an entry here; the rest use their defaults.
+def _qmmm(cls):
+    from smeltery.tiers import MmParameters
+
+    params = MmParameters(
+        symbols=("C", "H"),
+        charges=(0.0, 0.0),
+        sigmas_angstrom=(3.0, 2.0),
+        epsilons_kcal=(0.1, 0.01),
+        bonds=((0, 1, 300.0, 1.09),),
+        provenance={"source": "a stand-in for inspecting settings()"},
+    )
+    return cls(params=params, qm_indices=(0,), qm_charge=0)
+
+
 FACTORIES = {
     "docking": lambda cls: cls(_FakeDockingProvider()),
     "rescoring": lambda cls: _rescoring(),
+    "qmmm": _qmmm,
 }
 
 

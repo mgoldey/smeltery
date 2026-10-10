@@ -27,6 +27,7 @@ smeltery has no grade scheme of its own. These three facts are the smallest hone
 | [forcefield](forcefield.md) | yes | measured | UNMEASURED |
 | [docking](docking.md) | yes | UNMEASURED | UNMEASURED |
 | [rescoring](rescoring.md) | none | UNMEASURED | UNMEASURED |
+| [qmmm](qmmm.md) | yes | UNMEASURED | UNMEASURED |
 
 ## Gates
 

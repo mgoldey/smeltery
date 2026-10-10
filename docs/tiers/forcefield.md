@@ -7,7 +7,7 @@
 - **Quantity:** `E_mmff`, unit `kcal/mol`: the MMFF energy at the incoming geometry.
 - **Quantity:** `E_mmff_relaxed`, unit `kcal/mol`: the energy after minimising a copy. Their difference is the pose's strain.
 - The tier never writes coordinates back: a quantum tier after it scores the pose it was handed (`tests/test_forcefield.py::test_never_writes_coordinates_back_and_reports_strain`).
-- Only `path="mmff"` exists. There is no OpenMM path: where ligand parameters would come from is undecided (issue #18, `docs/environments.md`).
+- `path="mmff"` (RDKit, core) is what the quantities above describe. `path="openmm"` writes `E_openmm` and `E_openmm_relaxed` (kcal/mol, converted from kJ/mol) with the same contract; it needs the optional conda environment in `environment-openff.yml` (OpenMM with OpenFF Sage 2.2.1 ligand parameters and AM1-BCC charges), is a vacuum ligand-only calculation, and is not exercised by CI (`docs/environments.md`).
 
 ## Native settings
 
@@ -18,7 +18,7 @@
 | `max_iters` | `2000` |
 | `rdkit` | the installed RDKit version |
 
-`variant` may be `MMFF94` or `MMFF94s`; any other value, and any `path` other than `mmff`, is refused at construction.
+`variant` may be `MMFF94` or `MMFF94s`; any other value, and any `path` other than `mmff` or `openmm`, is refused at construction.
 
 ## Cost
 
