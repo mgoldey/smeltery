@@ -11,7 +11,7 @@ does not prove the packages work together.** Re-verify before relying on it.
 | `openmm rdkit vina meeko pdb2pqr posebusters ferric>=0.1.0rc6` (together) | resolves, 25 packages |
 | `openmmforcefields` | resolves |
 | `gufe` | resolves |
-| `openmmml` | resolves (3 packages; not checked that it is the OpenMM-ML project) |
+| `openmmml` | resolves (3 packages). It is the OpenMM-ML project (1.8). With `torchani` it installs and runs on CPU: see `docs/potentials.md` and the `ml-potential` extra |
 
 ## Does not resolve under uv
 
