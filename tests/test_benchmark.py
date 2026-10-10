@@ -109,9 +109,15 @@ def test_noise_floor_matches_the_constant(bench):
     assert bench.noise_floor_kcal_mol == pocket.DDE_NOISE_FLOOR_KCAL_MOL
 
 
-def test_suitability_recomputes_from_smiles(bench):
-    """The stored per-target statistics are not asserted: charge, size and the single-site count recompute."""
+def test_suitability_recomputes_from_smiles(bench, monkeypatch):
+    """The stored per-target statistics are not asserted: charge, size and the single-site count recompute.
+
+    An MCS search that finishes gives the same answer whatever its time limit, but one cut off by the 2 s
+    wall-clock limit is counted as NOT single-site, so on a loaded machine the count changes for reasons that
+    are not chemistry. This test therefore allows a generous limit and requires that no search was cut off.
+    """
     pytest.importorskip("rdkit")
+    monkeypatch.setattr(suit, "MCS_TIMEOUT_S", 120)
     for name in ("cdk2", "pde2", "cmet"):
         t = bench.targets[name]
         raw_t = bench.raw["targets"][name]
@@ -120,19 +126,45 @@ def test_suitability_recomputes_from_smiles(bench):
             assert chem == rl["chemistry"]
             assert bm.heavy_canonical(lig.smiles_upstream) == lig.smiles
         ref = t.ligand(t.reference)
-        n_site = sum(
-            suit.single_site_change(ref.smiles_upstream, lg.smiles_upstream)["single_site"]
+        results = [
+            suit.single_site_change(ref.smiles_upstream, lg.smiles_upstream)
             for lg in t.ligands
             if lg.name != t.reference
-        )
-        assert n_site == t.suitability["n_single_site_vs_reference"]
+        ]
+        assert not any(r["timed_out"] for r in results), f"{name}: an MCS search was cut off; the count is not valid"
+        assert sum(r["single_site"] for r in results) == t.suitability["n_single_site_vs_reference"]
+
+
+def test_a_cut_off_mcs_search_is_never_counted_as_a_single_site_change(monkeypatch):
+    """The semantics the test above depends on: a timed-out search reports `timed_out` and is not single-site."""
+    pytest.importorskip("rdkit")
+    from rdkit.Chem import rdFMCS
+
+    real = rdFMCS.FindMCS
+
+    class CutOff:
+        def __init__(self, res):
+            self.smartsString, self.numAtoms, self.canceled = res.smartsString, res.numAtoms, True
+
+    monkeypatch.setattr(rdFMCS, "FindMCS", lambda *a, **k: CutOff(real(*a, **k)))
+    r = suit.single_site_change("c1ccccc1N", "c1ccccc1Cl")  # a textbook single-site change when the search completes
+    assert r["timed_out"] is True and r["single_site"] is False
 
 
 def test_power_recomputes_from_ddg(bench):
     for t in bench.targets.values():
         ddg = [lg.ddg_kcal_mol for lg in t.ligands]
         idx = [lg.name for lg in t.ligands].index(t.reference)
-        assert bm.power_summary(ddg, bench.noise_floor_kcal_mol, idx) == t.suitability["power"]
+        got, stored = bm.power_summary(ddg, bench.noise_floor_kcal_mol, idx), t.suitability["power"]
+        assert got.keys() == stored.keys()
+        for key, value in got.items():
+            # Integer counts must match exactly; a derived float may differ in its last digit between platforms
+            # (numpy/Python build), which is not a difference in the statistic.
+            assert (
+                value == pytest.approx(stored[key], rel=1e-12, abs=0)
+                if isinstance(value, float)
+                else value == stored[key]
+            ), key
 
 
 def test_reference_is_a_most_connected_ligand(bench):
