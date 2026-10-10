@@ -33,7 +33,7 @@ from rdkit.Chem.rdMolAlign import AlignMol
 
 from .cost import rhf_calibration, sto3g_basis_functions_strict
 from .gates import require_passing_poses
-from .model import HARTREE_TO_KCAL, Candidate, PointCharge, Pose
+from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, PointCharge, Pose
 
 
 class NoCommonCoreError(RuntimeError):
@@ -319,6 +319,115 @@ class FieldInteraction:
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
             cand.per_pose["dE_int"] = vals
+
+
+# ---------------------------------------------------------------- surface ESP
+
+
+class SurfaceEspUnavailableError(RuntimeError):
+    """The installed ferric has no `esp_on_surface` binding."""
+
+
+@dataclass(frozen=True)
+class SurfaceEspResult:
+    """ESP on a Lebedev vdW surface. `points_ang` (M, 3) in Å; `esp` (M,) in Hartree/e.
+
+    `n_buried` is the number of surface points dropped for lying inside a
+    neighbour's scaled vdW sphere, so M excludes them.
+    """
+
+    points_ang: np.ndarray
+    esp: np.ndarray
+    n_buried: int
+
+
+def surface_esp(pose: Pose, result, basis_set, vdw_scale: float = 1.4, n_angular: int = 110) -> SurfaceEspResult:
+    """Per-point ESP outside `pose`'s vdW surface from a converged ferric `result`.
+
+    The array-valued feature source; `SurfaceEsp` reduces it to scalars for
+    `Candidate.per_pose`. Raises `SurfaceEspUnavailableError` on a ferric build
+    without the binding rather than falling back to anything.
+    """
+    import ferric
+
+    if not hasattr(ferric, "esp_on_surface"):
+        raise SurfaceEspUnavailableError(
+            "this ferric build has no esp_on_surface (added in mgoldey/ferric#359, commit b22183b). "
+            "Install ferric at or after that commit."
+        )
+    mol = ferric.Molecule.from_xyz_string(pose.to_xyz("surface esp"))
+    points, esp, n_buried = ferric.esp_on_surface(mol, basis_set, result, vdw_scale=vdw_scale, n_angular=n_angular)
+    return SurfaceEspResult(np.asarray(points) / ANGSTROM_TO_BOHR, np.asarray(esp), int(n_buried))
+
+
+@dataclass
+class SurfaceEsp:
+    """Surface-ESP descriptor tier: one RHF per pose, then the ESP on its vdW surface.
+
+    Writes scalar summaries to `per_pose` (min and max ESP over the retained
+    surface points, and the buried-point count). The full per-point arrays are
+    kept in `surfaces[(candidate name, pose index)]` for use as ML features.
+    A descriptor, not a ranker: no systematic floor has been measured.
+    """
+
+    basis: str = "sto-3g"
+    vdw_scale: float = 1.4
+    n_angular: int = 110
+    energy_conv: float = 1e-10
+    density_conv: float = 1e-8
+    name: str = "surface_esp"
+    surfaces: dict[tuple[str, int], SurfaceEspResult] = field(default_factory=dict)
+
+    def settings(self) -> dict:
+        return {
+            "method": "RHF",
+            "basis": self.basis,
+            "vdw_scale": self.vdw_scale,
+            "n_angular": self.n_angular,
+            "energy_conv": self.energy_conv,
+            "density_conv": self.density_conv,
+            "engine": "ferric",
+        }
+
+    def produces(self) -> dict[str, str]:
+        return {"esp_surface_min": "Eh/e", "esp_surface_max": "Eh/e", "n_buried": "count"}
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity not in self.produces():
+            raise _unknown_quantity(self, quantity)
+        return None  # basis / surface-definition sensitivity not yet measured
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": "unmeasured: one RHF plus a surface ESP evaluation per pose; not calibrated",
+        }
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        for cand in candidates:
+            require_passing_poses(cand, ctx)
+        import ferric
+
+        bs = ferric.BasisSet.bundled(self.basis)
+        for cand in candidates:
+            lo, hi, buried = [], [], []
+            for i, pose in enumerate(cand.poses):
+                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"))
+                res = ferric.run_rhf(mol, bs, energy_conv=self.energy_conv, density_conv=self.density_conv)
+                if not res.converged:
+                    raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
+                s = surface_esp(pose, res, bs, self.vdw_scale, self.n_angular)
+                if s.esp.size == 0:
+                    raise RuntimeError(f"{cand.name} pose {i}: every surface point is buried")
+                self.surfaces[(cand.name, i)] = s
+                lo.append(float(s.esp.min()))
+                hi.append(float(s.esp.max()))
+                buried.append(float(s.n_buried))
+            cand.per_pose["esp_surface_min"] = lo
+            cand.per_pose["esp_surface_max"] = hi
+            cand.per_pose["n_buried"] = buried
 
 
 # ---------------------------------------------------------------- GFN2-xTB
