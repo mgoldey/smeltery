@@ -463,3 +463,86 @@ class Gfn2:
             cand.per_pose["E_gfn2"] = [
                 xtb_singlepoint(p.symbols, p.coords_ang, q, charges) * HARTREE_TO_KCAL for p in cand.poses
             ]
+
+
+# ---------------------------------------------------------------- force field
+
+
+class ForceFieldTypingError(RuntimeError):
+    """MMFF has no parameters for this molecule; no energy is fabricated."""
+
+
+@dataclass
+class ForceField:
+    """MMFF94 energies per pose (RDKit, core): at the pose as given, and after relaxing a COPY.
+
+    `E_mmff` is the MMFF energy at the incoming geometry; `E_mmff_relaxed` is the
+    energy after minimizing a copy, so their difference is the pose's strain. The
+    tier NEVER writes coordinates back: a quantum tier after it scores the pose it
+    was handed, not a force-field-relaxed one (the ferric PR #325 defect). A
+    non-converged minimization raises rather than reporting a half-relaxed energy.
+
+    A descriptor and a gate, not a ranker: MMFF energies are not comparable
+    across formulas and no systematic floor has been measured. Only `path="mmff"`
+    exists; an OpenMM path (issue #18) has no parameter source decided yet.
+    """
+
+    path: str = "mmff"
+    variant: str = "MMFF94"
+    max_iters: int = 2000
+    name: str = "forcefield"
+
+    def __post_init__(self) -> None:
+        if self.path != "mmff":
+            raise ValueError(f"unsupported force-field path {self.path!r}: only 'mmff' is implemented (issue #18)")
+        if self.variant not in ("MMFF94", "MMFF94s"):
+            raise ValueError(f"unknown MMFF variant {self.variant!r}; use 'MMFF94' or 'MMFF94s'")
+
+    def settings(self) -> dict:
+        import rdkit
+
+        return {"path": self.path, "variant": self.variant, "max_iters": self.max_iters, "rdkit": rdkit.__version__}
+
+    def produces(self) -> dict[str, str]:
+        return {"E_mmff": "kcal/mol", "E_mmff_relaxed": "kcal/mol"}
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity not in self.produces():
+            raise _unknown_quantity(self, quantity)
+        return None  # not measured
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": "unmeasured as a tier: see docs/environments.md for the one-molecule timing",
+        }
+
+    def _energies(self, cand: Candidate, pose: Pose, i: int) -> tuple[float, float]:
+        from rdkit.Chem import rdForceFieldHelpers as ffh
+
+        mol = _mol_with_h(cand.smiles)
+        if tuple(a.GetSymbol() for a in mol.GetAtoms()) != tuple(pose.symbols):
+            raise ValueError(f"{cand.name} pose {i}: atom order does not match the SMILES (with H added)")
+        conf = Chem.Conformer(mol.GetNumAtoms())
+        for k, xyz in enumerate(pose.coords_ang):
+            conf.SetAtomPosition(k, [float(v) for v in xyz])
+        mol.RemoveAllConformers()
+        mol.AddConformer(conf)  # a private copy: `pose.coords_ang` is only read
+        props = ffh.MMFFGetMoleculeProperties(mol, mmffVariant=self.variant)
+        if props is None:
+            raise ForceFieldTypingError(f"{cand.name} pose {i}: {self.variant} cannot type this molecule")
+        ff = ffh.MMFFGetMoleculeForceField(mol, props)
+        e_pose = ff.CalcEnergy()
+        if ff.Minimize(maxIts=self.max_iters) != 0:
+            raise RuntimeError(f"{cand.name} pose {i}: {self.variant} did not converge in {self.max_iters} iterations")
+        return e_pose, ff.CalcEnergy()
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        for cand in candidates:
+            require_passing_poses(cand, ctx)
+        for cand in candidates:
+            pairs = [self._energies(cand, p, i) for i, p in enumerate(cand.poses)]
+            cand.per_pose["E_mmff"] = [a for a, _ in pairs]
+            cand.per_pose["E_mmff_relaxed"] = [b for _, b in pairs]
