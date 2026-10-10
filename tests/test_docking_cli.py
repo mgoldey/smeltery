@@ -20,10 +20,14 @@ import numpy as np
 import pytest
 
 _MISSING = [m for m in ("vina", "meeko", "rdkit") if importlib.util.find_spec(m) is None]
-pytestmark = pytest.mark.skipif(
-    bool(_MISSING),
-    reason=f"needs the docking extra: pip install 'smeltery[docking]' ({', '.join(_MISSING)} missing)",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        bool(_MISSING),
+        reason=f"needs the docking extra: pip install 'smeltery[docking]' ({', '.join(_MISSING)} missing)",
+    ),
+    # the pocket file is a PDB, so charges come from pdb2pqr30; CI's docking job installs it and fails on this skip
+    pytest.mark.skipif(shutil.which("pdb2pqr30") is None, reason="pdb2pqr30 not installed (pip install pdb2pqr)"),
+]
 
 DATA = pathlib.Path(__file__).parent / "data"
 RECEPTOR = DATA / "pocket_pep5.pdbqt"

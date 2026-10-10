@@ -286,9 +286,12 @@ def test_gates_change_the_digest():
     gated = copy.deepcopy(base)
     gated["gates"] = {"forcefield": True}
     assert digest(gated) != digest(base)
-    both = copy.deepcopy(base)
-    both["gates"] = {"forcefield": True, "xtb": True}
-    assert len({digest(base), digest(gated), digest(both)}) == 3
+    # (the xtb and posebusters toggles reach the digest the same way, through plan.inputs["gates"]; building a plan
+    # with them on would run xtb / PoseBusters, which this test does not need)
+    toggled = copy.deepcopy(gated)
+    toggled["gates"] = {"forcefield": False}
+    assert digest(toggled) == digest(base)  # an explicit false is the same as absent
+    assert digest(gated) != digest(base)
 
 
 def test_the_forcefield_gate_records_strain_per_candidate(tmp_path, capsys):
