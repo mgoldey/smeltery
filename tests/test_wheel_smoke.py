@@ -75,3 +75,13 @@ def test_an_extra_the_wheel_does_not_have_and_an_unsmoked_extra_are_refused_befo
     assert "not an extra" in capsys.readouterr().err
     assert ws.check(wheel, "unsmoked", False, None, None) == 2  # in the wheel but no EXTRA_CHECKS entry
     assert "no smoke checks defined" in capsys.readouterr().err
+
+
+def test_a_heavy_extra_is_only_resolved_unless_full_is_asked_for():
+    assert ws.HEAVY_EXTRAS, "the table of heavy extras must not be empty (ml-potential pulls torch)"
+    heavy = next(iter(ws.HEAVY_EXTRAS))
+    assert ws.resolves_only(heavy, False, False) is True
+    assert ws.resolves_only(heavy, False, True) is False  # the release workflow: install it for real
+    assert ws.resolves_only(heavy, True, True) is True  # an explicit --resolve-only always wins
+    assert ws.resolves_only("docking", False, False) is False  # a light extra is always installed
+    assert set(ws.HEAVY_EXTRAS) <= set(ws.EXTRA_CHECKS), "a heavy extra still needs its import checks for --full"

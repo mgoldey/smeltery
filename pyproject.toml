@@ -58,6 +58,10 @@ rdkit = ["rdkit>=2024.3"]
 # PoseBusters validity gate (smeltery.gates.posebusters_check).
 posebusters = ["posebusters>=0.4", "rdkit>=2024.3"]
 docking = ["vina>=1.2.7", "meeko>=0.8.0", "rdkit>=2024.3", "scipy>=1.11", "gemmi"]
+# ML-potential tier (smeltery.providers.openmm_ml): ANI-2x through OpenMM-ML. Minimums are the versions
+# measured in docs/potentials.md (openmm 8.6.1, openmmml 1.8, torchani 2.9.0); torchani 2.9.0 pins torch<=2.13.
+# openmmml's FORCE_SCALE correction is verified for 1.8 only. Pulls torch (~GBs): never part of CI's extras.
+ml-potential = ["openmm>=8.6.1", "openmmml>=1.8", "torchani>=2.9.0", "torch>=2.0,<=2.13", "numpy"]
 # Third-party imports of the frozen ferric code under experiments/ (psutil: binding_energy's memory check;
 # scipy: the run_* scripts). Not core: nothing under src/smeltery imports them.
 experiments = ["psutil>=5.9", "scipy>=1.11"]
