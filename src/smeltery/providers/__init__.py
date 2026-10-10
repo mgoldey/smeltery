@@ -1,5 +1,12 @@
 """Provider interfaces: where a third party plugs in without touching the funnel."""
 
+from .boltz import (
+    BOLTZ_ATTRIBUTION,
+    BOLTZ_LICENSE_ID,
+    BOLTZ_WEIGHTS_SOURCE,
+    BoltzProvider,
+    RunOutcome,
+)
 from .potential import (
     FORCE_FD_RELATIVE_BAR,
     PocketContextError,
@@ -22,6 +29,11 @@ from .structure import (
 )
 
 __all__ = [
+    "BOLTZ_ATTRIBUTION",
+    "BOLTZ_LICENSE_ID",
+    "BOLTZ_WEIGHTS_SOURCE",
+    "BoltzProvider",
+    "RunOutcome",
     "FORCE_FD_RELATIVE_BAR",
     "PocketContextError",
     "PotentialProvider",
