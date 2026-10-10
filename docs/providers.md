@@ -39,6 +39,12 @@ error, is not callable, is of the wrong kind, or is claimed by two distributions
 reported as a `Problem` (stage `name`, `import`, `factory`, `kind` or `duplicate`) and the rest
 still load. smeltery's own reference providers are registered the same way (see `pyproject.toml`).
 
+## Licensing
+
+Every registered provider needs a licence row: add yours to the "Registered providers and their rows" table in
+[licensing.md](licensing.md), or `tests/test_licensing.py` fails. That page also lists which tools are excluded
+and why, and Chai-1 as the next structure provider (listed, not implemented).
+
 ## Conformance
 
 `smeltery.providers.conformance` checks, per kind: a declared SPDX `license_id` (the licence of
