@@ -715,3 +715,343 @@ class ForceField:
             pairs = [self._energies(cand, p, i) for i, p in enumerate(cand.poses)]
             cand.per_pose["E_mmff"] = [a for a, _ in pairs]
             cand.per_pose["E_mmff_relaxed"] = [b for _, b in pairs]
+
+
+# ---------------------------------------------------------------- QM/MM with a covalent cut
+
+#: Scaled-position link-H factor for a cut C-C single bond, 1.09 A / 1.53 A. This is ferric's own
+#: `DEFAULT_LINK_SCALE` (ferric-scf qmmm.rs); any other cut bond type must pass `link_scale` explicitly.
+CC_LINK_SCALE = 1.09 / 1.53
+
+#: Refuse when the link H lies closer than this to an embedding charge. NOT a measured boundary: it is
+#: the midpoint of the two distances in mgoldey/smeltery#19 (a `keep` scheme with a charge 0.443 A from
+#: the link H made an optimization DIVERGE; delete-host at 1.305 A converged in 6 steps). Those numbers
+#: come from the issue text. A re-run on the Gly3 fixture (tests/data/gly3_ff14sb.json, STO-3G, 40
+#: steps) did NOT reproduce a divergence at 0.433 A (keep), 0.90 A (rcd) or 1.47 A (delete-host): all
+#: three descended without a step increase; none converged in 40 steps. So the true boundary is
+#: system-dependent or unobserved here; this value is a conservative placeholder, and it is a knob.
+MIN_LINK_CHARGE_DISTANCE_ANG = (0.443 + 1.305) / 2
+
+BOUNDARY_SCHEMES = ("keep", "delete-host", "rc", "rcd")
+
+
+class QmmmUnavailableError(RuntimeError):
+    """The installed ferric lacks a QM/MM capability this tier needs; nothing is computed."""
+
+
+class QmmmBoundaryError(ValueError):
+    """A QM/MM partition was refused before any SCF: unsafe or ill-defined boundary."""
+
+
+@dataclass(frozen=True)
+class MmParameters:
+    """Explicit AMBER-form force-field data for a whole structure, in atom order.
+
+    ferric's `MmTopology` assigns no parameters of its own, so every number here is caller-supplied
+    and its source must ride along in `provenance`. Units: e, Angstrom, kcal/mol (the units of
+    `ferric.MmTopology.from_amber_units`). `bonds` is also the covalent graph the tier uses to find
+    cut bonds, and the graph ferric derives its 1-2/1-3/1-4 exclusions from: one list, so the two
+    cannot disagree.
+    """
+
+    symbols: tuple[str, ...]
+    charges: tuple[float, ...]
+    sigmas_angstrom: tuple[float, ...]
+    epsilons_kcal: tuple[float, ...]
+    bonds: tuple[tuple[int, int, float, float], ...]
+    angles: tuple[tuple[int, int, int, float, float], ...] = ()
+    torsions: tuple[tuple[int, int, int, int, int, float, float], ...] = ()
+    provenance: dict = field(default_factory=dict, compare=False)
+
+    def __post_init__(self) -> None:
+        n = len(self.symbols)
+        for name in ("charges", "sigmas_angstrom", "epsilons_kcal"):
+            if len(getattr(self, name)) != n:
+                raise ValueError(f"MmParameters.{name} has {len(getattr(self, name))} entries for {n} atoms")
+        for b in self.bonds:
+            if not (0 <= b[0] < n and 0 <= b[1] < n and b[0] != b[1]):
+                raise ValueError(f"MmParameters bond {b[:2]} is out of range for {n} atoms")
+        if not self.provenance:
+            raise ValueError("MmParameters needs a non-empty provenance: where did these numbers come from?")
+
+    @classmethod
+    def from_json(cls, path: str | Path) -> MmParameters:
+        """Read the tests/data/gly3_ff14sb.json layout (atoms[{element,q,sigma_ang,eps_kcal}], bonds, ...).
+
+        Provenance is the file's own `openmm_version`/`forcefield` keys plus the file's SHA-256.
+        """
+        import hashlib
+        import json
+
+        raw = Path(path).read_bytes()
+        d = json.loads(raw)
+        atoms = d["atoms"]
+        return cls(
+            symbols=tuple(a["element"] for a in atoms),
+            charges=tuple(float(a["q"]) for a in atoms),
+            sigmas_angstrom=tuple(float(a["sigma_ang"]) for a in atoms),
+            epsilons_kcal=tuple(float(a["eps_kcal"]) for a in atoms),
+            bonds=tuple((int(b[0]), int(b[1]), float(b[2]), float(b[3])) for b in d["bonds"]),
+            angles=tuple((int(a[0]), int(a[1]), int(a[2]), float(a[3]), float(a[4])) for a in d.get("angles", [])),
+            torsions=tuple(
+                (int(t[0]), int(t[1]), int(t[2]), int(t[3]), int(t[4]), float(t[5]), float(t[6]))
+                for t in d.get("torsions", [])
+            ),
+            provenance={
+                "file": Path(path).name,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "openmm_version": d.get("openmm_version"),
+                "forcefield": d.get("forcefield"),
+            },
+        )
+
+    def topology(self, ferric, bonds=None):
+        """A `ferric.MmTopology`. `bonds` overrides the bond list (tests use it to omit a cut bond)."""
+        return ferric.MmTopology.from_amber_units(
+            list(self.charges),
+            list(self.sigmas_angstrom),
+            list(self.epsilons_kcal),
+            [tuple(b) for b in (self.bonds if bonds is None else bonds)],
+            [tuple(a) for a in self.angles],
+            [tuple(t) for t in self.torsions],
+        )
+
+
+def _qmmm_api_missing(ferric) -> list[str]:
+    missing = [n for n in ("QmmmSystem", "MmTopology", "run_qmmm") if not hasattr(ferric, n)]
+    if missing:
+        return missing
+    return [
+        f"QmmmSystem.{m}"
+        for m in ("with_link_atoms", "with_boundary_charges", "min_link_to_charge_distance", "qm_molecule")
+        if not hasattr(ferric.QmmmSystem, m)
+    ]
+
+
+_CUT_LJ_PROBE: dict[int, tuple[bool, float]] = {}
+
+
+def cut_lj_exclusions_probe(ferric=None) -> tuple[bool, float]:
+    """Does this ferric exclude 1-2/1-3 QM-MM Lennard-Jones pairs across a bonded cut? (ferric #319)
+
+    Behavioural, not version-based: an H2 QM region with one MM atom bonded to it, all sigma 3.4 A
+    (carbon-like). Both QM-MM pairs are 1-2 or 1-3 through the bond list, so a ferric that excludes
+    them reports LJ = 0 exactly; one that does not reports thousands of kcal/mol. Returns
+    `(supported, lj_kcal_per_mol)`. Cached per module object. Costs one two-electron SCF.
+    """
+    if ferric is None:
+        import ferric as ferric_mod
+
+        ferric = ferric_mod
+    key = id(ferric)
+    if key in _CUT_LJ_PROBE:
+        return _CUT_LJ_PROBE[key]
+    xyz = [(0.0, 0.0, 0.0), (0.0, 0.0, 0.74), (0.0, 0.0, 2.24)]
+    system = ferric.QmmmSystem(["H", "H", "H"], xyz, [0.0, 0.0, 0.0], qm_indices=[0, 1], charge=0)
+    top = ferric.MmTopology.from_amber_units(
+        [0.0] * 3, [3.4] * 3, [0.1] * 3, [(0, 1, 300.0, 0.74), (1, 2, 300.0, 1.5)], [], []
+    )
+    res = ferric.run_qmmm(system, "sto-3g", mm_topology=top)
+    lj = float(res.mm_energy["lj"]) * HARTREE_TO_KCAL
+    out = (abs(lj) < 1e-9, lj)
+    _CUT_LJ_PROBE[key] = out
+    return out
+
+
+@dataclass
+class Qmmm:
+    """Single-point QM/MM (RHF in a fixed-charge field + AMBER-form MM) with a real covalent cut.
+
+    The candidate's poses are conformers of the WHOLE structure (ligand and pocket residues, in the
+    atom order of `params`); `qm_indices` picks the QM region by explicit atom index. Every bond in
+    `params.bonds` with exactly one QM end is a cut bond. The tier never cuts silently:
+
+    * each cut bond is capped with a scaled-position link H (`link_scale`; default C-C only, any other
+      cut bond type needs an explicit scale), and the MM host's charge is treated by `boundary_scheme`
+      (default "delete-host", Z1);
+    * the partition is refused BEFORE any SCF if the link H lies within
+      `min_link_charge_distance_ang` of an embedding charge, if the QM region has an odd electron
+      count, or if the installed ferric lacks the link-atom API or does not exclude 1-2/1-3 (and scale
+      1-4) QM-MM Lennard-Jones across the cut (ferric #319, fixed by ferric PR #336);
+    * `E_mm` is the force field's MM-MM energy plus QM-MM Lennard-Jones (QM-MM Coulomb is in the
+      embedding, so it is in `E_qm_embedded`).
+
+    Writes `E_qmmm = E_qm_embedded + E_mm`, all kcal/mol, at the geometry given; it never writes
+    coordinates back. It is a single point: no geometry optimization. It is a total energy of a
+    partitioned system and depends on the partition, so no systematic floor is claimed.
+    `diagnostics[(candidate name, pose index)]` holds the boundary measurements (min link-charge
+    distance in Angstrom, cut bonds, MM components).
+    """
+
+    params: MmParameters
+    qm_indices: tuple[int, ...]
+    qm_charge: int
+    basis: str = "sto-3g"
+    boundary_scheme: str = "delete-host"
+    link_scale: float | None = None
+    min_link_charge_distance_ang: float = MIN_LINK_CHARGE_DISTANCE_ANG
+    energy_conv: float = 1e-10
+    density_conv: float = 1e-8
+    name: str = "qmmm"
+    diagnostics: dict[tuple[str, int], dict] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        n = len(self.params.symbols)
+        qm = tuple(int(i) for i in self.qm_indices)
+        if not qm or len(set(qm)) != len(qm) or any(not 0 <= i < n for i in qm):
+            raise ValueError(f"qm_indices must be unique atom indices in [0, {n}); got {self.qm_indices!r}")
+        self.qm_indices = qm
+        if self.boundary_scheme not in BOUNDARY_SCHEMES:
+            raise ValueError(f"unknown boundary_scheme {self.boundary_scheme!r}; use one of {BOUNDARY_SCHEMES}")
+        if self.link_scale is not None and not 0.0 < self.link_scale < 1.0:
+            raise ValueError(f"link_scale must be in (0, 1), got {self.link_scale}")
+
+    # -- partition ---------------------------------------------------------------------------
+
+    def cut_bonds(self) -> list[tuple[int, int]]:
+        """Bonds with exactly one QM end, as (qm atom, mm atom)."""
+        qm = set(self.qm_indices)
+        return [(b[0], b[1]) if b[0] in qm else (b[1], b[0]) for b in self.params.bonds if (b[0] in qm) != (b[1] in qm)]
+
+    def resolved_link_scale(self) -> float | None:
+        """The link scale used: None with no cut; `link_scale` if given; CC_LINK_SCALE for all-C-C cuts; else refuse."""
+        cuts = self.cut_bonds()
+        if not cuts:
+            return None
+        if self.link_scale is not None:
+            return self.link_scale
+        syms = self.params.symbols
+        odd = [(a, b) for a, b in cuts if (syms[a], syms[b]) != ("C", "C")]
+        if odd:
+            raise QmmmBoundaryError(
+                f"cut bond(s) {[(f'{syms[a]}{a}', f'{syms[b]}{b}') for a, b in odd]} are not C-C: the default link "
+                f"scale ({CC_LINK_SCALE:.4f} = 1.09/1.53) is for a cut C-C bond only; pass link_scale explicitly"
+            )
+        return CC_LINK_SCALE
+
+    def _require_engine(self, ferric) -> None:
+        missing = _qmmm_api_missing(ferric)
+        if missing:
+            raise QmmmUnavailableError(
+                f"this ferric build lacks {missing} (QM/MM link atoms, boundary charges and MmTopology are in "
+                "mgoldey/ferric PR #1; the cut-pair LJ exclusions are ferric PR #336, fixing issue #319, in "
+                "v0.1.0rc7 and later). Install a ferric at or after v0.1.0rc7."
+            )
+        if self.cut_bonds():
+            ok, lj = cut_lj_exclusions_probe(ferric)
+            if not ok:
+                raise QmmmUnavailableError(
+                    "refusing to cut a covalent bond: this ferric applies QM-MM Lennard-Jones across the bonded cut "
+                    f"pair without 1-2/1-3 exclusion (probe LJ = {lj:.1f} kcal/mol, expected 0). That is "
+                    "mgoldey/ferric#319, fixed by ferric PR #336 (commit 0251d40, in v0.1.0rc7). Install a ferric "
+                    "at or after v0.1.0rc7."
+                )
+
+    def _system(self, ferric, pose: Pose, label: str):
+        p = self.params
+        if tuple(pose.symbols) != p.symbols:
+            raise ValueError(f"{label}: pose atoms do not match the MmParameters atom order")
+        xyz = [tuple(float(v) for v in row) for row in pose.coords_ang]  # copies; the pose is only read
+        sysm = ferric.QmmmSystem(
+            list(p.symbols), xyz, list(p.charges), qm_indices=list(self.qm_indices), charge=self.qm_charge
+        )
+        scale = self.resolved_link_scale()
+        bonds = [(b[0], b[1]) for b in p.bonds]
+        if scale is not None:
+            sysm = sysm.with_link_atoms(bonds, scale)
+        sysm = sysm.with_boundary_charges(bonds, self.boundary_scheme)
+        if scale is not None:
+            d = sysm.min_link_to_charge_distance()  # Angstrom (ferric.pyi); None when there is no charge
+            if d is not None and d < self.min_link_charge_distance_ang:
+                raise QmmmBoundaryError(
+                    f"{label}: link H is {d:.3f} A from the nearest embedding charge, under the "
+                    f"{self.min_link_charge_distance_ang:.3f} A threshold (boundary scheme {self.boundary_scheme!r}); "
+                    "an unscreened charge this close over-polarizes the QM density (smeltery#19). Move the cut, "
+                    "or use a boundary scheme that removes the nearby charge"
+                )
+        nelec = sysm.qm_molecule().nelec()
+        if nelec % 2:
+            raise QmmmBoundaryError(
+                f"{label}: QM region plus link atoms has {nelec} electrons; RHF needs an even count"
+            )
+        return sysm
+
+    # -- Tier protocol -------------------------------------------------------------------------
+
+    def settings(self) -> dict:
+        cuts = self.cut_bonds()
+        return {
+            "method": "RHF",
+            "basis": self.basis,
+            "energy_conv": self.energy_conv,
+            "density_conv": self.density_conv,
+            "engine": "ferric",
+            "qm_indices": list(self.qm_indices),
+            "qm_charge": self.qm_charge,
+            "cut_bonds": cuts,
+            "boundary_scheme": self.boundary_scheme,
+            "boundary_charge_treatment": {
+                "keep": "none (host charge left in place)",
+                "delete-host": "Z1: host (M1) charge zeroed",
+                "rc": "RC: host charge moved to M1-M2 bond midpoints",
+                "rcd": "RCD: RC with the group dipole preserved",
+            }[self.boundary_scheme],
+            "link_atom": "scaled-position H" if cuts else None,
+            "link_scale": self.link_scale if self.link_scale is not None else (CC_LINK_SCALE if cuts else None),
+            "min_link_charge_distance_ang": self.min_link_charge_distance_ang,
+            "mm_force_field": dict(self.params.provenance),
+            "mm_terms": "MM-MM bonded, LJ and Coulomb plus QM-MM LJ (1-2/1-3 excluded, 1-4 scaled by the topology)",
+        }
+
+    def produces(self) -> dict[str, str]:
+        return {"E_qmmm": "kcal/mol", "E_qm_embedded": "kcal/mol", "E_mm": "kcal/mol"}
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity not in self.produces():
+            raise _unknown_quantity(self, quantity)
+        return None  # boundary / basis / force-field sensitivity not yet measured
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": "unmeasured: one embedded RHF per pose; the RHF calibration does not cover QM/MM",
+        }
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        for cand in candidates:
+            require_passing_poses(cand, ctx)
+        import ferric
+
+        self._require_engine(ferric)
+        top = self.params.topology(ferric)
+        # Build and gate EVERY partition before the first SCF, so a refusal costs no compute.
+        systems = [
+            [self._system(ferric, pose, f"{cand.name} pose {i}") for i, pose in enumerate(cand.poses)]
+            for cand in candidates
+        ]
+        for cand, per_cand in zip(candidates, systems, strict=True):
+            e_tot, e_qm, e_mm = [], [], []
+            for i, sysm in enumerate(per_cand):
+                res = ferric.run_qmmm(
+                    sysm,
+                    self.basis,
+                    energy_conv=self.energy_conv,
+                    density_conv=self.density_conv,
+                    mm_topology=top,
+                )
+                if not res.converged:
+                    raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
+                mm = {k: float(v) * HARTREE_TO_KCAL for k, v in res.mm_energy.items()}
+                e_qm.append(float(res.energy) * HARTREE_TO_KCAL)
+                e_mm.append(mm["total"])
+                e_tot.append(e_qm[-1] + e_mm[-1])
+                self.diagnostics[(cand.name, i)] = {
+                    "min_link_charge_distance_ang": sysm.min_link_to_charge_distance(),
+                    "cut_bonds": self.cut_bonds(),
+                    "mm_components_kcal": mm,
+                }
+            cand.per_pose["E_qmmm"] = e_tot
+            cand.per_pose["E_qm_embedded"] = e_qm
+            cand.per_pose["E_mm"] = e_mm
