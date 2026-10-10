@@ -40,7 +40,14 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "from smeltery.docking import VinaProvider, Docking, Box",
     ],
     "experiments": ["import psutil, scipy"],
+    "ml-potential": [
+        "import openmm, openmmml, torch, torchani",
+        "from smeltery.providers.openmm_ml import OpenMMMLAni2x",
+    ],
 }
+#: extras too heavy to install on every run: `check` only proves that pip can RESOLVE them unless `--full` is given
+#: (the release workflow gives it). The reason is stated so the next person can judge whether it still holds.
+HEAVY_EXTRAS = {"ml-potential": "pulls torch and torchani (several GB)"}
 #: extras that exist only for development; never part of a user's install.
 SKIP_EXTRAS = {"dev"}
 
@@ -74,7 +81,14 @@ def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, text=True, **kw)
 
 
-def check(wheel: Path, extra: str, resolve_only: bool, example: Path | None, config: Path | None) -> int:
+def resolves_only(extra: str, resolve_only: bool, full: bool) -> bool:
+    """Whether `check` should only resolve the extra: asked for, or a heavy extra without `--full`."""
+    return resolve_only or (extra in HEAVY_EXTRAS and not full)
+
+
+def check(
+    wheel: Path, extra: str, resolve_only: bool, example: Path | None, config: Path | None, full: bool = False
+) -> int:
     if extra != "none" and extra not in wheel_extras(wheel):
         print(f"error: {extra!r} is not an extra of {wheel.name} (has {wheel_extras(wheel)})", file=sys.stderr)
         return 2
@@ -89,9 +103,14 @@ def check(wheel: Path, extra: str, resolve_only: bool, example: Path | None, con
         _run([sys.executable, "-m", "venv", str(venv)])
         py, pip = venv / "bin" / "python", venv / "bin" / "pip"
         _run([str(pip), "install", "--quiet", "--upgrade", "pip"])
-        if resolve_only:
+        if resolves_only(extra, resolve_only, full):
             _run([str(pip), "install", "--dry-run", "--quiet", spec])
-            print(f"resolve-only: {extra!r} resolves; NOT installed or imported")
+            why = (
+                f" ({HEAVY_EXTRAS[extra]}; pass --full to install it)"
+                if extra in HEAVY_EXTRAS and not resolve_only
+                else ""
+            )
+            print(f"resolve-only: {extra!r} resolves; NOT installed or imported{why}")
             return 0
         _run([str(pip), "install", "--quiet", spec])
         _run([str(pip), "check"])
@@ -145,13 +164,14 @@ def main(argv: list[str] | None = None) -> int:
     ck.add_argument("wheel", type=Path)
     ck.add_argument("--extra", required=True, help="an extra name, or 'none'")
     ck.add_argument("--resolve-only", action="store_true")
+    ck.add_argument("--full", action="store_true", help="install heavy extras too instead of only resolving them")
     ck.add_argument("--example", type=Path, help="an example script to run from the installed wheel")
     ck.add_argument("--config", type=Path, help="a config for `smeltery run --plan` via the installed console script")
     args = ap.parse_args(argv)
     if args.cmd == "list-extras":
         print(json.dumps(["none", *wheel_extras(args.wheel)]))
         return 0
-    return check(args.wheel, args.extra, args.resolve_only, args.example, args.config)
+    return check(args.wheel, args.extra, args.resolve_only, args.example, args.config, args.full)
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ jobs:
         run: |
           for extra in $(python scripts/wheel_smoke.py list-extras dist/*.whl | python -c "import json,sys; print(*json.load(sys.stdin))"); do
             echo "::group::extra $extra"
-            python scripts/wheel_smoke.py check dist/*.whl --extra "$extra" --config examples/mwe_benzoic.toml
+            python scripts/wheel_smoke.py check dist/*.whl --extra "$extra" --config examples/mwe_benzoic.toml --full
             echo "::endgroup::"
           done
           python scripts/wheel_smoke.py check dist/*.whl --extra none --example examples/mwe_benzoic.py
