@@ -112,7 +112,7 @@ flexible ligand and, optionally, flexible receptor sidechains
 (`prepare_target(pdb, workdir, flex_residues=["A:45"])` also picks the box from the
 co-crystal ligand or pocket residues; `ensemble_score` pools a pose ensemble's
 scores). Scores are an empirical ranking heuristic, not binding free energies.
-A force-field tier and real receptor pockets are next.
+A force-field tier (MMFF in core; OpenMM + OpenFF in an optional conda environment, see docs/environments.md) exists; real receptor pockets are next.
 
 ## License
 

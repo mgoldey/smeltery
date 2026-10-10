@@ -74,9 +74,9 @@ def test_a_pose_whose_atom_order_does_not_match_the_smiles_is_refused():
         ForceField().run([cand], {})
 
 
-def test_only_the_mmff_path_exists_and_the_gate_is_honoured():
-    with pytest.raises(ValueError, match="only 'mmff' is implemented"):
-        ForceField(path="openmm")
+def test_unknown_paths_and_variants_are_refused_and_the_gate_is_honoured():
+    with pytest.raises(ValueError, match="unsupported force-field path"):
+        ForceField(path="amber")
     with pytest.raises(ValueError, match="unknown MMFF variant"):
         ForceField(variant="UFF")
     with pytest.raises(PoseGateError, match="no pose report"):

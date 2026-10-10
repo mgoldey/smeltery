@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import pathlib
+import shutil
 
 import numpy as np
 import pytest
@@ -27,7 +28,39 @@ pytestmark = [
 DATA = pathlib.Path(__file__).parent / "data"
 
 
-def test_quantum_tier_scores_the_docked_pose_not_a_force_field_relaxed_one():
+def _openmm_stack_missing() -> str:
+    missing = []
+    for m in ("openmm", "openff.toolkit", "openmmforcefields"):
+        try:
+            if importlib.util.find_spec(m) is None:
+                missing.append(m)
+        except (ImportError, ValueError):
+            missing.append(m)
+    if not missing and shutil.which("sqm") is None:
+        missing.append("sqm (AmberTools)")
+    return ", ".join(missing)
+
+
+_OPENMM_MISSING = _openmm_stack_missing()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "mmff",
+        pytest.param(
+            "openmm",
+            marks=pytest.mark.skipif(
+                bool(_OPENMM_MISSING),
+                reason=(
+                    f"needs the OpenMM/OpenFF environment ({_OPENMM_MISSING} missing): "
+                    "`micromamba create -n smeltery-ff -f environment-openff.yml` (docs/environments.md)"
+                ),
+            ),
+        ),
+    ],
+)
+def test_quantum_tier_scores_the_docked_pose_not_a_force_field_relaxed_one(path):
     from smeltery import Candidate, PointCharge
     from smeltery.docking import Box, Docking, VinaProvider
     from smeltery.tiers import FieldInteraction, ForceField
@@ -41,7 +74,7 @@ def test_quantum_tier_scores_the_docked_pose_not_a_force_field_relaxed_one():
     ctx = {"field": field}
     docked = copy.deepcopy(cand)
 
-    ForceField().run([cand], ctx)
+    ForceField(path=path).run([cand], ctx)
     for before, after in zip(docked.poses, cand.poses, strict=True):
         assert np.array_equal(before.coords_ang, after.coords_ang)  # the FF stage did not move the pose
 
