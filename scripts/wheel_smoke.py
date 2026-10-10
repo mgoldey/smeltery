@@ -34,6 +34,7 @@ EXTRA_CHECKS: dict[str, list[str]] = {
     "none": [],
     "gemmi": ["import gemmi"],
     "rdkit": ["import rdkit"],
+    "pocket-charges": ["import openmm"],
     "posebusters": ["import posebusters, rdkit", "from smeltery.gates import posebusters_check"],
     "docking": [
         "import vina, meeko, rdkit, scipy, gemmi",

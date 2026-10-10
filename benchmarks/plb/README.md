@@ -139,6 +139,12 @@ floor well under 4 kcal/mol or a ddE several times larger than ddG; this data ca
   difference of two is UNVERIFIED. Either way the order of magnitude, about 0.5-1 kcal/mol, is far below smeltery's
   4.07, so the limit on this benchmark is smeltery's noise, not the experiment's. Ki only; no IC50 figure is claimed.
 
+## First measurement against smeltery
+
+`docs/benchmarks/plb_plan.md` is the plan written before the run and `docs/benchmarks/plb_cdk2.md` the report (issues #27 and
+#29 part 1); results are in `benchmarks/plb/results/`. cdk2 only. The power table above says no pair of this series is resolvable at
+the noise floor, so the measurement is of trends over ligands, not of pairwise ranking.
+
 ## Loader and tests
 
 `smeltery.benchmark.load_benchmark()` returns typed dataclasses and raises `BenchmarkError` on a missing or blank
