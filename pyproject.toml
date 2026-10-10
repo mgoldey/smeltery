@@ -33,6 +33,7 @@ smeltery = "smeltery.cli:main"
 [project.entry-points."smeltery.providers"]
 "structure:pdb" = "smeltery.providers.structure:PdbProvider"
 "structure:afdb" = "smeltery.providers.structure:AfdbProvider"
+"structure:boltz2" = "smeltery.providers.boltz:BoltzProvider"
 "property:rdkit-alerts" = "smeltery.properties:RdkitAlertProvider"
 "scoring:vina-score" = "smeltery.scoring:VinaScoreProvider"
 "docking:vina" = "smeltery.docking.provider:VinaProvider"

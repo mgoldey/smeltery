@@ -274,3 +274,29 @@ def test_live_boltz2_trp_cage():
 def test_documented_layout_also_accepted(monkeypatch):
     monkeypatch.setitem(globals(), "LAYOUT", ".")
     assert BoltzProvider(make_runner(pdb=_synth_pdb(20))).predict(SEQ) is not None
+
+
+# --- the registry's conformance suite (#25), on the committed real output --------------------------
+
+
+@needs_fixture
+def test_boltz_provider_passes_the_conformance_suite():
+    from smeltery.providers.conformance import StructureCase, check_names, run_check
+
+    def anchor(res):
+        assert res.text == (DATA / "query_model_0.pdb").read_text()
+
+    case = StructureCase(
+        lambda: BoltzProvider(_replay_runner, boltz_version="2.2.1"), SEQ, "12345", "PREDICTED", anchor
+    )
+    for check in check_names("structure"):
+        run_check("structure", check, case)
+
+
+def test_boltz_is_registered_as_a_structure_provider_entry_point():
+    import tomllib
+
+    pyproject = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())
+    eps = pyproject["project"]["entry-points"]["smeltery.providers"]
+    assert eps["structure:boltz2"] == "smeltery.providers.boltz:BoltzProvider"
+    assert "boltz" not in str(pyproject["project"]["optional-dependencies"])  # gemmi pin conflict: see docs/boltz.md

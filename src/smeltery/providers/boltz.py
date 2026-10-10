@@ -114,6 +114,12 @@ class BoltzProvider:
     """
 
     name = "boltz2"
+    license_id = "MIT OR Apache-2.0"  # this code: smeltery's own (pyproject.toml)
+    #: the licence of what the answers derive from: the Boltz-2 weights (MIT, see docs/boltz.md); the Boltz code
+    #: that runs them is MIT too and is listed as an engine.
+    data_license_id = BOLTZ_LICENSE_ID
+    engine_licenses = {"boltz": "MIT"}
+    requires_network = False  # unless use_msa_server=True (the first run also downloads weights)
 
     def __init__(
         self,
