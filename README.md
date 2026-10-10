@@ -74,7 +74,13 @@ converged) exits 3 and names the stage. The config must state `[cut] floor`
 explicitly while `FieldInteraction`'s systematic floor is unmeasured, and the record
 says so. Measured 2026-10-10 on one pinned core (`taskset -c`), box load about 12:
 6 min 55 s wall, 403 s CPU, 181 MB peak (ferric `b22183b`). This is a slice of the
-campaign path: docking, PoseBusters, force field and xtb stages are not wired in yet.
+campaign path: structure and prep are not wired in.
+
+With a `[docking]` section the parent is docked with Vina and the analogues are paired to its docked poses
+(`examples/mwe_docking.toml`, needs the `docking` and `posebusters` extras); `[gates]` runs PoseBusters, an MMFF
+energy and strain record, and an xtb energy record before the SCFs. Analogue poses built by pairing fail PoseBusters
+at the junction between the copied core and the new substituent; `[poses] relax_unmapped = true` relaxes only the
+substituent and leaves every core coordinate exactly the parent's.
 
 ## Correctness checks
 
