@@ -25,6 +25,9 @@ dependencies = [
     "numpy>=1.26",
 ]
 
+[project.scripts]
+smeltery = "smeltery.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/mgoldey/smeltery"
 Repository = "https://github.com/mgoldey/smeltery"
