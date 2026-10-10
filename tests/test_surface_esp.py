@@ -31,6 +31,15 @@ RUST_FIRST = -2.250396583511804e-2
 RUST_LAST = 3.530571792071813e-2
 
 
+@pytest.fixture
+def binding():
+    """Skip where the installed ferric predates the binding (the PyPI wheel CI installs, until a release has it)."""
+    import ferric
+
+    if not hasattr(ferric, "esp_on_surface"):
+        pytest.skip("this ferric has no esp_on_surface (needs mgoldey/ferric#359, commit b22183b)")
+
+
 def _scf(pose, basis):
     import ferric
 
@@ -40,6 +49,7 @@ def _scf(pose, basis):
 
 
 @pytest.mark.needs_ferric
+@pytest.mark.usefixtures("binding")
 def test_surface_esp_reproduces_the_rust_reference_to_1e_10():
     rhf, bs = _scf(WATER, "cc-pvdz")
     s = surface_esp(WATER, rhf, bs, vdw_scale=1.4, n_angular=110)
@@ -53,6 +63,7 @@ def test_surface_esp_reproduces_the_rust_reference_to_1e_10():
 
 
 @pytest.mark.needs_ferric
+@pytest.mark.usefixtures("binding")
 def test_buried_points_are_dropped_for_a_polyatomic_and_none_for_an_isolated_atom():
     rhf, bs = _scf(WATER, "sto-3g")
     s = surface_esp(WATER, rhf, bs)
@@ -66,6 +77,7 @@ def test_buried_points_are_dropped_for_a_polyatomic_and_none_for_an_isolated_ato
 
 
 @pytest.mark.needs_ferric
+@pytest.mark.usefixtures("binding")
 def test_surface_points_are_returned_in_angstrom():
     import ferric
 
@@ -78,6 +90,7 @@ def test_surface_points_are_returned_in_angstrom():
 
 
 @pytest.mark.needs_ferric
+@pytest.mark.usefixtures("binding")
 def test_tier_writes_only_declared_scalars_and_keeps_the_arrays():
     tier = SurfaceEsp(basis="sto-3g")
     cand = Candidate("water", "O", [WATER, WATER])
