@@ -28,6 +28,11 @@ class VinaProvider:
     """
 
     name = "vina"
+    license_id = "MIT OR Apache-2.0"  # this code: smeltery's own (pyproject.toml)
+    # Engines (fetched 2026-10-10): AutoDock Vina is Apache-2.0 (https://github.com/ccsb-scripps/AutoDock-Vina);
+    # Meeko is LGPL-2.1 per its repository page (https://github.com/forlilab/Meeko). Whether that is SPDX
+    # LGPL-2.1-only or -or-later was NOT checked: UNVERIFIED, so the unsuffixed name is kept.
+    engine_licenses = {"AutoDock Vina": "Apache-2.0", "Meeko": "LGPL-2.1 (SPDX -only/-or-later UNVERIFIED)"}
 
     def __init__(
         self,
