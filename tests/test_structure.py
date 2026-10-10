@@ -8,7 +8,7 @@ constant of their own.
 
 Ported from ferric's `tools/structure/tests` (pinned 8637a5d), with two changes:
 `charge` and `multiplicity` are now required arguments, so each call states
-them; and the Rust-table cross-check needs `FERRIC_SRC`.
+them; and the Rust-table cross-check, which read a ferric checkout, is now a pinned table.
 
 Tests that need the compiled `ferric` extension skip cleanly when it is absent;
 the format layer itself is tested through `read_structure`, which never imports
@@ -18,7 +18,6 @@ it, so a missing extension does not silently delete coverage of the parsers.
 from __future__ import annotations
 
 import math
-import os
 import textwrap
 
 import pytest
@@ -391,43 +390,20 @@ def test_an_atom_name_with_no_letters_is_refused_not_guessed():
             element(bad)
 
 
-def test_python_and_rust_element_heuristics_agree():
-    """The two implementations must not drift.
+def test_two_letter_element_table_is_pinned_and_carbon_wins_the_ambiguous_names():
+    """Pin the table. ferric's `element_from_pqr_name` makes the same call for the `[qmmm]` path.
 
-    `crates/ferric-cli/src/config.rs::element_from_pqr_name` does the same job
-    for the `[qmmm]` TOML path. If they disagree, the SAME PQR gives different
-    nuclear charges from the CLI and from Python. This reads the Rust table out
-    of the source rather than duplicating it, so adding a symbol on one side
-    without the other fails here.
+    The table below equals the Rust one at ferric b22183b
+    (`crates/ferric-cli/src/config.rs`, `CA` excluded in the loop body), compared by
+    hand on 2026-10-10. smeltery does not read a ferric checkout (issue #13), so this
+    test cannot see drift on the Rust side: if ferric changes its table, ferric's own
+    tests must catch it, and this pin is updated deliberately alongside.
     """
-    import re
-    from pathlib import Path
-
     from smeltery.structure import _TWO_LETTER_OK
 
-    # The Rust table lives in ferric's source tree, which smeltery does not
-    # carry. Point FERRIC_SRC at a ferric checkout to run this cross-check.
-    root = os.environ.get("FERRIC_SRC")
-    if not root:
-        pytest.skip("set FERRIC_SRC to a ferric checkout to cross-check the Rust table")
-    src = Path(root) / "crates/ferric-cli/src/config.rs"
-    if not src.exists():  # pragma: no cover - source checkout only
-        pytest.skip("ferric-cli source not present")
-    text = src.read_text()
-    if "fn element_from_pqr_name" not in text:
-        pytest.skip("Rust element_from_pqr_name not on this branch yet")
-    body = text.split("fn element_from_pqr_name", 1)[1]
-    table = re.search(r"for two in \[([^\]]*)\]", body)
-    assert table, "could not find the Rust two-letter table"
-    rust = {s.strip().strip('"') for s in table.group(1).split(",") if s.strip()}
-    # Rust excludes CA inside the loop body rather than from the list.
-    if 'two != "CA"' in body:
-        rust.discard("CA")
-    assert "CA" not in rust and "CA" not in _TWO_LETTER_OK, "CA must resolve to carbon on BOTH sides"
-    missing_in_rust = _TWO_LETTER_OK - rust
-    missing_in_python = rust - _TWO_LETTER_OK
-    assert not missing_in_rust, f"Python accepts {missing_in_rust}, Rust does not"
-    assert not missing_in_python, f"Rust accepts {missing_in_python}, Python does not"
+    assert _TWO_LETTER_OK == frozenset({"CL", "BR", "ZN", "FE", "MG", "MN", "NA", "CU", "SE"})
+    # alpha carbon (CA), carbonyl carbon (CO) and an amide nitrogen (NI) must not read as calcium/cobalt/nickel
+    assert {"CA", "CO", "NI"}.isdisjoint(_TWO_LETTER_OK)
 
 
 def test_a_pqr_of_ions_reads_the_right_elements_end_to_end():
