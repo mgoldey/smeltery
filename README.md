@@ -58,6 +58,24 @@ cut (keep=1, z=2): survivors=['4-F'] | groups: [['4-F'], ['4-Cl']]
 Electron-withdrawing substituents weaken binding to the cationic pocket, and
 Cl > F follows their Hammett σp values.
 
+### The same run from a config
+
+`smeltery run` drives the same stages from a TOML file (`examples/mwe_benzoic.toml`):
+
+```bash
+uv run smeltery run examples/mwe_benzoic.toml --plan   # poses, pocket, parity, digest; no SCF
+OPENBLAS_NUM_THREADS=1 uv run smeltery run examples/mwe_benzoic.toml
+```
+
+It prints the same numbers as the script above, lists tie groups, prints `UNRANKED`
+(exit 0) when nothing can be ordered, and writes a run record under `out/`. A bad
+config exits 2; a failed stage (no common core, odd electron count, SCF not
+converged) exits 3 and names the stage. The config must state `[cut] floor`
+explicitly while `FieldInteraction`'s systematic floor is unmeasured, and the record
+says so. Measured 2026-10-10 on one pinned core (`taskset -c`), box load about 12:
+6 min 55 s wall, 403 s CPU, 181 MB peak (ferric `b22183b`). This is a slice of the
+campaign path: docking, PoseBusters, force field and xtb stages are not wired in yet.
+
 ## Correctness checks
 
 `tests/test_anchors.py` checks the trivial limits, where the machinery must do

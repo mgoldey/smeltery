@@ -143,7 +143,10 @@ class PairedPoses:
     scaffold_maps: dict[str, list[tuple[int, int]]] = field(default_factory=dict, repr=False, compare=False)
 
     def settings(self) -> dict:
-        return {k: getattr(self, k) for k in ("n_poses", "seed", "jitter_deg", "jitter_ang", "min_core_heavy")}
+        return {
+            k: getattr(self, k)
+            for k in ("n_poses", "seed", "jitter_deg", "jitter_ang", "min_core_heavy", "mcs_timeout_s")
+        }
 
     def produces(self) -> dict[str, str]:
         return {}  # writes poses, no per_pose quantity
