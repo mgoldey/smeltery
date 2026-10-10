@@ -1,0 +1,47 @@
+{
+  "machine": "x86_64, python 3.11.14, rdkit 2026.03.6, one thread",
+  "load_average_1m_at_start": 41.3515625,
+  "repeats": 5,
+  "statistic": "median",
+  "tiers": {
+    "paired_poses": {
+      "seconds": 0.08622473500145134,
+      "all_repeats": [
+        0.1481082139944192,
+        0.08525651700620074,
+        0.08724216200062074,
+        0.08622473500145134,
+        0.08594201999949291
+      ],
+      "unit_of_work": "PairedPoses(n_poses=6).run: parent ensemble of 6 poses plus 6 paired analogue poses",
+      "system": "benzoic acid (15 atoms) paired with 4-fluorobenzoic acid (15 atoms)",
+      "command": "PairedPoses(n_poses=6).run([parent, analogue], {'parent': parent})"
+    },
+    "gfn2": {
+      "vacuum": {
+        "seconds": 0.1125576850026846,
+        "all_repeats": [
+          0.05088043899741024,
+          0.1150762350007426,
+          0.3294824629992945,
+          0.04628554100054316,
+          0.1125576850026846
+        ]
+      },
+      "two_point_charges": {
+        "seconds": 0.08871963000274263,
+        "all_repeats": [
+          0.10486825100088026,
+          0.07701311899290886,
+          0.07555585500085726,
+          0.08871963000274263,
+          0.23181098399800248
+        ]
+      },
+      "unit_of_work": "Gfn2().run on one pose: one xtb GFN2 single point in a subprocess",
+      "system": "benzoic acid, 15 atoms, 1 pose",
+      "xtb_version": "6.7.1",
+      "command": "Gfn2().run([cand], {'field': FIELD})"
+    }
+  }
+}

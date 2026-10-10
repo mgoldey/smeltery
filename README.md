@@ -45,6 +45,11 @@ Structure, scoring, docking, property and potential providers plug in through th
 `smeltery.providers` entry-point group and are checked by a shared conformance suite;
 see [docs/providers.md](docs/providers.md).
 
+## Tiers
+
+Each tier has a page stating what it computes, its settings, its measured cost, its gates, its
+systematic floor and what it is not licensed to claim: [docs/tiers/index.md](docs/tiers/index.md).
+
 ## Example
 
 `examples/mwe_benzoic.py` places benzoic acid and two para-substituted
