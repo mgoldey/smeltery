@@ -21,8 +21,8 @@ wheels = [
 
 [[package]]
 name = "ferric"
-version = "0.1.0"
-source = { git = "https://github.com/mgoldey/ferric?rev=8637a5d50b8f0a5ea1953159ac5c775d9e2009ff#8637a5d50b8f0a5ea1953159ac5c775d9e2009ff" }
+version = "0.1.0.dev0"
+source = { git = "https://github.com/mgoldey/ferric?rev=b22183b9dbed226e1d2acc5cb6e5194c973b023b#b22183b9dbed226e1d2acc5cb6e5194c973b023b" }
 dependencies = [
     { name = "gemmi" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -350,7 +350,7 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -386,7 +386,7 @@ resolution-markers = [
     "python_full_version >= '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/74/66de6258867beb2ef08f35f9f2ac017a52cacd5081714d239ff1a442d458/scipy-1.18.1.tar.gz", hash = "sha256:52c4b7422442aba924d03ad4019852b08a92e64ea187b933135687bfe2747307", size = 30781235, upload-time = "2026-08-21T23:28:50.599Z" }
 wheels = [
@@ -456,7 +456,7 @@ rdkit = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ferric", git = "https://github.com/mgoldey/ferric?rev=8637a5d50b8f0a5ea1953159ac5c775d9e2009ff" },
+    { name = "ferric", git = "https://github.com/mgoldey/ferric?rev=b22183b9dbed226e1d2acc5cb6e5194c973b023b" },
     { name = "gemmi", marker = "extra == 'docking'" },
     { name = "gemmi", marker = "extra == 'gemmi'" },
     { name = "meeko", marker = "extra == 'docking'", specifier = ">=0.8.0" },

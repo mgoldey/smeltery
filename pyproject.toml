@@ -51,7 +51,7 @@ docking = ["vina>=1.2.7", "meeko>=0.8.0", "rdkit>=2024.3", "scipy>=1.11", "gemmi
 # An exact commit, not a branch: the run record reports this SHA, read back
 # from the installed package's metadata. To develop against a local ferric
 # checkout instead, point this at it: ferric = { path = "../ferric" }
-ferric = { git = "https://github.com/mgoldey/ferric", rev = "8637a5d50b8f0a5ea1953159ac5c775d9e2009ff" }
+ferric = { git = "https://github.com/mgoldey/ferric", rev = "b22183b9dbed226e1d2acc5cb6e5194c973b023b" }
 
 [build-system]
 requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]
