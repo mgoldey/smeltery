@@ -113,6 +113,10 @@ flexible ligand and, optionally, flexible receptor sidechains
 co-crystal ligand or pocket residues; `ensemble_score` pools a pose ensemble's
 scores). Scores are an empirical ranking heuristic, not binding free energies.
 A force-field tier (MMFF in core; OpenMM + OpenFF in an optional conda environment, see docs/environments.md) exists; real receptor pockets are next.
+`smeltery.tiers.Qmmm` is a single-point QM/MM tier
+with a real covalent cut (scaled-position link H, boundary-charge scheme default Z1, refusals before the SCF);
+it needs ferric >= v0.1.0rc7 (QM-MM Lennard-Jones follows the bond list across the cut, ferric PR #336) and
+skips/refuses on older builds. Its parameter source is caller-supplied (`MmParameters`); no geometry optimization yet.
 
 ## License
 
