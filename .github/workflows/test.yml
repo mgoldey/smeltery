@@ -73,8 +73,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - name: Install (dev + docking extras, ferric from PyPI)
-        run: uv sync --extra dev --extra docking --no-sources
+      - name: Install (dev + docking + posebusters extras, ferric from PyPI)
+        run: uv sync --extra dev --extra docking --extra posebusters --no-sources
 
       - name: Docking tests (real Vina + Meeko)
         run: |

@@ -1,0 +1,35 @@
+# The docked-parent path (issue #17): dock ethanol into the committed pentapeptide pocket with Vina, pair
+# propanol and butanol to its docked poses, gate them with PoseBusters and MMFF, then the field-interaction SCFs.
+# Needs the docking and posebusters extras and pdb2pqr30:
+#   uv run --extra docking --extra posebusters smeltery run examples/mwe_docking.toml
+# Receptor and pocket are the same pentapeptide, so they share a frame (required).
+campaign = "mwe-docking"
+parent = "ethanol"
+
+[candidates]
+ethanol = "CCO"
+propanol = "CCCO"
+butanol = "CCCCO"
+
+[poses]
+relax_unmapped = true
+
+[docking]
+receptor = "../tests/data/pocket_pep5.pdbqt"
+box_center = [0.4, -0.1, -0.1]
+box_size = [22.0, 16.0, 16.0]
+seeds = [7]
+exhaustiveness = 4
+n_poses = 3
+
+[pocket]
+file = "../tests/data/pocket_pep5.pdb"
+
+[gates]
+posebusters = true
+forcefield = true
+
+[cut]
+keep = 1
+z = 2.0
+floor = 0.0

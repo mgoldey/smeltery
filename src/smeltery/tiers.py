@@ -113,7 +113,10 @@ class PairedPoses:
     """Pose ensemble for the parent, plus paired poses for each analogue.
 
     Parent: `n_poses` ETKDG conformers, aligned onto conformer 0, each given
-    a seeded rigid jitter to mimic the spread of docked poses.
+    a seeded rigid jitter to mimic the spread of docked poses. With
+    `parent_poses_given=True` the parent's existing `poses` (for example from
+    `Docking`) are used as they are, unjittered: `n_poses`, `jitter_deg` and
+    `jitter_ang` then play no part, and the pose count is `len(parent.poses)`.
 
     Analogue pose i: every atom the maximum common substructure maps onto
     the parent (hydrogens included) is COPIED EXACTLY from parent pose i.
@@ -121,6 +124,15 @@ class PairedPoses:
     has been aligned onto the mapped core. Pairing an analogue with ITSELF
     therefore maps every atom, copies every coordinate, and gives a
     per-pose ΔΔE of exactly 0.0. That is the self-pair anchor.
+
+    The copied core and the freshly embedded substituent meet at a junction whose
+    bond lengths and angles are not those of any force field, and PoseBusters
+    rejects such poses (measured on docked and on ETKDG parents alike: bond_lengths,
+    bond_angles, internal_energy). `relax_unmapped=True` relaxes ONLY the unmapped
+    atoms with MMFF94, the mapped atoms held fixed, so every mapped coordinate is
+    still an exact copy of the parent's; the pose is refused (RuntimeError) if MMFF
+    cannot type the molecule or does not converge. Off by default: it changes the
+    substituent's geometry and hence the ΔΔE.
 
     The MCS gate REFUSES rather than degrades: a pair with no common core, a
     core below `min_core_heavy` heavy atoms, a search that hit its timeout, or
@@ -137,6 +149,8 @@ class PairedPoses:
     jitter_ang: float = 0.5
     min_core_heavy: int = 3
     mcs_timeout_s: int = 10
+    parent_poses_given: bool = False
+    relax_unmapped: bool = False
     name: str = "paired_poses"
     #: Per analogue name: (analogue atom, parent atom) pairs copied exactly. Read
     #: by `smeltery.generate.pairs_from_candidates`; reset on every `run`.
@@ -145,7 +159,16 @@ class PairedPoses:
     def settings(self) -> dict:
         return {
             k: getattr(self, k)
-            for k in ("n_poses", "seed", "jitter_deg", "jitter_ang", "min_core_heavy", "mcs_timeout_s")
+            for k in (
+                "n_poses",
+                "seed",
+                "jitter_deg",
+                "jitter_ang",
+                "min_core_heavy",
+                "mcs_timeout_s",
+                "parent_poses_given",
+                "relax_unmapped",
+            )
         }
 
     def produces(self) -> dict[str, str]:
@@ -165,18 +188,28 @@ class PairedPoses:
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         parent = ctx["parent"]
         pmol = _mol_with_h(parent.smiles)
-        cids = list(AllChem.EmbedMultipleConfs(pmol, numConfs=self.n_poses, randomSeed=self.seed))
-        if len(cids) < self.n_poses:
-            raise RuntimeError(f"{parent.name}: embedded only {len(cids)} of {self.n_poses} poses")
-        AllChem.MMFFOptimizeMoleculeConfs(pmol)
-        rng = np.random.default_rng(self.seed)
-        parent_poses: list[np.ndarray] = []
-        for cid in cids:
-            AlignMol(pmol, pmol, prbCid=cid, refCid=cids[0])
-            xyz = _pose_from_conf(pmol, cid).coords_ang
-            parent_poses.append(xyz if cid == cids[0] else _rigid_jitter(xyz, rng, self.jitter_deg, self.jitter_ang))
         psym = tuple(a.GetSymbol() for a in pmol.GetAtoms())
-        parent.poses = [Pose(psym, x) for x in parent_poses]
+        if self.parent_poses_given:
+            if not parent.poses:
+                raise ValueError(f"{parent.name}: parent_poses_given is set but the parent has no poses")
+            for i, pose in enumerate(parent.poses):
+                if tuple(pose.symbols) != psym:
+                    raise ValueError(f"{parent.name} pose {i}: atom order does not match the SMILES (with H added)")
+            parent_poses = [np.array(p.coords_ang, dtype=float) for p in parent.poses]
+        else:
+            cids = list(AllChem.EmbedMultipleConfs(pmol, numConfs=self.n_poses, randomSeed=self.seed))
+            if len(cids) < self.n_poses:
+                raise RuntimeError(f"{parent.name}: embedded only {len(cids)} of {self.n_poses} poses")
+            AllChem.MMFFOptimizeMoleculeConfs(pmol)
+            rng = np.random.default_rng(self.seed)
+            parent_poses: list[np.ndarray] = []
+            for cid in cids:
+                AlignMol(pmol, pmol, prbCid=cid, refCid=cids[0])
+                xyz = _pose_from_conf(pmol, cid).coords_ang
+                parent_poses.append(
+                    xyz if cid == cids[0] else _rigid_jitter(xyz, rng, self.jitter_deg, self.jitter_ang)
+                )
+            parent.poses = [Pose(psym, x) for x in parent_poses]
         self.scaffold_maps = {}
 
         for cand in candidates:
@@ -236,8 +269,32 @@ class PairedPoses:
                 xyz = _pose_from_conf(amol, 0).coords_ang.copy()
             for a, p in mapping:  # exact copy of every mapped atom
                 xyz[a] = pxyz[p]
+            if self.relax_unmapped and len(mapping) < amol.GetNumAtoms():
+                xyz = self._relax_unmapped(amol, xyz, [a for a, _ in mapping], f"{cand.name} pose {i}")
             poses.append(Pose(sym, xyz))
         return poses
+
+    def _relax_unmapped(self, amol: Chem.Mol, xyz: np.ndarray, mapped: list[int], label: str) -> np.ndarray:
+        """MMFF94 minimization with every mapped atom fixed: only the substituent moves."""
+        from rdkit.Chem import rdForceFieldHelpers as ffh
+
+        mol = Chem.Mol(amol)
+        conf = Chem.Conformer(mol.GetNumAtoms())
+        for k, (x, y, z) in enumerate(xyz):
+            conf.SetAtomPosition(k, (float(x), float(y), float(z)))
+        mol.RemoveAllConformers()
+        mol.AddConformer(conf, assignId=True)
+        props = ffh.MMFFGetMoleculeProperties(mol)
+        if props is None:
+            raise RuntimeError(f"{label}: MMFF94 cannot type this molecule, so the substituent cannot be relaxed")
+        ff = ffh.MMFFGetMoleculeForceField(mol, props)
+        for a in mapped:
+            ff.AddFixedPoint(a)
+        if ff.Minimize(maxIts=5000) != 0:
+            raise RuntimeError(f"{label}: the constrained MMFF94 relaxation did not converge")
+        out = np.array(mol.GetConformer().GetPositions(), dtype=float)
+        out[mapped] = xyz[mapped]  # the fixed atoms did not move; this makes "exact copy" hold bit for bit
+        return out
 
 
 @dataclass

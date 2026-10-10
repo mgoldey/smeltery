@@ -5,7 +5,10 @@ The plan-only tests need RDKit only. The run tests need ferric and use a tiny sy
 
 import copy
 import json
+import os
 import pathlib
+import subprocess
+import sys
 import tomllib
 
 import pytest
@@ -95,6 +98,7 @@ KNOBS = [
     ("poses", "jitter_ang", 0.25),
     ("poses", "min_core_heavy", 4),
     ("poses", "mcs_timeout_s", 20),
+    ("poses", "relax_unmapped", True),
     ("field_interaction", "basis", "3-21g"),
     ("field_interaction", "energy_conv", 1e-9),
     ("field_interaction", "density_conv", 1e-7),
@@ -132,6 +136,21 @@ def test_changing_a_candidate_or_a_pocket_site_changes_the_digest():
         (lambda c: c.update(parent="nope"), "not listed"),
         (lambda c: c["candidates"].update({"bad": "not a smiles ((("}), "unparseable"),
         (lambda c: c["cut"].update(keep=3), "keep must be"),
+        (lambda c: c["poses"].update(scaffold_maps={}), "unknown key"),
+        (lambda c: c.update(field_interaction={"field_provenance": {"x": 1}}), "unknown key"),
+        (lambda c: c.update(docking={"box_center": [0, 0, 0]}), "missing 'receptor'"),
+        (lambda c: c.update(docking={"receptor": "r.pdbqt"}), "missing 'box_center'"),
+        (lambda c: c.update(docking={"receptor": "r.pdbqt", "box_center": [0, 0]}), "three numbers"),
+        (lambda c: c.update(docking={"receptor": "r.pdbqt", "box_center": [0, 0, 0], "seeds": []}), "seeds"),
+        (lambda c: c.update(docking={"receptor": "r.pdbqt", "box_center": [0, 0, 0], "speed": 3}), "unknown key"),
+        (
+            lambda c: c.update(docking={"receptor": "r.pdbqt", "box_center": [0, 0, 0]}),
+            r"\['n_poses'\] have no effect",  # BASE sets [poses] n_poses; with docking it would be silently ignored
+        ),
+        (lambda c: c.update(gates={"posebusters": "yes"}), "must be true or false"),
+        (lambda c: c.update(gates={"magic": True}), "unknown key"),
+        (lambda c: c["pocket"].update(file="x.pdb"), "either file or"),
+        (lambda c: (c["pocket"].pop("site"), c["pocket"].update(file="x.txt")), r"\.pdb or \.pqr"),
         (lambda c: c["pocket"].update(site=[]), "at least one charge"),
         (lambda c: c["pocket"]["site"][0].pop("distance"), "missing"),
     ],
@@ -257,3 +276,65 @@ def test_the_configured_floor_alone_decides_whether_a_resolved_difference_is_ran
     assert (out["cut"].survivors == ["propanol"]) is ranked
     text = format_table(plan, out)
     assert (f"floor {floor:g} kcal/mol, from config" in text) and (("UNRANKED" in text) is (not ranked))
+
+
+GATED = SMALL.format(floor=0.0) + "\n[gates]\nposebusters = true\n"
+
+
+def test_gates_change_the_digest():
+    base = cfg_of(SMALL.format(floor=0.0))
+    gated = copy.deepcopy(base)
+    gated["gates"] = {"forcefield": True}
+    assert digest(gated) != digest(base)
+    both = copy.deepcopy(base)
+    both["gates"] = {"forcefield": True, "xtb": True}
+    assert len({digest(base), digest(gated), digest(both)}) == 3
+
+
+def test_the_forcefield_gate_records_strain_per_candidate(tmp_path, capsys):
+    p = tmp_path / "ff.toml"
+    p.write_text(SMALL.format(floor=0.0) + "\n[gates]\nforcefield = true\n")
+    plan = build_plan(load_config(p))
+    assert [e["stage"] for e in plan.stage_log] == ["poses", "pocket", "forcefield"]
+    strain = plan.stage_log[-1]["strain"]
+    assert set(strain) == {"ethanol", "propanol", "butanol"} and all(len(v) == 3 for v in strain.values())
+    assert [t["name"] for t in plan.tiers] == ["paired_poses", "forcefield", "field_interaction"]
+
+
+def _cli(*args):
+    """The CLI as a real subprocess.
+
+    PoseBusters tests cannot run in-process after pytest has swapped `sys.stderr`: RDKit's Python log stream is
+    then a closed file, and PoseBusters checks fail with "I/O operation on closed file" (reported as pose
+    failures, so it fails closed, but it makes the outcome depend on test order).
+    """
+    env = {**os.environ, "OPENBLAS_NUM_THREADS": "1"}
+    return subprocess.run([sys.executable, "-m", "smeltery", *args], capture_output=True, text=True, env=env)
+
+
+def test_posebusters_rejects_unrelaxed_analogue_poses_loudly_with_the_reason(tmp_path):
+    pytest.importorskip("posebusters", reason="needs the posebusters extra")
+    p = tmp_path / "pb.toml"
+    p.write_text(GATED)
+    r = _cli("run", str(p), "--plan")
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "stage 'posebusters' failed" in r.stderr and "propanol" in r.stderr and "relax_unmapped = true" in r.stderr
+
+
+def test_relaxing_only_the_substituent_lets_the_same_poses_pass_posebusters(tmp_path):
+    pytest.importorskip("posebusters", reason="needs the posebusters extra")
+    p = tmp_path / "pb_relax.toml"
+    p.write_text(GATED.replace("n_poses = 3", "n_poses = 3\nrelax_unmapped = true"))
+    r = _cli("run", str(p), "--plan")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no SCF run" in r.stdout and "posebusters" in r.stdout
+
+
+def test_a_pocket_file_that_does_not_exist_is_a_config_error(tmp_path, capsys):
+    p = tmp_path / "nofile.toml"
+    cfg_text = SMALL.format(floor=0.0).replace(
+        "[[pocket.site]]\nq = 1.0\natom = 2\nfrom_atom = 1\ndistance = 3.0\n", ""
+    )
+    p.write_text(cfg_text.replace("[cut]", '[pocket]\nfile = "missing.pdb"\n\n[cut]'))
+    assert main(["run", str(p), "--plan"]) == 2
+    assert "does not exist" in capsys.readouterr().err
