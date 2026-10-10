@@ -10,6 +10,7 @@ pytest.importorskip("posebusters", reason="needs the posebusters extra: pip inst
 
 from rdkit import Chem  # noqa: E402
 from rdkit.Chem import AllChem  # noqa: E402
+from rdkit.Geometry import Point3D  # noqa: E402
 
 from smeltery import Candidate, Pose, PoseGateError, check_candidate_poses, posebusters_check  # noqa: E402
 from smeltery.tiers import FieldInteraction, Gfn2  # noqa: E402
@@ -90,3 +91,21 @@ def test_receptor_adds_protein_ligand_checks():
     assert rep.config == "dock"
     names = set(rep.verdicts[0].passed_checks) | set(rep.verdicts[0].failed_checks)
     assert {"minimum_distance_to_protein", "volume_overlap_with_protein"} <= names
+
+
+def test_flatness_coords_patch_is_installed_and_reads_the_same_coordinates():
+    """#68: PoseBusters' np.array([Point3D...]) segfaults on some CPython builds; ours must not, and must agree."""
+    from posebusters.modules import flatness
+
+    p = _good_pose()
+    posebusters_check([p], ASPIRIN)  # installs the replacement
+    mol = Chem.AddHs(Chem.MolFromSmiles(ASPIRIN))
+    conf = Chem.Conformer(mol.GetNumAtoms())
+    for i, xyz in enumerate(p.coords_ang):
+        conf.SetAtomPosition(i, Point3D(*map(float, xyz)))
+    mol.AddConformer(conf)
+    idx = (7, 2, 0, 4)  # unordered on purpose
+    expected = np.array([list(mol.GetConformer().GetAtomPosition(i)) for i in idx])
+    got = flatness._get_coords(mol, idx)
+    assert got.shape == (4, 3) and np.array_equal(got, expected)
+    assert flatness._get_coords.__module__ == "smeltery.gates"

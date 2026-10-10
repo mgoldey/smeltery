@@ -28,6 +28,15 @@ dependencies = [
 [project.scripts]
 smeltery = "smeltery.cli:main"
 
+# Reference providers, registered the way a third party registers its own (docs/providers.md).
+# Entry name is "<kind>:<name>"; the value is a factory (class or callable), imported only on request.
+[project.entry-points."smeltery.providers"]
+"structure:pdb" = "smeltery.providers.structure:PdbProvider"
+"structure:afdb" = "smeltery.providers.structure:AfdbProvider"
+"property:rdkit-alerts" = "smeltery.properties:RdkitAlertProvider"
+"scoring:vina-score" = "smeltery.scoring:VinaScoreProvider"
+"docking:vina" = "smeltery.docking.provider:VinaProvider"
+
 [project.urls]
 Homepage = "https://github.com/mgoldey/smeltery"
 Repository = "https://github.com/mgoldey/smeltery"

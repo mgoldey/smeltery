@@ -65,6 +65,9 @@ class PotentialProvider(Protocol):
 
     def settings(self) -> dict: ...
 
+    # Not Protocol members (that would break existing providers under isinstance), but required by
+    # `smeltery.providers.conformance`: `license_id: str` (SPDX) and `energy_unit = "kcal/mol"`.
+
 
 def evaluate(
     provider: PotentialProvider, pose: Pose, point_charges: Sequence[PointCharge] | None = None, charge: int = 0
