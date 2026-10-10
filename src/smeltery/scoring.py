@@ -63,6 +63,10 @@ class VinaScoreProvider:
     """
 
     name = "vina-score"
+    license_id = "MIT OR Apache-2.0"  # this code: smeltery's own; it only REPLAYS scores, it runs no engine
+    # The scores came from AutoDock Vina, Apache-2.0 ("AutoDock Vina is distributed under the Apache License,
+    # Version 2.0", https://github.com/ccsb-scripps/AutoDock-Vina, fetched 2026-10-10).
+    engine_licenses = {"AutoDock Vina": "Apache-2.0"}
 
     def __init__(self, scores: list[float]) -> None:
         self._scores = [float(s) for s in scores]
