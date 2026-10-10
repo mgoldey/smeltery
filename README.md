@@ -82,6 +82,33 @@ energy and strain record, and an xtb energy record before the SCFs. Analogue pos
 at the junction between the copied core and the new substituent; `[poses] relax_unmapped = true` relaxes only the
 substituent and leaves every core coordinate exactly the parent's.
 
+### Starting from a target
+
+A `[structure]` section replaces the hand-prepared receptor, box centre and pocket file
+(`examples/mwe_structure.toml`, committed fixtures only, same extras plus `pdb2pqr30`):
+
+```bash
+uv run --extra docking --extra posebusters smeltery run examples/mwe_structure.toml --out out
+```
+
+The structure comes from a `StructureProvider` (a `.pdb` path; a PDB id or, with `provider = "afdb"`, a UniProt
+accession, both only with `allow_network = true`). The run writes a protein-only receptor PDB and its Meeko PDBQT
+to `out/structure/`, docks the parent in a box centred on `center = [x, y, z]` or on `reference_ligand = "RES"` (the
+centroid of that HETATM residue's heavy atoms), and cuts the point-charge field at `pocket_cutoff` around the same
+centre. The cutoff is required: truncation is not monotone, so there is no default. The record names both prepared
+files by sha256, says whether the structure is EXPERIMENTAL or PREDICTED (a prediction carries its licence,
+attribution and the mean pLDDT around the pocket), lists what was dropped (all HETATM by residue name, other
+altlocs, unselected chains) and the frame checks: box centre near the receptor, field covering the box faces (and
+whether it covers the corners), PDBQT atoms coinciding with the receptor PDB, no receptor atoms inside the box lost
+to Meeko, the docked parent inside the box. A failed check is a stage error (exit 3).
+
+The table and the record (`results.funnel`) give each stage's candidates in and out. Gates (parity, PoseBusters,
+and MMFF strain when `[gates] max_strain_kcal` is set) either pass everyone or stop the run loudly; MMFF and xtb
+without a threshold are recorded, not filters. Only the paired-ddE cut removes candidates, and it counts analogues
+(the parent is the reference); an unranked cut has no survivor count. There is one ranked stage: the only wired
+ranker, `FieldInteraction`, has an unmeasured systematic floor, and a second rung would need a second
+unmeasured floor stated in the config, so it is not offered.
+
 ## Correctness checks
 
 `tests/test_anchors.py` checks the trivial limits, where the machinery must do
