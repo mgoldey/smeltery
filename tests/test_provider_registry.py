@@ -185,6 +185,7 @@ def test_reference_providers_are_registered_through_the_same_mechanism():
     assert got == {
         ("structure", "pdb"): "smeltery.providers.structure:PdbProvider",
         ("structure", "afdb"): "smeltery.providers.structure:AfdbProvider",
+        ("structure", "boltz2"): "smeltery.providers.boltz:BoltzProvider",
         ("property", "rdkit-alerts"): "smeltery.properties:RdkitAlertProvider",
         ("scoring", "vina-score"): "smeltery.scoring:VinaScoreProvider",
         ("docking", "vina"): "smeltery.docking.provider:VinaProvider",
