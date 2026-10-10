@@ -132,6 +132,25 @@ def run_task(spec: dict) -> dict:
     return out
 
 
+def basis_gaps(symbols, basis: str) -> list[str]:
+    """Elements of `symbols` for which ferric's bundled `basis` has no shells (checked with a tiny hydride of each)."""
+    import ferric
+    from rdkit import Chem
+
+    bs = ferric.BasisSet.bundled(basis)
+    pt = Chem.GetPeriodicTable()
+    gaps = []
+    for el in sorted(set(symbols) - {"H"}):
+        n_h = 1 if pt.GetAtomicNumber(el) % 2 else 2  # an even electron count: ferric refuses an odd one
+        xyz = f"{1 + n_h}\n\n{el} 0 0 0\n" + "".join(f"H {x} 0 {z}\n" for x, z in ((0.0, 1.3), (1.1, -0.7))[:n_h])
+        try:
+            ferric.run_rhf(ferric.Molecule.from_xyz_string(xyz, charge=0), bs, max_iter=1)
+        except Exception as exc:  # only the basis-coverage failure counts as a gap
+            if "basis" in str(exc).lower():
+                gaps.append(el)
+    return gaps
+
+
 # ------------------------------------------------------------------------------------------------ driver
 
 
@@ -196,7 +215,21 @@ def read_tasks(path: Path) -> list[dict]:
 def cmd_run(a: argparse.Namespace) -> int:
     bench, tgt, ligs = load_series(a.plb_dir, a.target)
     ref = tgt.reference
-    pivot = ligs[ref]["coords"].mean(axis=0)
+    pivot = ligs[ref]["coords"].mean(axis=0)  # the reference's centroid, whatever is excluded
+    excluded = {}
+    for spec in a.exclude:
+        name, reason = spec.split("=", 1)
+        if name == ref or name not in ligs:
+            raise SystemExit(f"--exclude {name!r}: the reference cannot be excluded, and the ligand must exist")
+        excluded[name] = reason
+        del ligs[name]
+    for name, d in ligs.items():
+        gaps = basis_gaps(d["symbols"], a.basis)
+        if gaps:
+            raise SystemExit(
+                f"{name} has elements {gaps} with no {a.basis} shells in this ferric; refusing to drop it silently: "
+                f"pass --exclude {name}=<reason> (and say so in the plan) or choose another basis"
+            )
     out = a.out
     out.mkdir(parents=True, exist_ok=True)
     fields = {}
@@ -302,6 +335,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "pose_geometry_sha256": {
             n: hashlib.sha256(b"".join(np.asarray(x).tobytes() for x in poses[n])).hexdigest() for n in names
         },
+        "excluded_ligands": excluded,
         "max_cpu_hours_last_invocation": a.max_cpu_hours,
     }
     (out / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
@@ -405,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--cutoff", type=float, default=15.0)
     r.add_argument("--basis", default="sto-3g")
     r.add_argument("--workers", type=int, default=4)
+    r.add_argument("--exclude", action="append", default=[], metavar="LIGAND=REASON")
     r.add_argument("--run", nargs="+", required=True, help="which SCFs: 'vac' and/or model names, e.g. vac amber14")
     r.add_argument(
         "--max-cpu-hours", type=float, required=True, help="no new SCF is submitted past this many CPU-hours"

@@ -144,6 +144,7 @@ def _record(*, n_lig=6, n_poses=5, models=("A", "B"), slope=3.0, seed=0, noise=0
         "pivot_ang": [0.0, 0.0, 0.0],
         "n_poses": n_poses,
         "n_poses_by_model": n_by_model,
+        "excluded_ligands": {},
         "seed": 1,
         "jitter_deg": 15.0,
         "jitter_ang": 0.5,
@@ -463,3 +464,27 @@ def test_a_model_with_fewer_poses_is_compared_on_the_poses_both_completed():
     assert cm["values_a"] == {n: first3[n].mean for n in res.analogues}
     assert out["models"]["B"]["per_ligand"]["L1"]["per_pose_ddE"].__len__() == 3
     assert out["models"]["A"]["per_ligand"]["L1"]["per_pose_ddE"].__len__() == 6
+
+
+def test_a_declared_exclusion_is_honoured_and_an_undeclared_one_is_refused():
+    rec, ddg = _record(n_lig=6, n_poses=5, slope=3.0, noise=0.2)
+    tgt = _fake_target(ddg)
+    extra = type(tgt.ligands[0])(name="LBr", ddg_kcal_mol=1.1, ddg_sigma_kcal_mol=0.4, smiles="CBr")
+    tgt.ligands = [*tgt.ligands, extra]
+    with pytest.raises(pm.PlbResultsError, match="exclusions"):  # LBr is in the manifest but not in the results
+        pm.analyse(pm.validate_results(rec), tgt, n_boot=20)
+    rec["inputs"]["excluded_ligands"] = {"LBr": "no STO-3G shells for Br"}
+    rec["input_digest"] = digest({"inputs": rec["inputs"], "tiers": rec["tiers"]})
+    out = pm.analyse(pm.validate_results(rec), tgt, n_boot=20)
+    assert out["excluded_ligands"] == {"LBr": "no STO-3G shells for Br"} and out["n_ligands_analogues"] == 5
+    rec["inputs"]["excluded_ligands"] = {"L0": "the parent"}
+    rec["input_digest"] = digest({"inputs": rec["inputs"], "tiers": rec["tiers"]})
+    with pytest.raises(pm.PlbResultsError, match="reference"):
+        pm.analyse(pm.validate_results(rec), tgt, n_boot=20)
+
+
+@pytest.mark.needs_ferric
+def test_basis_gaps_finds_bromine_in_sto3g_but_not_chlorine_or_sulfur():
+    run = _script("run_plb_ddE")
+    assert run.basis_gaps(("C", "H", "N", "O", "S", "Cl"), "sto-3g") == []
+    assert run.basis_gaps(("C", "H", "Br"), "sto-3g") == ["Br"]

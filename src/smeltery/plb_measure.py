@@ -43,6 +43,7 @@ REQUIRED_INPUTS = (
     "pivot_ang",
     "n_poses",
     "n_poses_by_model",
+    "excluded_ligands",
     "seed",
     "jitter_deg",
     "jitter_ang",
@@ -549,17 +550,25 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
     if target.reference != res.reference:
         raise PlbResultsError(f"manifest reference {target.reference!r} != run reference {res.reference!r}")
     names = list(res.analogues)
-    if sorted(lg.name for lg in target.ligands) != sorted(res.ligands):
-        raise PlbResultsError("the results' ligands are not the manifest target's ligands")
-    ddg = {lg.name: lg.ddg_kcal_mol for lg in target.ligands}
-    sigma = {lg.name: lg.ddg_sigma_kcal_mol for lg in target.ligands}
+    excluded = dict(res.inputs["excluded_ligands"])
+    if res.reference in excluded:
+        raise PlbResultsError("the reference ligand cannot be excluded")
+    kept = [lg for lg in target.ligands if lg.name not in excluded]
+    if sorted(lg.name for lg in kept) != sorted(res.ligands):
+        raise PlbResultsError(
+            "the results' ligands are not the manifest target's ligands minus the declared exclusions "
+            f"{sorted(excluded)}"
+        )
+    ddg = {lg.name: lg.ddg_kcal_mol for lg in kept}
+    sigma = {lg.name: lg.ddg_sigma_kcal_mol for lg in kept}
     x = np.array([ddg[n] for n in names])
-    smiles = {lg.name: lg.smiles for lg in target.ligands}
+    smiles = {lg.name: lg.smiles for lg in kept}
     desc = descriptors(smiles)
     out: dict[str, Any] = {
         "seed": seed,
         "n_boot": n_boot,
         "n_ligands_analogues": len(names),
+        "excluded_ligands": excluded,
         "n_poses": res.n_poses,
         "n_poses_by_model": dict(res.n_poses_by_model),
         "exp_ddg": {n: ddg[n] for n in res.ligands},

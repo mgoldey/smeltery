@@ -5,10 +5,24 @@ words used to report the result. Anything done differently from it is listed und
 (`docs/benchmarks/plb_cdk2.md`), with the reason. Issues: #27 (measure the paired ddE against experiment) and the first
 part of #29 (charge-model systematic error). #28 (screening) is a later study and is not touched here.
 
+## Amendment A1 (made before any production result existed; the first launch was aborted after seconds)
+
+The first launch of stage 1 failed at once on `lig_17` (3-bromoanilino): **ferric 0.1.0rc7's bundled STO-3G has no shells for
+Br (Z = 35)** (`basis error: no basis shells for Z=35 (Br) in "sto-3g"`); the other elements of the series (H, C, N, O, S, Cl)
+work (tiny hydrides were run to check). I had not checked the basis coverage of the series before the first draft of this plan;
+that was an omission. Nothing was computed for any ligand but the parent (see the disclosure below) when this was found. The
+rule, fixed here and applying to any basis: **a ligand with an element the basis does not cover is excluded from the QM series, by
+name, with the reason recorded in the results (`inputs.excluded_ligands`); the run script refuses to start if a non-excluded
+ligand has such an element**. Changing the basis for one ligand would make its dE_int incomparable, and a bigger basis (def2-svp)
+is not affordable (section 3.3). Consequences: **`lig_17` is excluded; the series is 9 ligands (the parent and 8 analogues), n = 8,
+36 pairs**. `lig_17` is the weakest binder of the series (ddG +1.15 kcal/mol), so the experimental range of the 8 analogues is
+narrower than the manifest's. The detectable effect gets worse: section 5.8 and the sample sizes below are the n = 8 values. Costs
+fall by about 9% (section 7). Every number below that depends on n has been recomputed for n = 8.
+
 ## 0. What is already known, and what this study may not do
 
 * The benchmark's own power table (`benchmarks/plb/README.md`) says **no pair in cdk2's series differs by the
-  4.07 kcal/mol ddE noise floor** (0 of 45; the largest experimental difference is 2.76 kcal/mol), so pairwise ranking
+  4.07 kcal/mol ddE noise floor** (0 of 45 pairs of the 10 ligands, and the largest experimental difference is 2.76 kcal/mol; the QM series without `lig_17` is 9 ligands, 36 pairs, amendment A1), so pairwise ranking
   of this series is impossible a priori, even at slope 1. The right statistics are therefore trend statistics over
   ligands (correlation, slope, a permutation null), not "does smeltery order ligand A above B".
 * The campaign measured (`experiments/danuglipron/RESULTS.md`, M4 to M14) that single-pose ddE is dominated by pose
@@ -29,10 +43,10 @@ part of #29 (charge-model systematic error). #28 (screening) is a later study an
 
 | # | question | statistic (section 5) |
 |---|---|---|
-| Q1 (#27) | Does smeltery's paired ddE track the experimental ddG across the cdk2 ligands? | Spearman rho of ddE against ddG, n = 9 analogues, exact two-sided permutation p, 95% bootstrap CI over ligands; Kendall tau-b the same way |
+| Q1 (#27) | Does smeltery's paired ddE track the experimental ddG across the cdk2 ligands? | Spearman rho of ddE against ddG, n = 8 analogues, exact two-sided permutation p, 95% bootstrap CI over ligands; Kendall tau-b the same way |
 | Q2 (#27) | Does the 4.5-5x overshoot of interaction energies survive pairing? | OLS slope of ddE on ddG with bootstrap CI, and sd(ddE)/sd(ddG); read **only if Q1's answer is "tracks"** |
 | Q3 (#27) | Does ddE carry more rank information than a trivial descriptor? | the same statistics for heavy-atom count and Crippen logP against ddG |
-| Q4 (#27) | How many pairs of the series does ddE actually resolve (z = 2) at the achieved pose SEM, and are the resolved ones ordered correctly? | `funnel.resolved` over all 45 pairs, with floor 0, 4.07 and the charge-sensitivity floor |
+| Q4 (#27) | How many pairs of the series does ddE actually resolve (z = 2) at the achieved pose SEM, and are the resolved ones ordered correctly? | `funnel.resolved` over all 36 pairs of the 9 QM ligands, with floor 0, 4.07 and the charge-sensitivity floor |
 | Q5 (#29, part 1) | How far does swapping the pocket charge model move ddE on identical geometries? | sign flips of ddE, pairs whose order flips, Spearman between models, `gates.charge_sensitivity` floor |
 
 "Per tier" in #27: only ONE tier is measured here, the QM `FieldInteraction` (RHF/STO-3G). Docking, force-field and
@@ -50,7 +64,7 @@ depends on the CI width, which is only known after the run; the report states th
 Rule: slope is interpreted only if Q1 says "tracks". If the 95% CI excludes 1 and contains 4.5, say "overshoot
 survives"; if it contains 1 and excludes 4.5, "cancels"; if it contains both or neither, "not resolved".
 Regressing ddE (y) on ddG (x) is right because the experimental error is small against the spread (median sigma(ddG)
-0.08 kcal/mol against an sd of 0.96 kcal/mol of the nine analogues' ddG, mean sigma^2 0.036 against a variance of 0.92, so the attenuation of the slope is about 4%), whereas the large error is in y, which does not
+0.08 kcal/mol against an sd of 0.96 kcal/mol of the nine analogues' ddG (including `lig_17`; amendment A1 removes it; the figure is recomputed in the report), mean sigma^2 0.036 against a variance of 0.92, so the attenuation of the slope is about 4%), whereas the large error is in y, which does not
 bias an OLS slope.
 
 ## 2. Data
@@ -58,9 +72,9 @@ bias an OLS slope.
 * PLB (Open Force Field protein-ligand-benchmark), commit `fd88824f9114244f95a14b485e6d6c96c1de716d`, CC BY 4.0
   (attribution in `benchmarks/plb/manifest.json`). Files fetched with `scripts/fetch_plb.py` and sha256-checked
   against the manifest (and re-checked by the run script).
-* Target **cdk2** (PDB 1H1Q): 10 ligands, all neutral, explicit hydrogens, 3D, all in the protein's frame (centroids
+* Target **cdk2** (PDB 1H1Q): 10 ligands in PLB, 9 in the QM series (`lig_17` excluded, amendment A1), all neutral, explicit hydrogens, 3D, all in the protein's frame (centroids
   within about 1 A: one consistent binding mode). Reference (parent): `lig_1h1q`, chosen by the manifest's rule, not by me.
-  The 9 analogues are the sample (n = 9); the parent has ddE = ddG = 0 by definition and is not a data point.
+  The 8 analogues are the sample (n = 8); the parent has ddE = ddG = 0 by definition and is not a data point.
 * Experimental ddG: `R T ln(IC50_i / IC50_ref)` at 298.15 K, from the manifest (IC50 is not Kd; Cheng-Prusoff not
   applied; what PLB's `error` means is unverified). Span 2.76 kcal/mol; median sigma(ddG) 0.08.
 * The run script refuses a ligand set whose SDF structure differs from the manifest's SMILES or whose sha256 differs.
@@ -125,12 +139,12 @@ bias an OLS slope.
 ## 4. Models and the second part of #29
 
 The same geometries are scored under model A and model B (CHARMM36): all 60 for A, the first m whole poses of every ligand for B (m is set by the CPU cap, section 7). `gates.charge_sensitivity` is called with the
-nine analogues, quantity "ddE", values = each ligand's mean paired ddE under A and under B; it returns the sign-flip count,
+eight analogues, quantity "ddE", values = each ligand's mean paired ddE under A and under B; it returns the sign-flip count,
 the Spearman and `floor = max(delta) - min(delta)`. It is valid input (the same candidates, the same geometries, two
-models); **n = 9 and a range statistic underestimates a population range**, so the floor is reported as a lower bound with
-that caveat. I also report the number of ligand pairs whose order flips between models (of 36), a bootstrap CI for the
+models); **n = 8 and a range statistic underestimates a population range**, so the floor is reported as a lower bound with
+that caveat. I also report the number of ligand pairs whose order flips between models (of 28), a bootstrap CI for the
 between-model Spearman, and the shift of the raw dE_int. The constant `FieldInteraction.systematic_floor` is **not** changed
-by this study (one system, one model pair, n = 9: not enough to publish a default floor; see the report's decisions).
+by this study (one system, one model pair, n = 8: not enough to publish a default floor; see the report's decisions).
 
 ## 5. Statistics (all computed by `smeltery.plb_measure`, all seeded)
 
@@ -139,13 +153,13 @@ interaction). Both are differences from the same parent, so a faithful ddE is **
 
 1. Spearman rho and Kendall tau-b of y against x; 95% percentile bootstrap CI over ligands (10,000 resamples, seed
    20261010+offsets). **Primary endpoint: Spearman rho for model A.**
-2. **Exact permutation null**: all 9! = 362,880 relabellings of the ddG across ligands; p for rho, tau, Pearson r, slope
+2. **Exact permutation null**: all 8! = 40,320 relabellings of the ddG across ligands; p for rho, tau, Pearson r, slope
    and the sign-agreement count, two-sided on |statistic| and one-sided in the positive direction (the pre-declared direction).
    The primary p is two-sided.
 3. OLS slope of ddE on ddG, intercept, **RMSE after the linear fit** (n - 2 dof), raw MAE of ddE against ddG (the issue asks
    for MAE; it is not meaningful where the scales differ and is reported with that warning), Pearson r, sd ratio.
 4. Sign agreement: the number of analogues with sign(ddE) = sign(ddG), exact binomial p against 0.5.
-5. Resolution: for each of the 45 pairs of the 10 ligands, the pose-by-pose paired difference is a `Measurement`;
+5. Resolution: for each of the 36 pairs of the 9 ligands, the pose-by-pose paired difference is a `Measurement`;
    `funnel.resolved(z = 2)` with floor 0, 4.07 and the charge-sensitivity floor. Report resolved counts and, among the
    resolved, the number in the right experimental order. Also how many pairs experiment itself resolves (|diff| > 2 sigma).
 6. Trivial baselines: heavy-atom count and Crippen logP (RDKit) of the manifest SMILES, with the same statistics, so the
@@ -153,27 +167,27 @@ interaction). Both are differences from the same parent, so a faithful ddE is **
 7. Pose noise: the paired and unpaired SEM per ligand, the between-ligand variance left after removing the mean pose
    noise (a reliability of the ddE ranking), and CIs for rho when the poses (shared index across ligands) and when both poses
    and ligands are resampled.
-8. Detectable effect at the achieved n (**stated before interpreting any correlation**, as #27 requires): for n = 9 the
-   exact two-sided 5% critical value is |rho| >= 0.700 (|tau-b| >= 0.556); the simulated power of the Spearman permutation
-   test for a bivariate normal truth with Pearson r = 0.3 / 0.5 / 0.7 / 0.8 / 0.9 is 10% / 21% / 46% / 66% / 89% (4,000
+8. Detectable effect at the achieved n (**stated before interpreting any correlation**, as #27 requires): for n = 8 the
+   exact two-sided 5% critical value is |rho| >= 0.738 (|tau-b| >= 0.643); the simulated power of the Spearman permutation
+   test for a bivariate normal truth with Pearson r = 0.3 / 0.5 / 0.7 / 0.8 / 0.9 is 9% / 19% / 41% / 60% / 82% (4,000
    simulations, seed 20261010), **before** measurement noise. So a true correlation of 0.5, which would be a useful but modest
-   tracking, is detected one time in five. The measurement noise in ddE lowers this further and is reported after the run.
+   tracking, is detected about one time in five. The measurement noise in ddE lowers this further and is reported after the run.
 
 ## 6. Pre-declared outcome language
 
 * **"smeltery ddE tracks experiment (weakly)"**: Spearman rho > 0 with exact two-sided permutation p < 0.05 AND the
-  bootstrap 95% CI of rho excludes 0 AND Kendall tau-b > 0. Even then it is one target, 9 ligands, STO-3G, a jittered
+  bootstrap 95% CI of rho excludes 0 AND Kendall tau-b > 0. Even then it is one target, 8 analogues, STO-3G, a jittered
   crystal pose: "consistent with tracking", not "ranks ligands". If it also exceeds both baselines in |rho| (point
   estimate) the report may say "more rank information than heavy-atom count and Crippen logP at this n"; the
   bootstrap CI of the difference is given and will almost certainly be wide.
 * **"smeltery ddE does not track experiment at the level this study can detect"**: anything else. With the sub-labels
   "no evidence either way" (p >= 0.05 and CI contains 0: **absence of detection is not absence of an effect**, and
-  this study cannot see rho below about 0.7) and "anti-correlated" (rho < 0 with p < 0.05, a result to be explained, not tuned away).
+  this study cannot see rho below about 0.74) and "anti-correlated" (rho < 0 with p < 0.05, a result to be explained, not tuned away).
 * Pairwise ranking is **not licensed** by any outcome here: the fraction of resolved pairs and their correctness are
   reported, and "unranked" is the faithful statement wherever a pair is not resolved.
 * The slope is read under Q2's rule only if the answer to Q1 is "tracks". Otherwise it is printed with the warning that a
   slope fitted to an uncorrelated pair is noise.
-* #29: the sign-flip count, pair flips, Spearman and floor are reported as measured, with n = 9, as a **lower bound**.
+* #29: the sign-flip count, pair flips, Spearman and floor are reported as measured, with n = 8, as a **lower bound**.
   Neither "agree" nor "disagree" is a pass/fail; the campaign's 4 of 12 flips and Spearman +0.664 (from `examples/danuglipron_halogen.py`'s
   summary) are quoted for context only, on a different system.
 
@@ -185,19 +199,20 @@ field SCF 232 CPU-s (AMBER) and 250 CPU-s (CHARMM36); 707 CPU-s and 1059 s wall 
 on a quieter moment gave 320 CPU-s for vacuum plus one field, so CPU time moves by tens of percent with load; the cap below is
 enforced on measured CPU time, not on this prediction.)
 
-**Extrapolation** to the series, scaling by (nbf/141)^2.71 (the exponent `smeltery.cost` fitted for this tier; the ligands have 141
-to 162 basis functions, the sum of the ten scale factors is 12.04): vacuum plus AMBER for 10 ligands x 6 poses is
-12.04 x 6 x 457 s = **9.2 CPU-h**; CHARMM36 for all 6 poses would be 12.04 x 6 x 250 s = **5.0 CPU-h**. Together 14.2 CPU-h, plus
-about 0.25 CPU-h already spent on the timing test and the test suite: **over the 14 CPU-h cap**. So:
+**Extrapolation** to the 9-ligand QM series (amendment A1), scaling by (nbf/141)^2.71 (the exponent `smeltery.cost` fitted for
+this tier; the ligands have 141 to 166 basis functions counting 9 for S and Cl; the sum of the nine scale factors is 11.24):
+vacuum plus AMBER for 9 ligands x 6 poses is 11.24 x 6 x 457 s = **8.6 CPU-h**; CHARMM36 for all 6 poses would be
+11.24 x 6 x 250 s = **4.7 CPU-h**. Together 13.2 CPU-h, plus about 0.3 CPU-h already spent (timing test, test suite, the aborted
+first launch): too close to the 14 CPU-h cap given that CPU time moves by tens of percent with load. So:
 
-* **Stage 1 (primary, Q1 to Q4):** vacuum and AMBER SCFs for all 10 ligands, 6 poses, `--max-cpu-hours 9.6`, 4 workers.
+* **Stage 1 (primary, Q1 to Q4):** vacuum and AMBER SCFs for all 9 ligands, 6 poses, `--max-cpu-hours 9.2`, 4 workers.
 * **Stage 2 (#29):** CHARMM36 field SCFs, pose-major (pose 0 for all ligands, then pose 1, ...), until the total of every SCF
-  recorded (stage 1 included) reaches **12.6 CPU-h**, then stop. About 3.4 CPU-h remain for it at the predicted stage 1 cost,
-  which is about 4 of the 6 poses. The number of poses B completes is therefore decided by the CPU cap and the load, never by a
-  result. **The declared subset is "the first m whole poses of every ligand"**; Q5 compares the two models on exactly those m
-  poses (model A is restricted to the same m for that comparison). If m < 3, #29 is reported as NOT measured. The vacuum SCF is
-  shared, so stage 2 costs only the field SCF.
-* Worst case total: 12.6 + the SCFs in flight when the cap hits (4 x about 5 min = 0.35 CPU-h) + 0.25 already spent = 13.2 CPU-h,
+  recorded (stage 1 included) reaches **12.6 CPU-h**, then stop. About 4 CPU-h remain for it at the predicted stage 1 cost,
+  which is about 5 of the 6 poses (0.78 CPU-h per pose of all ligands). The number of poses B completes is therefore decided by
+  the CPU cap and the load, never by a result. **The declared subset is "the first m whole poses of every ligand"**; Q5 compares
+  the two models on exactly those m poses (model A is restricted to the same m for that comparison). If m < 3, #29 is reported as
+  NOT measured. The vacuum SCF is shared, so stage 2 costs only the field SCF.
+* Worst case total: 12.6 + the SCFs in flight when the cap hits (4 x about 5 min = 0.35 CPU-h) + 0.3 already spent = 13.3 CPU-h,
   under the cap. If stage 1 itself hits its cap before 6 poses, the primary analysis uses the poses completed (pose-major, so
   equal for every ligand), and this is reported. Nothing is left running when the work ends.
 * A second target (section 8) does **not** fit in this budget and will not be run.
