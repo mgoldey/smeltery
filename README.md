@@ -43,7 +43,8 @@ CI, and prints passed / skipped-needs-ferric / failed (non-zero on any failure).
 
 Structure, scoring, docking, property and potential providers plug in through the
 `smeltery.providers` entry-point group and are checked by a shared conformance suite;
-see [docs/providers.md](docs/providers.md).
+see [docs/providers.md](docs/providers.md). Tool and data licences, with the date each was read and which
+are excluded: [docs/licensing.md](docs/licensing.md).
 
 ## Tiers
 

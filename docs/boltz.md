@@ -21,6 +21,14 @@ Weights are fetched by `boltz predict` on first run into `~/.boltz` (or `--cache
 file sizes) plus `ccd.pkl`; about 6.2 GB before extraction. The default download host is
 `model-gateway.boltz.bio`, with Hugging Face as fallback (`boltz/main.py`).
 
+## Second provider: Chai-1 (listed, not implemented)
+
+Chai-1 is the next structure provider on the list. Its code and its weights are both Apache-2.0, read from the
+primary sources on 2026-10-10 (rows `chai1-code` and `chai1-weights` of [licensing.md](licensing.md), VERIFIED).
+No adapter exists. The full licence table, the exclusion rule (AlphaFold 3 weights, original RoseTTAFold and
+HelixFold3 are excluded) and the test that forbids an adapter for an excluded tool are in
+[licensing.md](licensing.md).
+
 ## Install: not as a smeltery extra
 
 `pip install 'smeltery[boltz]'` cannot be solved: `boltz==2.2.1` pins `gemmi==0.6.5`, while ferric (a core
