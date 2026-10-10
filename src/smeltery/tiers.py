@@ -370,8 +370,9 @@ class FieldInteraction:
         bs = ferric.BasisSet.bundled(self.basis)
         for cand in candidates:
             vals = []
+            charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
-                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"))
+                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
                 kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
                 vac = ferric.run_rhf(mol, bs, **kw)
                 fld = ferric.run_rhf(mol, bs, point_charges=charges, **kw)
@@ -401,8 +402,12 @@ class SurfaceEspResult:
     n_buried: int
 
 
-def surface_esp(pose: Pose, result, basis_set, vdw_scale: float = 1.4, n_angular: int = 110) -> SurfaceEspResult:
+def surface_esp(
+    pose: Pose, result, basis_set, vdw_scale: float = 1.4, n_angular: int = 110, charge: int = 0
+) -> SurfaceEspResult:
     """Per-point ESP outside `pose`'s vdW surface from a converged ferric `result`.
+
+    `charge` is the net charge `result` was computed at; the molecule built here must match it.
 
     The array-valued feature source; `SurfaceEsp` reduces it to scalars for
     `Candidate.per_pose`. Raises `SurfaceEspUnavailableError` on a ferric build
@@ -415,7 +420,7 @@ def surface_esp(pose: Pose, result, basis_set, vdw_scale: float = 1.4, n_angular
             "this ferric build has no esp_on_surface (added in mgoldey/ferric#359, commit b22183b). "
             "Install ferric at or after that commit."
         )
-    mol = ferric.Molecule.from_xyz_string(pose.to_xyz("surface esp"))
+    mol = ferric.Molecule.from_xyz_string(pose.to_xyz("surface esp"), charge=charge)
     points, esp, n_buried = ferric.esp_on_surface(mol, basis_set, result, vdw_scale=vdw_scale, n_angular=n_angular)
     return SurfaceEspResult(np.asarray(points) / ANGSTROM_TO_BOHR, np.asarray(esp), int(n_buried))
 
@@ -473,12 +478,13 @@ class SurfaceEsp:
         bs = ferric.BasisSet.bundled(self.basis)
         for cand in candidates:
             lo, hi, buried = [], [], []
+            charge = _net_charge(cand.smiles)
             for i, pose in enumerate(cand.poses):
-                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"))
+                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
                 res = ferric.run_rhf(mol, bs, energy_conv=self.energy_conv, density_conv=self.density_conv)
                 if not res.converged:
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
-                s = surface_esp(pose, res, bs, self.vdw_scale, self.n_angular)
+                s = surface_esp(pose, res, bs, self.vdw_scale, self.n_angular, charge=charge)
                 if s.esp.size == 0:
                     raise RuntimeError(f"{cand.name} pose {i}: every surface point is buried")
                 self.surfaces[(cand.name, i)] = s
