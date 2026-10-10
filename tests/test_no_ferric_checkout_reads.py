@@ -4,7 +4,7 @@ smeltery depends on ferric as an installed package, never on its source tree: a 
 or script that opens `$FERRIC_SRC/crates/...` makes the suite depend on a checkout
 smeltery does not carry, and passes or skips depending on what is on the machine.
 
-What is checked, in Python files under src/, tests/, scripts/ and examples/: string
+What is checked, in Python files under src/, tests/, scripts/, examples/ and experiments/: string
 literals in CODE (docstrings and comments are prose and may cite ferric paths) that
 look like a ferric repo path, or an environment variable naming a ferric checkout.
 Shell and CI files are scanned for the same on non-comment lines. This file is
@@ -47,7 +47,7 @@ def _code_strings(path: Path):
 
 def _offences() -> list[str]:
     found = []
-    for sub in ("src", "tests", "scripts", "examples"):
+    for sub in ("src", "tests", "scripts", "examples", "experiments"):
         for path in sorted((ROOT / sub).rglob("*.py")):
             if path.resolve() == SELF or ".venv" in path.parts:
                 continue
