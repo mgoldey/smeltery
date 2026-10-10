@@ -16,8 +16,8 @@ WHAT IS AND IS NOT REPRODUCED (read before citing anything here)
     four sites below are an a-priori choice (one benzimidazole CH, one pyridine CH,
     two benzonitrile-ring CH), fixed before any energy was computed, 3 substituents
     each. They are NOT known to be the campaign's sites.
-  * The tier scores the NEUTRAL acid (FieldInteraction has no net-charge setting
-    yet); the campaign scored the carboxylate. Both are disclosed in the record.
+  * The SMILES given is the NEUTRAL acid, and the tier scores the net charge the SMILES
+    carries; the campaign scored the carboxylate. Both are disclosed in the record.
   * Parent poses: the cryo-EM bound conformer plus seeded rigid jitters
     (15 deg / 0.5 A), mimicking docked-pose spread. Not docked, not relaxed.
   * Second charge model: pdb2pqr30 --ff=CHARMM against the default AMBER. The
@@ -372,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
             "sites": sites,
             "pocket": tier_a.field_provenance,
             "pocket_charge_model_b": tier_b.field_provenance if tier_b else None,
-            "ionization": "neutral acid (tier has no net-charge setting)",
+            "ionization": "neutral acid (the SMILES given carries no formal charge)",
             "campaign_summary": CAMPAIGN_SUMMARY,
         },
         tiers=[{"name": t.name, **t.settings()} for t in (poses, tier_a, tier_b) if t is not None],

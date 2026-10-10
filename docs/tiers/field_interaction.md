@@ -30,7 +30,7 @@
 ## Gates
 
 - **G1, pose validity (applied by this tier).** `FieldInteraction.run` calls `require_passing_poses` on every candidate first; a pose that failed PoseBusters raises `PoseGateError`. A candidate with no report runs unless `ctx["require_pose_report"]` is true.
-- **G3, electron parity (not applied by this tier).** Only `smeltery run` checks parity (`src/smeltery/cli.py`, `_check_parity`). The tier calls `ferric.Molecule.from_xyz_string` without a charge or multiplicity, so every molecule is scored at charge 0, multiplicity 1; ferric refuses an odd electron count (run during this documentation, one H atom: `ValueError`, "inconsistent charge/multiplicity"). A charged molecule is scored as the neutral atom list it is given. The CLI's parity check uses the SMILES formal charge, which the tier does not.
+- **G3, electron parity (not applied by this tier).** Only `smeltery run` checks parity (`src/smeltery/cli.py`, `_check_parity`). The tier passes the SMILES' net formal charge to `ferric.Molecule.from_xyz_string` (`tests/test_charge_state.py`) and the multiplicity stays 1, so it scores a closed-shell singlet at that charge; ferric refuses an odd electron count (one H atom: `ValueError`, "inconsistent charge/multiplicity"). The CLI's parity check uses the same SMILES formal charge, so the two agree. The charge is whatever the SMILES carries: a carboxylic acid given as the neutral acid is scored as the neutral acid.
 - Its own guards: SCF non-convergence of either calculation raises `RuntimeError`.
 - **G4, unmeasured floor (applies to using the output).** `funnel.cut(tier=...)` refuses this tier because its floor is unmeasured; `smeltery run` then requires an explicit `[cut] floor` and records that it came from the config.
 

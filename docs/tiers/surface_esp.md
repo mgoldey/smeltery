@@ -31,7 +31,7 @@
 - **G1, pose validity (applied by this tier).** `SurfaceEsp.run` calls `require_passing_poses` on every candidate first.
 - Needs a ferric with `esp_on_surface` (mgoldey/ferric#359, commit b22183b). Without it `surface_esp` raises `SurfaceEspUnavailableError` and falls back to nothing (`tests/test_surface_esp.py::test_tier_skips_with_an_actionable_message_on_a_ferric_without_the_binding`).
 - Its own guards: SCF non-convergence raises `RuntimeError`; a pose whose every surface point is buried raises `RuntimeError`.
-- Like `field_interaction`, it passes no charge or multiplicity to ferric, so every molecule is treated as a neutral singlet and an odd electron count is refused by ferric.
+- Like `field_interaction`, it passes the SMILES' net formal charge to ferric (`tests/test_charge_state.py`) and a multiplicity of 1, so it scores a closed-shell singlet at that charge; ferric refuses an odd electron count.
 
 ## Systematic floor
 
