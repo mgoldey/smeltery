@@ -91,6 +91,57 @@ jobs:
             exit 1
           fi
 
+  # The BUILT wheel installed with plain pip into a fresh venv, with and without each extra the wheel declares
+  # (issue #31). The matrix comes from the wheel's own metadata, so a new extra is covered the moment it exists;
+  # scripts/wheel_smoke.py refuses an extra it has no checks for, and tests/test_wheel_smoke.py guards the same.
+  wheel-build:
+    runs-on: ubuntu-24.04
+    outputs:
+      extras: ${{ steps.extras.outputs.extras }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # hatch-vcs derives the version from tags
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel
+      - id: extras
+        run: echo "extras=$(python scripts/wheel_smoke.py list-extras dist/*.whl)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wheel
+          path: dist/
+          if-no-files-found: error
+
+  wheel-smoke:
+    needs: wheel-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        extra: ${{ fromJSON(needs.wheel-build.outputs.extras) }}
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wheel
+          path: dist/
+      - name: Wheel with extra "${{ matrix.extra }}"
+        run: python scripts/wheel_smoke.py check dist/*.whl --extra "${{ matrix.extra }}" --config examples/mwe_benzoic.toml
+      - name: The example runs from the installed wheel, and the run record's ferric provenance is VERIFIED
+        if: matrix.extra == 'none'
+        run: python scripts/wheel_smoke.py check dist/*.whl --extra none --example examples/mwe_benzoic.py
+
   # The PoseBusters gate on Python 3.12 (issue #68). The `test` job runs 3.11
   # only, which hid a segfault in posebusters_check on uv's CPython 3.12.11+
   # (numpy iterating RDKit Point3D -> C++ throw -> boost stacktrace hook ->

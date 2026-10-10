@@ -123,6 +123,11 @@ class PdbProvider:
     """Experimental structures: a local PDB file, or a 4-character PDB id fetched from RCSB."""
 
     name = "pdb"
+    license_id = "MIT OR Apache-2.0"  # this code: smeltery's own (pyproject.toml)
+    # DATA licence: RCSB says "data files contained in the PDB archive are available under the CC0 1.0 Universal
+    # (CC0 1.0) Public Domain Dedication" (https://www.rcsb.org/pages/policies, fetched 2026-10-10). That covers
+    # ids fetched from RCSB; a local .pdb file carries whatever licence its owner gave it (results leave it None).
+    data_license_id = "CC0-1.0"
 
     def __init__(self, fetch: Callable[[str], bytes] = _urlopen_bytes) -> None:
         self._fetch = fetch
@@ -159,6 +164,10 @@ class AfdbProvider:
     """Predicted structures from the AlphaFold Protein Structure Database, by UniProt accession."""
 
     name = "afdb"
+    license_id = "MIT OR Apache-2.0"  # this code: smeltery's own (pyproject.toml)
+    # DATA licence: "Data is available for academic and commercial use, under a CC-BY-4.0 licence"
+    # (https://alphafold.ebi.ac.uk/download, fetched 2026-10-10). The data, not the code, is CC-BY-4.0.
+    data_license_id = "CC-BY-4.0"
 
     def __init__(self, fetch: Callable[[str], bytes] = _urlopen_bytes) -> None:
         self._fetch = fetch
