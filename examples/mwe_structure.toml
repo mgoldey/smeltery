@@ -1,0 +1,38 @@
+# The structure-first path (issue #17): start from a TARGET, not hand-prepared files. The structure is read
+# through the PdbProvider, prepared for Vina (protein-only receptor PDB -> Meeko PDBQT), the pocket field is
+# cut at an explicit radius around the stated box centre, ethanol is docked, propanol and butanol are PAIRED
+# to its docked poses, gated, and the field-interaction SCFs rank them. Only committed fixtures are read.
+# Needs the docking and posebusters extras and pdb2pqr30:
+#   uv run --extra docking --extra posebusters smeltery run examples/mwe_structure.toml --out out
+# The prepared receptor, its PDBQT and the pocket field are written under out/structure/ and named in the
+# run record by sha256.
+campaign = "mwe-structure"
+parent = "ethanol"
+
+[structure]
+spec = "../tests/data/pocket_pep5.pdb"   # a path, or a 4-character PDB id with allow_network = true
+center = [0.4, -0.1, -0.1]               # explicit; or reference_ligand = "LIG" (centroid of that HETATM residue)
+pocket_cutoff = 12.0                     # required: truncating the field is not monotone, so there is no default
+
+[candidates]
+ethanol = "CCO"
+propanol = "CCCO"
+butanol = "CCCCO"
+
+[poses]
+relax_unmapped = true
+
+[docking]                                # receptor and centre come from [structure]; only the search knobs here
+box_size = [22.0, 16.0, 16.0]
+seeds = [7]
+exhaustiveness = 4
+n_poses = 3
+
+[gates]
+posebusters = true
+forcefield = true
+
+[cut]
+keep = 1
+z = 2.0
+floor = 0.0
