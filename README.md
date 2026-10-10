@@ -39,6 +39,12 @@ the tests in a venv without it: a labelled stub is installed and tests marked
 `needs_ferric` are skipped, not failed. It is a smoke check, not a substitute for
 CI, and prints passed / skipped-needs-ferric / failed (non-zero on any failure).
 
+## Providers
+
+Structure, scoring, docking, property and potential providers plug in through the
+`smeltery.providers` entry-point group and are checked by a shared conformance suite;
+see [docs/providers.md](docs/providers.md).
+
 ## Example
 
 `examples/mwe_benzoic.py` places benzoic acid and two para-substituted
