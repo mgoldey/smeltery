@@ -25,6 +25,14 @@ take if you need OpenFF parameters. `gufe` was evaluated and rejected as the fun
 core (a Protocol is a fixed two-state DAG with no population, ranking or cost
 tracking); that it resolves says nothing about adopting it.
 
+## OpenMM for pocket charges (one-off tool dependency)
+
+`scripts/plb_pocket_charges.py` assigns force-field charges to a PLB protein through OpenMM (pdb2pqr30 cannot template its
+ACE/NME caps and phosphothreonine). OpenMM is the optional `pocket-charges` extra (`openmm>=8.6.1`); it is not a core dependency
+and nothing under `src/smeltery` imports it. Measured 2026-10-10 (python 3.11, `uv pip install openmm==8.6.1` into the CI-style
+venv with PyPI ferric 0.1.0rc7): installs, `amber14-all.xml` and `charmm36.xml` load. Tests that need it skip without it
+(`tests/test_plb_pocket_charges.py`; CI does not install it).
+
 ## Force-field tier
 
 `smeltery.tiers.ForceField` has two paths with one contract: `mmff` (RDKit, core;

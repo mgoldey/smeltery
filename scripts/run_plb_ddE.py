@@ -37,6 +37,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import argparse  # noqa: E402
 import hashlib  # noqa: E402
 import json  # noqa: E402
+import multiprocessing  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
 import time  # noqa: E402
@@ -280,7 +281,12 @@ def cmd_run(a: argparse.Namespace) -> int:
         return s
 
     stopped = False
-    with ProcessPoolExecutor(max_workers=a.workers, initializer=_init_worker, initargs=(ferric_fields,)) as ex:
+    # "spawn", not fork: basis_gaps has already started ferric's rayon pool in this process, and a forked child of a
+    # process with live rayon threads deadlocks (seen: four idle workers, zero CPU).
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=a.workers, mp_context=ctx, initializer=_init_worker, initargs=(ferric_fields,)
+    ) as ex:
         pending: dict = {}
         queue = iter(todo)
 
