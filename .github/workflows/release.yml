@@ -8,7 +8,9 @@
 #      (the version is DERIVED from the tag by hatch-vcs; no version commit),
 #   2. the sdist and wheel pass `twine check`,
 #   3. the BUILT WHEEL, installed with plain pip and with ferric resolved from
-#      PyPI (as a user would get it), passes the test suite and runs the example.
+#      PyPI (as a user would get it), passes the test suite and runs the example;
+#      and installs and imports with each extra it declares, the example's run
+#      record reporting a VERIFIED ferric provenance from the package index.
 #
 # Actions are pinned by commit SHA, the same pins ferric uses.
 name: release
@@ -70,6 +72,17 @@ jobs:
           cd /tmp/t
           /tmp/venv/bin/python -m pytest -q -p no:cacheprovider test_funnel.py test_anchors.py
           /tmp/venv/bin/python mwe_benzoic.py
+
+      - name: Smoke-test the built wheel with and without each extra (and the example's ferric provenance)
+        env:
+          OPENBLAS_NUM_THREADS: "1"
+        run: |
+          for extra in $(python scripts/wheel_smoke.py list-extras dist/*.whl | python -c "import json,sys; print(*json.load(sys.stdin))"); do
+            echo "::group::extra $extra"
+            python scripts/wheel_smoke.py check dist/*.whl --extra "$extra" --config examples/mwe_benzoic.toml --full
+            echo "::endgroup::"
+          done
+          python scripts/wheel_smoke.py check dist/*.whl --extra none --example examples/mwe_benzoic.py
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

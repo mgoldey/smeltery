@@ -65,6 +65,9 @@ class PotentialProvider(Protocol):
 
     def settings(self) -> dict: ...
 
+    # Not Protocol members (that would break existing providers under isinstance), but required by
+    # `smeltery.providers.conformance`: `license_id: str` (SPDX) and `energy_unit = "kcal/mol"`.
+
 
 def evaluate(
     provider: PotentialProvider, pose: Pose, point_charges: Sequence[PointCharge] | None = None, charge: int = 0
@@ -106,12 +109,19 @@ def relax(
     charge: int = 0,
     fmax: float = 1e-8,
     max_steps: int = 500,
+    max_step_ang: float = 0.2,
 ) -> RelaxResult:
     """BFGS minimization of `provider`'s energy, on a copy. `converged` is False if `max_steps` ran out.
 
     Convergence is the largest force component below `fmax`, so a positional error is about
-    `fmax / k` for a locally harmonic potential of curvature k. The input `pose` is not modified.
+    `fmax / k` for a locally harmonic potential of curvature k. Each trial step is capped at `max_step_ang`
+    per coordinate: with the identity as the first Hessian a force of tens of kcal/mol/Å would otherwise be a
+    step of tens of Å. A provider may declare `energy_noise` (kcal/mol, default 0): its energy resolution, e.g.
+    float32 round-off on a total energy of 1e5 kcal/mol. The line search then accepts a step that raises the
+    energy by up to that much, since a smaller change is not measurable; without it BFGS stalls on round-off.
+    The input `pose` is not modified.
     """
+    noise = float(getattr(provider, "energy_noise", 0.0))
     x = np.array(pose.coords_ang, dtype=float).ravel()
     res = evaluate(provider, _with_coords(pose, x), point_charges, charge)
     g = -res.forces.ravel()
@@ -122,11 +132,13 @@ def relax(
         d = -h @ g
         if d @ g >= 0:  # not a descent direction: reset the curvature estimate
             h, d = np.eye(x.size), -g
+        if np.abs(d).max() > max_step_ang:
+            d = d * (max_step_ang / np.abs(d).max())
         t = 1.0
         while True:  # Armijo backtracking
             x_new = x + t * d
             new = evaluate(provider, _with_coords(pose, x_new), point_charges, charge)
-            if new.energy <= res.energy + 1e-4 * t * (g @ d) or t < 1e-12:
+            if new.energy <= res.energy + 1e-4 * t * (g @ d) + noise or t < 1e-12:
                 break
             t *= 0.5
         g_new = -new.forces.ravel()

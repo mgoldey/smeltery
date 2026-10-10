@@ -174,6 +174,30 @@ def _mol_for_pose(smiles: str, pose: Pose):
     return mol
 
 
+def _flatness_coords(mol, indices) -> np.ndarray:
+    """Coordinates of `indices`, read in one C++ call (same values as PoseBusters' own `_get_coords`)."""
+    return np.asarray(mol.GetConformer().GetPositions(), dtype=float)[list(indices)]
+
+
+def _avoid_point3d_unwind_segfault() -> None:
+    """Replace PoseBusters' `flatness._get_coords` (issue #68) with `_flatness_coords`.
+
+    PoseBusters 0.6.5 does `np.array([conf.GetAtomPosition(i) ...])`. NumPy then
+    iterates each `Point3D` until RDKit raises the end-of-sequence IndexError from
+    C++. RDKit >= 2024.3.2 wheels route every C++ throw through boost's
+    stacktrace-from-exception hook, which walks the stack with `_Unwind_Backtrace`;
+    on uv's python-build-standalone CPython 3.12.11+/3.13.5+ that walk faults
+    (docs/environments.md). `GetPositions()` raises nothing, so the fault is never
+    reached. Harmless where it was not faulting: identical coordinates.
+    """
+    try:
+        from posebusters.modules import flatness
+    except ImportError:  # posebusters layout changed: nothing to patch
+        return
+    if hasattr(flatness, "_get_coords"):
+        flatness._get_coords = _flatness_coords
+
+
 def posebusters_check(poses: Sequence[Pose], smiles: str, receptor: str | None = None) -> PoseReport:
     """Run PoseBusters on every pose of one molecule.
 
@@ -191,6 +215,7 @@ def posebusters_check(poses: Sequence[Pose], smiles: str, receptor: str | None =
         raise ImportError(f"posebusters is required for the pose gate -- {_INSTALL_HINT}") from e
     if not poses:
         raise ValueError("no poses to check")
+    _avoid_point3d_unwind_segfault()
     mols = [_mol_for_pose(smiles, p) for p in poses]
     config = "dock" if receptor is not None else "mol"
     buster = PoseBusters(config=config)

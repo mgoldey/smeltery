@@ -54,7 +54,35 @@ Optional sections (absent = the stages above only):
     [gates]                 # run before the SCFs; a failing pose is a stage error, never silently dropped
     posebusters = true      # needs the posebusters extra; also checks against the pocket when it is a .pdb
     forcefield = true       # MMFF94 energy and strain per pose, recorded
+    max_strain_kcal = 25.0  # optional, needs forcefield: reject (stage error) any pose with more strain; no default
     xtb = true              # GFN2 energy per pose in the pocket field, recorded (a gate, not a ranker)
+
+Starting from a target (replaces [docking] receptor/box_center and [pocket]; see `smeltery.prep`):
+
+    [structure]
+    spec = "pocket_pep5.pdb"    # a .pdb path (relative to the config), a PDB id, or (provider afdb) a UniProt id
+    provider = "pdb"            # optional: "pdb" (default) or "afdb" (PREDICTED: licence + attribution recorded)
+    allow_network = false       # an id or accession is fetched only when this is true; a local file never is
+    center = [0.4, -0.1, -0.1]  # EXACTLY ONE of: explicit box centre (the structure's frame, Angstrom) ...
+    reference_ligand = "LIG"    # ... or the heavy-atom centroid of HETATM residue RES[:CHAIN[:RESNUM]]
+    pocket_cutoff = 12.0        # required, Angstrom: the point-charge field is cut at this radius from the centre.
+                                # No default: truncation is not monotone, so the choice is recorded, not assumed.
+    chains = ["A"]              # optional: protein chains to keep (default all)
+    [docking]                   # optional here: seeds, exhaustiveness, n_poses, box_size (default 24 A)
+
+The structure stage writes `receptor.pdb` (first model, altloc blank/A, every HETATM dropped and counted) and
+`receptor.pdbqt` (Meeko) under `<out>/structure/`, identifies both by sha256 in the record, and checks the frame
+(centre near the receptor; field covers the box faces; PDBQT atoms coincide with the PDB; no receptor atoms lost to
+Meeko inside the box; docked parent inside the box). A failed check is a stage error.
+
+Funnel semantics (smallest sound form): every stage reports candidates in and out (`results.funnel`, and the table).
+Gate stages can only REJECT, loudly: parity, PoseBusters and MMFF strain when `[gates] max_strain_kcal` is set (an
+explicit kcal/mol threshold; absent = strain is recorded, nothing is rejected, and the stage says so) -- so a gate's
+out count is its in count, or the run stops. xtb is recorded, never a filter. Only the one ranked stage, the paired
+ddE `cut`, removes candidates, with the tier floor (explicit `[cut] floor` while unmeasured), tie groups and
+UNRANKED exactly as above; it counts analogues, because the parent is the paired reference. A second ranked stage
+is deliberately not offered: the only wired ranker has an unmeasured floor, so a ladder would need a second invented
+floor, and totals are never compared across formulas.
 
 Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed.
 """
@@ -79,11 +107,24 @@ from .pocket.loader import file_digest
 from .record import RunRecord
 from .tiers import FieldInteraction, ForceField, Gfn2, PairedPoses, _net_charge
 
-TOP_KEYS = {"campaign", "parent", "candidates", "poses", "pocket", "field_interaction", "cut", "docking", "gates"}
+TOP_KEYS = {
+    "campaign",
+    "parent",
+    "candidates",
+    "poses",
+    "pocket",
+    "field_interaction",
+    "cut",
+    "docking",
+    "gates",
+    "structure",
+}
+STRUCTURE_KEYS = {"spec", "provider", "allow_network", "center", "reference_ligand", "pocket_cutoff", "chains"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
 POCKET_KEYS = {"site", "file"}
 DOCKING_KEYS = {"receptor", "box_center", "box_size", "seeds", "exhaustiveness", "n_poses"}
 GATE_KEYS = {"posebusters", "forcefield", "xtb"}
+GATE_OPTION_KEYS = {"max_strain_kcal"}  # explicit rejection thresholds; absent = recorded only
 CUT_KEYS = {"keep", "z", "floor"}
 QUANTITY = "dE_int"
 
@@ -124,6 +165,8 @@ class Plan:
             "gates": {k: bool(gates.get(k, False)) for k in sorted(GATE_KEYS)},
             **self.extra_inputs,
         }
+        if "max_strain_kcal" in gates:  # only when set, so configs from before this knob keep their digests
+            inputs["gates"]["max_strain_kcal"] = float(gates["max_strain_kcal"])
         if "pocket" not in self.extra_inputs:  # sites: the charges ARE the input; a file: its digest is
             inputs["field"] = [(c.q, c.xyz_ang) for c in self.field]
         return inputs
@@ -175,6 +218,7 @@ def validate_config(cfg: dict) -> dict:
             raise ConfigError(f"candidate {name!r}: unparseable SMILES {smi!r}")
     poses_cfg = _knobs(cfg, "poses", PairedPoses)
     _knobs(cfg, "field_interaction", FieldInteraction)
+    _validate_structure(cfg)
     _validate_docking(cfg, poses_cfg)
     _validate_gates(cfg)
     cut_cfg = cfg["cut"]
@@ -183,6 +227,10 @@ def validate_config(cfg: dict) -> dict:
     if not isinstance(cut_cfg.get("keep"), int) or not 1 <= cut_cfg["keep"] <= n_analogues:
         raise ConfigError(f"[cut] keep must be an integer in 1..{n_analogues} (the number of analogues)")
     pocket = cfg.get("pocket", {})
+    if "structure" in cfg:
+        if pocket:
+            raise ConfigError("[pocket] cannot be combined with [structure]: the field comes from the structure")
+        return cfg
     _check_keys("[pocket]", pocket, POCKET_KEYS)
     sites = pocket.get("site", [])
     if "file" in pocket:
@@ -202,19 +250,60 @@ def validate_config(cfg: dict) -> dict:
     return cfg
 
 
-def _validate_docking(cfg: dict, poses_cfg: dict) -> None:
-    if "docking" not in cfg:
+def _validate_structure(cfg: dict) -> None:
+    if "structure" not in cfg:
         return
-    d = cfg["docking"]
+    s = cfg["structure"]
+    if not isinstance(s, dict):
+        raise ConfigError("[structure] must be a table")
+    _check_keys("[structure]", s, STRUCTURE_KEYS)
+    if not isinstance(s.get("spec"), str) or not s["spec"]:
+        raise ConfigError("[structure] spec is required: a .pdb path, a PDB id or (provider afdb) a UniProt accession")
+    if s.get("provider", "pdb") not in ("pdb", "afdb"):
+        raise ConfigError("[structure] provider must be 'pdb' or 'afdb'")
+    if not isinstance(s.get("allow_network", False), bool):
+        raise ConfigError("[structure] allow_network must be true or false")
+    if ("center" in s) == ("reference_ligand" in s):
+        raise ConfigError("[structure] needs exactly one of center = [x, y, z] or reference_ligand = 'RES[:CHAIN]'")
+    if "center" in s:
+        v = s["center"]
+        if not (isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v)):
+            raise ConfigError("[structure] center must be three numbers (Angstrom, the structure's frame)")
+    elif s.get("provider", "pdb") == "afdb" or not isinstance(s["reference_ligand"], str):
+        raise ConfigError("[structure] reference_ligand is a residue name in an experimental structure")
+    cutoff = s.get("pocket_cutoff")
+    if isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)) or cutoff <= 0:
+        raise ConfigError(
+            "[structure] pocket_cutoff (Angstrom, > 0) is required: truncating the field is not monotone, "
+            "so there is no default cutoff"
+        )
+    if "chains" in s and not (s["chains"] and all(isinstance(c, str) and len(c) == 1 for c in s["chains"])):
+        raise ConfigError("[structure] chains must be a non-empty list of one-letter chain ids")
+
+
+def _validate_docking(cfg: dict, poses_cfg: dict) -> None:
+    structure = "structure" in cfg
+    if "docking" not in cfg and not structure:
+        return
+    d = cfg.get("docking", {})
     if not isinstance(d, dict):
         raise ConfigError("[docking] must be a table")
     _check_keys("[docking]", d, DOCKING_KEYS)
-    for key in ("receptor", "box_center"):
-        if key not in d:
-            raise ConfigError(f"[docking] is missing {key!r}")
-    if not isinstance(d["receptor"], str):
-        raise ConfigError("[docking] receptor must be a path to a prepared receptor (.pdbqt)")
+    if structure:
+        clash = sorted({"receptor", "box_center"} & set(d))
+        if clash:
+            raise ConfigError(
+                f"[docking] {clash} come from [structure] (prepared receptor, stated centre); remove them"
+            )
+    else:
+        for key in ("receptor", "box_center"):
+            if key not in d:
+                raise ConfigError(f"[docking] is missing {key!r}")
+        if not isinstance(d["receptor"], str):
+            raise ConfigError("[docking] receptor must be a path to a prepared receptor (.pdbqt)")
     for key in ("box_center", "box_size"):
+        if key not in d and structure:
+            continue
         v = d.get(key, [0, 0, 0])
         if not (isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v)):
             raise ConfigError(f"[docking] {key} must be three numbers (Angstrom, receptor frame)")
@@ -237,10 +326,16 @@ def _validate_gates(cfg: dict) -> None:
     g = cfg.get("gates", {})
     if not isinstance(g, dict):
         raise ConfigError("[gates] must be a table")
-    _check_keys("[gates]", g, GATE_KEYS)
-    bad = sorted(k for k, v in g.items() if not isinstance(v, bool))
+    _check_keys("[gates]", g, GATE_KEYS | GATE_OPTION_KEYS)
+    bad = sorted(k for k, v in g.items() if k in GATE_KEYS and not isinstance(v, bool))
     if bad:
         raise ConfigError(f"[gates] {bad} must be true or false")
+    if "max_strain_kcal" in g:
+        v = g["max_strain_kcal"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+            raise ConfigError("[gates] max_strain_kcal must be a positive number (kcal/mol)")
+        if not g.get("forcefield"):
+            raise ConfigError("[gates] max_strain_kcal needs forcefield = true: it thresholds the MMFF94 strain")
 
 
 def _stage(name: str, fn):
@@ -250,6 +345,16 @@ def _stage(name: str, fn):
         raise
     except Exception as e:
         raise StageError(f"stage {name!r} failed: {type(e).__name__}: {e}") from e
+
+
+def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | None, kind: str, **extra) -> None:
+    """One stage entry: its name, a summary line, and how many candidates went in and came out.
+
+    `kind`: prep (no candidates yet), search (parent only), pair, field, gate (rejects loudly, so a run that
+    reaches the next stage has n_out == n_in), recorded (measured and kept, no rejection threshold).
+    """
+    entry = {"stage": stage, "summary": summary, "kind": kind, "candidates_in": n_in, "candidates_out": n_out}
+    log.append({**entry, **extra})
 
 
 def _place_sites(parent: Candidate, sites: list[dict]) -> list[PointCharge]:
@@ -281,11 +386,14 @@ def _resolve(cfg: dict, name: str) -> Path:
     return p if p.is_absolute() else Path(cfg.get("_dir", ".")) / p
 
 
-def _dock_parent(cfg: dict, parent: Candidate, log: list, extra: dict):
+def _dock_parent(cfg: dict, parent: Candidate, log: list, extra: dict, prepared=None):
     from .docking import Box, Docking, VinaProvider  # the docking extra: imported only when docking is configured
 
-    d = cfg["docking"]
-    receptor = _resolve(cfg, d["receptor"])
+    d = cfg.get("docking", {})
+    if prepared is not None:  # [structure]: the receptor and the centre are the stage's own artefacts
+        receptor, center = prepared.receptor_pdbqt, prepared.center
+    else:
+        receptor, center = _resolve(cfg, d["receptor"]), tuple(float(x) for x in d["box_center"])
     if not receptor.is_file():
         raise ConfigError(f"[docking] receptor {str(receptor)!r} does not exist")
     provider_kw = {k: d[k] for k in ("exhaustiveness", "n_poses") if k in d}
@@ -293,8 +401,16 @@ def _dock_parent(cfg: dict, parent: Candidate, log: list, extra: dict):
     if "seeds" in d:
         tier_kw["seeds"] = tuple(d["seeds"])
     tier = Docking(VinaProvider(**provider_kw), **tier_kw)
-    box = Box(tuple(float(x) for x in d["box_center"]), tuple(float(x) for x in d.get("box_size", (24.0, 24.0, 24.0))))
+    box = Box(center, tuple(float(x) for x in d.get("box_size", (24.0, 24.0, 24.0))))
     tier.run([parent], {"receptor": str(receptor), "box": box})
+    if prepared is not None:  # frame check: a docked pose outside the box is not in the frame the box was stated in
+        mid = np.array([p.coords_ang.mean(axis=0) for p in parent.poses])
+        outside = (np.abs(mid - np.asarray(box.center)) > np.asarray(box.size) / 2).any(axis=1)
+        if outside.any():
+            raise StageError(
+                f"stage 'docking' failed: {int(outside.sum())} of {len(parent.poses)} docked pose(s) have "
+                "their centroid outside the search box; the receptor and the box are not in one frame"
+            )
     scores = [float(x) for x in parent.per_pose[tier.QUANTITY]]
     extra["docking"] = {
         "receptor": receptor.name,
@@ -303,19 +419,36 @@ def _dock_parent(cfg: dict, parent: Candidate, log: list, extra: dict):
     }
     unit = tier.produces()[tier.QUANTITY]
     best = f"best {min(scores):.2f} {unit}"
-    log.append(
-        {"stage": "docking", "summary": f"docking {parent.name}: {len(parent.poses)} pose(s), {best}", "scores": scores}
+    _log(
+        log,
+        "docking",
+        f"docking {parent.name}: {len(parent.poses)} pose(s), {best}",
+        1,
+        1,
+        "search",
+        scores=scores,
     )
     return tier
 
 
-def _load_field(cfg: dict, parent: Candidate, extra: dict, log: list) -> tuple[list[PointCharge], Path | None]:
+def _load_field(
+    cfg: dict, parent: Candidate, extra: dict, log: list, prepared=None
+) -> tuple[list[PointCharge], Path | None]:
+    n_c = len(cfg["candidates"])
+    if prepared is not None:  # already loaded around the stated centre with the explicit cutoff
+        _log(
+            log,
+            "pocket",
+            f"pocket {prepared.receptor_pdb.name}: {len(prepared.field)} point charges",
+            n_c,
+            n_c,
+            "field",
+        )
+        return prepared.field, prepared.receptor_pdb
     pocket = cfg["pocket"]
     if "file" not in pocket:
         sites = _place_sites(parent, pocket["site"])
-        log.append(
-            {"stage": "pocket", "summary": f"pocket: {len(sites)} point charge(s) placed from {parent.name} pose 0"}
-        )
+        _log(log, "pocket", f"pocket: {len(sites)} point charge(s) placed from {parent.name} pose 0", n_c, n_c, "field")
         return sites, None
     path = _resolve(cfg, pocket["file"])
     if not path.is_file():
@@ -324,7 +457,7 @@ def _load_field(cfg: dict, parent: Candidate, extra: dict, log: list) -> tuple[l
     if not len(field):
         raise StageError("stage 'pocket' failed: the pocket file produced no point charges")
     extra["pocket"] = dict(field.provenance)
-    log.append({"stage": "pocket", "summary": f"pocket {path.name}: {len(field)} point charges"})
+    _log(log, "pocket", f"pocket {path.name}: {len(field)} point charges", n_c, n_c, "field")
     return field, path
 
 
@@ -358,12 +491,14 @@ def _run_gates(plan_cfg: dict, cands: list[Candidate], field, pocket_path: Path 
         report = _stage("posebusters", posebusters)
         n = sum(len(c.poses) for c in cands)
         mode = "ligand + protein" if receptor else "ligand only"
-        log.append(
-            {
-                "stage": "posebusters",
-                "summary": f"posebusters ({mode}): all {n} pose(s) of {len(cands)} candidate(s) pass",
-                "posebusters_version": getattr(report, "posebusters_version", None),
-            }
+        _log(
+            log,
+            "posebusters",
+            f"posebusters ({mode}): all {n} pose(s) of {len(cands)} candidate(s) pass",
+            len(cands),
+            len(cands),
+            "gate",
+            posebusters_version=getattr(report, "posebusters_version", None),
         )
     if gates.get("forcefield"):
         ff = ForceField()
@@ -373,43 +508,96 @@ def _run_gates(plan_cfg: dict, cands: list[Candidate], field, pocket_path: Path 
             for c in cands
         }
         worst = max(max(v) for v in strain.values())
-        log.append(
-            {
-                "stage": "forcefield",
-                "summary": f"forcefield MMFF94 recorded; largest pose strain {worst:.1f} kcal/mol",
-                "strain": strain,
-            }
+        limit = gates.get("max_strain_kcal")
+        if limit is not None:
+            for name, v in strain.items():
+                bad = [i for i, x in enumerate(v) if x > limit]
+                if bad:
+                    raise StageError(
+                        f"stage 'forcefield' failed: {name} pose(s) {bad} have MMFF94 strain "
+                        f"{max(v):.1f} kcal/mol > the configured max_strain_kcal {limit:g}"
+                    )
+        what = f"gated at {limit:g} kcal/mol" if limit is not None else "recorded, no rejection threshold"
+        _log(
+            log,
+            "forcefield",
+            f"forcefield MMFF94 {what}; largest pose strain {worst:.1f} kcal/mol",
+            len(cands),
+            len(cands),
+            "gate" if limit is not None else "recorded",
+            strain=strain,
         )
         recorded.append(ff)
     if gates.get("xtb"):
         xtb = Gfn2()
         _stage("xtb", lambda: xtb.run(cands, {"field": field}))
-        log.append(
-            {
-                "stage": "xtb",
-                "summary": "xtb GFN2 recorded (a gate, not a ranker)",
-                "E_gfn2": {c.name: [float(x) for x in c.per_pose["E_gfn2"]] for c in cands},
-            }
+        _log(
+            log,
+            "xtb",
+            "xtb GFN2 recorded (a failed xtb run is a stage error; no energy threshold; not a ranker)",
+            len(cands),
+            len(cands),
+            "recorded",
+            E_gfn2={c.name: [float(x) for x in c.per_pose["E_gfn2"]] for c in cands},
         )
         recorded.append(xtb)
     return recorded
 
 
-def build_plan(cfg: dict) -> Plan:
-    """Everything before the field-interaction SCFs: docking, pairing, pocket, parity, gates and the floor."""
+def _prepare_structure(cfg: dict, out_dir: Path | None, fetch, log: list, extra: dict):
+    from .prep import PrepConfigError, obtain_structure, prepare_target_from_structure
+
+    if out_dir is None:
+        raise ConfigError("[structure] writes its prepared artefacts under an output directory: pass out_dir")
+    s = cfg["structure"]
+    size = tuple(float(x) for x in cfg.get("docking", {}).get("box_size", (24.0, 24.0, 24.0)))
+    base = Path(cfg.get("_dir", "."))
+
+    def guarded(fn):
+        try:
+            return fn()
+        except PrepConfigError as e:  # the structure section names something that does not exist: exit 2, not 3
+            raise ConfigError(str(e)) from e
+
+    result = _stage(
+        "structure",
+        lambda: guarded(
+            lambda: obtain_structure(s["spec"], s.get("provider", "pdb"), base, s.get("allow_network", False), fetch)
+        ),
+    )
+    prepared = _stage("structure", lambda: guarded(lambda: prepare_target_from_structure(s, result, size, out_dir)))
+    extra["structure"] = prepared.record
+    extra["pocket"] = dict(prepared.field.provenance)
+    _log(log, "structure", prepared.summary, None, None, "prep", structure_kind=result.kind)
+    return prepared
+
+
+def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
+    """Everything before the field-interaction SCFs: structure prep, docking, pairing, pocket, parity, gates, floor.
+
+    `out_dir` is where `[structure]` writes its prepared receptor (required then). `fetch` replaces the
+    network fetch of the structure providers (tests inject committed fixtures).
+    """
     cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
     extra: dict = {}
     before = []
-    if "docking" in cfg:
-        before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra)))
-    poses = PairedPoses(parent_poses_given="docking" in cfg, **cfg.get("poses", {}))
+    docked = "docking" in cfg or "structure" in cfg
+    prepared = _prepare_structure(cfg, out_dir, fetch, log, extra) if "structure" in cfg else None
+    if docked:
+        before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra, prepared)))
+    poses = PairedPoses(parent_poses_given=docked, **cfg.get("poses", {}))
     _stage("poses", lambda: poses.run(cands, {"parent": parent}))
-    log.append(
-        {"stage": "poses", "summary": f"paired poses: {len(parent.poses)} per candidate, {len(cands)} candidates"}
+    _log(
+        log,
+        "poses",
+        f"paired poses: {len(parent.poses)} per candidate, {len(cands)} candidates",
+        len(cands),
+        len(cands),
+        "pair",
     )
-    field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log))
+    field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared))
     _stage("parity", lambda: _check_parity(cands))
     after = _run_gates(cfg, cands, field, pocket_path, log)
     tier = FieldInteraction(**cfg.get("field_interaction", {}))
@@ -423,6 +611,34 @@ def build_plan(cfg: dict) -> Plan:
     return Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
 
 
+def funnel_counts(plan: Plan, res=None) -> list[dict]:
+    """Per stage: kind and how many candidates went in and came out. Gates cannot thin the list silently
+    (a rejection is a stage error), so for them out == in; only the ranked cut removes candidates.
+
+    The cut counts ANALOGUES: the parent is the paired reference, not a candidate for survival. With `res`
+    (the CutResult) the last two rows are the measurement and the cut; `candidates_out` is None for an
+    unranked cut, because no survivor set exists.
+    """
+    n = len(plan.candidates)
+    rows = []
+    for e in plan.stage_log:
+        rows.append({k: e[k] for k in ("stage", "kind", "candidates_in", "candidates_out")})
+        if e["stage"] == "pocket":  # parity runs right after the pocket, before the recorded gates
+            rows.append({"stage": "parity", "kind": "gate", "candidates_in": n, "candidates_out": n})
+    if res is not None:
+        rows.append({"stage": "field_interaction", "kind": "measure", "candidates_in": n, "candidates_out": n})
+        rows.append(
+            {
+                "stage": "cut",
+                "kind": "rank",
+                "candidates_in": n - 1,
+                "candidates_out": None if res.unranked_at_boundary else len(res.survivors or []),
+                "unranked": bool(res.unranked_at_boundary),
+            }
+        )
+    return rows
+
+
 def run_plan(plan: Plan) -> tuple[RunRecord, dict]:
     _stage("field_interaction", lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
     analogues = [c for c in plan.candidates if c is not plan.parent]
@@ -434,6 +650,7 @@ def run_plan(plan: Plan) -> tuple[RunRecord, dict]:
         "unpaired_sem": {k: v.sem for k, v in unpaired.items()},
         "cut": {"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary},
         "stages": plan.stage_log,
+        "funnel": funnel_counts(plan, res),
     }
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
@@ -448,6 +665,16 @@ def format_table(plan: Plan, out: dict) -> str:
         m = out["paired"][c.name]
         lines.append(f"{c.name:12} {c.formula:10} {m.mean:+12.4f} ± {m.sem:.4f} {out['unpaired'][c.name].sem:13.4f}")
     lines.append("\nstages: " + " -> ".join(e["summary"] for e in plan.stage_log) + " -> field_interaction")
+    lines.append("candidates in -> out per stage (a gate rejects loudly or passes everyone; only the cut ranks):")
+    for r in funnel_counts(plan, res):
+        cin = "-" if r["candidates_in"] is None else r["candidates_in"]
+        cout = "unranked" if r.get("unranked") else ("-" if r["candidates_out"] is None else r["candidates_out"])
+        lines.append(f"  {r['stage']:18} {r['kind']:9} {cin!s:>3} -> {cout!s}")
+    st = plan.extra_inputs.get("structure")
+    if st:
+        lines.append(f"structure: {st['kind']}, {st['structure']['source']}")
+        if st["kind"] == "PREDICTED":
+            lines.append(f"  licence {st['structure']['license_id']}; {st['structure']['attribution']}")
     lines.append(f"floor {plan.floor:g} kcal/mol, from {plan.floor_source}; z={res.z:g}")
     lines.append("tie groups (no order within a group): " + " | ".join(", ".join(g) for g in res.groups))
     if res.unranked_at_boundary:
@@ -477,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--plan", action="store_true", help="stop before the SCFs: poses, pocket, parity, digest")
     args = ap.parse_args(argv)
     try:
-        plan = build_plan(load_config(args.config))
+        plan = build_plan(load_config(args.config), out_dir=args.out)
         if args.plan:
             print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
             return 0

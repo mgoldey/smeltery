@@ -1,0 +1,22 @@
+# Optional environment for ForceField(path="openmm") (issue #18). NOT a core dependency.
+#
+#   micromamba create -n smeltery-ff -f environment-openff.yml
+#   micromamba run -n smeltery-ff python -m pip install --pre "ferric>=0.1.0rc6"   # smeltery's own dependency, from PyPI
+#   PYTHONPATH=src micromamba run -n smeltery-ff python -m pytest tests/test_forcefield_openmm.py
+#
+# Why conda-forge: openff-toolkit has no usable PyPI release (its only one, 0.18.0, is
+# yanked), and the AM1-BCC charges it requests need AmberTools' sqm, which conda-forge
+# ships as `ambertools`. See docs/environments.md, 'OpenMM force-field path'.
+name: smeltery-ff
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - openmm
+  - openmmforcefields
+  - openff-toolkit
+  - ambertools
+  - rdkit
+  - numpy
+  - pytest
+  - pip
