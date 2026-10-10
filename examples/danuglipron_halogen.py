@@ -85,10 +85,10 @@ def find_data_dir() -> Path:
     raise FileNotFoundError("danuglipron test data not found; set FERRIC_DANUGLIPRON_DIR")
 
 
-def analogue_smiles() -> dict[str, str]:
+def analogue_smiles(sites: dict[str, int] | None = None) -> dict[str, str]:
     """name -> SMILES: replace the aromatic CH at each site with F, Cl or CH3."""
     out = {}
-    for sname, idx in SITES.items():
+    for sname, idx in (SITES if sites is None else sites).items():
         for sub, elem in SUBSTITUENTS.items():
             rw = Chem.RWMol(Chem.MolFromSmiles(PARENT_SMILES))
             atom = rw.GetAtomWithIdx(idx)
@@ -235,16 +235,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--poses", type=int, default=6)
     ap.add_argument("--out", type=Path, default=Path("out"))
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    ap.add_argument("--sites", default=None, help="comma-separated subset of " + ",".join(SITES) + " (default: all)")
+    ap.add_argument("--skip-model-b", action="store_true",
+                    help="skip the CHARMM pass: criterion 4 (sensitivity floor and cut) is then reported as SKIPPED")
     args = ap.parse_args(argv)
 
     data = find_data_dir()
     field_a = load_pocket(data / "7LCJ_pocket.pdb", ff="AMBER")
-    field_b = load_pocket(data / "7LCJ_pocket.pdb", ff="CHARMM")
+    field_b = None if args.skip_model_b else load_pocket(data / "7LCJ_pocket.pdb", ff="CHARMM")
     print(f"field A (AMBER): {field_a.provenance['n_charges']} charges, net {sum(c.q for c in field_a):+.2f}; "
-          f"field B (CHARMM): {field_b.provenance['n_charges']} charges, net {sum(c.q for c in field_b):+.2f}")
+          + (f"field B (CHARMM): {field_b.provenance['n_charges']} charges, net {sum(c.q for c in field_b):+.2f}" if field_b else "field B: skipped"))
 
     parent = Candidate("parent", PARENT_SMILES)
-    smi = analogue_smiles()
+    sites = SITES if args.sites is None else {k: SITES[k] for k in args.sites.split(",")}
+    smi = analogue_smiles(sites)
     analogues = [Candidate(n, s) for n, s in smi.items()]
     selfpair = Candidate("parent-self", PARENT_SMILES)
     cands = [parent, *analogues, selfpair]
@@ -255,9 +259,11 @@ def main(argv: list[str] | None = None) -> int:
     cache = args.out / f"halogen-scf-cache-{args.poses}poses.json"
     tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache)
     # Model B: the SAME poses under CHARMM charges, in separate candidates so per_pose stays model-specific.
-    cands_b = [Candidate(c.name, c.smiles, c.poses) for c in cands if c is not selfpair]
-    tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache)
-    parent_b = cands_b[0]
+    tier_b = parent_b = None
+    if field_b is not None:
+        cands_b = [Candidate(c.name, c.smiles, c.poses) for c in cands if c is not selfpair]
+        tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache)
+        parent_b = cands_b[0]
 
     # Criterion 1: self-anchor, exactly 0.0 on every pose, and a non-zero field.
     selfdd = paired_delta(parent, selfpair, "dE_int")
@@ -270,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
 
     paired = {c.name: paired_delta(parent, c, "dE_int", tier_a) for c in analogues}
     unpaired = {c.name: unpaired_delta(parent, c, "dE_int") for c in analogues}
-    paired_b = {c.name: paired_delta(parent_b, c, "dE_int", tier_b) for c in cands_b[1:]}
+    paired_b = {c.name: paired_delta(parent_b, c, "dE_int", tier_b) for c in cands_b[1:]} if tier_b else {}
     rho = {c.name: float(np.corrcoef(c.per_pose["dE_int"], parent.per_pose["dE_int"])[0, 1]) for c in analogues}
 
     print(f"\n[3] paired vs unpaired (AMBER, {args.poses} poses, kcal/mol)")
@@ -292,30 +298,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{r['name']:14} {r['mean']:+9.3f} {r['sem']:9.3f} {rec:>9} {ag:>7}")
 
     # Criterion 4: charge-sensitivity floor, then the cut.
-    va = {c.name: paired[c.name].mean for c in analogues}
-    vb = {n: m.mean for n, m in paired_b.items()}
-    report = charge_sensitivity(analogues, "dE_int", lambda c, q: va[c.name], lambda c, q: vb[c.name])
-    print(f"\n[4] charge sensitivity (AMBER -> CHARMM): sign flips {report.n_sign_flips}/{report.n} "
-          f"(campaign: {CAMPAIGN_SUMMARY['n_sign_flips']}/{CAMPAIGN_SUMMARY['n']}), Spearman {report.spearman:+.3f} "
-          f"(campaign: {CAMPAIGN_SUMMARY['spearman']:+.3f}), floor {report.floor:.3f} kcal/mol")
-    res = cut(paired, keep=3, z=2.0, sensitivity=report)
-    print(f"    cut(keep=3, z=2, floor={res.floor:.3f}): groups={res.groups}")
-    print("    ", "UNRANKED at the boundary" if res.unranked_at_boundary else f"survivors={res.survivors}", *res.notes)
-    order = sorted(paired, key=lambda k: paired[k].mean)
-    gaps = {(a, b): paired[b].mean - paired[a].mean for a, b in pairwise(order)}
-    in_group = {n: i for i, g in enumerate(res.groups) for n in g}
-    for (a, b), gap in gaps.items():
-        if gap <= res.floor:  # a gap under the floor must never be reported as a resolved order
-            assert in_group[a] == in_group[b], f"cut separated {a},{b} despite gap {gap:.3f} <= floor {res.floor:.3f}"
-    n_unres = sum(1 for g in gaps.values() if g <= res.floor)
-    print(f"     {n_unres}/{len(gaps)} adjacent gaps are below the floor; none is ranked across.")
+    report = res = None
+    if tier_b is None:
+        print("\n[4] SKIPPED: --skip-model-b, no second charge model was run; no sensitivity floor, so no cut is reported.")
+    else:
+        va = {c.name: paired[c.name].mean for c in analogues}
+        vb = {n: m.mean for n, m in paired_b.items()}
+        report = charge_sensitivity(analogues, "dE_int", lambda c, q: va[c.name], lambda c, q: vb[c.name])
+        print(f"\n[4] charge sensitivity (AMBER -> CHARMM): sign flips {report.n_sign_flips}/{report.n} "
+              f"(campaign: {CAMPAIGN_SUMMARY['n_sign_flips']}/{CAMPAIGN_SUMMARY['n']}), Spearman {report.spearman:+.3f} "
+              f"(campaign: {CAMPAIGN_SUMMARY['spearman']:+.3f}), floor {report.floor:.3f} kcal/mol")
+        res = cut(paired, keep=3, z=2.0, sensitivity=report)
+        print(f"    cut(keep=3, z=2, floor={res.floor:.3f}): groups={res.groups}")
+        print("    ", "UNRANKED at the boundary" if res.unranked_at_boundary else f"survivors={res.survivors}", *res.notes)
+        order = sorted(paired, key=lambda k: paired[k].mean)
+        gaps = {(a, b): paired[b].mean - paired[a].mean for a, b in pairwise(order)}
+        in_group = {n: i for i, g in enumerate(res.groups) for n in g}
+        for (a, b), gap in gaps.items():
+            if gap <= res.floor:  # a gap under the floor must never be reported as a resolved order
+                assert in_group[a] == in_group[b], f"cut separated {a},{b} despite gap {gap:.3f} <= floor {res.floor:.3f}"
+        n_unres = sum(1 for g in gaps.values() if g <= res.floor)
+        print(f"     {n_unres}/{len(gaps)} adjacent gaps are below the floor; none is ranked across.")
 
     rec = RunRecord(
         campaign="danuglipron-halogen-scan",
-        inputs={"parent": PARENT_SMILES, "analogues": smi, "sites": SITES, "pocket": tier_a.field_provenance,
-                "pocket_charge_model_b": tier_b.field_provenance,
+        inputs={"parent": PARENT_SMILES, "analogues": smi, "sites": sites, "pocket": tier_a.field_provenance,
+                "pocket_charge_model_b": tier_b.field_provenance if tier_b else None,
                 "ionization": "neutral acid (tier has no net-charge setting)", "campaign_summary": CAMPAIGN_SUMMARY},
-        tiers=[{"name": t.name, **t.settings()} for t in (poses, tier_a, tier_b)],
+        tiers=[{"name": t.name, **t.settings()} for t in (poses, tier_a, tier_b) if t is not None],
         results={
             "criterion_1_self_anchor": {"per_pose": list(selfdd.per_pose), "exact_zero": True,
                                         "parent_dE_int": parent.per_pose["dE_int"]},
@@ -324,10 +334,11 @@ def main(argv: list[str] | None = None) -> int:
                                         "ratio": ratios[n], "rho": rho[n]} for n in paired},
             "paired_ddE_amber": {n: {"mean": m.mean, "sem": m.sem, "n": m.n, "per_pose": m.per_pose} for n, m in paired.items()},
             "paired_ddE_charmm": {n: {"mean": m.mean, "sem": m.sem} for n, m in paired_b.items()},
-            "criterion_4_sensitivity": {"n_sign_flips": report.n_sign_flips, "spearman": report.spearman,
-                                        "floor": report.floor, "deltas": report.deltas},
-            "cut": {"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary,
-                    "floor": res.floor, "notes": res.notes},
+            "criterion_4_sensitivity": ({"n_sign_flips": report.n_sign_flips, "spearman": report.spearman,
+                                         "floor": report.floor, "deltas": report.deltas}
+                                        if report else "SKIPPED: --skip-model-b"),
+            "cut": ({"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary,
+                     "floor": res.floor, "notes": res.notes} if res else "SKIPPED: no sensitivity floor"),
         },
     )
     path = args.out / f"danuglipron-halogen-{rec.input_digest[:12]}.json"
