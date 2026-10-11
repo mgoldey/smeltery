@@ -569,10 +569,19 @@ def dielectric_family(res: PlbResults) -> dict[str, float]:
         return {}
     if any(not v > 0 for v in fam.values()):
         raise PlbResultsError(f"dielectric_eps must be positive: {fam}")
+    # A model on its OWN PQR (another force field, e.g. CHARMM36 beside AMBER) at eps = 1 is a second charge model, not
+    # a member of a screening family: it is left out. Everything else must form ONE family on one PQR.
+    by_pqr: dict[str, list[str]] = {}
+    for m in fam:
+        by_pqr.setdefault(res.inputs["prep_provenance"][m]["output_sha256"], []).append(m)
+    groups = [g for g in by_pqr.values() if len(g) > 1 or fam[g[0]] != 1.0]
+    if not groups:
+        return {}
+    if len(groups) > 1:
+        raise PlbResultsError(f"screened models must share one PQR (one force field, one crop): {fam}")
+    fam = {m: fam[m] for m in groups[0]}
     if sorted(v for v in fam.values() if v == 1.0) != [1.0]:
         raise PlbResultsError(f"a screening family needs exactly one unscreened (eps = 1) model: {fam}")
-    if len({res.inputs["prep_provenance"][m]["output_sha256"] for m in fam}) != 1:
-        raise PlbResultsError("screened models must share one PQR (one force field, one crop)")
     return fam
 
 
