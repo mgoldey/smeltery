@@ -268,16 +268,12 @@ wheels = [
 
 [[package]]
 name = "ferric"
-version = "0.1.0rc7"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.0.dev0"
+source = { git = "https://github.com/mgoldey/ferric?rev=b22183b9dbed226e1d2acc5cb6e5194c973b023b#b22183b9dbed226e1d2acc5cb6e5194c973b023b" }
 dependencies = [
     { name = "gemmi" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ee/ad/7beb6534a54edc3f863ed6514fdfdffe48f9aaaa7b26434e65324d624531/ferric-0.1.0rc7-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:db5f1a2e780d02819a26d1ceccaba34c5c90f583a50d2bee2574b9f624dac540", size = 98746566, upload-time = "2026-10-06T21:05:25.947Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/95/fe24e753f995e86b3ffa2586c5ae478a9db8740ad63fd7182c6c627dddd3/ferric-0.1.0rc7-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:7ece20587508f1e6f05dedbce26ad0a0240d1246bdc61cffd5259a8b87c45b43", size = 98746387, upload-time = "2026-10-06T21:05:29.749Z" },
 ]
 
 [[package]]
@@ -1365,6 +1361,9 @@ ml-potential = [
     { name = "torch" },
     { name = "torchani" },
 ]
+pocket-charges = [
+    { name = "openmm" },
+]
 posebusters = [
     { name = "posebusters" },
     { name = "rdkit" },
@@ -1375,13 +1374,14 @@ rdkit = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ferric", specifier = ">=0.1.0rc6" },
+    { name = "ferric", git = "https://github.com/mgoldey/ferric?rev=b22183b9dbed226e1d2acc5cb6e5194c973b023b" },
     { name = "gemmi", marker = "extra == 'docking'" },
     { name = "gemmi", marker = "extra == 'gemmi'" },
     { name = "meeko", marker = "extra == 'docking'", specifier = ">=0.8.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "numpy", marker = "extra == 'ml-potential'" },
     { name = "openmm", marker = "extra == 'ml-potential'", specifier = ">=8.6.1" },
+    { name = "openmm", marker = "extra == 'pocket-charges'", specifier = ">=8.6.1" },
     { name = "openmmml", marker = "extra == 'ml-potential'", specifier = ">=1.8" },
     { name = "posebusters", marker = "extra == 'posebusters'", specifier = ">=0.4" },
     { name = "psutil", marker = "extra == 'experiments'", specifier = ">=5.9" },
@@ -1397,7 +1397,7 @@ requires-dist = [
     { name = "torchani", marker = "extra == 'ml-potential'", specifier = ">=2.9.0" },
     { name = "vina", marker = "extra == 'docking'", specifier = ">=1.2.7" },
 ]
-provides-extras = ["dev", "docking", "experiments", "gemmi", "ml-potential", "posebusters", "rdkit"]
+provides-extras = ["dev", "docking", "experiments", "gemmi", "ml-potential", "pocket-charges", "posebusters", "rdkit"]
 
 [[package]]
 name = "sympy"

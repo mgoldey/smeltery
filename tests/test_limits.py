@@ -1,4 +1,4 @@
-"""docs/limits.md: every measured limit has a number and an existing source; every unmeasured one says so (issue #30)."""
+"""docs/limits.md: each measured limit has a number and an existing source; each unmeasured one says so (#30)."""
 
 from __future__ import annotations
 
