@@ -44,6 +44,8 @@ REQUIRED_INPUTS = (
     "n_poses",
     "n_poses_by_model",
     "excluded_ligands",
+    "pose_indices",
+    "dropped_poses",
     "seed",
     "jitter_deg",
     "jitter_ang",
@@ -140,6 +142,15 @@ def validate_results(rec: dict) -> PlbResults:
             _need(pp, k, f"prep_provenance[{m}]")
         if float(fp["cutoff_ang"]) != float(inp["cutoff_ang"]):
             raise PlbResultsError(f"{m}: field cutoff differs from inputs.cutoff_ang")
+    pidx = inp["pose_indices"]
+    for m in models:
+        if len(pidx.get(m, ())) != int(inp["n_poses_by_model"].get(m, -1)) or len(set(pidx[m])) != len(pidx[m]):
+            raise PlbResultsError(f"pose_indices[{m}] does not match n_poses_by_model")
+        if set(pidx[m]) & {int(k) for k in inp["dropped_poses"]}:
+            raise PlbResultsError(f"{m} uses a pose that was dropped")
+    undeclared = {r["pose"] for r in res.get("dropped_failures", [])} - {int(k) for k in inp["dropped_poses"]}
+    if undeclared:
+        raise PlbResultsError(f"failures at poses {sorted(undeclared)} were dropped without a declared reason")
     if res.get("failures"):
         raise PlbResultsError(f"{len(res['failures'])} unresolved SCF failures are recorded; the run is incomplete")
     ligands = list(res["E_vac_hartree"])

@@ -350,59 +350,74 @@ def cmd_run(a: argparse.Namespace) -> int:
     return 0
 
 
-def _prefix(ok: set[int], n_max: int) -> int:
-    """Length of the longest prefix 0..n-1 contained in `ok`."""
-    n = 0
-    while n < n_max and n in ok:
-        n += 1
-    return n
+def _prefix(ok: set[int], kept: list[int]) -> list[int]:
+    """The longest prefix of the pose list `kept` whose every pose is in `ok`."""
+    out: list[int] = []
+    for k in kept:
+        if k not in ok:
+            break
+        out.append(k)
+    return out
 
 
 def cmd_assemble(a: argparse.Namespace) -> int:
     """Fold OUT/tasks.jsonl and OUT/meta.json into one committed RunRecord JSON (per-pose values, provenance).
 
-    A model's poses are the longest prefix 0..n-1 for which EVERY ligand has both the vacuum and that model's field SCF
-    converged, so every ligand always has the same poses. Which poses were completed is decided by the CPU cap, never by
-    a result.
+    A model's poses are the longest prefix of the kept pose list for which EVERY ligand has both the vacuum and that
+    model's field SCF converged, so every ligand always has the same poses. Which poses were completed is decided by the
+    CPU cap, never by a result. `--drop-pose K=reason` removes pose K for EVERY ligand and model (used when one SCF at
+    pose K did not converge: a pose is kept for all ligands or for none, so the pairing is never broken); the reason and
+    the non-converged SCFs are recorded in the results.
     """
     meta = json.loads((a.out / "meta.json").read_text())
     tasks = read_tasks(a.out / "tasks.jsonl")
     commands = (a.out / "commands.log").read_text().splitlines()
     by = {task_key(r): r for r in tasks if r.get("error") is None}  # a later successful re-run supersedes
-    failures = [r for r in tasks if r.get("error") is not None and task_key(r) not in by]
+    drop = {}
+    for spec in a.drop_pose:
+        k, reason = spec.split("=", 1)
+        drop[int(k)] = reason
+    failed = [r for r in tasks if r.get("error") is not None and task_key(r) not in by]
+    failures = [r for r in failed if r["pose"] not in drop]
+    dropped_failures = [r for r in failed if r["pose"] in drop]
     ligs = [meta["reference"], *sorted(n for n in meta["ligand_atom_counts"] if n != meta["reference"])]
     npose = meta["n_poses"]
     vac_ok = {k for k in range(npose) if all(("vac", None, n, k) in by for n in ligs)}
-    n_vac = _prefix(vac_ok, npose)
-    n_by_model, dE, e_fld, dist = {}, {}, {}, {}
+    kept = [k for k in range(npose) if k not in drop]
+    vac_poses = _prefix({k for k in vac_ok}, kept)
+    n_by_model, pose_indices, dE, e_fld, dist = {}, {"vac": vac_poses}, {}, {}, {}
     for m in meta["models"]:
         ok = {k for k in vac_ok if all(("field", m, n, k) in by for n in ligs)}
-        n_m = _prefix(ok, npose)
-        n_by_model[m] = n_m
-        e_fld[m] = {n: [by[("field", m, n, k)]["energy_hartree"] for k in range(n_m)] for n in ligs}
+        poses_m = _prefix(ok, kept)
+        pose_indices[m] = poses_m
+        n_by_model[m] = len(poses_m)
+        e_fld[m] = {n: [by[("field", m, n, k)]["energy_hartree"] for k in poses_m] for n in ligs}
         dE[m] = {
             n: [
                 (by[("field", m, n, k)]["energy_hartree"] - by[("vac", None, n, k)]["energy_hartree"]) * HARTREE_TO_KCAL
-                for k in range(n_m)
+                for k in poses_m
             ]
             for n in ligs
         }
-        dist[m] = {n: [by[("field", m, n, k)]["min_dist_to_field_ang"] for k in range(n_m)] for n in ligs}
+        dist[m] = {n: [by[("field", m, n, k)]["min_dist_to_field_ang"] for k in poses_m] for n in ligs}
     results = {
         "schema": SCHEMA,
         "dE_int_kcal_mol": dE,
-        "E_vac_hartree": {n: [by[("vac", None, n, k)]["energy_hartree"] for k in range(n_vac)] for n in ligs},
+        "E_vac_hartree": {n: [by[("vac", None, n, k)]["energy_hartree"] for k in vac_poses] for n in ligs},
         "E_field_hartree": e_fld,
         "min_dist_to_field_ang": dist,
         "task_cpu_s": {
             f"{r['kind']}:{r.get('model') or ''}:{r['ligand']}:{r['pose']}": r["cpu_s"] for r in by.values()
         },
         "failures": failures,
+        "dropped_failures": [{k: v for k, v in r.items() if k != "energy_hartree"} for r in dropped_failures],
         "total_cpu_s_used_in_results": sum(r["cpu_s"] for r in by.values()),
         "total_cpu_s_all_tasks_incl_failures_and_reruns": sum(r["cpu_s"] for r in tasks),
     }
     inputs = dict(meta)
     inputs["n_poses_by_model"] = n_by_model
+    inputs["pose_indices"] = pose_indices
+    inputs["dropped_poses"] = {str(k): v for k, v in drop.items()}
     inputs["commands"] = commands
     rec = RunRecord(
         campaign=f"plb-{meta['target']}-paired-ddE",
@@ -451,6 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-cpu-hours", type=float, required=True, help="no new SCF is submitted past this many CPU-hours"
     )
     s = sub.add_parser("assemble")
+    s.add_argument("--drop-pose", action="append", default=[], metavar="K=REASON")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--result", type=Path, required=True)
     a = ap.parse_args(argv)

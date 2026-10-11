@@ -145,6 +145,8 @@ def _record(*, n_lig=6, n_poses=5, models=("A", "B"), slope=3.0, seed=0, noise=0
         "n_poses": n_poses,
         "n_poses_by_model": n_by_model,
         "excluded_ligands": {},
+        "pose_indices": {"vac": list(range(n_poses)), **{m: list(range(n_by_model[m])) for m in models}},
+        "dropped_poses": {},
         "seed": 1,
         "jitter_deg": 15.0,
         "jitter_ang": 0.5,
@@ -488,3 +490,15 @@ def test_basis_gaps_finds_bromine_in_sto3g_but_not_chlorine_or_sulfur():
     run = _script("run_plb_ddE")
     assert run.basis_gaps(("C", "H", "N", "O", "S", "Cl"), "sto-3g") == []
     assert run.basis_gaps(("C", "H", "Br"), "sto-3g") == ["Br"]
+
+
+def test_a_dropped_pose_must_be_declared_and_cannot_be_used():
+    rec, _ = _record()
+    rec["results"]["dropped_failures"] = [{"ligand": "L1", "pose": 0, "error": "SCF did not converge"}]
+    rec["input_digest"] = digest({"inputs": rec["inputs"], "tiers": rec["tiers"]})
+    with pytest.raises(pm.PlbResultsError, match="dropped without a declared reason"):
+        pm.validate_results(rec)
+    rec["inputs"]["dropped_poses"] = {"0": "SCF did not converge for L1"}
+    rec["input_digest"] = digest({"inputs": rec["inputs"], "tiers": rec["tiers"]})
+    with pytest.raises(pm.PlbResultsError, match="was dropped"):  # the record still uses pose 0
+        pm.validate_results(rec)
