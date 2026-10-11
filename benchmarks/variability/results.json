@@ -1,0 +1,762 @@
+{
+ "provenance": {
+  "api": "https://www.ebi.ac.uk/chembl/api/data",
+  "attribution": "ChEMBL, EMBL-EBI, https://www.ebi.ac.uk/chembl/ (Zdrazil et al., Nucleic Acids Res. 2024)",
+  "chembl_db_version": "ChEMBL_37",
+  "chembl_release_date": "2026-05-01",
+  "filters": {
+   "assay_type": "B (binding)",
+   "pchembl_value": "not null",
+   "potential_duplicate": 0,
+   "standard_relation": "=",
+   "standard_type": [
+    "IC50",
+    "Ki"
+   ],
+   "standard_units": "nM"
+  },
+  "kcal_per_log10_unit": 1.3642469041248109,
+  "licence": "CC BY-SA 3.0 (https://chembl.gitbook.io/chembl-interface-documentation/about)",
+  "redistribution": "aggregates only; the per-record data are not redistributed",
+  "retrieved_utc": "2026-10-10T22:33:24Z",
+  "source": "ChEMBL",
+  "temperature_K": 298.15
+ },
+ "targets": {
+  "cdk2": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.5500000000000003,
+     "n_compounds_2plus_documents": 38,
+     "n_identical_pairs": 1,
+     "n_pairs": 138,
+     "pooled": {
+      "df": 66,
+      "sd": 0.6681564036945091,
+      "sd_kcal_mol": 0.9115303052114014,
+      "ss": 29.46457666666667
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 65,
+      "n_compounds": 37,
+      "sd": 0.6732764510119001,
+      "sd_kcal_mol": 0.9185153139131247,
+      "ss": 29.46457666666667
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.8400000000000003,
+     "n_compounds_2plus_documents": 6,
+     "n_identical_pairs": 1,
+     "n_pairs": 6,
+     "pooled": {
+      "df": 6,
+      "sd": 0.8276523021978087,
+      "sd_kcal_mol": 1.129122090965133,
+      "ss": 4.1100499999999975
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 5,
+      "n_compounds": 5,
+      "sd": 0.9066476713696449,
+      "sd_kcal_mol": 1.2368912787980069,
+      "ss": 4.1100499999999975
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "5f3b7cd6861adeaf0bbed60de1315ba5f365b4528b8ea0000c2a9038ec69875e",
+   "n_records": 2535,
+   "pref_name": "Cyclin-dependent kinase 2",
+   "target_chembl_id": "CHEMBL301",
+   "uniprot": "P24941"
+  },
+  "cdk8": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.38500000000000023,
+     "n_compounds_2plus_documents": 21,
+     "n_identical_pairs": 1,
+     "n_pairs": 46,
+     "pooled": {
+      "df": 29,
+      "sd": 0.5419816502386426,
+      "sd_kcal_mol": 0.7393967884305243,
+      "ss": 8.518579166666669
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 28,
+      "n_compounds": 20,
+      "sd": 0.5515749905843224,
+      "sd_kcal_mol": 0.7524844732973335,
+      "ss": 8.518579166666669
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": null,
+     "n_compounds_2plus_documents": 0,
+     "n_identical_pairs": 0,
+     "n_pairs": 0,
+     "pooled": {
+      "df": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 0,
+      "n_compounds": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "1cc486a798594c50e4584ad5be96333f6607703e6bad734458894e1e1c5d7367",
+   "n_records": 391,
+   "pref_name": "Cyclin-dependent kinase 8",
+   "target_chembl_id": "CHEMBL5719",
+   "uniprot": "P49336"
+  },
+  "cmet": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.5500000000000007,
+     "n_compounds_2plus_documents": 72,
+     "n_identical_pairs": 2,
+     "n_pairs": 946,
+     "pooled": {
+      "df": 180,
+      "sd": 0.7609278211414384,
+      "sd_kcal_mol": 1.0380934242546451,
+      "ss": 104.22200681767023
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 178,
+      "n_compounds": 70,
+      "sd": 0.7651907554552018,
+      "sd_kcal_mol": 1.0439091191946843,
+      "ss": 104.22200681767023
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.5999999999999996,
+     "n_compounds_2plus_documents": 13,
+     "n_identical_pairs": 0,
+     "n_pairs": 17,
+     "pooled": {
+      "df": 15,
+      "sd": 0.45637216781433493,
+      "sd_kcal_mol": 0.6226043170694351,
+      "ss": 3.1241333333333325
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 15,
+      "n_compounds": 13,
+      "sd": 0.45637216781433493,
+      "sd_kcal_mol": 0.6226043170694351,
+      "ss": 3.1241333333333325
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "60bde78cb427e4c07947ffc8509e31fffacb13c593e9680d884e7a8d483e2764",
+   "n_records": 6601,
+   "pref_name": "Hepatocyte growth factor receptor",
+   "target_chembl_id": "CHEMBL3717",
+   "uniprot": "P08581"
+  },
+  "eg5": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.3649999999999993,
+     "n_compounds_2plus_documents": 26,
+     "n_identical_pairs": 0,
+     "n_pairs": 65,
+     "pooled": {
+      "df": 39,
+      "sd": 0.4004884151832244,
+      "sd_kcal_mol": 0.5463650805515659,
+      "ss": 6.25524785714286
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 39,
+      "n_compounds": 26,
+      "sd": 0.4004884151832244,
+      "sd_kcal_mol": 0.5463650805515659,
+      "ss": 6.25524785714286
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.29249999999999954,
+     "n_compounds_2plus_documents": 11,
+     "n_identical_pairs": 0,
+     "n_pairs": 18,
+     "pooled": {
+      "df": 14,
+      "sd": 0.47837133787964536,
+      "sd_kcal_mol": 0.65261661672435,
+      "ss": 3.203747916666666
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 14,
+      "n_compounds": 11,
+      "sd": 0.47837133787964536,
+      "sd_kcal_mol": 0.65261661672435,
+      "ss": 3.203747916666666
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "84614223ec53ea71384e9de0e0e721fac35b3b009fe0878b0d6f6c2a4838ddd0",
+   "n_records": 1039,
+   "pref_name": "Kinesin-like protein KIF11",
+   "target_chembl_id": "CHEMBL4581",
+   "uniprot": "P52732"
+  },
+  "hif2a": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.2799999999999998,
+     "n_compounds_2plus_documents": 24,
+     "n_identical_pairs": 1,
+     "n_pairs": 26,
+     "pooled": {
+      "df": 25,
+      "sd": 0.30984942579689667,
+      "sd_kcal_mol": 0.4227111198882666,
+      "ss": 2.4001666666666646
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 25,
+      "n_compounds": 24,
+      "sd": 0.30984942579689667,
+      "sd_kcal_mol": 0.4227111198882666,
+      "ss": 2.4001666666666646
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": null,
+     "n_compounds_2plus_documents": 0,
+     "n_identical_pairs": 0,
+     "n_pairs": 0,
+     "pooled": {
+      "df": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 0,
+      "n_compounds": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "881cd53ea3e9de428d50cf564a16b695b3627e169c1776f1102ede86c83351ad",
+   "n_records": 399,
+   "pref_name": "Endothelial PAS domain-containing protein 1",
+   "target_chembl_id": "CHEMBL1744522",
+   "uniprot": "Q99814"
+  },
+  "mcl1": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.3200000000000003,
+     "n_compounds_2plus_documents": 17,
+     "n_identical_pairs": 2,
+     "n_pairs": 25,
+     "pooled": {
+      "df": 21,
+      "sd": 0.7264055887485168,
+      "sd_kcal_mol": 0.9909965755891246,
+      "ss": 11.080966666666667
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 19,
+      "n_compounds": 15,
+      "sd": 0.7636810668923413,
+      "sd_kcal_mol": 1.0418495312466092,
+      "ss": 11.080966666666667
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.3899999999999997,
+     "n_compounds_2plus_documents": 76,
+     "n_identical_pairs": 1,
+     "n_pairs": 155,
+     "pooled": {
+      "df": 95,
+      "sd": 0.6285674698825714,
+      "sd_kcal_mol": 0.8575212248208633,
+      "ss": 37.53422109848485
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 95,
+      "n_compounds": 76,
+      "sd": 0.6285674698825714,
+      "sd_kcal_mol": 0.8575212248208633,
+      "ss": 37.53422109848485
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "b0abf821086e38c7e1fc0664ea21ee96238b55a7b892d89ae0ad29b6e6226967",
+   "n_records": 2966,
+   "pref_name": "Induced myeloid leukemia cell differentiation protein Mcl-1",
+   "target_chembl_id": "CHEMBL4361",
+   "uniprot": "Q07820"
+  },
+  "p38": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.5899999999999999,
+     "n_compounds_2plus_documents": 100,
+     "n_identical_pairs": 13,
+     "n_pairs": 621,
+     "pooled": {
+      "df": 176,
+      "sd": 0.6778139489545659,
+      "sd_kcal_mol": 0.9247055814338792,
+      "ss": 80.85998789393939
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 170,
+      "n_compounds": 96,
+      "sd": 0.6896716520282736,
+      "sd_kcal_mol": 0.9408824161422161,
+      "ss": 80.85998789393939
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.4250000000000007,
+     "n_compounds_2plus_documents": 8,
+     "n_identical_pairs": 0,
+     "n_pairs": 12,
+     "pooled": {
+      "df": 10,
+      "sd": 0.5933773391920748,
+      "sd_kcal_mol": 0.8095131979706058,
+      "ss": 3.520966666666666
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 10,
+      "n_compounds": 8,
+      "sd": 0.5933773391920748,
+      "sd_kcal_mol": 0.8095131979706058,
+      "ss": 3.520966666666666
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "f934eb37f4f8994fce16fc6bc1d6d8c6576b677542a73318e4ddd11927002ecf",
+   "n_records": 5936,
+   "pref_name": "Mitogen-activated protein kinase 14",
+   "target_chembl_id": "CHEMBL260",
+   "uniprot": "Q16539"
+  },
+  "pde2": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.3000000000000007,
+     "n_compounds_2plus_documents": 42,
+     "n_identical_pairs": 1,
+     "n_pairs": 82,
+     "pooled": {
+      "df": 56,
+      "sd": 0.49669311960155416,
+      "sd_kcal_mol": 0.6776120507165146,
+      "ss": 13.815427083333333
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 56,
+      "n_compounds": 42,
+      "sd": 0.49669311960155416,
+      "sd_kcal_mol": 0.6776120507165146,
+      "ss": 13.815427083333333
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.12749999999999995,
+     "n_compounds_2plus_documents": 8,
+     "n_identical_pairs": 1,
+     "n_pairs": 8,
+     "pooled": {
+      "df": 8,
+      "sd": 0.17578840263225567,
+      "sd_kcal_mol": 0.23981878407210055,
+      "ss": 0.24721250000000025
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 7,
+      "n_compounds": 7,
+      "sd": 0.18792570720519178,
+      "sd_kcal_mol": 0.25637706426014856,
+      "ss": 0.24721250000000025
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "9211e799020de705971c115dd0db48c6ef276bc33a283b406f1fd76d9881c5b0",
+   "n_records": 3433,
+   "pref_name": "cGMP-dependent 3',5'-cyclic phosphodiesterase",
+   "target_chembl_id": "CHEMBL2652",
+   "uniprot": "O00408"
+  },
+  "pfkfb3": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.8600000000000012,
+     "n_compounds_2plus_documents": 3,
+     "n_identical_pairs": 0,
+     "n_pairs": 3,
+     "pooled": {
+      "df": 3,
+      "sd": 0.8441563836162114,
+      "sd_kcal_mol": 1.1516377329456127,
+      "ss": 2.137800000000001
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 3,
+      "n_compounds": 3,
+      "sd": 0.8441563836162114,
+      "sd_kcal_mol": 1.1516377329456127,
+      "ss": 2.137800000000001
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": null,
+     "n_compounds_2plus_documents": 0,
+     "n_identical_pairs": 0,
+     "n_pairs": 0,
+     "pooled": {
+      "df": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 0,
+      "n_compounds": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "75e7bee287f3cdeb6ae9ba4536c5190c249bb3fbd5ac1e8302b47c6f23c5e802",
+   "n_records": 416,
+   "pref_name": "6-phosphofructo-2-kinase/fructose-2,6-bisphosphatase 3",
+   "target_chembl_id": "CHEMBL2331053",
+   "uniprot": "Q16875"
+  },
+  "ptp1b": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.4900000000000002,
+     "n_compounds_2plus_documents": 68,
+     "n_identical_pairs": 0,
+     "n_pairs": 546,
+     "pooled": {
+      "df": 128,
+      "sd": 0.6812548141813163,
+      "sd_kcal_mol": 0.929399771166984,
+      "ss": 59.40583959618814
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 128,
+      "n_compounds": 68,
+      "sd": 0.6812548141813163,
+      "sd_kcal_mol": 0.929399771166984,
+      "ss": 59.40583959618814
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.15000000000000036,
+     "n_compounds_2plus_documents": 39,
+     "n_identical_pairs": 0,
+     "n_pairs": 46,
+     "pooled": {
+      "df": 42,
+      "sd": 0.34002531126606933,
+      "sd_kcal_mol": 0.46387847821881023,
+      "ss": 4.8559229166666675
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 42,
+      "n_compounds": 39,
+      "sd": 0.34002531126606933,
+      "sd_kcal_mol": 0.46387847821881023,
+      "ss": 4.8559229166666675
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "f81730c48d567ad1e958474b9bee1c724883753b8acc6bad659297f594938526",
+   "n_records": 4237,
+   "pref_name": "Tyrosine-protein phosphatase non-receptor type 1",
+   "target_chembl_id": "CHEMBL335",
+   "uniprot": "P18031"
+  },
+  "shp2": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.5275000000000003,
+     "n_compounds_2plus_documents": 83,
+     "n_identical_pairs": 1,
+     "n_pairs": 214,
+     "pooled": {
+      "df": 116,
+      "sd": 0.6602097095864192,
+      "sd_kcal_mol": 0.900689052376413,
+      "ss": 50.56171583333334
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 115,
+      "n_compounds": 82,
+      "sd": 0.6630738914383874,
+      "sd_kcal_mol": 0.9045965036008109,
+      "ss": 50.561703333333334
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": null,
+     "n_compounds_2plus_documents": 0,
+     "n_identical_pairs": 0,
+     "n_pairs": 0,
+     "pooled": {
+      "df": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 0,
+      "n_compounds": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "82b20570dddd2fb375812f2334d08c9cc7ce27dc7e7dd4320f726e62657d560f",
+   "n_records": 2559,
+   "pref_name": "Tyrosine-protein phosphatase non-receptor type 11",
+   "target_chembl_id": "CHEMBL3864",
+   "uniprot": "Q06124"
+  },
+  "syk": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.7400000000000002,
+     "n_compounds_2plus_documents": 67,
+     "n_identical_pairs": 3,
+     "n_pairs": 159,
+     "pooled": {
+      "df": 91,
+      "sd": 0.7327996800607631,
+      "sd_kcal_mol": 0.999719694866548,
+      "ss": 48.86657876984127
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 89,
+      "n_compounds": 65,
+      "sd": 0.7409876401177048,
+      "sd_kcal_mol": 1.0108900940253283,
+      "ss": 48.86657876984127
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": null,
+     "n_compounds_2plus_documents": 0,
+     "n_identical_pairs": 0,
+     "n_pairs": 0,
+     "pooled": {
+      "df": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 0,
+      "n_compounds": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "ee11f949e3e9d2134fc1bbc8a1b6e89501729a22554b9b9f82b1f3cf4b50d940",
+   "n_records": 5676,
+   "pref_name": "Tyrosine-protein kinase SYK",
+   "target_chembl_id": "CHEMBL2599",
+   "uniprot": "P43405"
+  },
+  "thrombin": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.7150000000000003,
+     "n_compounds_2plus_documents": 27,
+     "n_identical_pairs": 0,
+     "n_pairs": 126,
+     "pooled": {
+      "df": 49,
+      "sd": 0.8832406959510679,
+      "sd_kcal_mol": 1.2049583850482877,
+      "ss": 38.22559222222221
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 49,
+      "n_compounds": 27,
+      "sd": 0.8832406959510679,
+      "sd_kcal_mol": 1.2049583850482877,
+      "ss": 38.22559222222221
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.2599999999999998,
+     "n_compounds_2plus_documents": 68,
+     "n_identical_pairs": 0,
+     "n_pairs": 97,
+     "pooled": {
+      "df": 79,
+      "sd": 0.46413586282048724,
+      "sd_kcal_mol": 0.6331959139461476,
+      "ss": 17.018345833333335
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 79,
+      "n_compounds": 68,
+      "sd": 0.46413586282048724,
+      "sd_kcal_mol": 0.6331959139461476,
+      "ss": 17.018345833333335
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "cbc3cc08d3f247bace32c2685938d377f5810787e0f72829d59fa8721b8c2f5e",
+   "n_records": 5750,
+   "pref_name": "Prothrombin",
+   "target_chembl_id": "CHEMBL204",
+   "uniprot": "P00734"
+  },
+  "tnks2": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.4499999999999993,
+     "n_compounds_2plus_documents": 24,
+     "n_identical_pairs": 0,
+     "n_pairs": 115,
+     "pooled": {
+      "df": 42,
+      "sd": 0.8357318204645323,
+      "sd_kcal_mol": 1.1401445487473305,
+      "ss": 29.334802380952375
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 42,
+      "n_compounds": 24,
+      "sd": 0.8357318204645323,
+      "sd_kcal_mol": 1.1401445487473305,
+      "ss": 29.334802380952375
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": null,
+     "n_compounds_2plus_documents": 0,
+     "n_identical_pairs": 0,
+     "n_pairs": 0,
+     "pooled": {
+      "df": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 0,
+      "n_compounds": 0,
+      "sd": null,
+      "sd_kcal_mol": null,
+      "ss": 0
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "d2df0260405c9ec2f57d68524f87d63200cecbbb4ba4c24433cca5a2c5bf386e",
+   "n_records": 1018,
+   "pref_name": "Poly [ADP-ribose] polymerase tankyrase-2",
+   "target_chembl_id": "CHEMBL6154",
+   "uniprot": "Q9H2K2"
+  },
+  "tyk2": {
+   "by_type": {
+    "IC50": {
+     "median_abs_diff_log": 0.8300000000000001,
+     "n_compounds_2plus_documents": 157,
+     "n_identical_pairs": 4,
+     "n_pairs": 493,
+     "pooled": {
+      "df": 213,
+      "sd": 0.7389967470516482,
+      "sd_kcal_mol": 1.008174024323517,
+      "ss": 116.32274892857144
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 213,
+      "n_compounds": 157,
+      "sd": 0.7389967470516482,
+      "sd_kcal_mol": 1.008174024323517,
+      "ss": 116.32274892857144
+     },
+     "type": "IC50"
+    },
+    "Ki": {
+     "median_abs_diff_log": 0.09999999999999964,
+     "n_compounds_2plus_documents": 12,
+     "n_identical_pairs": 0,
+     "n_pairs": 14,
+     "pooled": {
+      "df": 13,
+      "sd": 0.6248463913799237,
+      "sd_kcal_mol": 0.8524447549936208,
+      "ss": 5.075629166666666
+     },
+     "pooled_excluding_all_identical_compounds": {
+      "df": 13,
+      "n_compounds": 12,
+      "sd": 0.6248463913799237,
+      "sd_kcal_mol": 0.8524447549936208,
+      "ss": 5.075629166666666
+     },
+     "type": "Ki"
+    }
+   },
+   "inputs_sha256": "76927dd9c70c40ab75411c68f6535680e1a4b8601e490e854cade0d7a9108af3",
+   "n_records": 4955,
+   "pref_name": "Non-receptor tyrosine-protein kinase TYK2",
+   "target_chembl_id": "CHEMBL3553",
+   "uniprot": "P29597"
+  }
+ }
+}
