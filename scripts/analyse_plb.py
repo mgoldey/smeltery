@@ -27,7 +27,7 @@ def tables(an: dict) -> str:
     out = []
     n = an["n_ligands_analogues"]
     out.append(
-        f"n = {n} analogues, {an['n_poses']} poses per ligand; bootstrap {an['n_boot']} resamples, seed {an['seed']}\n"
+        f"n = {n} analogues, design {an['n_poses']} poses, completed per model {an['n_poses_by_model']}; bootstrap {an['n_boot']} resamples, seed {an['seed']}\n"
     )
     out.append("### Trend of computed ddE against experimental ddG\n")
     out.append(
