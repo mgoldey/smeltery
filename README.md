@@ -139,6 +139,8 @@ energy, or passing charges in Å each makes a test fail.
 
 ## Status
 
+Measured limits, with sizes and sources: [docs/limits.md](docs/limits.md).
+
 This is an early working example. The tier protocol, the paired-ΔΔE funnel,
 the resolution-aware cut and the run record work end to end. Vina docking works with a
 flexible ligand and, optionally, flexible receptor sidechains
