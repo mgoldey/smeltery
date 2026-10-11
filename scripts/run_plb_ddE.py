@@ -382,6 +382,61 @@ def _prefix(ok: set[int], kept: list[int]) -> list[int]:
     return out
 
 
+def fold_base(base: dict, base_model: str, meta: dict, base_path_sha256: str) -> tuple[dict, dict]:
+    """Synthetic task records (cpu_s 0) for the vacuum and `base_model` SCFs already stored in a committed result file.
+
+    This is how a second charge model is compared with energies that are NOT recomputed (issue #29, tyk2): the stored
+    vacuum and AMBER energies enter the new record bit for bit, and every input that fixes the geometry or the QM must
+    equal this run's, else `SystemExit`.
+    Returns (records keyed like `task_key`, the base's entry for the new record's inputs).
+    """
+    binp, bres = base["inputs"], base["results"]
+    for k in ("target", "reference", "basis", "cutoff_ang", "seed", "jitter_deg", "jitter_ang", "n_poses", "pivot_ang"):
+        if binp[k] != meta[k]:
+            raise SystemExit(
+                f"base result and this run differ in {k!r}: {binp[k]!r} vs {meta[k]!r}; refusing to compare"
+            )
+    if binp["pose_geometry_sha256"] != meta["pose_geometry_sha256"]:
+        raise SystemExit("base result and this run do not have identical pose geometries (pose_geometry_sha256)")
+    if binp.get("excluded_ligands") != meta.get("excluded_ligands"):
+        raise SystemExit("base result and this run exclude different ligands")
+    if base_model not in binp["models"] or base_model in meta["models"]:
+        raise SystemExit(f"--base-model {base_model!r} must be in the base's models and not among this run's")
+    recs: dict = {}
+    vac_idx, mod_idx = binp["pose_indices"]["vac"], binp["pose_indices"][base_model]
+    for n, vals in bres["E_vac_hartree"].items():
+        for k, e in zip(vac_idx, vals, strict=True):
+            recs[("vac", None, n, k)] = {
+                "kind": "vac",
+                "ligand": n,
+                "pose": k,
+                "energy_hartree": e,
+                "cpu_s": 0.0,
+                "error": None,
+            }
+    for n, vals in bres["E_field_hartree"][base_model].items():
+        for j, (k, e) in enumerate(zip(mod_idx, vals, strict=True)):
+            recs[("field", base_model, n, k)] = {
+                "kind": "field",
+                "ligand": n,
+                "pose": k,
+                "model": base_model,
+                "energy_hartree": e,
+                "cpu_s": 0.0,
+                "error": None,
+                "min_dist_to_field_ang": bres["min_dist_to_field_ang"][base_model][n][j],
+            }
+    info = {
+        "file_sha256": base_path_sha256,
+        "model": base_model,
+        "pose_indices": mod_idx,
+        "smeltery_commit": binp["smeltery_commit"],
+        "ferric": base["ferric"],
+        "cpu_s_of_the_reused_scfs": bres["total_cpu_s_used_in_results"],
+    }
+    return recs, info
+
+
 def cmd_assemble(a: argparse.Namespace) -> int:
     """Fold OUT/tasks.jsonl and OUT/meta.json into one committed RunRecord JSON (per-pose values, provenance).
 
@@ -395,6 +450,24 @@ def cmd_assemble(a: argparse.Namespace) -> int:
     tasks = read_tasks(a.out / "tasks.jsonl")
     commands = (a.out / "commands.log").read_text().splitlines()
     by = {task_key(r): r for r in tasks if r.get("error") is None}  # a later successful re-run supersedes
+    reused = None
+    if a.base:
+        base = json.loads(a.base.read_text())
+        base_recs, reused = fold_base(base, a.base_model, meta, sha256_file(a.base))
+        by = {**base_recs, **by}
+        meta = {
+            **meta,
+            "models": [a.base_model, *meta["models"]],
+            "field_provenance": {
+                a.base_model: base["inputs"]["field_provenance"][a.base_model],
+                **meta["field_provenance"],
+            },
+            "prep_provenance": {
+                a.base_model: base["inputs"]["prep_provenance"][a.base_model],
+                **meta["prep_provenance"],
+            },
+            "field_eps": {a.base_model: base["inputs"]["field_eps"][a.base_model], **meta["field_eps"]},
+        }
     drop = {}
     for spec in a.drop_pose:
         k, reason = spec.split("=", 1)
@@ -441,6 +514,8 @@ def cmd_assemble(a: argparse.Namespace) -> int:
     inputs["pose_indices"] = pose_indices
     inputs["dropped_poses"] = {str(k): v for k, v in drop.items()}
     inputs["commands"] = commands
+    if reused:
+        inputs["reused_from_base_result"] = reused
     rec = RunRecord(
         campaign=f"plb-{meta['target']}-paired-ddE",
         inputs=inputs,
@@ -496,6 +571,13 @@ def main(argv: list[str] | None = None) -> int:
         "--max-cpu-hours", type=float, required=True, help="no new SCF is submitted past this many CPU-hours"
     )
     s = sub.add_parser("assemble")
+    s.add_argument(
+        "--base",
+        type=Path,
+        default=None,
+        help="committed result file whose vacuum and --base-model energies are reused, not recomputed",
+    )
+    s.add_argument("--base-model", default="amber14")
     s.add_argument("--drop-pose", action="append", default=[], metavar="K=REASON")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--result", type=Path, required=True)
