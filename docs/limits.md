@@ -23,5 +23,5 @@ system or one model pair, and says so.
 
 | ID | Limit | Status | Tracked in | Claim it forbids until measured |
 |---|---|---|---|---|
-| U1 | Missing ligand-pocket dielectric screening | UNMEASURED | issue #28 | That the bare point-charge field's ddE is quantitatively comparable to experiment |
+| U1 | Missing ligand-pocket dielectric screening | UNMEASURED for distance-dependent screening, PCM and COSMO (uniform eps is L10) | issue #28 | That the bare point-charge field's ddE is quantitatively comparable to experiment |
 | U2 | On-target liabilities | UNMEASURED, target-specific | issue #35 | A substitution objective where the liability is the target's own function |
