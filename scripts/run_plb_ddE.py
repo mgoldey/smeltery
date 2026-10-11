@@ -78,6 +78,15 @@ def build_poses(
     return out
 
 
+def scale_field(charges_bohr, eps: float) -> list[tuple[float, float, float, float]]:
+    """Divide every point charge of a ferric field (q, x, y, z in Bohr) by `eps`: the pre-declared screening
+    treatment (a uniform, distance-independent relative permittivity applied to the bare field). eps = 1 returns
+    the same numbers, bit for bit; positions are never touched."""
+    if not eps > 0:
+        raise ValueError(f"eps must be positive, got {eps}")
+    return [(q / eps, x, y, z) for q, x, y, z in charges_bohr]
+
+
 def xyz_text(symbols, coords, comment: str) -> str:
     lines = [str(len(symbols)), comment]
     lines += [f"{s} {x:.10f} {y:.10f} {z:.10f}" for s, (x, y, z) in zip(symbols, coords, strict=True)]
@@ -242,7 +251,16 @@ def cmd_run(a: argparse.Namespace) -> int:
     unknown = [x for x in a.run if x != "vac" and x not in fields]
     if unknown:
         raise SystemExit(f"--run names {unknown}, which are neither 'vac' nor a --field model")
-    ferric_fields = {m: [c.as_ferric_bohr() for c in f] for m, f in fields.items()}
+    eps = {m: 1.0 for m in fields}
+    for spec in a.eps:
+        model, val = spec.split("=", 1)
+        if model not in fields:
+            raise SystemExit(f"--eps names {model!r}, which is not a --field model")
+        eps[model] = float(val)
+    ferric_fields = {m: scale_field([c.as_ferric_bohr() for c in f], eps[m]) for m, f in fields.items()}
+    for m, f in fields.items():
+        f.provenance["dielectric_eps"] = eps[m]
+        f.provenance["scaled_charge_sum_e"] = float(sum(c[0] for c in ferric_fields[m]))
     poses = build_poses({n: d["coords"] for n, d in ligs.items()}, pivot, a.poses, a.seed, a.jitter_deg, a.jitter_ang)
     names = sorted(ligs, key=lambda n: (n != ref, n))  # parent first
     tasks_path = out / "tasks.jsonl"
@@ -251,7 +269,10 @@ def cmd_run(a: argparse.Namespace) -> int:
     cpu_s = sum(r["cpu_s"] for r in prior)
     cap_s = a.max_cpu_hours * 3600.0
     todo = []
-    for k in range(a.poses):  # pose-major: every ligand has the same number of poses whenever the run stops
+    pose_ids = range(a.poses) if a.only_poses is None else sorted(set(a.only_poses))
+    if any(k not in range(a.poses) for k in pose_ids):
+        raise SystemExit(f"--only-poses {a.only_poses} outside the design's poses 0..{a.poses - 1}")
+    for k in pose_ids:  # pose-major: every ligand has the same number of poses whenever the run stops
         for n in names:
             for what in a.run:
                 key = ("vac", None, n, k) if what == "vac" else ("field", what, n, k)
@@ -332,6 +353,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "basis": a.basis,
         "cutoff_ang": a.cutoff,
         "models": list(fields),
+        "field_eps": eps,
         "field_provenance": {m: dict(f.provenance) for m, f in fields.items()},
         "prep_provenance": {
             m: json.loads(Path(str(p) + ".json").read_text()) for m, p in (s.split("=", 1) for s in a.field)
@@ -461,6 +483,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--basis", default="sto-3g")
     r.add_argument("--workers", type=int, default=4)
     r.add_argument("--exclude", action="append", default=[], metavar="LIGAND=REASON")
+    r.add_argument(
+        "--eps",
+        action="append",
+        default=[],
+        metavar="MODEL=EPS",
+        help="divide the point charges of this --field model by EPS (screening); default 1 for every model",
+    )
+    r.add_argument("--only-poses", type=int, nargs="+", default=None, help="run only these pose indices (default: all)")
     r.add_argument("--run", nargs="+", required=True, help="which SCFs: 'vac' and/or model names, e.g. vac amber14")
     r.add_argument(
         "--max-cpu-hours", type=float, required=True, help="no new SCF is submitted past this many CPU-hours"
