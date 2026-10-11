@@ -90,6 +90,13 @@ def tables(an: dict) -> str:
         )
         sec = b["secondary_drop_close_contact_poses"]
         out.append(f"Secondary (poses with any atom < 2 A from a field charge dropped): {sec}\n")
+        ss = b.get("secondary_same_source_as_parent")
+        if ss:
+            sp, sc_, spm = ss["point"], ss["bootstrap_ci_over_ligands"], ss["permutation"]
+            out.append(
+                f"Secondary (only the {len(ss['ligands'])} analogues measured in the parent's publication): rho {sp['spearman']:+.3f} "
+                f"{fmt_ci(sc_['spearman'])}, p {spm['spearman']['p_two_sided']:.4f}; tau-b {sp['kendall']:+.3f}; slope {sp['slope']:+.2f} {fmt_ci(sc_['slope'])}\n"
+            )
     cm = an.get("charge_model_comparison")
     if cm:
         out.append("### Charge model: same geometries, two pocket charge sets (issue #29, part 1)\n")
@@ -100,6 +107,32 @@ def tables(an: dict) -> str:
             f"charge_sensitivity floor {cm['charge_sensitivity_floor_kcal_mol']:.2f} kcal/mol; raw dE_int shift "
             f"{cm['raw_dE_int_mean_shift_b_minus_a_kcal_mol']:+.2f} +/- {cm['raw_dE_int_sd_of_shift_kcal_mol']:.2f} (sd) kcal/mol; "
             f"raw dE_int Spearman across ligand-pose {cm['raw_dE_int_spearman_across_ligand_pose']:+.3f}\n"
+        )
+    sc = an.get("screening")
+    if sc:
+        out.append(
+            f"### Screening: the unscreened field's charges divided by eps (issue #28), {sc['n_poses_common']} common poses, "
+            f"base model {sc['base_model']}\n"
+        )
+        out.append(
+            "| eps | rho | p (perm., 2-sided) | rho 95% CI | slope | slope 95% CI | sd ratio | mean dE_int | dE_int / unscreened | 1/eps | slope / first-order | rho with unscreened ddE | ddE sign flips | dE_int sign flips |"
+        )
+        out.append("|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for r in sc["by_eps"].values():
+            p, c = r["point"], r["bootstrap_ci_over_ligands"]
+            sf = (
+                "n/a" if r["slope_measured_over_first_order"] is None else f"{r['slope_measured_over_first_order']:.2f}"
+            )
+            out.append(
+                f"| {r['eps']:g} | {p['spearman']:+.3f} | {r['spearman_p_two_sided']:.4f} | {fmt_ci(c['spearman'])} | "
+                f"{p['slope']:+.2f} | {fmt_ci(c['slope'])} | {p['sd_ratio']:.2f} | {r['mean_dE_int_kcal_mol']:+.2f} | "
+                f"{r['mean_dE_int_ratio_to_unscreened']:.3f} | {r['first_order_expectation_1_over_eps']:.3f} | {sf} | "
+                f"{r['spearman_with_unscreened_ddE']:+.3f} | {r['n_ddE_sign_flips_vs_unscreened']}/{len(r['ddE_mean'])} | "
+                f"{r['n_dE_int_sign_flips_vs_unscreened']}/{r['n_dE_int_values']} |"
+            )
+        cr = sc["slope_crosses_1_at_eps"]
+        out.append(
+            f"\nFitted slope crosses 1 at eps = {'not within the range' if cr is None else f'{cr:.2f}'} (log-log interpolation, descriptive)\n"
         )
     return "\n".join(out)
 

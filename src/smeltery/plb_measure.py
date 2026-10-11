@@ -553,6 +553,99 @@ def charge_model_comparison(res: PlbResults, model_a: str, model_b: str, *, n_bo
     }
 
 
+def dielectric_family(res: PlbResults) -> dict[str, float]:
+    """model -> relative permittivity, for the models of ONE force field whose field provenance has `dielectric_eps`.
+
+    Empty when the results carry no screening treatment (the cdk2 file). Refuses a family without exactly one
+    unscreened (eps = 1) model, an eps <= 0, or models that do not share a force field and a PQR: a screened model
+    is the unscreened field with its charges divided by eps, nothing else.
+    """
+    fam = {
+        m: float(res.inputs["field_provenance"][m]["dielectric_eps"])
+        for m in res.models
+        if "dielectric_eps" in res.inputs["field_provenance"][m]
+    }
+    if not fam:
+        return {}
+    if any(not v > 0 for v in fam.values()):
+        raise PlbResultsError(f"dielectric_eps must be positive: {fam}")
+    if sorted(v for v in fam.values() if v == 1.0) != [1.0]:
+        raise PlbResultsError(f"a screening family needs exactly one unscreened (eps = 1) model: {fam}")
+    if len({res.inputs["prep_provenance"][m]["output_sha256"] for m in fam}) != 1:
+        raise PlbResultsError("screened models must share one PQR (one force field, one crop)")
+    return fam
+
+
+def screening_analysis(res: PlbResults, x: np.ndarray, *, n_boot: int, seed: int) -> dict[str, Any]:
+    """The pre-declared screening analysis (issue #28): the same ligands, poses and field, charges divided by eps.
+
+    Every eps is compared with the unscreened field on the poses ALL models of the family completed (the same
+    geometries). For each eps: the trend statistics of ddE against ddG (Spearman with its permutation p, slope with
+    a bootstrap CI over ligands, sd ratio), how far the raw interaction energy moved against the first-order
+    expectation 1/eps, the rank agreement with the unscreened ddE, and sign flips of ddE and of dE_int.
+    """
+    fam = dielectric_family(res)
+    if not fam:
+        return {}
+    base = next(m for m, v in fam.items() if v == 1.0)
+    n_c = min(res.dE[m].shape[1] for m in fam)
+    names = list(res.analogues)
+    ref_dE = res.dE[base][:, :n_c]
+    ref_y = np.array([m.mean for m in paired_ddE(res, base, ref_dE).values()])
+    ref_slope = point_stats(x, ref_y)["slope"]
+    rows: dict[str, Any] = {}
+    for i, (m, e) in enumerate(sorted(fam.items(), key=lambda kv: kv[1])):
+        dE = res.dE[m][:, :n_c]
+        pm_ = paired_ddE(res, m, dE)
+        y = np.array([pm_[n].mean for n in names])
+        pts = point_stats(x, y)
+        null = permutation_null(x, y, seed=seed + 10 * i)
+        ratio = float(dE.mean() / ref_dE.mean())
+        rows[f"{e:g}"] = {
+            "model": m,
+            "eps": e,
+            "n_poses": n_c,
+            "point": pts,
+            "spearman_p_two_sided": null["spearman"]["p_two_sided"],
+            "permutation_exact": null["exact"],
+            "bootstrap_ci_over_ligands": {
+                s_: bootstrap_ci(x, y, s_, n_boot=n_boot, seed=seed + 100 * (i + 1) + j)
+                for j, s_ in enumerate(("spearman", "slope"))
+            },
+            "ddE_mean": dict(zip(names, (float(v) for v in y), strict=True)),
+            "mean_dE_int_kcal_mol": float(dE.mean()),
+            "mean_dE_int_ratio_to_unscreened": ratio,
+            "first_order_expectation_1_over_eps": 1.0 / e,
+            "slope_measured_over_first_order": pts["slope"] / (ref_slope / e) if ref_slope else None,
+            "spearman_with_unscreened_ddE": spearman(ref_y, y),
+            "n_ddE_sign_flips_vs_unscreened": int((np.sign(y) != np.sign(ref_y)).sum()),
+            "n_dE_int_sign_flips_vs_unscreened": int((np.sign(dE) != np.sign(ref_dE)).sum()),
+            "n_dE_int_values": int(dE.size),
+        }
+    # eps at which the fitted slope crosses 1: log-log interpolation between the bracketing eps values, descriptive only
+    pts_ = [(r_["eps"], r_["point"]["slope"]) for r_ in rows.values()]
+    pts_.sort()
+    crossing = None
+    for (e0, s0), (e1, s1) in zip(pts_, pts_[1:], strict=False):
+        if s0 > 1.0 >= s1 > 0:
+            t = (math.log(s0) - 0.0) / (math.log(s0) - math.log(s1))
+            crossing = float(math.exp(math.log(e0) + t * (math.log(e1) - math.log(e0))))
+            break
+    return {
+        "base_model": base,
+        "eps_values": sorted(fam.values()),
+        "n_poses_common": n_c,
+        "by_eps": rows,
+        "slope_crosses_1_at_eps": crossing,
+    }
+
+
+def _source_ids(lg) -> frozenset[str] | None:
+    """The publication ids of a manifest ligand's measurement (None where the object carries none)."""
+    m = getattr(lg, "measurement", None)
+    return None if m is None else frozenset(src.id for src in m.sources)
+
+
 def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_000) -> dict[str, Any]:
     """Every statistic the plan declared, for every model, from the per-pose values and the manifest alone.
 
@@ -570,6 +663,7 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
             "the results' ligands are not the manifest target's ligands minus the declared exclusions "
             f"{sorted(excluded)}"
         )
+    sources = {lg.name: _source_ids(lg) for lg in kept}
     ddg = {lg.name: lg.ddg_kcal_mol for lg in kept}
     sigma = {lg.name: lg.ddg_sigma_kcal_mol for lg in kept}
     x = np.array([ddg[n] for n in names])
@@ -640,12 +734,20 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
             "min": float(res.min_dist_ang[model].min()),
             "per_pose_min_over_ligands": res.min_dist_ang[model].min(axis=0).tolist(),
         }
+        # pre-declared secondary (tyk2 plan): only the analogues measured in the same publication as the parent
+        same = [i for i, n in enumerate(names) if sources[n] and sources[n] == sources[res.reference]]
+        if 3 <= len(same) < len(names):
+            block["secondary_same_source_as_parent"] = {
+                "ligands": [names[i] for i in same],
+                **_stat_block(x[same], y[same], seed + 250 + 10 * mi, n_boot),
+            }
         # spread diagnostics: is ddE just size?
         block["ddE_vs_descriptors"] = {
             k: {"spearman": spearman(y, [desc[n][k] for n in names])} for k in ("heavy_atoms", "crippen_logp")
         }
         floors = {"0": 0.0, "noise_floor_4.07": DDE_NOISE_FLOOR_KCAL_MOL}
-        if len(res.models) >= 2 and mi == 0:
+        # a screened copy of one force field's field is not a second charge model
+        if len(res.models) >= 2 and mi == 0 and not dielectric_family(res):
             cm = charge_model_comparison(res, res.models[0], res.models[1], n_boot=n_boot, seed=seed + 500)
             out["charge_model_comparison"] = cm
             floors["charge_sensitivity"] = cm["charge_sensitivity_floor_kcal_mol"]
@@ -654,4 +756,7 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
         rows, summ = pair_resolution(res, model, ddg, sigma, floors)
         block["pair_resolution"] = {"summary": summ, "pairs": rows}
         out["models"][model] = block
+    scr = screening_analysis(res, x, n_boot=n_boot, seed=seed + 600)
+    if scr:
+        out["screening"] = scr
     return out
