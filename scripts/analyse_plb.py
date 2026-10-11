@@ -31,7 +31,7 @@ def tables(an: dict) -> str:
     )
     out.append("### Trend of computed ddE against experimental ddG\n")
     out.append(
-        "| quantity | rho | rho 95% CI | p (exact perm., 2-sided) | tau-b | tau 95% CI | p (tau) | slope | slope 95% CI | RMSE after fit | MAE raw | sign agree | binom. p |"
+        "| quantity | rho | rho 95% CI | p (permutation, 2-sided; exact for n <= 9, else 200,000 seeded shuffles) | tau-b | tau 95% CI | p (tau) | slope | slope 95% CI | RMSE after fit | MAE raw | sign agree | binom. p |"
     )
     out.append("|---|---:|---|---:|---:|---|---:|---:|---|---:|---:|---|---:|")
 
