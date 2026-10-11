@@ -66,6 +66,9 @@ ml-potential = ["openmm>=8.6.1", "openmmml>=1.8", "torchani>=2.9.0", "torch>=2.0
 # Third-party imports of the frozen ferric code under experiments/ (psutil: binding_energy's memory check;
 # scipy: the run_* scripts). Not core: nothing under src/smeltery imports them.
 experiments = ["psutil>=5.9", "scipy>=1.11"]
+# scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
+# dependency: nothing under src/smeltery imports it; tests that need it skip without it.
+pocket-charges = ["openmm>=8.6.1"]
 
 [tool.uv.sources]
 # An exact commit, not a branch: the run record reports this SHA, read back
