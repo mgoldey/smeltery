@@ -1,25 +1,62 @@
 """ScaffoldGrowth end to end against a fake runner that replays the real fixture; no GPU, no torch."""
 
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
+import smeltery.generate
 from smeltery.generate.base import GeneratorError
 from smeltery.generate.sbdd import ScaffoldGrowth
 from smeltery.generate.sbdd_post import FilterConfig
 
+RUNNER_DIR = str(Path(smeltery.generate.__file__).parent)
 DATA = Path(__file__).resolve().parents[1] / "data" / "sbdd"
 
 FAKE_RUNNER = """
 import json, os, shutil, sys
-request = json.load(open(sys.argv[1]))
+sys.path.insert(0, RUNNER_DIR)
+import _sbdd_runner
+
+
+def _fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(2)
+
+
+try:
+    request = _sbdd_runner.load_request(sys.argv[1])
+except Exception as exc:
+    _fail(f"bad request: {exc}")
+extra = set(request) - set(_sbdd_runner.REQUIRED) - {"add_n_nodes"}
+if extra:
+    _fail(f"unexpected request keys: {sorted(extra)}")
+for key in ("diffsbdd_dir", "checkpoint", "pdb", "ref_ligand", "fix_atoms"):
+    if not os.path.exists(request[key]):
+        _fail(f"{key} does not exist: {request[key]}")
+for key in ("ref_ligand", "fix_atoms"):
+    if not request[key].endswith(".sdf"):
+        _fail(f"{key} must end in .sdf: {request[key]}")
+for key in ("n_samples", "timesteps", "resamplings", "seed"):
+    if not isinstance(request[key], int):
+        _fail(f"{key} must be an int: {request[key]!r}")
+if not isinstance(request["center"], str):
+    _fail("center must be a string")
 mode = os.environ.get("FAKE_MODE", "ok")
 if mode == "crash":
     print("boom: something broke", file=sys.stderr)
     sys.exit(3)
+if mode == "list_report":
+    json.dump([1], open(request["out_report"], "w"))
+    shutil.copy(FIXTURE, request["out_sdf"])
+    sys.exit(0)
+if mode == "no_n_raw":
+    json.dump({"ok": True}, open(request["out_report"], "w"))
+    shutil.copy(FIXTURE, request["out_sdf"])
+    sys.exit(0)
 if mode == "garbage_report":
     open(request["out_report"], "w").write("not json")
     shutil.copy(FIXTURE, request["out_sdf"])
@@ -41,7 +78,10 @@ def fake_runner(tmp_path):
     empty = tmp_path / "empty.sdf"
     empty.write_text("")
     path = tmp_path / "fake_runner.py"
-    path.write_text(f"FIXTURE = {str(DATA / 'grown_raw.sdf')!r}\nEMPTY = {str(empty)!r}\n" + FAKE_RUNNER)
+    path.write_text(
+        f"FIXTURE = {str(DATA / 'grown_raw.sdf')!r}\nEMPTY = {str(empty)!r}\nRUNNER_DIR = {RUNNER_DIR!r}\n"
+        + FAKE_RUNNER
+    )
     return str(path)
 
 
@@ -163,7 +203,14 @@ def test_without_a_target_exactly_one_batch_runs(fake_runner, files, parent_cand
 
 @pytest.mark.parametrize(
     "mode, message",
-    [("crash", "status 3"), ("no_sdf", "no SDF"), ("garbage_report", "readable report"), ("wrong_count", "99")],
+    [
+        ("crash", "status 3"),
+        ("no_sdf", "no SDF"),
+        ("garbage_report", "readable report"),
+        ("list_report", "readable report"),
+        ("no_n_raw", "readable report"),
+        ("wrong_count", "99"),
+    ],
 )
 def test_a_failed_run_is_a_generator_error_with_the_reason(
     fake_runner, files, parent_candidate, scaffold_indices, monkeypatch, mode, message
@@ -224,3 +271,24 @@ def test_misconfiguration_is_refused_before_anything_runs(fake_runner, files, pa
             ScaffoldGrowth(runner=fake_runner, **kw).generate(
                 parent_candidate, scaffold_indices, files["pocket"], seed=1
             )
+
+
+def test_the_fake_runner_rejects_a_request_the_real_runner_would_reject(fake_runner, tmp_path):
+    """Guards the guard: a request missing a required key must fail the fake, naming the key."""
+    request = {
+        "diffsbdd_dir": str(tmp_path),
+        "checkpoint": str(tmp_path),
+        "pdb": str(tmp_path),
+        "fix_atoms": str(tmp_path / "s.sdf"),
+        "out_sdf": str(tmp_path / "o.sdf"),
+        "out_report": str(tmp_path / "r.json"),
+        "n_samples": 1,
+        "timesteps": 1,
+        "resamplings": 1,
+        "center": "ligand",
+        "seed": 1,
+    }  # no "ref_ligand"
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(request))
+    proc = subprocess.run([sys.executable, fake_runner, str(path)], capture_output=True, text=True)
+    assert proc.returncode != 0 and "ref_ligand" in proc.stderr

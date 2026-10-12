@@ -205,6 +205,8 @@ class ScaffoldGrowth:
             raise GeneratorError(f"the runner exited with status {proc.returncode}: {proc.stderr[-STDERR_TAIL_CHARS:]}")
         try:
             report = json.loads(out_report.read_text())
+            if not isinstance(report, dict) or (report.get("ok") and "n_raw" not in report):
+                raise ValueError("report is not an object with n_raw")
         except (OSError, ValueError) as exc:
             raise GeneratorError("the runner left no readable report") from exc
         if not report.get("ok"):
