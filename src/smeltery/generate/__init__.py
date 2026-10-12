@@ -6,15 +6,19 @@ campaign supplies its own parent and hypothesis set.
 
 Pairing is NOT here. Analogue pose i is built on parent pose i by
 `smeltery.tiers.PairedPoses`, the one pairing implementation; `paired` keeps
-only the statistics over its output. Substitution proposals are keyed by
+only the statistics over its output. `ScaffoldGrowth` is a structure-based generator over
+DiffSBDD (see docs/generators.md). Substitution proposals are keyed by
 (substituent, SITE), never by substituent alone.
 """
 
+from .base import CandidateGenerator, GenerationResult, GeneratorError, Rejection
 from .design import Analogue, PharmacophoreSpec
 from .embed import EmbeddedAnalogue, embed_analogue
 from .enumerate import EnumerationReport, enumerate_isomers, enumerate_with_report
 from .model import Isomer
 from .paired import PairedPose, PairedResult, paired_ddE, pairs_from_candidates
+from .sbdd import ScaffoldGrowth
+from .sbdd_post import FilterConfig
 from .structural import bioisostere_swaps, ring_contractions, stereoisomers
 from .substitution import (
     EmbeddedProposal,
@@ -58,4 +62,10 @@ __all__ = [
     "GraphSanityError",
     "assert_graph_is_sane",
     "mol_with_coords",
+    "CandidateGenerator",
+    "GenerationResult",
+    "GeneratorError",
+    "Rejection",
+    "ScaffoldGrowth",
+    "FilterConfig",
 ]
