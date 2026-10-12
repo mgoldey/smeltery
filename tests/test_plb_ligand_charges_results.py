@@ -70,9 +70,20 @@ def test_shapes_and_charge_sums(rec, an):
         assert rec["charges"]["gasteiger"][n][0] == rec["charges"]["gasteiger"][n][7]
 
 
+def _same(a, b, rel=1e-12):
+    """Equal structure, floats equal to rel: a recomputed statistic can differ in the last ulp across platforms."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k], rel) for k in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y, rel) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return a == pytest.approx(b, rel=rel, nan_ok=True)
+    return a == b
+
+
 def test_analysis_recomputes_from_the_results_file(rec, an, stored):
     again = lc.analyse_record(rec, stored)
-    assert json.loads(json.dumps(again)) == an
+    assert _same(json.loads(json.dumps(again)), an)
 
 
 def test_es_energy_is_q_dot_phi_from_the_file(rec, an):
