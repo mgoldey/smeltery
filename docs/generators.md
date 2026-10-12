@@ -21,7 +21,8 @@ gen = ScaffoldGrowth(
 )
 result = gen.generate(parent, scaffold_indices, "pocket.pdb", seed=1)
 
-# With pose_source="model" the analogues carry the generator's geometry.
+# With pose_source="model" the analogues carry the generator's geometry. See "Pairing the model's poses" below
+# for what this recipe was and was not measured to do.
 paired = PairedPoses(parent_poses_given=True, analogue_poses_given=True)
 # ... pass [parent, *result.candidates] through `paired`
 
@@ -65,6 +66,36 @@ Filters run in this order: sanitize, connected, scaffold, forbidden, duplicate, 
 | `duplicate` | the same canonical SMILES was already returned |
 | `size` | outside the heavy-atom limits |
 | `atom_order` | the pose could not be put in the candidate SMILES's atom order |
+
+The default forbidden list holds one pattern, `peroxide`: `[OX2][OX2]`. Replace it through
+`FilterConfig(forbidden_smarts={...})`.
+
+## Sampling until a target is met
+
+`target_accepted` and `max_batches` work together. `max_batches` defaults to 1, so setting `target_accepted` alone
+changes nothing. With both set, batches of `n_samples` run (seeds `seed`, `seed + 1`, ...) and sampling stops as soon
+as the number of accepted candidates reaches the target or `max_batches` batches have run. The last batch may
+overshoot the target. Duplicates are detected across batches.
+
+## Pairing the model's poses
+
+With `pose_source="model"` each candidate carries the model's geometry as its only pose, in the atom order of
+`Chem.AddHs(Chem.MolFromSmiles(candidate.smiles))`. The recipe in the example above
+(`PairedPoses(parent_poses_given=True, analogue_poses_given=True)`) works on small cores such as the benzoic acid
+pair in `tests/test_paired_given_poses.py`. It was refused on the only real candidate the generator produced (the
+41-heavy-atom parent's one accepted sample):
+
+- The maximum-common-substructure search times out at the default `mcs_timeout_s=10` and was still cancelled at
+  60 s: it reaches 54 atoms on the 71-atom parent and 76-atom candidate (hydrogens included) and never proves
+  maximality.
+- Were the search bypassed, the given-pose check would also refuse it: the worst mapped heavy atom sits 2.22 Å from
+  the parent's pose 0 (median 0.055 Å, 2 of 32 over the 0.5 Å limit) because the search picks a
+  symmetry-degenerate assignment.
+
+Both refusals are correct. `tests/generate/test_sbdd_model_pose_pairing.py` pins the first. `pose_source="embed"`
+has the same search cost, because `PairedPoses` runs the same MCS search for it. The follow-up is a `PairedPoses`
+option that takes the known scaffold mapping (the generator already knows which candidate atoms are the scaffold)
+instead of searching.
 
 ## Measured yield
 
