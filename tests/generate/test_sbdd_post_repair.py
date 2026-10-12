@@ -58,13 +58,17 @@ def test_scaffold_coordinates_are_the_parents(parent_candidate, scaffold_spec, s
 
 
 def test_smiles_and_pose_puts_the_pose_in_smiles_atom_order():
-    mol = Chem.MolFromSmiles("C[C@H](N)c1ccccc1O")
+    mol = Chem.MolFromSmiles("c1ccccc1O")  # canonical is Oc1ccccc1: the atom order really changes
     AllChem.EmbedMolecule(mol, randomSeed=3)  # heavy atoms only, in input order
     smiles, pose = smiles_and_pose(mol)
+    n = mol.GetNumAtoms()
     reference = Chem.AddHs(Chem.MolFromSmiles(smiles))
     assert pose.symbols == tuple(a.GetSymbol() for a in reference.GetAtoms())
     order = [int(x) for x in re.findall(r"\d+", mol.GetProp("_smilesAtomOutputOrder"))]
-    assert np.array_equal(pose.coords_ang[: mol.GetNumAtoms()], mol.GetConformer().GetPositions()[order])
+    assert order != list(range(n))  # this test exercises a permutation
+    positions = mol.GetConformer().GetPositions()
+    assert np.array_equal(pose.coords_ang[:n], positions[order])
+    assert not np.array_equal(pose.coords_ang[:n], positions)  # would catch ignoring the order
 
 
 def test_the_parent_fixture_pose_matches_its_smiles(parent_candidate):
