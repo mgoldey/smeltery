@@ -20,10 +20,14 @@ WHAT IS AND IS NOT REPRODUCED (read before citing anything here)
     carries; the campaign scored the carboxylate. Both are disclosed in the record.
   * Parent poses: the cryo-EM bound conformer plus seeded rigid jitters
     (15 deg / 0.5 A), mimicking docked-pose spread. Not docked, not relaxed.
-  * Second charge model: pdb2pqr30 --ff=CHARMM against the default AMBER. The
+  * Second charge model: pdb2pqr30 --ff=CHARMM against the default AMBER (pass --skip-model-b to omit it). The
     campaign's second model is not recorded. Two force fields share the same
     structure, protonation tool and point-charge approximation, so their
-    disagreement is a LOWER bound on charge-model uncertainty.
+    disagreement is a LOWER bound on charge-model uncertainty. Without it the cut uses ONLY the declared
+    floor (`DECLARED_FLOOR_KCAL_MOL`, a lower bound taken from other targets, see its comment), and the sign-flip and
+    Spearman comparison with the campaign is not run.
+  * The run is metered: each SCF records its CPU seconds and `--cap-cpu-hours` stops a pass at the cap.
+    Plan and outcome language: docs/benchmarks/danuglipron_halogen_plan.md.
 """
 
 from __future__ import annotations
@@ -33,7 +37,8 @@ import hashlib
 import json
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from itertools import pairwise
 from pathlib import Path
 
@@ -61,6 +66,16 @@ PARENT_SMILES = "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)
 # Atom indices (heavy-atom order of PARENT_SMILES) of the four substituted aromatic CH sites.
 SITES = {"bzim-C9": 9, "pyr-C28": 28, "bnz-C34": 34, "bnz-C36": 36}
 SUBSTITUENTS = {"F": "F", "Cl": "Cl", "CH3": "C"}
+# The tier default (10 s) is too short for this 74-atom parent: the exact MCS needs 2 s (bzim sites) to ~75 s
+# (bnz-C36-CH3) on the dev box, and the default hit its timeout, so NoCommonCoreError, for 9 of the 12 analogues. The
+# search is exact when it finishes, so a longer limit changes only whether it finishes; it is recorded in the
+# tier settings.
+MCS_TIMEOUT_S = 900
+# FieldInteraction's systematic floor is UNMEASURED (docs/tiers/field_interaction.md), so the cut needs a DECLARED
+# floor. 1.26 kcal/mol is the larger of the two measured pocket-side charge-model sensitivities (AMBER ff14SB vs
+# CHARMM36, docs/limits.md L6 cdk2 1.26, L11 tyk2 0.67), each a lower bound measured on another target.
+DECLARED_FLOOR_KCAL_MOL = 1.26
+DECLARED_FLOOR_SOURCE = "1.26 kcal/mol, docs/limits.md L6 (cdk2; L11 tyk2 is 0.67), a lower bound from other targets"
 
 # The campaign's recorded per-analogue paired ddE: {name: (mean, sem)} in kcal/mol.
 # EMPTY ON PURPOSE: searched ferric experiments/danuglipron (RESULTS.md, PLAN.md, out/*.json),
@@ -182,18 +197,33 @@ class BoundPosePairedPoses(PairedPoses):
                 cand.poses = self._paired(pmol, parent_poses, cand)
 
 
-def _one_pose(name: str, smiles: str, pose: Pose, field) -> float:
-    """Worker: dE_int of one pose, through the real `FieldInteraction` tier."""
+def make_pairing(bound: Pose, n_poses: int) -> BoundPosePairedPoses:
+    """The pairing tier as this example runs it: default seed, jitter and core rules, MCS limit `MCS_TIMEOUT_S`."""
+    return BoundPosePairedPoses(bound, n_poses=n_poses, mcs_timeout_s=MCS_TIMEOUT_S)
+
+
+class CpuCapReached(RuntimeError):
+    """The CPU-time cap was reached; finished work is in the cache, and a rerun with fewer poses resumes from it."""
+
+
+def _one_pose(name: str, smiles: str, pose: Pose, field) -> tuple[float, float]:
+    """Worker: (dE_int, CPU seconds) of one pose, through the real `FieldInteraction` tier."""
+    t0 = time.process_time()
     c = Candidate(name, smiles, [pose])
     FieldInteraction().run([c], {"field": field})
-    return c.per_pose["dE_int"][0]
+    return c.per_pose["dE_int"][0], time.process_time() - t0
 
 
-def run_field_tier(cands: list[Candidate], field, tag: str, workers: int, cache_path: Path) -> FieldInteraction:
+def run_field_tier(
+    cands: list[Candidate], field, tag: str, workers: int, cache_path: Path, cap_cpu_s: float | None = None
+) -> FieldInteraction:
     """`FieldInteraction` over every pose of every candidate, one process per pose, with a resumable cache.
 
     Results are identical to `FieldInteraction().run(cands, ...)`; only scheduling differs. The cache key is
     the pose geometry plus the field's input digest and force field, so a stale entry cannot be reused.
+    Work is scheduled pose-major with `workers` calls in flight, so a stop leaves whole poses. Each entry stores
+    the worker's CPU seconds; if the CPU spent by THIS call reaches `cap_cpu_s`, or an SCF fails, nothing further
+    is submitted and the error propagates (at most `workers` in-flight SCFs finish beyond the cap).
     """
     cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
     tier = FieldInteraction()
@@ -206,19 +236,60 @@ def run_field_tier(cands: list[Candidate], field, tag: str, workers: int, cache_
         for c in cands
         for i, p in enumerate(c.poses)
     }
-    todo = [(c, i) for c in cands for i in range(len(c.poses)) if keys[(c.name, i)] not in cache]
+    todo = sorted(
+        ((c, i) for c in cands for i in range(len(c.poses)) if keys[(c.name, i)] not in cache), key=lambda t: t[1]
+    )
     print(f"  {tag}: {len(keys) - len(todo)} cached, {len(todo)} to run on {workers} workers", flush=True)
+    spent = 0.0
     if todo:
+        # Rolling window of `workers` submissions, never the whole queue: ProcessPoolExecutor hands every queued
+        # call to its call queue at once, where it can no longer be cancelled, so a stop would still run them all.
+        queue = iter(todo)
         with ProcessPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(_one_pose, c.name, c.smiles, c.poses[i], field): (c, i) for c, i in todo}
-            for fut in as_completed(futs):
-                c, i = futs[fut]
-                cache[keys[(c.name, i)]] = fut.result()
-                cache_path.write_text(json.dumps(cache))
-                print(f"  {tag}: {c.name} pose {i} done ({len(cache)} cached)", flush=True)
+            live: dict = {}
+
+            def submit_next() -> None:
+                for c, i in queue:
+                    live[ex.submit(_one_pose, c.name, c.smiles, c.poses[i], field)] = (c, i)
+                    return
+
+            for _ in range(workers):
+                submit_next()
+            while live:
+                done, _ = wait(live, return_when=FIRST_COMPLETED)
+                for fut in done:
+                    c, i = live.pop(fut)
+                    de, cpu = fut.result()  # a failed SCF raises here; nothing further is submitted
+                    cache[keys[(c.name, i)]] = {"dE": de, "cpu_s": cpu}
+                    cache_path.write_text(json.dumps(cache))
+                    spent += cpu
+                    print(
+                        f"  {tag}: {c.name} pose {i} done, {cpu:.0f} CPU-s ({spent / 3600:.2f} CPU-h this call)",
+                        flush=True,
+                    )
+                    if cap_cpu_s is not None and spent >= cap_cpu_s:
+                        raise CpuCapReached(
+                            f"{tag}: {spent / 3600:.2f} CPU-h reached the cap of {cap_cpu_s / 3600:.2f} CPU-h"
+                        )
+                    submit_next()
     for c in cands:
-        c.per_pose["dE_int"] = [cache[keys[(c.name, i)]] for i in range(len(c.poses))]
+        c.per_pose["dE_int"] = [cache[keys[(c.name, i)]]["dE"] for i in range(len(c.poses))]
+        c.per_pose["cpu_s"] = [cache[keys[(c.name, i)]]["cpu_s"] for i in range(len(c.poses))]
     return tier
+
+
+def range_report(values: dict[str, float], lo: float, hi: float) -> dict:
+    """Criterion 2, range form: which values fall inside the closed range [lo, hi] and which outside (no tolerance)."""
+    inside = sorted(n for n, v in values.items() if lo <= v <= hi)
+    outside = sorted(n for n, v in values.items() if not lo <= v <= hi)
+    return {"range": [lo, hi], "n_inside": len(inside), "n_outside": len(outside), "inside": inside, "outside": outside}
+
+
+def unranked_pairs(paired: dict[str, Measurement], floor: float) -> list[tuple[str, str, float]]:
+    """Adjacent pairs (by mean ddE) whose gap is at or below the floor: these must not be reported as ordered."""
+    order = sorted(paired, key=lambda k: paired[k].mean)
+    gaps = [(a, b, paired[b].mean - paired[a].mean) for a, b in pairwise(order)]
+    return [(a, b, g) for a, b, g in gaps if g <= floor]
 
 
 def compare_to_campaign(paired: dict[str, Measurement]) -> tuple[list[dict], str]:
@@ -253,6 +324,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--poses", type=int, default=6)
     ap.add_argument("--out", type=Path, default=Path("out"))
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    ap.add_argument(
+        "--cap-cpu-hours", type=float, default=26.0, help="stop (CpuCapReached) once a field pass has spent this much"
+    )
+    ap.add_argument(
+        "--floor",
+        type=float,
+        default=DECLARED_FLOOR_KCAL_MOL,
+        help="declared systematic floor for the cut (kcal/mol); default " + DECLARED_FLOOR_SOURCE,
+    )
     ap.add_argument("--sites", default=None, help="comma-separated subset of " + ",".join(SITES) + " (default: all)")
     ap.add_argument(
         "--skip-model-b",
@@ -279,17 +359,19 @@ def main(argv: list[str] | None = None) -> int:
     analogues = [Candidate(n, s) for n, s in smi.items()]
     selfpair = Candidate("parent-self", PARENT_SMILES)
     cands = [parent, *analogues, selfpair]
-    poses = BoundPosePairedPoses(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), n_poses=args.poses)
+    poses = make_pairing(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), args.poses)
     poses.run(cands, {"parent": parent})
 
     args.out.mkdir(exist_ok=True)
-    cache = args.out / f"halogen-scf-cache-{args.poses}poses.json"
-    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache)
+    cache = args.out / "halogen-scf-cache.json"  # content-addressed, so shared by runs with different --poses
+    cap_s = args.cap_cpu_hours * 3600.0
+    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s)
     # Model B: the SAME poses under CHARMM charges, in separate candidates so per_pose stays model-specific.
     tier_b = parent_b = None
+    cands_b: list[Candidate] = []
     if field_b is not None:
         cands_b = [Candidate(c.name, c.smiles, c.poses) for c in cands if c is not selfpair]
-        tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache)
+        tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache, cap_s)
         parent_b = cands_b[0]
 
     # Criterion 1: self-anchor, exactly 0.0 on every pose, and a non-zero field.
@@ -332,13 +414,23 @@ def main(argv: list[str] | None = None) -> int:
         ag = "n/a" if r["agrees"] is None else str(r["agrees"])
         print(f"{r['name']:14} {r['mean']:+9.3f} {r['sem']:9.3f} {rec:>9} {ag:>7}")
 
-    # Criterion 4: charge-sensitivity floor, then the cut.
-    report = res = None
+    # Criterion 2, range form (issue #6 as amended): rho and the CH3 paired SEM against the campaign's ranges.
+    rho_rng = range_report(rho, *CAMPAIGN_SUMMARY["rho"])
+    sem_rng = range_report({n: m.sem for n, m in paired.items() if n.endswith("-CH3")}, *CAMPAIGN_SUMMARY["CH3_sem"])
+    print(
+        f"    rho (analogue vs parent per-pose dE_int) against campaign {CAMPAIGN_SUMMARY['rho']}: "
+        f"{rho_rng['n_inside']} inside, {rho_rng['n_outside']} outside {rho_rng['outside']}"
+    )
+    print(
+        f"    CH3 paired SEM against campaign {CAMPAIGN_SUMMARY['CH3_sem']}: "
+        f"{sem_rng['n_inside']} inside, {sem_rng['n_outside']} outside {sem_rng['outside']}"
+    )
+
+    # Criterion 4: the floor, then the cut. The declared floor is always applied; the measured AMBER->CHARMM
+    # sensitivity, when that pass was run, can only raise it (cut takes the max).
+    report = None
     if tier_b is None:
-        print(
-            "\n[4] SKIPPED: --skip-model-b, no second charge model was run; "
-            "no sensitivity floor, so no cut is reported."
-        )
+        print("\n[4] second charge model NOT run (--skip-model-b): sign flips and Spearman between models unmeasured.")
     else:
         va = {c.name: paired[c.name].mean for c in analogues}
         vb = {n: m.mean for n, m in paired_b.items()}
@@ -346,23 +438,21 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"\n[4] charge sensitivity (AMBER -> CHARMM): sign flips {report.n_sign_flips}/{report.n} "
             f"(campaign: {CAMPAIGN_SUMMARY['n_sign_flips']}/{CAMPAIGN_SUMMARY['n']}), Spearman {report.spearman:+.3f} "
-            f"(campaign: {CAMPAIGN_SUMMARY['spearman']:+.3f}), floor {report.floor:.3f} kcal/mol"
+            f"(campaign: {CAMPAIGN_SUMMARY['spearman']:+.3f}), measured floor {report.floor:.3f} kcal/mol"
         )
-        res = cut(paired, keep=3, z=2.0, sensitivity=report)
-        print(f"    cut(keep=3, z=2, floor={res.floor:.3f}): groups={res.groups}")
-        print(
-            "    ", "UNRANKED at the boundary" if res.unranked_at_boundary else f"survivors={res.survivors}", *res.notes
-        )
-        order = sorted(paired, key=lambda k: paired[k].mean)
-        gaps = {(a, b): paired[b].mean - paired[a].mean for a, b in pairwise(order)}
-        in_group = {n: i for i, g in enumerate(res.groups) for n in g}
-        for (a, b), gap in gaps.items():
-            if gap <= res.floor:  # a gap under the floor must never be reported as a resolved order
-                assert in_group[a] == in_group[b], (
-                    f"cut separated {a},{b} despite gap {gap:.3f} <= floor {res.floor:.3f}"
-                )
-        n_unres = sum(1 for g in gaps.values() if g <= res.floor)
-        print(f"     {n_unres}/{len(gaps)} adjacent gaps are below the floor; none is ranked across.")
+    res = cut(paired, keep=3, z=2.0, floor=args.floor, sensitivity=report)
+    src = DECLARED_FLOOR_SOURCE if args.floor == DECLARED_FLOOR_KCAL_MOL else "set by --floor"
+    print(f"    declared floor {args.floor} kcal/mol ({src})")
+    print(f"    cut(keep=3, z=2, floor={res.floor:.3f}): groups={res.groups}")
+    print("    ", "UNRANKED at the boundary" if res.unranked_at_boundary else f"survivors={res.survivors}", *res.notes)
+    in_group = {n: i for i, g in enumerate(res.groups) for n in g}
+    unres = unranked_pairs(paired, res.floor)
+    for a, b, gap in unres:  # a gap under the floor must never be reported as a resolved order
+        assert in_group[a] == in_group[b], f"cut separated {a},{b} despite gap {gap:.3f} <= floor {res.floor:.3f}"
+    print(f"     {len(unres)}/{len(paired) - 1} adjacent gaps are at or below the floor; none is ranked across.")
+    all_cands = [*cands, *(cands_b if tier_b else [])]
+    total_cpu_s = sum(sum(c.per_pose["cpu_s"]) for c in all_cands)
+    print(f"    CPU spent in the SCFs behind this table: {total_cpu_s / 3600:.2f} CPU-h")
 
     rec = RunRecord(
         campaign="danuglipron-halogen-scan",
@@ -382,7 +472,12 @@ def main(argv: list[str] | None = None) -> int:
                 "exact_zero": True,
                 "parent_dE_int": parent.per_pose["dE_int"],
             },
-            "criterion_2_campaign_comparison": {"status": status, "rows": rows},
+            "criterion_2_campaign_comparison": {
+                "status": status,
+                "rows": rows,
+                "rho_range": rho_rng,
+                "ch3_paired_sem_range": sem_rng,
+            },
             "criterion_3_pairing": {
                 n: {"paired_sem": paired[n].sem, "unpaired_sem": unpaired[n].sem, "ratio": ratios[n], "rho": rho[n]}
                 for n in paired
@@ -399,19 +494,18 @@ def main(argv: list[str] | None = None) -> int:
                     "deltas": report.deltas,
                 }
                 if report
-                else "SKIPPED: --skip-model-b"
+                else "NOT RUN: --skip-model-b"
             ),
-            "cut": (
-                {
-                    "groups": res.groups,
-                    "survivors": res.survivors,
-                    "unranked": res.unranked_at_boundary,
-                    "floor": res.floor,
-                    "notes": res.notes,
-                }
-                if res
-                else "SKIPPED: no sensitivity floor"
-            ),
+            "declared_floor": {"value": args.floor, "source": DECLARED_FLOOR_SOURCE},
+            "cost": {"scf_cpu_hours": total_cpu_s / 3600, "n_poses": args.poses, "workers": args.workers},
+            "cut": {
+                "groups": res.groups,
+                "survivors": res.survivors,
+                "unranked": res.unranked_at_boundary,
+                "floor": res.floor,
+                "notes": res.notes,
+                "adjacent_gaps_at_or_below_floor": [[a, b, g] for a, b, g in unres],
+            },
         },
     )
     path = args.out / f"danuglipron-halogen-{rec.input_digest[:12]}.json"
