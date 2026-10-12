@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from rdkit import Chem
 
-from ..model import Pose
+from ..model import Candidate, Pose
+from .base import Rejection
 
 MATCH_TOL_ANG = 0.5  # a scaffold atom's output atom must lie within this of its input position
 FIT_TOL_ANG = 0.3  # and the rigid fit of the whole scaffold must leave at most this rmsd
@@ -172,3 +173,131 @@ def smiles_and_pose(mol: Chem.Mol) -> tuple[str, Pose]:
     if not np.array_equal(pose.coords_ang[: len(order)], xyz):
         raise ValueError(f"adding hydrogens moved a heavy atom of {smiles!r}")
     return smiles, pose
+
+
+DEFAULT_FORBIDDEN: dict[str, str] = {"peroxide": "[OX2][OX2]"}
+SCAFFOLD_MATCH_MODES = ("exact", "topology", "off")
+POSE_SOURCES = ("embed", "model")
+
+
+@dataclass
+class FilterConfig:
+    """Which outputs are returned. Every filter is independent; sanitization is not one of them (no SMILES without it).
+
+    `scaffold_match`: "exact" needs the scaffold as a substructure with its bond orders (a partially cut aromatic ring
+    can be perceived differently in the product and fail); "topology" ignores bond orders and admits molecules that
+    rearranged the scaffold's chemistry; "off" skips the check, and `PairedPoses` then needs a common core on its own.
+    """
+
+    require_connected: bool = True
+    scaffold_match: str = "exact"
+    forbidden_smarts: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_FORBIDDEN))
+    deduplicate: bool = True
+    min_heavy_atoms: int | None = None
+    max_heavy_atoms: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.scaffold_match not in SCAFFOLD_MATCH_MODES:
+            raise ValueError(f"scaffold_match must be one of {SCAFFOLD_MATCH_MODES}, not {self.scaffold_match!r}")
+        for label, smarts in self.forbidden_smarts.items():
+            if Chem.MolFromSmarts(smarts) is None:
+                raise ValueError(f"forbidden_smarts[{label!r}] is not valid SMARTS: {smarts!r}")
+
+
+def first_forbidden(mol: Chem.Mol, forbidden: dict[str, str]) -> str | None:
+    """The label of the first forbidden pattern `mol` contains, or None."""
+    for label, smarts in forbidden.items():
+        if mol.HasSubstructMatch(Chem.MolFromSmarts(smarts)):
+            return label
+    return None
+
+
+def _scaffold_query(spec: ScaffoldSpec, mode: str) -> Chem.Mol | None:
+    if mode == "off":
+        return None
+    if mode == "exact":
+        return spec.scaffold
+    params = Chem.AdjustQueryParameters.NoAdjustments()
+    params.makeBondsGeneric = True
+    return Chem.AdjustQueryProperties(spec.scaffold, params)
+
+
+@dataclass(frozen=True)
+class _Rejected:
+    reason: str
+    detail: str = ""
+    smiles: str | None = None
+
+
+def _classify(raw: Chem.Mol | None, spec: ScaffoldSpec, config: FilterConfig, query: Chem.Mol | None):
+    """The repaired, sanitized molecule if it passes the structural filters, else a `_Rejected`."""
+    if raw is None:
+        return _Rejected("unsanitizable", "unreadable SDF record")
+    try:
+        mol, _ = repair(raw, spec)
+    except RepairError as e:
+        return _Rejected("scaffold_atom_mismatch", str(e))
+    try:
+        Chem.SanitizeMol(mol)
+    except Exception as e:  # noqa: BLE001 - RDKit raises several exception types for the same condition
+        return _Rejected("unsanitizable", (str(e).strip().splitlines() or ["sanitization failed"])[0])
+    Chem.AssignStereochemistryFrom3D(mol)
+    smiles = Chem.MolToSmiles(mol)
+    n_frag = len(Chem.GetMolFrags(mol))
+    if config.require_connected and n_frag != 1:
+        return _Rejected("disconnected", f"{n_frag} fragments", smiles)
+    if query is not None and not mol.HasSubstructMatch(query):
+        return _Rejected("scaffold_lost", config.scaffold_match, smiles)
+    label = first_forbidden(mol, config.forbidden_smarts)
+    if label is not None:
+        return _Rejected("forbidden_substructure", label, smiles)
+    return mol
+
+
+def process_samples(
+    raws: Sequence[Chem.Mol | None],
+    spec: ScaffoldSpec,
+    config: FilterConfig,
+    *,
+    pose_source: str = "embed",
+    name_prefix: str = "sbdd",
+    start_index: int = 0,
+    first_number: int = 0,
+    seen: set[str] | None = None,
+) -> tuple[list[Candidate], list[Rejection]]:
+    """Repair, filter, deduplicate and name the raw outputs. Every input ends up as exactly one of the two lists."""
+    if pose_source not in POSE_SOURCES:
+        raise ValueError(f"pose_source must be one of {POSE_SOURCES}, not {pose_source!r}")
+    seen = set() if seen is None else seen
+    query = _scaffold_query(spec, config.scaffold_match)
+    candidates: list[Candidate] = []
+    rejected: list[Rejection] = []
+    number = first_number
+    for offset, raw in enumerate(raws):
+        index = start_index + offset
+        outcome = _classify(raw, spec, config, query)
+        if isinstance(outcome, _Rejected):
+            rejected.append(Rejection(index, outcome.reason, outcome.detail, outcome.smiles))
+            continue
+        smiles = Chem.MolToSmiles(outcome)
+        if config.deduplicate and smiles in seen:
+            rejected.append(Rejection(index, "duplicate", "", smiles))
+            continue
+        n_heavy = outcome.GetNumAtoms()
+        if (config.min_heavy_atoms is not None and n_heavy < config.min_heavy_atoms) or (
+            config.max_heavy_atoms is not None and n_heavy > config.max_heavy_atoms
+        ):
+            rejected.append(Rejection(index, "size", f"{n_heavy} heavy atoms", smiles))
+            continue
+        poses: list[Pose] = []
+        if pose_source == "model":
+            try:
+                smiles, pose = smiles_and_pose(outcome)
+            except ValueError as e:
+                rejected.append(Rejection(index, "atom_order", str(e), smiles))
+                continue
+            poses = [pose]
+        seen.add(smiles)
+        candidates.append(Candidate(f"{name_prefix}-{number:04d}", smiles, poses=poses))
+        number += 1
+    return candidates, rejected
