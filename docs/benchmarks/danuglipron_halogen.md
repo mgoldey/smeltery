@@ -21,8 +21,20 @@ is claimed. The example's checks (self-anchor, field non-zero) were never reache
 Seven SCFs finished before the stop (all pose 0, AMBER field, 6458 charges), cached in `benchmarks/danuglipron_halogen/results/halogen-scf-cache.json`:
 parent, `bzim-C9-F`, `bzim-C9-Cl`, `bzim-C9-CH3`, `pyr-C28-CH3`, `pyr-C28-Cl`, `bnz-C34-CH3`. They cost **3.65 CPU-h** (13,151 CPU-s;
 1182 to 3485 CPU-s each; `pyr-C28-Cl` at 3485 CPU-s is twice the others, which fits a hard SCF). Pilots cost 0.86 CPU-h before.
-The CPU of SCFs that were in flight at the stop (up to 4, including the failing one) is unmetered, so the total spent is
-at least 4.51 CPU-h, below the 26 CPU-h cap. Seven energies on one pose give no paired statistic, so none is reported.
+The CPU of SCFs that were in flight at the stop (the failing one and up to 3 others, discarded because the pool raised before
+caching them) is unmetered. **It is not small.** The run log was created at 04:05 and the traceback at 07:29 (3.41 h wall, 4 workers);
+the last cached SCF was written at 06:09, so for the final 80 minutes all four workers were inside SCFs that never returned a cached
+result. The upper bound on CPU is 4 x 3.41 = 13.7 CPU-h for the run (of which 3.65 is cached), so up to about 10.0 CPU-h is unmetered, and
+**the total spent, pilots included, is up to about 14.6 CPU-h** (not the 4.5 CPU-h first assumed). It is probably close to that bound,
+since the workers were busy throughout. Seven energies on one pose give no paired statistic, so none is reported.
+
+## Amendment A1 considered and NOT run (cost accounting)
+
+The proposal was to drop pose 0 for every molecule and run jittered poses 1..N, N the largest of {3, 2} that fits the 26 CPU-h cap.
+With the spend bounded at 14.6 CPU-h, 11.4 CPU-h remain. One pose index of the 14 molecules costs about 7 CPU-h or more (the seven cached
+SCFs averaged 1879 s, against the 1500 s assumed in the plan, and the pyridine-site SCFs appear to be the expensive ones): N = 2 needs about
+14 CPU-h and N = 3 about 21, neither fits, and N = 1 gives no SEM and so no criterion 2 to 4. **No new SCF was started.** Spending past the
+cap, or on a pose count that cannot answer the criteria, is not done without an explicit decision.
 
 ## Deviations
 
@@ -40,4 +52,7 @@ at least 4.51 CPU-h, below the 26 CPU-h cap. Seven energies on one pose give no 
 1. Drop pose 0 for all molecules (as the tyk2 study's rule did) and run the jittered poses only? That departs from the plan (pose 0 is the bound
    conformer), so it needs your approval; the 7 cached pose-0 SCFs would then be unused.
 2. Or investigate the non-converging SCF in ferric (ferric issue) before spending more.
-3. Remaining budget: about 21 CPU-h; a full 3-pose run needs about 18 more.
+3. Remaining budget is about 11.4 CPU-h of the 26 (not 21): enough for neither 2 nor 3 jittered poses. Raise the cap to about 30 CPU-h for
+   2 jittered poses (amendment A1: pose 0 dropped for every molecule before any ddE exists, cached pose-0 SCFs excluded from all statistics),
+   or about 38 for 3.
+4. Fix the scheduler so a failure does not discard the in-flight SCFs' results (cache them before raising); that would have saved the unmetered work.
