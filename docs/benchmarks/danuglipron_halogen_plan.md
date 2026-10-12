@@ -124,3 +124,42 @@ as not completed and criteria 2 to 4 as not measured.
 * No ranking of analogues finer than the floor allows, and no statement about the CHARMM sensitivity of this system.
 * No new row in `docs/limits.md` without a number and an existing source (`tests/test_limits.py`); a row, if added, is for the measured pose
   noise of the paired ddE on this system (its mean paired SEM and the unpaired/paired ratio), sourced to the committed results file.
+
+## Amendment A1 (written after the first run failed, before any new SCF)
+
+**What happened.** The first production run (3 poses, cap 23 CPU-h for the call) stopped with `pyr-C28-F pose 0: SCF did not converge`
+(`docs/benchmarks/danuglipron_halogen.md`). Section 5 of this plan was followed: no retry, no aids, and with the failing index 0 no whole
+pose existed, so the first run is reported as not completed. Seven pose-0 SCFs had finished (parent, `bzim-C9-F/Cl/CH3`, `pyr-C28-CH3/Cl`,
+`bnz-C34-CH3`). No ddE or SEM exists from them or from any other source: **this amendment is decided before any ddE has been computed.**
+
+**Changes (the analyses, outcome language and judging of section 4 are otherwise unchanged).**
+
+1. **Pose 0 is dropped for every molecule**, because one pose-0 SCF did not converge (the tyk2 and cdk2 studies' convention: a pose index is dropped for
+   all molecules, never for one). The 7 cached pose-0 SCFs stay in the cache file and are **excluded from every statistic**. The run uses the
+   two seeded jitters, **pose indices 1 and 2**, for all 14 molecules (the same geometries as in the first run's plan: seed 20261005, <= 15 deg and <= 0.5 A rigid
+   jitters of the cryo-EM conformer; the bound conformer itself is no longer scored). Implemented as `--skip-first-poses 1 --poses 2`.
+2. **Pose count 2, not 3** (cost, section 3 below). **Total cap raised from 26 to 30 CPU-h**, a user-side change made because the issue's ~26 CPU-h estimate
+   proved low (the plan's own cost model, built on two pilots, underestimated the mean SCF; see 3).
+3. **Cost accounting.** Spent so far, upper bound: 0.86 (pilots) + 3.65 (cached SCFs) + up to 10.0 (SCFs in flight when the first run stopped, unmetered because the pool discarded
+   them: 4 workers x 3.41 h wall minus the cached CPU) = **up to 14.6 CPU-h**. Remaining under the 30 CPU-h cap: **15.4 CPU-h = 55,440 CPU-s**. Cost model: the 7 cached SCFs averaged
+   1879 s (range 1182 to 3485; the pyridine-site `pyr-C28-Cl` was 3485), so 28 SCFs (14 molecules x 2 poses) cost about **52,600 CPU-s = 14.6 CPU-h**, a margin of
+   about 0.8 CPU-h (5%). That is thin and is stated as such.
+4. **Cap enforcement (new in the example).** `--cap-cpu-hours 15.4 --est-scf-cpu-s 2500`: a new SCF is submitted only if the CPU spent by the call plus 2500 s for each SCF in flight and for the new
+   one stays within the cap; if work remains when that stops submission the run stops cleanly with `CpuCapReached`, every finished SCF cached. The 2500 s estimate is deliberately above the mean so
+   the tail of the queue slows rather than overruns. Because the molecules are scheduled pose-major (parent, 12 analogues, self-pair; pose 1 then pose 2), a cap stop can leave the last
+   molecules of pose 2 (the self-pair last) unrun; the report would then say which criteria are unmeasured, not infer them.
+5. **Scheduler fix (the lost work).** A worker that fails no longer discards the other in-flight results: the worker returns the error and its CPU, the failure is cached as failed (and is
+   **never retried** by later calls), nothing further is submitted, the in-flight SCFs are collected and cached, then `ScfFailed` is raised. The rule of section 5 is unchanged: a failed SCF is not retried and not helped; if a
+   jittered pose fails for any molecule, that is reported plainly, the pose index is not silently dropped, and the plan's "fewer than 2 whole poses" clause applies.
+
+**What 2 poses support (stated now).**
+
+* A paired SEM from n = 2 has **1 degree of freedom** (it is |d1 - d2| / 2, with a 95% t multiplier of 12.7). It is a measure of the spread of two numbers, not an estimate of a standard error one may attach
+  a confidence interval to. Criterion 3 (paired SEM < unpaired SEM for every analogue, ratio printed) is judged as written, with this attached; a pass on 2 poses means the arithmetic holds on these two poses, not that pairing was shown to help.
+* **rho across poses is +1 or -1 by construction with 2 poses** (any two distinct points are perfectly correlated), so the comparison with the campaign's rho range [0.78, 0.9997] is printed
+  but is **vacuous** (a value of 1.0 is "outside" only because it exceeds 0.9997) and is reported as uninformative, not as a finding.
+* The CH3 paired SEM comparison with [1.0, 3.5] is printed as inside/outside and carries the 1-dof caveat. The cut (section 4, criterion 4) is judged as written from the means and the declared
+  1.26 kcal/mol floor; the two-pose means inherit the same weakness, so any ordering it reports is conditional.
+* Nothing from this run supports a ranking, an agreement with the campaign, or a statement about experiment.
+
+**Seen since the plan:** the first run's CPU times (above), that `pyr-C28-F` pose 0 does not converge, and that the pyridine-site SCFs are the slow ones. No energy or ddE.

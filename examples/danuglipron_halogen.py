@@ -203,27 +203,47 @@ def make_pairing(bound: Pose, n_poses: int) -> BoundPosePairedPoses:
 
 
 class CpuCapReached(RuntimeError):
-    """The CPU-time cap was reached; finished work is in the cache, and a rerun with fewer poses resumes from it."""
+    """The CPU-time cap stopped the pass; every finished SCF is in the cache and a rerun resumes from it."""
 
 
-def _one_pose(name: str, smiles: str, pose: Pose, field) -> tuple[float, float]:
-    """Worker: (dE_int, CPU seconds) of one pose, through the real `FieldInteraction` tier."""
+class ScfFailed(RuntimeError):
+    """One or more SCFs failed (e.g. did not converge). They are cached as failed and are never retried."""
+
+
+def _one_pose(name: str, smiles: str, pose: Pose, field) -> tuple[float | None, float, str | None]:
+    """Worker: (dE_int, CPU seconds, error) of one pose, through the real `FieldInteraction` tier.
+
+    An SCF that raises (non-convergence) returns (None, cpu_spent, message) so its CPU is metered and the other
+    workers' results are not discarded with it.
+    """
     t0 = time.process_time()
     c = Candidate(name, smiles, [pose])
-    FieldInteraction().run([c], {"field": field})
-    return c.per_pose["dE_int"][0], time.process_time() - t0
+    try:
+        FieldInteraction().run([c], {"field": field})
+    except RuntimeError as e:
+        return None, time.process_time() - t0, str(e)
+    return c.per_pose["dE_int"][0], time.process_time() - t0, None
 
 
 def run_field_tier(
-    cands: list[Candidate], field, tag: str, workers: int, cache_path: Path, cap_cpu_s: float | None = None
+    cands: list[Candidate],
+    field,
+    tag: str,
+    workers: int,
+    cache_path: Path,
+    cap_cpu_s: float | None = None,
+    est_cpu_s: float = 0.0,
 ) -> FieldInteraction:
     """`FieldInteraction` over every pose of every candidate, one process per pose, with a resumable cache.
 
     Results are identical to `FieldInteraction().run(cands, ...)`; only scheduling differs. The cache key is
     the pose geometry plus the field's input digest and force field, so a stale entry cannot be reused.
-    Work is scheduled pose-major with `workers` calls in flight, so a stop leaves whole poses. Each entry stores
-    the worker's CPU seconds; if the CPU spent by THIS call reaches `cap_cpu_s`, or an SCF fails, nothing further
-    is submitted and the error propagates (at most `workers` in-flight SCFs finish beyond the cap).
+    Work is scheduled pose-major with `workers` calls in flight (never the whole queue). Each entry stores the
+    worker's CPU seconds. A new SCF is submitted only if the CPU spent by THIS call, plus `est_cpu_s` for every SCF
+    in flight and for the new one, stays within `cap_cpu_s`; if work remains when that stops submission,
+    `CpuCapReached` is raised after the in-flight SCFs are collected and cached. A failed SCF is cached as failed
+    (with its CPU), is never retried, stops further submission, and `ScfFailed` is raised after the in-flight
+    SCFs are collected and cached.
     """
     cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
     tier = FieldInteraction()
@@ -241,40 +261,48 @@ def run_field_tier(
     )
     print(f"  {tag}: {len(keys) - len(todo)} cached, {len(todo)} to run on {workers} workers", flush=True)
     spent = 0.0
+    failures: list[str] = []
+    pending = list(reversed(todo))
     if todo:
-        # Rolling window of `workers` submissions, never the whole queue: ProcessPoolExecutor hands every queued
-        # call to its call queue at once, where it can no longer be cancelled, so a stop would still run them all.
-        queue = iter(todo)
         with ProcessPoolExecutor(max_workers=workers) as ex:
             live: dict = {}
-
-            def submit_next() -> None:
-                for c, i in queue:
+            while pending or live:
+                # Rolling window: ProcessPoolExecutor hands every queued call to its call queue at once, where it can
+                # no longer be cancelled, so the whole queue is never submitted.
+                while pending and len(live) < workers and not failures:
+                    if cap_cpu_s is not None and spent + est_cpu_s * (len(live) + 1) > cap_cpu_s:
+                        break
+                    c, i = pending.pop()
                     live[ex.submit(_one_pose, c.name, c.smiles, c.poses[i], field)] = (c, i)
-                    return
-
-            for _ in range(workers):
-                submit_next()
-            while live:
+                if not live:
+                    break
                 done, _ = wait(live, return_when=FIRST_COMPLETED)
                 for fut in done:
                     c, i = live.pop(fut)
-                    de, cpu = fut.result()  # a failed SCF raises here; nothing further is submitted
-                    cache[keys[(c.name, i)]] = {"dE": de, "cpu_s": cpu}
-                    cache_path.write_text(json.dumps(cache))
+                    de, cpu, err = fut.result()
                     spent += cpu
-                    print(
-                        f"  {tag}: {c.name} pose {i} done, {cpu:.0f} CPU-s ({spent / 3600:.2f} CPU-h this call)",
-                        flush=True,
-                    )
-                    if cap_cpu_s is not None and spent >= cap_cpu_s:
-                        raise CpuCapReached(
-                            f"{tag}: {spent / 3600:.2f} CPU-h reached the cap of {cap_cpu_s / 3600:.2f} CPU-h"
-                        )
-                    submit_next()
+                    if err is None:
+                        cache[keys[(c.name, i)]] = {"dE": de, "cpu_s": cpu}
+                        msg = f"done, {cpu:.0f} CPU-s"
+                    else:
+                        cache[keys[(c.name, i)]] = {"dE": None, "cpu_s": cpu, "error": err}
+                        failures.append(f"{c.name} pose {i}: {err}")
+                        msg = f"FAILED ({err}), {cpu:.0f} CPU-s"
+                    cache_path.write_text(json.dumps(cache))
+                    print(f"  {tag}: {c.name} pose {i} {msg} ({spent / 3600:.2f} CPU-h this call)", flush=True)
+    if failures:
+        raise ScfFailed("; ".join(failures))
+    if pending:
+        raise CpuCapReached(
+            f"{tag}: {len(pending)} SCFs not started; {spent / 3600:.2f} CPU-h spent against a cap of "
+            f"{(cap_cpu_s or 0) / 3600:.2f} CPU-h (in-flight SCFs counted at {est_cpu_s:.0f} CPU-s each)"
+        )
     for c in cands:
-        c.per_pose["dE_int"] = [cache[keys[(c.name, i)]]["dE"] for i in range(len(c.poses))]
-        c.per_pose["cpu_s"] = [cache[keys[(c.name, i)]]["cpu_s"] for i in range(len(c.poses))]
+        entries = [cache[keys[(c.name, i)]] for i in range(len(c.poses))]
+        if any(e.get("error") for e in entries):  # a cached failure from an earlier call is not retried
+            raise ScfFailed(f"{c.name}: cached SCF failure {[e.get('error') for e in entries if e.get('error')]}")
+        c.per_pose["dE_int"] = [e["dE"] for e in entries]
+        c.per_pose["cpu_s"] = [e["cpu_s"] for e in entries]
     return tier
 
 
@@ -328,6 +356,18 @@ def main(argv: list[str] | None = None) -> int:
         "--cap-cpu-hours", type=float, default=26.0, help="stop (CpuCapReached) once a field pass has spent this much"
     )
     ap.add_argument(
+        "--est-scf-cpu-s",
+        type=float,
+        default=2000.0,
+        help="CPU seconds assumed for every in-flight SCF when deciding whether the cap allows another submission",
+    )
+    ap.add_argument(
+        "--skip-first-poses",
+        type=int,
+        default=0,
+        help="drop this many leading pose indices for every molecule (plan amendment A1 drops pose 0)",
+    )
+    ap.add_argument(
         "--floor",
         type=float,
         default=DECLARED_FLOOR_KCAL_MOL,
@@ -359,19 +399,22 @@ def main(argv: list[str] | None = None) -> int:
     analogues = [Candidate(n, s) for n, s in smi.items()]
     selfpair = Candidate("parent-self", PARENT_SMILES)
     cands = [parent, *analogues, selfpair]
-    poses = make_pairing(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), args.poses)
+    k0 = args.skip_first_poses
+    poses = make_pairing(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), args.poses + k0)
     poses.run(cands, {"parent": parent})
+    for c in cands:  # amendment A1: the first k0 pose indices are dropped for EVERY molecule, before any SCF
+        c.poses = c.poses[k0:]
 
     args.out.mkdir(exist_ok=True)
     cache = args.out / "halogen-scf-cache.json"  # content-addressed, so shared by runs with different --poses
     cap_s = args.cap_cpu_hours * 3600.0
-    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s)
+    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s, args.est_scf_cpu_s)
     # Model B: the SAME poses under CHARMM charges, in separate candidates so per_pose stays model-specific.
     tier_b = parent_b = None
     cands_b: list[Candidate] = []
     if field_b is not None:
         cands_b = [Candidate(c.name, c.smiles, c.poses) for c in cands if c is not selfpair]
-        tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache, cap_s)
+        tier_b = run_field_tier(cands_b, field_b, "CHARMM", args.workers, cache, cap_s, args.est_scf_cpu_s)
         parent_b = cands_b[0]
 
     # Criterion 1: self-anchor, exactly 0.0 on every pose, and a non-zero field.
@@ -462,6 +505,10 @@ def main(argv: list[str] | None = None) -> int:
             "sites": sites,
             "pocket": tier_a.field_provenance,
             "pocket_charge_model_b": tier_b.field_provenance if tier_b else None,
+            "dropped_pose_indices": {
+                "indices": list(range(k0)),
+                "reason": "plan amendment A1 (docs/benchmarks/danuglipron_halogen_plan.md)",
+            },
             "ionization": "neutral acid (the SMILES given carries no formal charge)",
             "campaign_summary": CAMPAIGN_SUMMARY,
         },
@@ -497,7 +544,12 @@ def main(argv: list[str] | None = None) -> int:
                 else "NOT RUN: --skip-model-b"
             ),
             "declared_floor": {"value": args.floor, "source": DECLARED_FLOOR_SOURCE},
-            "cost": {"scf_cpu_hours": total_cpu_s / 3600, "n_poses": args.poses, "workers": args.workers},
+            "cost": {
+                "scf_cpu_hours": total_cpu_s / 3600,
+                "n_poses": args.poses,
+                "first_pose_index": k0,
+                "workers": args.workers,
+            },
             "cut": {
                 "groups": res.groups,
                 "survivors": res.survivors,

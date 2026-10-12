@@ -106,14 +106,14 @@ def _fake_cands():
 
 
 def _fake_one_pose(name, smiles, pose, field):
-    return float(pose.coords_ang[1, 0]), 100.0
+    return float(pose.coords_ang[1, 0]), 100.0, None
 
 
 def test_run_field_tier_stops_at_the_cpu_cap_pose_major_and_resumes(tmp_path, monkeypatch):
     monkeypatch.setattr(ex, "_one_pose", _fake_one_pose)
     cache = tmp_path / "c.json"
-    with pytest.raises(ex.CpuCapReached):
-        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, cap_cpu_s=150.0)
+    with pytest.raises(ex.CpuCapReached):  # 2 done = 200 s; another 100 s in flight would reach 300 > 250
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, cap_cpu_s=250.0, est_cpu_s=100.0)
     done = json.loads(cache.read_text())
     assert len(done) == 2 and all(v["cpu_s"] == 100.0 for v in done.values())
     assert sorted(v["dE"] for v in done.values()) == [0.7, 0.7]  # both candidates' pose 0 first, not A's poses 0..2
@@ -123,26 +123,70 @@ def test_run_field_tier_stops_at_the_cpu_cap_pose_major_and_resumes(tmp_path, mo
     assert cands[1].per_pose["cpu_s"] == [100.0] * 3
 
 
+def test_cap_counts_every_in_flight_scf_at_its_estimate(tmp_path, monkeypatch):
+    monkeypatch.setattr(ex, "_one_pose", _fake_one_pose)
+    with pytest.raises(
+        ex.CpuCapReached
+    ):  # 2 workers: after 0 spent, 2 in flight at 100 each = 200 <= 250, a third is refused
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 2, tmp_path / "c.json", cap_cpu_s=250.0, est_cpu_s=100.0)
+    assert len(json.loads((tmp_path / "c.json").read_text())) == 2
+
+
 _RUN_LOG: list[Path] = []
 
 
 def _failing_one_pose(name, smiles, pose, field):
+    x = float(pose.coords_ang[1, 0])
     with open(_RUN_LOG[0], "a") as f:  # side effect visible from the forked worker
-        f.write(f"{name}{pose.coords_ang[1, 0]:.1f}\n")
-    time.sleep(0.3)  # slow enough that the parent sees the failure while later tasks are still queued
-    if name == "A" and pose.coords_ang[1, 0] > 0.75:  # A's poses 1 and 2 fail to converge
-        raise RuntimeError("SCF did not converge")
-    return float(pose.coords_ang[1, 0]), 100.0
+        f.write(f"{name}{x:.1f}\n")
+    if name == "A" and x > 0.75:  # A's poses 1 and 2 fail to converge, quickly
+        return None, 100.0, f"{name} pose: SCF did not converge"
+    time.sleep(0.6 if (name == "B" and x > 0.75) else 0.1)  # B's pose 1 is still in flight when A's fails
+    return x, 100.0, None
 
 
-def test_a_failed_scf_aborts_without_running_the_rest_of_the_queue(tmp_path, monkeypatch):
+def test_a_failed_scf_keeps_the_inflight_results_and_is_never_retried(tmp_path, monkeypatch):
     monkeypatch.setattr(ex, "_one_pose", _failing_one_pose)
     _RUN_LOG[:] = [tmp_path / "ran.txt"]
-    with pytest.raises(RuntimeError, match="did not converge"):
-        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, tmp_path / "c.json")
-    # pose-major, one worker: A0 B0 A1(fails) then at most the one prefetched task; A2 and B2 never run
+    cache = tmp_path / "c.json"
+    with pytest.raises(ex.ScfFailed, match="did not converge"):
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 2, cache)
     ran = (tmp_path / "ran.txt").read_text().split()
-    assert len(ran) <= 4 and "A0.9" not in ran and "B0.9" not in ran
+    assert "A0.9" not in ran and "B0.9" not in ran  # nothing submitted after the failure
+    entries = list(json.loads(cache.read_text()).values())
+    assert sum(1 for e in entries if e.get("error")) == 1  # the failure, with its CPU metered
+    assert [e["cpu_s"] for e in entries if e.get("error")] == [100.0]
+    assert sorted(e["dE"] for e in entries if e["dE"] is not None) == pytest.approx(
+        [0.7, 0.7, 0.8]
+    )  # A0, B0 and the in-flight B1
+    before = (tmp_path / "ran.txt").read_text()
+    with pytest.raises(ex.ScfFailed):  # a second call: cached failure, not retried, no SCF runs
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 2, cache)
+    assert "A0.8" in before and (tmp_path / "ran.txt").read_text().count("A0.8") == 1
+
+
+def test_real_worker_returns_a_failed_scf_with_its_cpu_instead_of_raising(monkeypatch):
+    class Boom:
+        def run(self, cands, ctx):
+            sum(i * i for i in range(300000))  # burn measurable CPU
+            raise RuntimeError("SCF did not converge")
+
+    monkeypatch.setattr(ex, "FieldInteraction", Boom)
+    pose = _fake_cands()[0].poses[0]
+    de, cpu, err = ex._one_pose("A", "C", pose, None)
+    assert de is None and cpu > 0.0 and err == "SCF did not converge"
+
+
+def test_a_cached_failure_stops_a_later_call_even_when_nothing_is_left_to_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(ex, "_one_pose", _fake_one_pose)
+    cache = tmp_path / "c.json"
+    ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache)
+    data = json.loads(cache.read_text())
+    k = next(iter(data))
+    data[k] = {"dE": None, "cpu_s": 5.0, "error": "SCF did not converge"}
+    cache.write_text(json.dumps(data))
+    with pytest.raises(ex.ScfFailed, match="cached SCF failure"):
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache)
 
 
 def test_run_field_tier_cache_is_keyed_on_the_force_field(tmp_path, monkeypatch):
