@@ -101,28 +101,55 @@ sample.
 
 ## Post-processing
 
-Observed on one run (16 samples, 32-atom fixed scaffold, 9 atoms added, single GTX 1080,
-213 s wall including model load): all 16 kept the scaffold's coordinates (max 0.12 Å) and
-elements; 11 sanitized; 7 were one connected fragment; only 4 contained the scaffold's
-graph. Every one of the 16 missing scaffold bonds was a C–O single bond of 1.37–1.50 Å,
-dropped by DiffSBDD's distance-based bond builder. This is one run and one scaffold; the
-numbers motivate the design and are not a benchmark.
+Measured on one scaffold (16 samples, 32-atom fixed scaffold of a 41-heavy-atom parent,
+9 atoms added, one GTX 1080, 213 s wall including model load; `--timesteps 50
+--resamplings 20`, the `inpaint.py` defaults). Raw output, no repair: every scaffold atom
+is within 0.12 Å of its input position and has the right element, but the atoms of each
+output are **not in the input order** (DiffSBDD's `batch_to_list` uses an unstable
+`argsort`), so scaffold atoms must be found by position. 11 of 16 sanitize, 7 are one
+fragment, 4 contain the scaffold's graph (the dropped bonds are C–O single bonds of
+1.37–1.50 Å that the distance-based bond builder missed).
+
+What repair can and cannot do, measured on the same 16:
+
+| repair policy | sanitize | connected | contain scaffold (exact bond orders) |
+|---|---|---|---|
+| force the scaffold's bond orders onto the model's atoms | 0 of 16 | – | – |
+| add missing scaffold bonds, drop extra scaffold–scaffold bonds, keep the model's orders | 4 of 16 | 4 | **1 of 16** |
+
+Forcing the scaffold's orders fails because the model places new atoms next to atoms that
+are already saturated in the scaffold (a carboxyl oxygen with a neighbour at 1.34 Å, a
+piperidine nitrogen with a fourth neighbour): the model never sees bond orders or
+valences. The 1 survivor is chemically implausible (a phosphonate ester on the carboxyl).
+A second run at the training step count (`--timesteps 500 --resamplings 1`) gave 0 of 16
+usable. With bond orders ignored in the scaffold check, 4 of 16 pass, but they include
+molecules that absorbed the carboxylic acid into a ring, so that check is too lenient to
+be the default. **On this scaffold and settings the model is a poor proposer; the wrapper
+must report this, not hide it.** One run, one scaffold; a yield study (scaffold size,
+`add_n_nodes`, resamplings, other scaffolds) is a separate piece of work.
 
 Stages, in order, each recorded in `Rejection.reason`:
 
-1. **Graft scaffold bonds (repair, always on).** For each scaffold atom, find the output
-   atom at the same position (nearest, within a tolerance, one-to-one), check the
-   element matches, then add any scaffold bond that is missing and set the scaffold's
-   bond orders. An element mismatch or a non-unique match rejects the sample
-   (`scaffold_atom_mismatch`). Repair is not a filter and has no switch.
+1. **Match and repair (always on).** Find, for each scaffold atom, the output atom nearest
+   its input position (one-to-one, within 0.5 Å, same element). A failure rejects the
+   sample (`scaffold_atom_mismatch`). Fit the output rigidly onto the scaffold
+   coordinates (Kabsch; residual above 0.3 Å rejects as `scaffold_atom_mismatch`), so the
+   scaffold atoms sit exactly where the parent has them. Add any scaffold bond the model
+   missed, with the scaffold's bond order, and delete any bond between two scaffold atoms
+   that the scaffold does not have. Bonds the model did place are never re-ordered.
+   Formal charges on scaffold atoms come from the scaffold. Repair is not a filter and
+   has no switch.
 2. **Sanitize (required).** An output that does not sanitize cannot yield a SMILES, so
    it is rejected (`unsanitizable`). This stage cannot be disabled.
 3. **Optional filters**, each a `ScaffoldGrowth` argument, applied in this order and as
    far upstream as possible, before any pose, tier or expensive step:
    - `require_connected` (default on): one fragment (`disconnected`).
-   - `require_scaffold` (default on): the scaffold is a substructure of the result under
-     the original bond orders (`scaffold_lost`). `PairedPoses` needs a common core, so
-     turning this off is allowed but the caller owns the consequence.
+   - `scaffold_match` (default `"exact"`; `"topology"` ignores bond orders; `"off"`): the
+     scaffold is a substructure of the result (`scaffold_lost`). `"exact"` can reject a
+     product whose partially cut aromatic ring is perceived differently; `"topology"`
+     is more lenient and admits molecules that rearranged the scaffold's chemistry.
+     `PairedPoses` needs a common core, so `"off"` is allowed but the caller owns the
+     consequence.
    - `forbidden_smarts` (default: a short documented list, peroxide O–O first; pass `()`
      to disable): matches reject with `forbidden_substructure:<label>`.
    - `deduplicate` (default on): canonical SMILES with stereo (`duplicate`).
@@ -140,16 +167,24 @@ Every filter is independent and individually switchable. The rejection list is c
 
 - **`"embed"`**: returned candidates have `smiles` only and no poses. `PairedPoses`
   works exactly as today. The model acts as a proposer.
-- **`"model"`**: each candidate also carries pose 0, built from the model's geometry:
-  1. scaffold atoms are overwritten with the parent pose's exact coordinates;
-  2. the new atoms keep the model's coordinates;
-  3. hydrogens are added with `Chem.AddHs(addCoords=True)` and only the hydrogens are
-     relaxed (heavy atoms held), so no heavy-atom coordinate changes.
+- **`"model"`**: each candidate also carries one pose, built from the model's geometry:
+  1. the output is fitted rigidly onto the scaffold (stage 1), so the scaffold's heavy
+     atoms sit on the parent's coordinates and the grown atoms keep their position
+     relative to the scaffold;
+  2. heavy atoms are put in the candidate SMILES's atom order (below);
+  3. hydrogens are added with `Chem.AddHs(addCoords=True)`; there is no relaxation, so
+     no heavy-atom coordinate changes.
 
-`PairedPoses` gains `analogue_poses_given: bool = False`. When set, a candidate that
-already has poses keeps its pose 0 and remaining poses come from the existing
-jittered-ensemble path; pose count stays `len(parent.poses)`. The default behavior is
-unchanged, and the self-pair anchor test is extended to cover the new path.
+`PairedPoses` gains `analogue_poses_given: bool = False` (a ninth key in `settings()` and
+on `docs/tiers/paired_poses.md`). When set and a candidate already has poses, its first
+pose is pose 0 of the pair and poses 1..n-1 come from the existing path, so the pose
+count stays `len(parent.poses)`. The given pose is checked, not trusted: its symbols must
+equal those of the candidate SMILES with hydrogens added, and its core atoms (the
+atoms the common-substructure search maps onto the parent) must lie within 0.05 Å of the
+parent's pose 0 for heavy atoms, otherwise `ValueError`. Every mapped atom, hydrogens
+included, is then overwritten with the parent's pose-0 coordinate, so the core is an
+exact copy as in the default path. The default behavior is unchanged, and the self-pair
+anchor is extended to the new path.
 
 ### Atom-order invariant
 
@@ -168,11 +203,11 @@ every fixture molecule. A pose that fails the check is rejected (`atom_order`).
 `GenerationResult.provenance` and `ScaffoldGrowth.settings()` carry: checkpoint path and
 SHA-256, DiffSBDD git commit (read by the runner from the checkout, `dirty` flag
 included), torch and CUDA versions, device name, seed, sampling parameters, all filter
-settings, `pose_source`, wall time, and counts per rejection reason. `record.py` embeds
-the result in the run record alongside the ferric identity. The runner reports a dirty
-DiffSBDD checkout rather than hiding it; the local one has a one-line `batch_to_list`
-device patch; the runner must either avoid needing it or apply the equivalent fix and
-record that it did (see Risks).
+settings, `pose_source`, wall time, and counts per rejection reason. `record.py` is not
+changed: the caller puts `generator.settings()` and `result.provenance` into
+`RunRecord.inputs` (they are plain JSON-able dicts), where they enter the input digest
+alongside the ferric identity. The runner reports a dirty DiffSBDD checkout rather than
+hiding it, and lists the runtime patches it applied (see Risks).
 
 ## Error handling
 
@@ -182,9 +217,10 @@ record that it did (see Risks).
 - Misconfiguration (scaffold index out of range, scaffold not a connected subgraph of
   the parent, missing pocket file, checkpoint path absent): `ValueError` before any
   subprocess starts.
-- GPU contention: the runner reports free memory at start and fails fast with a clear
-  message if the batch cannot fit; `batch_size` is configurable. A shared GPU is a
-  known condition on this machine (another process held about 3 GB per card).
+- GPU contention: the runner records free GPU memory in its report, and a CUDA
+  out-of-memory error becomes a `GeneratorError` that says so; `n_samples` per run is
+  configurable. A shared GPU is a known condition on this machine (another process held
+  about 3 GB per card).
 
 ## Testing
 
@@ -206,18 +242,25 @@ No test needs a GPU, torch, or the external environment, except the one marked s
 - **GPU smoke** (`@pytest.mark.gpu`, skipped unless `SMELTERY_SBDD_PYTHON` and a
   checkpoint are set): one tiny run on the bundled example complex from the DiffSBDD
   repository.
-- `MIN_TESTS` in `.github/workflows/test.yml` is raised to the real collected count.
+- The tier docs tests (`tests/test_tier_docs.py`) keep passing: `docs/tiers/paired_poses.md`
+  gains the ninth settings row. CI has no test-count gate to update.
 
 ## Risks and open items
 
-- **Local DiffSBDD patch.** The clone has a one-line device fix in `utils.batch_to_list`
-  that `inpaint.py` needs on GPU. The runner should avoid depending on it by calling the
-  sampling API directly and moving tensors itself; if that proves not to be possible, the
-  runner applies the equivalent fix at import time and records it in the report. To be
-  settled in the implementation plan.
-- **Model quality.** The 7 of 16 connected and 11 of 16 sanitizable rates were measured
-  once, on one scaffold. The filters make output usable; whether the proposals are good
-  is a separate measurement (the head-to-head against `substituent_scan`, a later spec).
+- **DiffSBDD needs two runtime fixes.** `inpaint.py` fails on GPU in `utils.batch_to_list`
+  (a CPU/CUDA index error), and `prepare_substructure` reads a module global `model` that
+  exists only when the file runs as a script. The runner applies both at import time
+  (wraps `utils.batch_to_list`; sets `inpaint.model`) and lists them under `patches` in
+  its report. The local clone's edit to `utils.py` is reverted so the checkout is clean
+  and the commit hash in the report is the upstream one.
+- **Model quality is poor on the scaffold measured.** 1 of 16 samples survived repair and
+  the exact scaffold check, and that one is chemically implausible (see Post-processing).
+  The wrapper, filters and accounting are model-independent and worth having either way,
+  but this scaffold-growth setup does not yet yield usable analogues. Whether a smaller
+  fixed scaffold, a stated attachment atom, other `add_n_nodes` or resampling values, or
+  another model helps is the next piece of work (a yield study), and the head-to-head
+  against `substituent_scan` comes after it. Each spec of that work starts from the
+  rejection counts this wrapper reports.
 - **One pose per molecule.** The model gives one geometry. The funnel pairs ensembles,
   so the model path yields n = 1 model pose plus the jittered ones, and the SEM then
   mixes the two kinds. Whether that is acceptable is exactly what the switchable design
@@ -235,13 +278,16 @@ No test needs a GPU, torch, or the external environment, except the one marked s
 1. `ScaffoldGrowth(...).generate(...)` returns a `GenerationResult` where
    `len(candidates) + len(rejected)` equals the raw output count, on the fixture run and
    on a fake-runner run.
-2. On the fixture SDF, graft recovers the scaffold in every sample whose only defect is
-   missing scaffold bonds, and rejects none of those.
+2. On the fixture SDF (16 raw outputs) with default settings: 1 accepted, 12
+   `unsanitizable`, 3 `scaffold_lost`, none of any other reason (measured, then pinned).
+   With `scaffold_match="topology"`: 4 accepted.
 3. With every optional filter off, only `scaffold_atom_mismatch` and `unsanitizable`
-   rejections remain.
+   rejections remain, and 4 of the 16 fixture outputs are returned.
 4. `pose_source="model"` candidates pass the atom-order check and the exact-core check,
    and the self-pair anchor holds with `analogue_poses_given=True`.
 5. The run record carries the checkpoint SHA-256 and the DiffSBDD commit.
-6. The full suite passes with no GPU present, and `MIN_TESTS` matches the collected count.
-7. One GPU smoke run on this machine produces at least one accepted candidate, with the
-   wall time and rejection counts printed.
+6. The full suite passes with no GPU present, and ruff check and format are clean.
+7. One GPU smoke run on this machine completes, and its wall time, accepted count and
+   rejection counts are printed. It is not required to accept any candidate: on the
+   measured scaffold the expected yield is about 1 in 16, and a run that accepts none
+   is a result, not a failure.
