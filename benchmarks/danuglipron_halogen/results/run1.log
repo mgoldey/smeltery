@@ -1,0 +1,42 @@
+field A (AMBER): 6458 charges, net -1.00; field B: skipped
+  AMBER: 0 cached, 42 to run on 4 workers
+  AMBER: parent pose 0 done, 1182 CPU-s (0.33 CPU-h this call)
+  AMBER: bzim-C9-F pose 0 done, 1623 CPU-s (0.78 CPU-h this call)
+  AMBER: bzim-C9-Cl pose 0 done, 1698 CPU-s (1.25 CPU-h this call)
+  AMBER: bzim-C9-CH3 pose 0 done, 1712 CPU-s (1.73 CPU-h this call)
+  AMBER: pyr-C28-CH3 pose 0 done, 1877 CPU-s (2.25 CPU-h this call)
+  AMBER: pyr-C28-Cl pose 0 done, 3485 CPU-s (3.22 CPU-h this call)
+  AMBER: bnz-C34-CH3 pose 0 done, 1575 CPU-s (3.65 CPU-h this call)
+concurrent.futures.process._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/concurrent/futures/process.py", line 264, in _process_worker
+    r = call_item.fn(*call_item.args, **call_item.kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 213, in _one_pose
+    FieldInteraction().run([c], {"field": field})
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/src/smeltery/tiers.py", line 380, in run
+    raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
+RuntimeError: pyr-C28-F pose 0: SCF did not converge
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 520, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 368, in main
+    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 262, in run_field_tier
+    de, cpu = fut.result()  # a failed SCF raises here; nothing further is submitted
+              ^^^^^^^^^^^^
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+RuntimeError: pyr-C28-F pose 0: SCF did not converge
+
+[exited with code 1]
