@@ -19,7 +19,7 @@
 | `jitter_deg` | `15.0` |
 | `jitter_ang` | `0.5` |
 | `min_core_heavy` | `3` |
-| `mcs_timeout_s` | `10` |
+| `mcs_timeout_s` | `10` (too short for drug-sized molecules: 9 of the 12 danuglipron halogen analogues time out and raise `NoCommonCoreError`; the exact search took 2 to 75 s there, so the example passes 900; `docs/benchmarks/danuglipron_halogen.md`) |
 | `parent_poses_given` | `False` |
 | `relax_unmapped` | `False` |
 

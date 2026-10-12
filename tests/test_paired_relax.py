@@ -70,3 +70,18 @@ def test_the_knob_is_recorded_and_off_by_default():
     assert PairedPoses().settings()["relax_unmapped"] is False
     assert PairedPoses(relax_unmapped=True).settings()["relax_unmapped"] is True
     assert PairedPoses(relax_unmapped=True).settings() != PairedPoses().settings()
+
+
+def test_an_mcs_timeout_names_the_knob_and_its_value(monkeypatch):
+    """A cut-off search must raise (an unfinished core is not a core) and say which limit to raise."""
+    from smeltery import tiers
+    from smeltery.tiers import NoCommonCoreError
+
+    class Cancelled:
+        canceled = True
+        smartsString = "[#6]"
+
+    monkeypatch.setattr(tiers.rdFMCS, "FindMCS", lambda *a, **k: Cancelled())
+    cands = [Candidate("parent", PARENT), Candidate("analogue", ANALOGUE)]
+    with pytest.raises(NoCommonCoreError, match=r"mcs_timeout_s=7 s.*Raise PairedPoses\(mcs_timeout_s"):
+        PairedPoses(n_poses=2, mcs_timeout_s=7).run(cands, {"parent": cands[0]})
