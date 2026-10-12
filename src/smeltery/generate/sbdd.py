@@ -9,6 +9,7 @@ for the measured yield: on the scaffold it was developed against, about 1 raw sa
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -28,6 +29,23 @@ from .sbdd_post import POSE_SOURCES, FilterConfig, build_scaffold, process_sampl
 
 RUNNER = Path(__file__).with_name("_sbdd_runner.py")
 STDERR_TAIL_CHARS = 2000
+
+
+def _sha256_of(path: str | PathLike) -> str:
+    """SHA-256 of a file's bytes, streamed; hashing never loads the (pickled) checkpoint."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tail(text: str | bytes | None) -> str:
+    if text is None:
+        return ""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    return text[-STDERR_TAIL_CHARS:]
 
 
 def _write_sdf(path: Path, mol: Chem.Mol) -> None:
@@ -97,7 +115,7 @@ class ScaffoldGrowth:
             )
         spec = build_scaffold(parent.smiles, scaffold, parent.poses[0])
         own_dir = self.keep_workdir is None
-        workdir = Path(tempfile.mkdtemp(prefix="smeltery-sbdd-")) if own_dir else Path(self.keep_workdir)
+        workdir = Path(tempfile.mkdtemp(prefix="smeltery-sbdd-")) if own_dir else Path(self.keep_workdir).resolve()
         workdir.mkdir(parents=True, exist_ok=True)
         try:
             return self._generate(spec, str(Path(pocket).resolve()), seed, workdir)
@@ -113,11 +131,14 @@ class ScaffoldGrowth:
         for label, path in (("pocket", pocket), ("checkpoint", self.checkpoint), ("diffsbdd_dir", self.diffsbdd_dir)):
             if not Path(path).exists():
                 raise ValueError(f"{label} not found: {path}")
+        if self.runner is None and not RUNNER.is_file():
+            raise ValueError(f"the packaged runner is missing: {RUNNER}")
         if shutil.which(self.python) is None:
             raise ValueError(f"python not found or not executable: {self.python}")
 
     def _generate(self, spec, pocket: str, seed: int, workdir: Path) -> GenerationResult:
         started = time.time()
+        checkpoint_sha256 = _sha256_of(self.checkpoint)
         reference, fixed = workdir / "parent.sdf", workdir / "scaffold.sdf"
         _write_sdf(reference, spec.parent)
         _write_sdf(fixed, spec.scaffold)
@@ -128,7 +149,7 @@ class ScaffoldGrowth:
         runs: list[dict] = []
         n_raw = 0
         for batch in range(n_batches):
-            report = self._run_batch(workdir, batch, seed + batch, pocket, reference, fixed)
+            report = self._run_batch(workdir, batch, seed + batch, pocket, reference, fixed, checkpoint_sha256)
             raws = _read_records(workdir / f"grown_{batch}.sdf")
             if len(raws) != report["n_raw"]:
                 raise GeneratorError(f"the runner reported {report['n_raw']} samples but the SDF holds {len(raws)}")
@@ -152,6 +173,7 @@ class ScaffoldGrowth:
         result.provenance = {
             "generator": self.name,
             "seed": seed,
+            "checkpoint_sha256": checkpoint_sha256,
             "n_batches": len(runs),
             "n_raw": n_raw,
             "n_accepted": len(candidates),
@@ -161,7 +183,9 @@ class ScaffoldGrowth:
         }
         return result
 
-    def _run_batch(self, workdir: Path, batch: int, seed: int, pocket: str, reference: Path, fixed: Path) -> dict:
+    def _run_batch(
+        self, workdir: Path, batch: int, seed: int, pocket: str, reference: Path, fixed: Path, checkpoint_sha256: str
+    ) -> dict:
         out_sdf = workdir / f"grown_{batch}.sdf"
         out_report = workdir / f"report_{batch}.json"
         request = workdir / f"request_{batch}.json"
@@ -185,20 +209,24 @@ class ScaffoldGrowth:
                 indent=2,
             )
         )
+        runner = self.runner or str(RUNNER)
+        if self.runner is not None and Path(self.runner).is_file():
+            runner = str(Path(self.runner).resolve())
         env = dict(os.environ)
         if self.device is not None:
             env["CUDA_VISIBLE_DEVICES"] = str(self.device)
         try:
             proc = subprocess.run(
-                [self.python, self.runner or str(RUNNER), str(request)],
+                [self.python, runner, str(request)],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 env=env,
                 cwd=str(Path(self.diffsbdd_dir).resolve()),
                 timeout=self.timeout_s,
             )
         except subprocess.TimeoutExpired as exc:
-            raise GeneratorError(f"the runner did not finish within {self.timeout_s} s") from exc
+            raise GeneratorError(f"the runner did not finish within {self.timeout_s} s: {_tail(exc.stderr)}") from exc
         except OSError as exc:
             raise GeneratorError(f"could not start {self.python!r}: {exc}") from exc
         if proc.returncode != 0:
@@ -211,6 +239,11 @@ class ScaffoldGrowth:
             raise GeneratorError("the runner left no readable report") from exc
         if not report.get("ok"):
             raise GeneratorError(f"the runner reported a failure: {str(report.get('error'))[-STDERR_TAIL_CHARS:]}")
+        if report.get("checkpoint_sha256") != checkpoint_sha256:
+            raise GeneratorError(
+                f"the runner hashed a different checkpoint ({report.get('checkpoint_sha256')}) "
+                f"than {self.checkpoint} ({checkpoint_sha256})"
+            )
         if not out_sdf.exists():
             raise GeneratorError("the runner reported success but wrote no SDF")
         return report

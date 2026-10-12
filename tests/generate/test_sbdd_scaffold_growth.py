@@ -1,5 +1,6 @@
 """ScaffoldGrowth end to end against a fake runner that replays the real fixture; no GPU, no torch."""
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -17,7 +18,7 @@ RUNNER_DIR = str(Path(smeltery.generate.__file__).parent)
 DATA = Path(__file__).resolve().parents[1] / "data" / "sbdd"
 
 FAKE_RUNNER = """
-import json, os, shutil, sys
+import hashlib, json, os, shutil, sys
 sys.path.insert(0, RUNNER_DIR)
 import _sbdd_runner
 
@@ -49,6 +50,10 @@ mode = os.environ.get("FAKE_MODE", "ok")
 if mode == "crash":
     print("boom: something broke", file=sys.stderr)
     sys.exit(3)
+if mode == "binary_stderr":
+    sys.stderr.buffer.write(b"\\xff\\xfe boom")
+    sys.stderr.buffer.flush()
+    sys.exit(3)
 if mode == "list_report":
     json.dump([1], open(request["out_report"], "w"))
     shutil.copy(FIXTURE, request["out_sdf"])
@@ -64,9 +69,10 @@ if mode == "garbage_report":
 if mode != "no_sdf":
     shutil.copy(FIXTURE if mode != "empty" else EMPTY, request["out_sdf"])
 n_raw = 16 if mode not in ("empty", "wrong_count") else (0 if mode == "empty" else 99)
+sha = "0" * 64 if mode == "bad_hash" else hashlib.sha256(open(request["checkpoint"], "rb").read()).hexdigest()
 json.dump({
     "ok": True, "n_raw": n_raw, "wall_time_s": 0.1, "seed": request["seed"],
-    "checkpoint_sha256": "abc", "diffsbdd_commit": "deadbeef", "diffsbdd_dirty": False,
+    "checkpoint_sha256": sha, "diffsbdd_commit": "deadbeef", "diffsbdd_dirty": False,
     "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"), "patches": [],
     "cwd": os.getcwd(),
 }, open(request["out_report"], "w"))
@@ -117,7 +123,8 @@ def test_a_run_returns_the_measured_split_and_accounts_for_every_output(
     prov = result.provenance
     assert prov["n_batches"] == 1 and prov["n_raw"] == 16 and prov["n_accepted"] == 1 and prov["seed"] == 11
     assert prov["rejection_counts"] == {"unsanitizable": 12, "scaffold_lost": 3}
-    assert prov["runs"][0]["checkpoint_sha256"] == "abc" and prov["runs"][0]["diffsbdd_dirty"] is False
+    assert prov["runs"][0]["checkpoint_sha256"] == hashlib.sha256(b"x").hexdigest() == prov["checkpoint_sha256"]
+    assert prov["runs"][0]["diffsbdd_dirty"] is False
     json.dumps(prov)  # provenance goes into the run record, so it must be JSON-able
 
 
@@ -210,6 +217,8 @@ def test_without_a_target_exactly_one_batch_runs(fake_runner, files, parent_cand
         ("list_report", "readable report"),
         ("no_n_raw", "readable report"),
         ("wrong_count", "99"),
+        ("binary_stderr", "status 3"),
+        ("bad_hash", "checkpoint"),
     ],
 )
 def test_a_failed_run_is_a_generator_error_with_the_reason(
@@ -292,3 +301,41 @@ def test_the_fake_runner_rejects_a_request_the_real_runner_would_reject(fake_run
     path.write_text(json.dumps(request))
     proc = subprocess.run([sys.executable, fake_runner, str(path)], capture_output=True, text=True)
     assert proc.returncode != 0 and "ref_ligand" in proc.stderr
+
+
+def test_a_relative_keep_workdir_and_runner_are_resolved(
+    fake_runner, files, parent_candidate, scaffold_indices, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    gen = _generator(Path(fake_runner).name, files, keep_workdir="kept")
+    result = gen.generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
+    assert result.n_raw == 16
+    request = json.loads((tmp_path / "kept" / "request_0.json").read_text())
+    for key in ("diffsbdd_dir", "checkpoint", "pdb", "ref_ligand", "fix_atoms", "out_sdf", "out_report"):
+        assert Path(request[key]).is_absolute(), key
+
+
+def test_the_packaged_runner_exists_and_its_absence_is_a_value_error(
+    files, parent_candidate, scaffold_indices, monkeypatch, tmp_path
+):
+    from smeltery.generate import sbdd
+
+    assert sbdd.RUNNER.is_file()
+    monkeypatch.setattr(sbdd, "RUNNER", tmp_path / "missing.py")
+    gen = ScaffoldGrowth(python=sys.executable, diffsbdd_dir=files["diffsbdd_dir"], checkpoint=files["checkpoint"])
+    with pytest.raises(ValueError, match="runner"):
+        gen.generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
+
+
+def test_a_timeout_error_carries_the_stderr_tail(files, parent_candidate, scaffold_indices, tmp_path):
+    slow = tmp_path / "slow.py"
+    slow.write_text("import sys, time\nprint('stuck here', file=sys.stderr, flush=True)\ntime.sleep(30)\n")
+    gen = ScaffoldGrowth(
+        python=sys.executable,
+        runner=str(slow),
+        diffsbdd_dir=files["diffsbdd_dir"],
+        checkpoint=files["checkpoint"],
+        timeout_s=2,
+    )
+    with pytest.raises(GeneratorError, match="stuck here"):
+        gen.generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
