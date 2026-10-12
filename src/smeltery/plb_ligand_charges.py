@@ -5,7 +5,7 @@ field; it uses NO ligand partial charge model. Ligand partial charges exist in t
 (`pocket.energy.compute_charges`, returned by `compute_binding_energy`) and never enter an energy. The quantity compared
 here is therefore a SURROGATE with its own definition, not the tier's ddE:
 
-    E_es(model, pose) = sum_i q_i(model) * phi(r_i)          phi(r) = sum_j Q_j / |r - R_j|   (kcal/mol, pocket field Q_j)
+    E_es(model, pose) = sum_i q_i(model) * phi(r_i),   phi(r) = sum_j Q_j / |r - R_j|   (kcal/mol)
 
 the first-order electrostatic energy of the ligand's atom-centred charges in the same pocket field the tier uses, and
 ddE_es(ligand) = mean over poses of [E_es(ligand, k) - E_es(parent, k)]. The plan is
@@ -46,7 +46,7 @@ def es_energy(charges, phi) -> float:
 
 
 def paired_ddE_es(E: np.ndarray, names: list[str], parent: str) -> dict[str, dict[str, float]]:
-    """E has shape (n_ligands, n_poses), rows in `names` order. Per analogue: pose-mean and SEM of E(lig,k) - E(parent,k)."""
+    """E is (n_ligands, n_poses), rows in `names` order. Per analogue: pose mean and SEM of E(L,k)-E(parent,k)."""
     E = np.asarray(E, dtype=float)
     i0 = names.index(parent)
     out = {}
@@ -60,7 +60,7 @@ def paired_ddE_es(E: np.ndarray, names: list[str], parent: str) -> dict[str, dic
 
 
 def pair_comparison(values: dict[str, dict[str, float]], a: str, b: str) -> dict[str, Any]:
-    """Two models' per-ligand values (model -> name -> value) through `gates.charge_sensitivity`, plus pair-order flips."""
+    """Two models (model -> name -> value) through `gates.charge_sensitivity`, plus pair-order flips."""
     names = sorted(values[a])
     if sorted(values[b]) != names:
         raise ValueError("the two models do not score the same ligands")
@@ -85,3 +85,99 @@ def pair_comparison(values: dict[str, dict[str, float]], a: str, b: str) -> dict
 def spearman_vs(values: dict[str, float], other: dict[str, float]) -> float:
     names = sorted(values)
     return spearman([values[n] for n in names], [other[n] for n in names])
+
+
+#: Verdict thresholds fixed in the plan (docs/benchmarks/plb_ligand_charges_plan.md, section 3); n = 12, 66 pairs.
+AGREE = {"spearman_min": 0.90, "sign_flips_max": 1, "pair_flips_max": 6}
+DISAGREE = {"spearman_below": 0.70, "sign_flips_min": 3, "pair_flips_min": 17}
+N_BOOT = 10_000
+BOOT_SEED = 20261011
+
+
+def verdict(pc: dict[str, Any]) -> str:
+    """'agree' / 'disagree' / 'between' for one `pair_comparison`, by the plan's pre-declared thresholds."""
+    if (
+        pc["spearman"] >= AGREE["spearman_min"]
+        and pc["n_sign_flips"] <= AGREE["sign_flips_max"]
+        and pc["n_pair_order_flips"] <= AGREE["pair_flips_max"]
+    ):
+        return "agree"
+    if (
+        pc["spearman"] < DISAGREE["spearman_below"]
+        or pc["n_sign_flips"] >= DISAGREE["sign_flips_min"]
+        or pc["n_pair_order_flips"] >= DISAGREE["pair_flips_min"]
+    ):
+        return "disagree"
+    return "between"
+
+
+def es_energies(rec: dict) -> dict[str, np.ndarray]:
+    """model -> array (n_ligands, n_poses) of sum_i q_i phi_i, recomputed from the stored charges and potentials."""
+    names = rec["ligands"]
+    return {
+        m: np.array(
+            [
+                [es_energy(rec["charges"][m][n][k], rec["phi_kcal_mol_per_e"][n][k]) for k in range(rec["n_poses"])]
+                for n in names
+            ]
+        )
+        for m in rec["models"]
+    }
+
+
+def analyse_record(rec: dict, stored: dict) -> dict[str, Any]:
+    """Every statistic of the plan, from the per-atom charges and potentials in `rec` and the stored QM run `stored`."""
+    from . import plb_measure as pm
+
+    names, parent, npose, models = rec["ligands"], rec["reference"], rec["n_poses"], rec["models"]
+    E = es_energies(rec)
+    dde = {m: paired_ddE_es(E[m], names, parent) for m in models}
+    means = {m: {n: v["mean"] for n, v in dde[m].items()} for m in models}
+    qm_E = np.array([stored["results"]["dE_int_kcal_mol"]["amber14"][n][:npose] for n in names])
+    qm = {n: v["mean"] for n, v in paired_ddE_es(qm_E, names, parent).items()}
+    pairs = {}
+    for a, b in itertools.combinations(models, 2):
+        pc = pair_comparison(means, a, b)
+        x = [means[a][n] for n in sorted(means[a])]
+        y = [means[b][n] for n in sorted(means[b])]
+        pc["spearman_ci95"] = pm.bootstrap_ci(x, y, "spearman", n_boot=N_BOOT, seed=BOOT_SEED)
+        pc["kendall"] = pm.kendall_tau_b(x, y)
+        d = E[b] - E[a]
+        pc["raw_E_es_shift_mean_kcal_mol"] = float(d.mean())
+        pc["raw_E_es_shift_sd_kcal_mol"] = float(d.std(ddof=1))
+        pc["verdict"] = verdict(pc)
+        pairs[f"{a}|{b}"] = pc
+    carb = {}
+    for m in models:
+        ok = tot = 0
+        for n in names:
+            for c, o in rec["carbonyl_atom_pairs"][n]:
+                for k in range(npose):
+                    q = rec["charges"][m][n][k]
+                    tot += 1
+                    ok += int(q[c] > 0 and q[o] < 0)
+        carb[m] = {"n_carbonyl_ligand_poses": tot, "n_polarity_correct": ok}
+    sums = {
+        m: max(abs(sum(rec["charges"][m][n][k]) - rec["inputs"]["net_charge"][n]) for n in names for k in range(npose))
+        for m in models
+    }
+    return {
+        "schema": "smeltery-plb-ligand-charges-analysis/1",
+        "n_analogues": len(names) - 1,
+        "n_poses": npose,
+        "models": models,
+        "ddE_es_kcal_mol": dde,
+        "pairs": pairs,
+        "qm_ddE_stored_amber_kcal_mol": qm,
+        "vs_qm": {
+            m: {
+                "spearman": spearman_vs(means[m], qm),
+                "n_same_sign": sum(1 for n in qm if np.sign(means[m][n]) == np.sign(qm[n])),
+            }
+            for m in models
+        },
+        "mean_paired_sem_kcal_mol": {m: float(np.mean([v["sem"] for v in dde[m].values()])) for m in models},
+        "carbonyl_polarity": carb,
+        "max_abs_charge_sum_error_e": sums,
+        "thresholds": {"agree": AGREE, "disagree": DISAGREE},
+    }
