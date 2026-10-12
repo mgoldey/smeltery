@@ -139,3 +139,125 @@ def test_the_headline_number_is_the_pooled_sd_of_the_plb_own_types():
     assert o["df"] == sum(r["pooled"]["df"] for r in rows) and o["df"] > 500
     assert 0.3 < o["sd"] < 1.0  # a sanity band: independent assays agree to a fraction of a log unit, not a decade
     assert o["diff_sd_kcal_mol"] == pytest.approx(o["sd_kcal_mol"] * math.sqrt(2))
+
+
+# --- within-assay relative variability (the quantity a computed ddG is compared with) ---
+
+
+def _rec(mol, doc, val, typ="IC50"):
+    return {"molecule_chembl_id": mol, "document_chembl_id": doc, "standard_type": typ, "pchembl_value": str(val)}
+
+
+def test_relative_pairs_hand_worked_and_offset_cancels():
+    """Doc D2 = doc D1 shifted by a constant 1.0 (an assay offset), except compound C is 0.3 lower in D2.
+    Compounds A, B, C. Pairs: (A,B): x = (7-6) - (8-7) = 0; (A,C): x = (7-5) - (8-6.7) = 0.7;
+    (B,C): x = (6-5) - (7-6.7) = 0.7.
+    So n = 3, sum x^2 = 0.98, sum |x| = 1.4. The constant offset contributes nothing."""
+    recs = [
+        _rec("A", "D1", 7.0), _rec("B", "D1", 6.0), _rec("C", "D1", 5.0),
+        _rec("A", "D2", 8.0), _rec("B", "D2", 7.0), _rec("C", "D2", 6.7),
+    ]  # fmt: skip
+    (row,) = cv.relative_doc_pairs(recs, "IC50")
+    assert row[0] == 3 and row[1] == pytest.approx(0.98) and row[2] == pytest.approx(1.4)
+
+
+def test_relative_pairs_never_mix_types_and_need_two_common_compounds():
+    mixed = [
+        _rec("A", "D1", 7.0, "IC50"),
+        _rec("B", "D1", 6.0, "IC50"),
+        _rec("A", "D2", 7.0, "Ki"),
+        _rec("B", "D2", 6.0, "Ki"),
+    ]
+    assert cv.relative_doc_pairs(mixed, "IC50") == [] and cv.relative_doc_pairs(mixed, "Ki") == []
+    one_common = [_rec("A", "D1", 7.0), _rec("B", "D1", 6.0), _rec("A", "D2", 7.0), _rec("C", "D2", 6.0)]
+    assert cv.relative_doc_pairs(one_common, "IC50") == []  # a single shared compound gives no pair
+
+
+def test_relative_summary_rmse_mue_and_deterministic_bootstrap():
+    rows = [[3, 0.98, 1.4], [1, 0.25, 0.5]]  # 4 pairs, sum x^2 = 1.23, sum |x| = 1.9
+    out = cv.relative_summary(rows, n_boot=200)
+    assert out["n_pairs"] == 4 and out["n_document_pairs"] == 2
+    assert out["rmse_log"] == pytest.approx((1.23 / 4) ** 0.5) and out["mue_log"] == pytest.approx(0.475)
+    assert out["rmse_kcal_mol"] == pytest.approx(out["rmse_log"] * cv.RT_LN10_KCAL)
+    assert out == cv.relative_summary(rows, n_boot=200)  # seeded
+    lo, hi = out["rmse_kcal_mol_ci95"]
+    assert lo <= hi
+
+
+def test_relative_pairs_use_only_the_requested_type_when_both_types_are_present():
+    """IC50: (A,B) differ by 1.0 in D1 and 1.0 in D2 -> x = 0. Ki: by 1.0 and 3.0 -> x = 2.
+    Asking for IC50 must give x = 0 and asking for Ki must give |x| = 2, never a mixture."""
+    recs = [
+        _rec("A", "D1", 7.0), _rec("B", "D1", 6.0), _rec("A", "D2", 7.5), _rec("B", "D2", 6.5),
+        _rec("A", "D1", 7.0, "Ki"), _rec("B", "D1", 6.0, "Ki"), _rec("A", "D2", 9.0, "Ki"), _rec("B", "D2", 6.0, "Ki"),
+    ]  # fmt: skip
+    assert cv.relative_doc_pairs(recs, "IC50") == [[1, 0.0, 0.0]]
+    (ki,) = cv.relative_doc_pairs(recs, "Ki")
+    assert ki[0] == 1 and ki[1] == pytest.approx(4.0) and ki[2] == pytest.approx(2.0)
+
+
+# --- the committed within-assay results ---
+
+WA = ROOT / "benchmarks" / "variability" / "within_assay.json"
+
+
+@pytest.fixture(scope="module")
+def wa():
+    import json
+
+    return json.loads(WA.read_text())
+
+
+def test_within_assay_licence_and_provenance(wa):
+    p = wa["provenance"]
+    assert p["chembl_db_version"].startswith("ChEMBL_") and "CC BY-SA 3.0" in p["licence"]
+    assert p["redistribution"].startswith("aggregates only")
+    # aggregates only: no ChEMBL ids anywhere in the file's document-pair rows
+    rows = [r for t in wa["targets"].values() for ty in t["by_type"].values() for r in ty["document_pairs"]]
+    assert rows and all(len(r) == 3 and all(isinstance(x, (int, float)) for x in r) for r in rows)
+
+
+def test_within_assay_pooled_recomputes_from_the_stored_document_pairs(wa):
+    pooled = {"IC50": [], "Ki": []}
+    for t in wa["targets"].values():
+        for typ, v in t["by_type"].items():
+            pooled[typ].extend(v["document_pairs"])
+    for typ, rows in pooled.items():
+        again = cv.relative_summary(rows)
+        for k in ("n_document_pairs", "n_pairs", "rmse_kcal_mol", "mue_kcal_mol", "rmse_kcal_mol_ci95"):
+            assert again[k] == pytest.approx(wa["pooled"][typ][k], rel=1e-12), (typ, k)
+    both = cv.relative_summary(pooled["IC50"] + pooled["Ki"])
+    assert both["rmse_kcal_mol"] == pytest.approx(wa["pooled"]["all"]["rmse_kcal_mol"], rel=1e-12)
+
+
+def test_within_assay_per_target_summaries_recompute(wa):
+    for name, t in wa["targets"].items():
+        for typ, v in t["by_type"].items():
+            if v["document_pairs"]:
+                again = cv.relative_summary(v["document_pairs"])
+                assert again["rmse_kcal_mol"] == pytest.approx(v["rmse_kcal_mol"], rel=1e-12), (name, typ)
+            else:
+                assert v["n_pairs"] == 0
+
+
+def test_within_assay_readme_table_matches_the_file(wa):
+    text = (ROOT / "benchmarks" / "variability" / "README.md").read_text()
+    for key in ("IC50", "Ki", "all"):
+        v = wa["pooled"][key]
+        lo, hi = v["rmse_kcal_mol_ci95"]
+        cell = f"{v['rmse_kcal_mol']:.2f} [{lo:.2f}, {hi:.2f}]"
+        assert f"| {v['n_document_pairs']} | {v['n_pairs']} | {cell} |" in text, key
+
+
+def test_within_assay_headline_sanity_band(wa):
+    # a loose plausibility band, not a target: pooled RMSE between ~0.5 and ~3 kcal/mol, and the pooled
+    # intervals contain their point estimates
+    for key in ("IC50", "Ki", "all"):
+        v = wa["pooled"][key]
+        lo, hi = v["rmse_kcal_mol_ci95"]
+        assert 0.3 < v["rmse_kcal_mol"] < 3.0 and lo <= v["rmse_kcal_mol"] <= hi
+
+
+def test_relative_summary_does_not_depend_on_the_order_of_the_pairs():
+    rows = [[3, 0.98, 1.4], [1, 0.25, 0.5], [5, 2.0, 3.1], [2, 0.1, 0.4]]
+    assert cv.relative_summary(rows, n_boot=300) == cv.relative_summary(rows[::-1], n_boot=300)

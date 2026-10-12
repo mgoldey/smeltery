@@ -54,6 +54,43 @@ Retrieved 2026-10-10 from ChEMBL release ChEMBL_37 (2026-05-01).
 * ChEMBL's curation (units, relations, duplicates) is taken as given, apart from the filters in `results.json`
   (`provenance.filters`).
 
+
+## Within-assay relative variability (the comparison a computed ddG needs)
+
+The table above compares ABSOLUTE values from different publications, so it includes each assay's overall offset. A
+computed ddG is a difference between two compounds, and the offset cancels in it. The matching experimental quantity
+is the one used by [Ross et al. 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10576784/): for two documents that both
+measured compounds A and B, x = (p_A - p_B in document 1) - (p_A - p_B in document 2), and its RMSE and MUE.
+`python scripts/chembl_variability.py --within-assay benchmarks/variability/within_assay.json` computes it (same
+filters, same type-never-mixed rule, aggregates only). Retrieved 2026-10-12 from ChEMBL_37.
+
+| type | document pairs | compound pairs | RMSE kcal/mol [95% CI] | MUE kcal/mol [95% CI] |
+|---|---|---|---|---|
+| IC50 | 158 | 3088 | 1.72 [1.07, 1.88] | 1.25 [0.71, 1.35] |
+| Ki | 40 | 667 | 0.56 [0.44, 1.00] | 0.36 [0.31, 0.63] |
+| IC50 and Ki, never mixed within a pair | 198 | 3755 | 1.58 [0.83, 1.82] | 1.09 [0.51, 1.30] |
+
+Intervals resample document pairs, because the compound pairs inside a document pair share compounds and document
+pairs share documents; they are wide for that reason.
+
+How to read it, and what it does not say:
+
+* **Pooling is dominated by a few document pairs.** tyk2 IC50 alone supplies 2426 of the 3755 compound pairs, and the
+  per-target values range from 0.29 to 1.84 kcal/mol (IC50) and 0.39 to 4.79 (Ki, where measured; the 4.79 is one compound pair on cdk2). The pooled figure
+  is a pair-weighted mixture, not a typical target's value.
+* **It is the RMSE between TWO experiments.** A prediction compared with ONE experiment would carry roughly that
+  experiment's own noise, about 1/sqrt(2) of this if the two experiments are equally noisy. Ross et al. take the
+  between-experiment RMSE as the ceiling; this page reports the same quantity and does not rescale it.
+* **Not the same as Ross et al.'s 0.91 kcal/mol.** They report pairwise RMSE 0.91 and MUE 0.67 on a different
+  compilation of assay pairs (compounds measured in at least two assays against one protein, weighted by compound
+  number). Here ChEMBL IC50 pairs give a larger value and Ki pairs a smaller one; the difference between datasets and
+  weightings is not resolved, so neither figure should be read as correcting the other.
+* If every measurement carried an independent error of 0.88 kcal/mol (the pooled per-measurement SD above), x would have
+  RMSE 2 x 0.88 = 1.76. The observed pooled 1.58 is lower, so some error is shared within an assay and cancels in a
+  difference. That is a consistency check on the two analyses, not a fitted parameter.
+* Still between-publication: it does not bound a within-paper ddG, where the same group and protocol measured both
+  compounds.
+
 ## Data and licence
 
 ChEMBL is licensed CC BY-SA 3.0 (https://chembl.gitbook.io/chembl-interface-documentation/about). Only aggregates are
