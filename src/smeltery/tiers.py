@@ -40,6 +40,11 @@ class NoCommonCoreError(RuntimeError):
     """Raised when the MCS gate refuses a pair instead of returning a degraded mapping."""
 
 
+#: How far (Å) a mapped heavy atom of a GIVEN analogue pose may sit from the parent's pose 0. A sanity check against
+#: a mis-mapped core (a flipped ring is over 1 Å off), not a test of exactness: the core is copied exactly afterwards.
+GIVEN_POSE_CORE_TOL_ANG = 0.5
+
+
 class Tier(Protocol):
     name: str
 
@@ -134,6 +139,13 @@ class PairedPoses:
     cannot type the molecule or does not converge. Off by default: it changes the
     substituent's geometry and hence the ΔΔE.
 
+    With `analogue_poses_given=True`, an analogue that already carries poses keeps its FIRST pose as pose 0 of the
+    pair (a generator's geometry for the new atoms). Every mapped atom of that pose is still overwritten with the
+    parent's pose-0 coordinate, so the core remains an exact copy and the self-pair anchor holds; the pose is refused
+    (ValueError) if its atom order is not that of the SMILES with hydrogens added, or a mapped heavy atom sits more
+    than `GIVEN_POSE_CORE_TOL_ANG` from the parent's pose 0. Poses 1..n-1 are built as above, and a given pose is
+    never relaxed, whatever `relax_unmapped` says.
+
     The MCS gate REFUSES rather than degrades: a pair with no common core, a
     core below `min_core_heavy` heavy atoms, a search that hit its timeout, or
     a molecule paired with an identical one whose core misses atoms, raises
@@ -151,6 +163,7 @@ class PairedPoses:
     mcs_timeout_s: int = 10
     parent_poses_given: bool = False
     relax_unmapped: bool = False
+    analogue_poses_given: bool = False
     name: str = "paired_poses"
     #: Per analogue name: (analogue atom, parent atom) pairs copied exactly. Read
     #: by `smeltery.generate.pairs_from_candidates`; reset on every `run`.
@@ -168,6 +181,7 @@ class PairedPoses:
                 "mcs_timeout_s",
                 "parent_poses_given",
                 "relax_unmapped",
+                "analogue_poses_given",
             )
         }
 
@@ -251,8 +265,17 @@ class PairedPoses:
             )
         self.scaffold_maps[cand.name] = mapping
         sym = tuple(a.GetSymbol() for a in amol.GetAtoms())
+        given = cand.poses[0] if self.analogue_poses_given and cand.poses else None
+        if given is not None:
+            self._check_given_pose(cand, given, amol, sym, mapping, parent_poses[0])
         poses = []
         for i, pxyz in enumerate(parent_poses):
+            if i == 0 and given is not None:
+                xyz = np.array(given.coords_ang, dtype=float)
+                for a, p in mapping:  # exact copy of every mapped atom, as in the default path
+                    xyz[a] = pxyz[p]
+                poses.append(Pose(sym, xyz))
+                continue
             if len(mapping) == amol.GetNumAtoms():
                 xyz = np.zeros((amol.GetNumAtoms(), 3))
             else:
@@ -273,6 +296,25 @@ class PairedPoses:
                 xyz = self._relax_unmapped(amol, xyz, [a for a, _ in mapping], f"{cand.name} pose {i}")
             poses.append(Pose(sym, xyz))
         return poses
+
+    def _check_given_pose(
+        self,
+        cand: Candidate,
+        given: Pose,
+        amol: Chem.Mol,
+        sym: tuple[str, ...],
+        mapping: list[tuple[int, int]],
+        parent_pose0: np.ndarray,
+    ) -> None:
+        if tuple(given.symbols) != sym:
+            raise ValueError(f"{cand.name}: the given pose's atom order does not match the SMILES (with H added)")
+        heavy = [(a, p) for a, p in mapping if amol.GetAtomWithIdx(a).GetAtomicNum() > 1]
+        worst = max(float(np.linalg.norm(given.coords_ang[a] - parent_pose0[p])) for a, p in heavy)
+        if worst > GIVEN_POSE_CORE_TOL_ANG:
+            raise ValueError(
+                f"{cand.name}: a core atom of the given pose sits {worst:.2f} A from the parent's pose 0 "
+                f"(limit {GIVEN_POSE_CORE_TOL_ANG} A); the pose is not on the parent's core"
+            )
 
     def _relax_unmapped(self, amol: Chem.Mol, xyz: np.ndarray, mapped: list[int], label: str) -> np.ndarray:
         """MMFF94 minimization with every mapped atom fixed: only the substituent moves."""
