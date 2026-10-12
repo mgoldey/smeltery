@@ -38,6 +38,17 @@ LIMITS = ROOT / "docs" / "limits.md"
 CPU_CAP_HOURS = 6.0
 
 
+def _same(a, b, rel=1e-12):
+    """Equal structure, floats equal to rel: a recomputed p-value can differ in the last ulp across platforms."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k], rel) for k in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y, rel) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return a == pytest.approx(b, rel=rel, nan_ok=True)
+    return a == b
+
+
 @pytest.fixture(scope="module")
 def raw():
     return json.loads(RESULTS.read_text())
@@ -144,19 +155,19 @@ def test_cpu_spend_is_inside_the_cap(raw):
 def test_the_amber_endpoint_of_the_merged_run_is_reproduced(res, target, stored):
     merged = json.loads(MERGED_ANALYSIS.read_text())["models"]["amber14"]
     assert stored["models"]["amber14"]["point"] == pytest.approx(merged["point"], abs=1e-12)
-    assert (
-        stored["models"]["amber14"]["permutation"]["spearman"]["p_two_sided"]
-        == merged["permutation"]["spearman"]["p_two_sided"]
+    assert _same(
+        stored["models"]["amber14"]["permutation"]["spearman"]["p_two_sided"],
+        merged["permutation"]["spearman"]["p_two_sided"],
     )
 
 
 def test_the_analysis_recomputes_including_the_charge_comparison(res, target, stored):
     an = pm.analyse(res, target, seed=stored["seed"], n_boot=stored["n_boot"])
     assert "screening" not in an and "screening" not in stored  # no eps family here
-    assert an["charge_model_comparison"] == stored["charge_model_comparison"]
+    assert _same(an["charge_model_comparison"], stored["charge_model_comparison"])
     for m in res.models:
         assert an["models"][m]["point"] == pytest.approx(stored["models"][m]["point"], abs=1e-9, nan_ok=True)
-        assert an["models"][m]["pair_resolution"]["summary"] == stored["models"][m]["pair_resolution"]["summary"]
+        assert _same(an["models"][m]["pair_resolution"]["summary"], stored["models"][m]["pair_resolution"]["summary"])
 
 
 def test_the_comparison_matches_an_independent_computation(res, raw):
@@ -310,3 +321,10 @@ def test_a_second_force_field_at_eps_one_is_not_a_screening_family(res, raw):
     r["input_digest"] = digest({"inputs": r["inputs"], "tiers": r["tiers"]})
     with pytest.raises(pm.PlbResultsError, match="unscreened"):
         pm.dielectric_family(pm.validate_results(r))
+
+
+def test_same_helper_tolerates_an_ulp_but_not_a_real_difference():
+    assert _same({"p": [0.14803218069275834]}, {"p": [0.14803218069275842]})
+    assert not _same({"p": 0.148}, {"p": 0.149})
+    assert not _same({"n": 41}, {"n": 42})
+    assert not _same({"a": 1.0}, {"b": 1.0})
