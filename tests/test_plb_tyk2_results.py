@@ -114,6 +114,17 @@ def test_cpu_spend_is_inside_the_declared_caps(raw):
     assert total_h + 0.14 + 1.0 <= CPU_CAP_HOURS  # plus the pilot and (at most) one CPU-hour of tests and analysis
 
 
+def _same(a, b, rel=1e-12):
+    """Equal structure, floats equal to rel: a recomputed p-value can differ in the last ulp across platforms."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k], rel) for k in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y, rel) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return a == pytest.approx(b, rel=rel, nan_ok=True)
+    return a == b
+
+
 def test_the_primary_statistics_recompute_exactly(res, target, stored):
     """Everything that does not depend on the bootstrap RNG recomputes to rounding error."""
     an = pm.analyse(res, target, n_boot=50)
@@ -128,7 +139,7 @@ def test_the_primary_statistics_recompute_exactly(res, target, stored):
                 b["permutation"][k]["p_one_sided_positive"], abs=1e-12
             )
         assert a["permutation"]["exact"] is False and a["permutation"]["n_permutations"] == 200_000  # MC at n = 12
-        assert a["pair_resolution"]["summary"] == b["pair_resolution"]["summary"]
+        assert _same(a["pair_resolution"]["summary"], b["pair_resolution"]["summary"])
         assert a["pose_noise"] == pytest.approx(b["pose_noise"], abs=1e-9)
         for n, v in b["per_ligand"].items():
             assert a["per_ligand"][n]["per_pose_ddE"] == pytest.approx(v["per_pose_ddE"], abs=1e-9)
@@ -159,7 +170,7 @@ def test_the_full_analysis_including_bootstrap_cis_recomputes(res, target, store
     for e, row in stored["screening"]["by_eps"].items():
         for stat, ci in row["bootstrap_ci_over_ligands"].items():
             assert an["screening"]["by_eps"][e]["bootstrap_ci_over_ligands"][stat] == ci
-    assert an["power"] == stored["power"]
+    assert _same(an["power"], stored["power"])
 
 
 def test_the_experimental_ddg_in_the_analysis_is_the_manifests(stored, target):
