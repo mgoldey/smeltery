@@ -67,15 +67,18 @@ except the DiffSBDD checkout. It is the only file that touches torch.
 ```python
 class CandidateGenerator(Protocol):
     name: str
-    def settings(self) -> dict: ...           # recorded in the run record
-    def generate(self, parent: Candidate, scaffold: Sequence[int], pocket: PathLike,
-                 *, seed: int) -> GenerationResult: ...
+
+    def settings(self) -> dict: ...  # recorded in the run record
+    def generate(
+        self, parent: Candidate, scaffold: Sequence[int], pocket: PathLike, *, seed: int
+    ) -> GenerationResult: ...
+
 
 @dataclass
 class GenerationResult:
     candidates: list[Candidate]
-    rejected: list[Rejection]       # one per raw output not returned, with a reason code
-    provenance: dict                # checkpoint sha256, upstream commit, device, wall time, seed
+    rejected: list[Rejection]  # one per raw output not returned, with a reason code
+    provenance: dict  # checkpoint sha256, upstream commit, device, wall time, seed
 ```
 
 `scaffold` is a sequence of heavy-atom indices into the parent's SMILES atom order.

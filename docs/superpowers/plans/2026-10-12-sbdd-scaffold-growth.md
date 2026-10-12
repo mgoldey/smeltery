@@ -418,7 +418,11 @@ def test_repair_does_not_touch_bonds_the_model_placed_outside_the_scaffold(raw_s
 
     def outside(mol):
         return sorted(
-            (min(b.GetBeginAtomIdx(), b.GetEndAtomIdx()), max(b.GetBeginAtomIdx(), b.GetEndAtomIdx()), str(b.GetBondType()))
+            (
+                min(b.GetBeginAtomIdx(), b.GetEndAtomIdx()),
+                max(b.GetBeginAtomIdx(), b.GetEndAtomIdx()),
+                str(b.GetBondType()),
+            )
             for b in mol.GetBonds()
             if not (b.GetBeginAtomIdx() in inside and b.GetEndAtomIdx() in inside)
         )
@@ -445,7 +449,9 @@ def test_repair_rejects_a_scaffold_atom_with_the_wrong_element(raw_samples, scaf
 def test_repair_rejects_an_output_missing_a_scaffold_atom(raw_samples, scaffold_spec):
     raw = Chem.Mol(raw_samples[SURVIVOR])
     pos, _ = _positions_and_symbols(raw)
-    raw.GetConformer().SetAtomPosition(int(np.linalg.norm(pos - scaffold_spec.coords[0], axis=1).argmin()), (50.0, 50.0, 50.0))
+    raw.GetConformer().SetAtomPosition(
+        int(np.linalg.norm(pos - scaffold_spec.coords[0], axis=1).argmin()), (50.0, 50.0, 50.0)
+    )
     with pytest.raises(RepairError, match="unique same-element"):
         repair(raw, scaffold_spec)
 
@@ -1305,7 +1311,11 @@ def test_sha256_of_matches_hashlib(tmp_path):
 
 def test_git_info_reports_the_commit_and_whether_tracked_files_changed(tmp_path):
     def git(*a):
-        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            check=True,
+            capture_output=True,
+        )
 
     git("init", "-q")
     (tmp_path / "f.txt").write_text("one")
@@ -1541,7 +1551,7 @@ from smeltery.generate.sbdd_post import FilterConfig
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "sbdd"
 
-FAKE_RUNNER = '''
+FAKE_RUNNER = """
 import json, os, shutil, sys
 request = json.load(open(sys.argv[1]))
 mode = os.environ.get("FAKE_MODE", "ok")
@@ -1561,7 +1571,7 @@ json.dump({
     "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"), "patches": [],
     "cwd": os.getcwd(),
 }, open(request["out_report"], "w"))
-'''
+"""
 
 
 @pytest.fixture
@@ -1586,7 +1596,11 @@ def files(tmp_path):
 
 def _generator(fake_runner, files, **kw):
     return ScaffoldGrowth(
-        python=sys.executable, runner=fake_runner, diffsbdd_dir=files["diffsbdd_dir"], checkpoint=files["checkpoint"], **kw
+        python=sys.executable,
+        runner=fake_runner,
+        diffsbdd_dir=files["diffsbdd_dir"],
+        checkpoint=files["checkpoint"],
+        **kw,
     )
 
 
@@ -1640,7 +1654,9 @@ def test_the_device_sets_cuda_visible_devices_and_none_leaves_it_alone(
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     off = _generator(fake_runner, files).generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
     assert off.provenance["runs"][0]["cuda_visible_devices"] is None
-    on = _generator(fake_runner, files, device="1").generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
+    on = _generator(fake_runner, files, device="1").generate(
+        parent_candidate, scaffold_indices, files["pocket"], seed=1
+    )
     assert on.provenance["runs"][0]["cuda_visible_devices"] == "1"
 
 
@@ -1743,7 +1759,9 @@ def test_misconfiguration_is_refused_before_anything_runs(fake_runner, files, pa
     ):
         kw = {"diffsbdd_dir": files["diffsbdd_dir"], "checkpoint": files["checkpoint"], "python": sys.executable, **bad}
         with pytest.raises(ValueError):
-            ScaffoldGrowth(runner=fake_runner, **kw).generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
+            ScaffoldGrowth(runner=fake_runner, **kw).generate(
+                parent_candidate, scaffold_indices, files["pocket"], seed=1
+            )
 ```
 
 - [ ] **Step 2: Run them and see them fail**
@@ -1850,7 +1868,9 @@ class ScaffoldGrowth:
     ) -> GenerationResult:
         self._validate(pocket)
         if not parent.poses:
-            raise ValueError(f"{parent.name}: the parent needs its bound pose as poses[0] to fix the scaffold's coordinates")
+            raise ValueError(
+                f"{parent.name}: the parent needs its bound pose as poses[0] to fix the scaffold's coordinates"
+            )
         spec = build_scaffold(parent.smiles, scaffold, parent.poses[0])
         own_dir = self.keep_workdir is None
         workdir = Path(tempfile.mkdtemp(prefix="smeltery-sbdd-")) if own_dir else Path(self.keep_workdir)
@@ -2050,7 +2070,9 @@ def test_a_real_run_completes_and_reports(parent_candidate, scaffold_indices):
     # A run that accepts nothing is a result: the measured yield on this scaffold is about 1 in 16.
     assert result.n_raw == 4
     assert len(run["checkpoint_sha256"]) == 64 and run["diffsbdd_commit"]
-    assert run["diffsbdd_dirty"] is False, "the DiffSBDD checkout has local changes; the runner patches at runtime instead"
+    assert run["diffsbdd_dirty"] is False, (
+        "the DiffSBDD checkout has local changes; the runner patches at runtime instead"
+    )
 ```
 
 - [ ] **Step 4: The docs**
