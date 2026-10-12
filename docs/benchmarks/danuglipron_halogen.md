@@ -1,58 +1,60 @@
 # Danuglipron halogen scan through the funnel (issue #6): report
 
-Plan: [danuglipron_halogen_plan.md](danuglipron_halogen_plan.md), committed before the run and not edited since.
+Plan: [danuglipron_halogen_plan.md](danuglipron_halogen_plan.md), including amendment A1 (committed before the second run).
 
-## Outcome: the run did NOT complete. Criteria 1 to 4 are NOT MEASURED.
+## Outcome: the scan did NOT complete, twice. Criteria 1 to 4 are NOT MEASURED. No paired ddE exists.
 
-The production run (`--poses 3 --workers 4 --cap-cpu-hours 23 --skip-model-b`, ferric 0.1.0rc7 from PyPI, `nice -n 10`) stopped with
+ferric 0.1.0rc7 (PyPI), RHF/STO-3G, 7LCJ AMBER field of 6458 charges, `FieldInteraction` through the example. **Four SCFs did not
+converge** with default settings (one attempt each; whether they are deterministic is not tested):
 
-> `RuntimeError: pyr-C28-F pose 0: SCF did not converge`
+| run | pose (geometry) | molecule | outcome | CPU of the SCF |
+|---|---|---|---|---|
+| 1 | original pose 0 (cryo-EM bound conformer) | `pyr-C28-F` | SCF did not converge | not metered (lost with the pool) |
+| 2 (A1) | original pose 1 (jittered) | `pyr-C28-F` | SCF did not converge | 2250 s |
+| 2 (A1) | original pose 1 (jittered) | `pyr-C28-Cl` | SCF did not converge | 2665 s |
+| 2 (A1) | original pose 1 (jittered) | `bzim-C9-F` | SCF did not converge | 5151 s |
 
-(log: `benchmarks/danuglipron_halogen/results/run1.log`). Pose 0 is the cryo-EM bound conformer, so this is the unjittered
-geometry of the pyridine-site fluoro analogue. The failing SCF's CPU time was not recorded (it raised before returning).
-
-Under the plan's section 5 rule (an SCF that fails is not retried and not given convergence aids; the analysis uses only whole poses
-completed before the failing pose index; fewer than 2 poses means the run is reported as not completed), the run is **not completed**:
-the failing index is 0, so zero whole poses exist. No paired ddE, SEM, ratio, rho, cut, self-anchor or run record was produced, and none
-is claimed. The example's checks (self-anchor, field non-zero) were never reached.
+(The run-2 log, `benchmarks/danuglipron_halogen/results/run2.log`, labels the first kept pose "pose 0"; after A1 drops original pose 0 that
+index is original pose 1.) Under the plan's section 5 and A1.5 (a failed SCF is not retried and not helped; the failing pose index is not
+silently dropped; fewer than 2 whole poses means the run is not completed), no whole jittered pose exists, so **the run is reported as not completed**.
+No paired ddE, SEM, unpaired SEM, ratio, rho, cut, self-anchor check or run record was produced, and none is claimed.
 
 ## What was measured
 
-Seven SCFs finished before the stop (all pose 0, AMBER field, 6458 charges), cached in `benchmarks/danuglipron_halogen/results/halogen-scf-cache.json`:
-parent, `bzim-C9-F`, `bzim-C9-Cl`, `bzim-C9-CH3`, `pyr-C28-CH3`, `pyr-C28-Cl`, `bnz-C34-CH3`. They cost **3.65 CPU-h** (13,151 CPU-s;
-1182 to 3485 CPU-s each; `pyr-C28-Cl` at 3485 CPU-s is twice the others, which fits a hard SCF). Pilots cost 0.86 CPU-h before.
-The CPU of SCFs that were in flight at the stop (the failing one and up to 3 others, discarded because the pool raised before
-caching them) is unmetered. **It is not small.** The run log was created at 04:05 and the traceback at 07:29 (3.41 h wall, 4 workers);
-the last cached SCF was written at 06:09, so for the final 80 minutes all four workers were inside SCFs that never returned a cached
-result. The upper bound on CPU is 4 x 3.41 = 13.7 CPU-h for the run (of which 3.65 is cached), so up to about 10.0 CPU-h is unmetered, and
-**the total spent, pilots included, is up to about 14.6 CPU-h** (not the 4.5 CPU-h first assumed). It is probably close to that bound,
-since the workers were busy throughout. Seven energies on one pose give no paired statistic, so none is reported.
+* Run 1: 7 pose-0 SCFs converged (parent, `bzim-C9-F/Cl/CH3`, `pyr-C28-CH3/Cl`, `bnz-C34-CH3`); they are **excluded from every statistic** by A1 and not used.
+* Run 2 (original pose 1): 4 converged (parent, `bzim-C9-Cl`, `bzim-C9-CH3`, `pyr-C28-CH3`) and 3 did not (above); the other 21 of the 28 planned SCFs were not
+  started because the scheduler stops submitting after a failure. Four converged jittered-pose energies for four molecules do not make a paired difference for any analogue
+  except `bzim-C9-Cl`, `bzim-C9-CH3` and `pyr-C28-CH3` against the parent, and a one-pose difference has no SEM; none is reported.
+* The cache `benchmarks/danuglipron_halogen/results/halogen-scf-cache.json` holds 14 entries: 11 converged (22,099 CPU-s) and 3 recorded failures (10,066 CPU-s).
 
-## Amendment A1 considered and NOT run (cost accounting)
+## Cost
 
-The proposal was to drop pose 0 for every molecule and run jittered poses 1..N, N the largest of {3, 2} that fits the 26 CPU-h cap.
-With the spend bounded at 14.6 CPU-h, 11.4 CPU-h remain. One pose index of the 14 molecules costs about 7 CPU-h or more (the seven cached
-SCFs averaged 1879 s, against the 1500 s assumed in the plan, and the pyridine-site SCFs appear to be the expensive ones): N = 2 needs about
-14 CPU-h and N = 3 about 21, neither fits, and N = 1 gives no SEM and so no criterion 2 to 4. **No new SCF was started.** Spending past the
-cap, or on a pose count that cannot answer the criteria, is not done without an explicit decision.
+| item | CPU-h |
+|---|---|
+| pilots | 0.86 |
+| run 1: 7 cached SCFs | 3.65 |
+| run 1: in flight at the stop, unmetered (upper bound) | up to 10.0 |
+| run 2, all metered (4 converged 8,949 s + 3 failed 10,066 s) | 5.28 |
+| **total, upper bound** | **up to 19.9 of the 30 CPU-h cap (26 originally; raised by the user, see A1)** |
+
+Nothing is running. The scheduler fix of A1.5 worked as designed: the three failures and four successes were all cached with their CPU.
 
 ## Deviations
 
-* No procedure was changed after seeing the failure. Nothing was retried.
-* The example's 12-analogue set, 3 poses, declared 1.26 kcal/mol floor and ranges were unchanged.
+* The run followed A1 exactly (`--poses 2 --skip-first-poses 1 --cap-cpu-hours 15.4 --est-scf-cpu-s 2500 --skip-model-b`, 4 workers, nice 10). The cap was not reached (5.28 CPU-h of 15.4 used by the call).
+* No SCF was retried or given aids; the run stopped on the first failures as pre-declared.
 
-## What this does and does not support
+## What the data support, and what they do not
 
-* Supports: ferric RHF/STO-3G in the full 7LCJ field does not converge on pose 0 of `pyr-C28-F` with default settings, on one attempt. Not
-  tested: whether it is deterministic, whether other settings fix it, or whether other analogues fail.
-* Does not support: any statement about the halogen scan, pairing, the campaign ranges or the cut.
+* Supports: with default ferric settings, RHF/STO-3G in the full pocket field fails to converge for danuglipron analogues at the F/Cl-substituted
+  pyridine site (`pyr-C28-F` on two geometries, `pyr-C28-Cl` on one) and for `bzim-C9-F`; and slow SCFs are common (1.2k to 5.2k CPU-s). It does not tell why (field close contacts at
+  jittered poses, the neutral-acid choice, basis size, SCF algorithm), and a single attempt per case does not show it is deterministic.
+* Does not support: any statement about the halogen scan, pairing, the campaign ranges, the cut, or experiment.
 
 ## Decisions for the user
 
-1. Drop pose 0 for all molecules (as the tyk2 study's rule did) and run the jittered poses only? That departs from the plan (pose 0 is the bound
-   conformer), so it needs your approval; the 7 cached pose-0 SCFs would then be unused.
-2. Or investigate the non-converging SCF in ferric (ferric issue) before spending more.
-3. Remaining budget is about 11.4 CPU-h of the 26 (not 21): enough for neither 2 nor 3 jittered poses. Raise the cap to about 30 CPU-h for
-   2 jittered poses (amendment A1: pose 0 dropped for every molecule before any ddE exists, cached pose-0 SCFs excluded from all statistics),
-   or about 38 for 3.
-4. Fix the scheduler so a failure does not discard the in-flight SCFs' results (cache them before raising); that would have saved the unmetered work.
+1. **Fix the SCF, not the scan.** Take the failing cases to ferric (issue): `pyr-C28-F` original poses 0 and 1, `pyr-C28-Cl` pose 1, `bzim-C9-F` pose 1, with the 6458-charge field. Whether
+   damping, level shifting or an SCF-algorithm switch converges them is a ferric question; using one here is a plan change (the plan forbids aids), so it needs your approval and a new amendment.
+2. **Or shrink the scan** to analogues that converge (the CH3 SCFs converged in 6 of 6 attempts, the pilot included; the F and Cl SCFs in 4 of 8), which changes what is being asked and cannot reproduce "12 analogues".
+3. **Or change the field**: a distance cutoff (the campaign used none; the field is 6458 charges) would be a plan change, for ferric-side reasons unknown.
+4. Budget remaining under the 30 CPU-h cap: about 10 CPU-h at the upper bound of spend, which is roughly one pose of 14 molecules (about 7 CPU-h at the observed mean), not two.

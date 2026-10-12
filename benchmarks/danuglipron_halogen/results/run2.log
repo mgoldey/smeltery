@@ -1,0 +1,19 @@
+field A (AMBER): 6458 charges, net -1.00; field B: skipped
+  AMBER: 0 cached, 28 to run on 4 workers
+  AMBER: parent pose 0 done, 1527 CPU-s (0.42 CPU-h this call)
+  AMBER: bzim-C9-Cl pose 0 done, 2291 CPU-s (1.06 CPU-h this call)
+  AMBER: bzim-C9-CH3 pose 0 done, 2516 CPU-s (1.76 CPU-h this call)
+  AMBER: pyr-C28-F pose 0 FAILED (pyr-C28-F pose 0: SCF did not converge), 2250 CPU-s (2.38 CPU-h this call)
+  AMBER: pyr-C28-Cl pose 0 FAILED (pyr-C28-Cl pose 0: SCF did not converge), 2665 CPU-s (3.12 CPU-h this call)
+  AMBER: pyr-C28-CH3 pose 0 done, 2615 CPU-s (3.85 CPU-h this call)
+  AMBER: bzim-C9-F pose 0 FAILED (bzim-C9-F pose 0: SCF did not converge), 5151 CPU-s (5.28 CPU-h this call)
+Traceback (most recent call last):
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 572, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 411, in main
+    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s, args.est_scf_cpu_s)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/matt/qc/smeltery/.claude/worktrees/agent-a51292badaea1f177/examples/danuglipron_halogen.py", line 294, in run_field_tier
+    raise ScfFailed("; ".join(failures))
+ScfFailed: pyr-C28-F pose 0: pyr-C28-F pose 0: SCF did not converge; pyr-C28-Cl pose 0: pyr-C28-Cl pose 0: SCF did not converge; bzim-C9-F pose 0: bzim-C9-F pose 0: SCF did not converge
