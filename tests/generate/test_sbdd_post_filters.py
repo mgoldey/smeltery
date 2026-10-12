@@ -2,6 +2,7 @@
 
 from collections import Counter
 
+import numpy as np
 import pytest
 from rdkit import Chem
 
@@ -127,3 +128,56 @@ def test_filter_config_refuses_nonsense():
         FilterConfig(forbidden_smarts={"bad": "[C"})
     assert FilterConfig().forbidden_smarts == {"peroxide": "[OX2][OX2]"}
     assert FilterConfig().forbidden_smarts is not FilterConfig().forbidden_smarts  # not a shared mutable default
+
+
+def test_a_scaffold_atom_with_no_output_counterpart_is_a_scaffold_atom_mismatch(raw_samples, scaffold_spec):
+    raw = Chem.Mol(raw_samples[SURVIVOR])
+    pos = raw.GetConformer().GetPositions()
+    nearest = int(np.linalg.norm(pos - scaffold_spec.coords[0], axis=1).argmin())
+    raw.GetConformer().SetAtomPosition(nearest, (50.0, 50.0, 50.0))
+    candidates, rejected = process_samples([raw], scaffold_spec, FilterConfig())
+    assert candidates == [] and len(candidates) + len(rejected) == 1
+    assert [(r.index, r.reason) for r in rejected] == [(0, "scaffold_atom_mismatch")]
+
+
+def _with_a_terminal_atom_cut_off(raw, spec):
+    """A copy of `raw` with the single bond of one non-scaffold terminal atom removed."""
+    pos = raw.GetConformer().GetPositions()
+    rw = Chem.RWMol(raw)
+    for atom in raw.GetAtoms():
+        near_scaffold = np.linalg.norm(spec.coords - pos[atom.GetIdx()], axis=1).min() <= 0.5
+        if atom.GetDegree() == 1 and not near_scaffold:
+            nbr = atom.GetNeighbors()[0].GetIdx()
+            rw.RemoveBond(atom.GetIdx(), nbr)
+            return rw.GetMol()
+    raise AssertionError("no terminal non-scaffold atom in the fixture sample")
+
+
+def test_a_fragmented_molecule_is_rejected_unless_connectivity_is_not_required(raw_samples, scaffold_spec):
+    cut = _with_a_terminal_atom_cut_off(raw_samples[SURVIVOR], scaffold_spec)
+    candidates, rejected = process_samples([cut], scaffold_spec, FilterConfig())
+    assert candidates == [] and len(candidates) + len(rejected) == 1
+    assert [(r.reason, r.detail) for r in rejected] == [("disconnected", "2 fragments")]
+    candidates, rejected = process_samples([cut], scaffold_spec, FilterConfig(require_connected=False))
+    assert len(candidates) == 1 and rejected == []
+
+
+@pytest.mark.parametrize("error", [ValueError("x"), RuntimeError("y")])
+def test_a_failing_pose_extraction_is_an_atom_order_rejection(raw_samples, scaffold_spec, monkeypatch, error):
+    def boom(mol):
+        raise error
+
+    monkeypatch.setattr("smeltery.generate.sbdd_post.smiles_and_pose", boom)
+    candidates, rejected = process_samples([raw_samples[SURVIVOR]], scaffold_spec, FilterConfig(), pose_source="model")
+    assert candidates == [] and len(candidates) + len(rejected) == 1
+    assert [r.reason for r in rejected] == ["atom_order"] and type(error).__name__ in rejected[0].detail
+
+
+def test_an_unexpected_error_in_repair_is_a_rejection_not_a_crash(raw_samples, scaffold_spec, monkeypatch):
+    def boom(raw, spec):
+        raise RuntimeError("z")
+
+    monkeypatch.setattr("smeltery.generate.sbdd_post.repair", boom)
+    candidates, rejected = process_samples([raw_samples[SURVIVOR]], scaffold_spec, FilterConfig())
+    assert candidates == [] and len(candidates) + len(rejected) == 1
+    assert [r.reason for r in rejected] == ["scaffold_atom_mismatch"] and "RuntimeError" in rejected[0].detail

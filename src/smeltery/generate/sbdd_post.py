@@ -237,12 +237,14 @@ def _classify(raw: Chem.Mol | None, spec: ScaffoldSpec, config: FilterConfig, qu
         mol, _ = repair(raw, spec)
     except RepairError as e:
         return _Rejected("scaffold_atom_mismatch", str(e))
+    except Exception as e:  # noqa: BLE001 - one bad sample must be a rejection, never an exception
+        return _Rejected("scaffold_atom_mismatch", f"repair failed: {type(e).__name__}: {e}")
     try:
         Chem.SanitizeMol(mol)
+        Chem.AssignStereochemistryFrom3D(mol)
+        smiles = Chem.MolToSmiles(mol)
     except Exception as e:  # noqa: BLE001 - RDKit raises several exception types for the same condition
         return _Rejected("unsanitizable", (str(e).strip().splitlines() or ["sanitization failed"])[0])
-    Chem.AssignStereochemistryFrom3D(mol)
-    smiles = Chem.MolToSmiles(mol)
     n_frag = len(Chem.GetMolFrags(mol))
     if config.require_connected and n_frag != 1:
         return _Rejected("disconnected", f"{n_frag} fragments", smiles)
@@ -293,8 +295,8 @@ def process_samples(
         if pose_source == "model":
             try:
                 smiles, pose = smiles_and_pose(outcome)
-            except ValueError as e:
-                rejected.append(Rejection(index, "atom_order", str(e), smiles))
+            except Exception as e:  # noqa: BLE001 - RDKit raises non-ValueError types too
+                rejected.append(Rejection(index, "atom_order", f"{type(e).__name__}: {e}", smiles))
                 continue
             poses = [pose]
         seen.add(smiles)
