@@ -94,6 +94,65 @@ def summarize(records: list[dict], std_type: str) -> dict:
     }
 
 
+def relative_doc_pairs(records: list[dict], std_type: str) -> list[list[float]]:
+    """Within-assay relative differences, the quantity a computed ddG is compared with.
+
+    For every pair of documents (d1, d2) that both measured >= 2 common compounds of this type, and every pair of
+    those compounds (A, B): x = (p_A - p_B in d1) - (p_A - p_B in d2), in log10 units. The offset between the two
+    assays cancels, as it does for a ddG. Returns, per document pair, [n_pairs, sum x^2, sum |x|] (aggregates only;
+    no ids). The pairs inside one document pair share compounds, and document pairs share documents, so they are
+    not independent: confidence intervals resample document pairs (see `relative_summary`)."""
+    grp = {k[0]: v for k, v in compound_groups(records).items() if k[1] == std_type and len(v) >= 2}
+    docs: dict[str, dict[str, float]] = defaultdict(dict)  # doc -> {compound: value}
+    for mol, per_doc in grp.items():
+        for d, v in per_doc.items():
+            docs[d][mol] = v
+    out = []
+    names = sorted(docs)
+    for i, d1 in enumerate(names):
+        for d2 in names[i + 1 :]:
+            common = sorted(set(docs[d1]) & set(docs[d2]))
+            xs = [
+                (docs[d1][a] - docs[d1][b]) - (docs[d2][a] - docs[d2][b])
+                for j, a in enumerate(common)
+                for b in common[j + 1 :]
+            ]
+            if xs:
+                out.append([len(xs), sum(x * x for x in xs), sum(abs(x) for x in xs)])
+    return out
+
+
+def relative_summary(doc_pairs: list[list[float]], n_boot: int = 2000, seed: int = 20261011) -> dict:
+    """RMSE and MUE (log10 and kcal/mol) pooled over pairs, with a 95% interval from resampling document pairs."""
+    import random
+
+    def stats(rows: list[list[float]]) -> tuple[float, float]:
+        n = sum(r[0] for r in rows)
+        return math.sqrt(sum(r[1] for r in rows) / n), sum(r[2] for r in rows) / n
+
+    if not doc_pairs:
+        return {"n_document_pairs": 0, "n_pairs": 0}
+    doc_pairs = sorted(doc_pairs)  # the interval must not depend on the order the pairs were found in
+    rmse, mue = stats(doc_pairs)
+    rng = random.Random(seed)
+    boots = [stats([doc_pairs[rng.randrange(len(doc_pairs))] for _ in doc_pairs]) for _ in range(n_boot)]
+    rmse_sorted = sorted(b[0] for b in boots)
+    mue_sorted = sorted(b[1] for b in boots)
+
+    def ci(v: list[float]) -> list[float]:
+        return [v[int(0.025 * n_boot)], v[int(0.975 * n_boot) - 1]]
+
+    return {
+        "n_document_pairs": len(doc_pairs),
+        "n_pairs": int(sum(r[0] for r in doc_pairs)),
+        "rmse_log": rmse, "mue_log": mue,
+        "rmse_kcal_mol": to_kcal(rmse), "mue_kcal_mol": to_kcal(mue),
+        "rmse_kcal_mol_ci95": [to_kcal(v) for v in ci(rmse_sorted)],
+        "mue_kcal_mol_ci95": [to_kcal(v) for v in ci(mue_sorted)],
+        "bootstrap": {"n": n_boot, "seed": seed, "resampled": "document pairs"},
+    }  # fmt: skip
+
+
 def inputs_digest(records: list[dict]) -> str:
     rows = sorted(
         (r["molecule_chembl_id"], r["document_chembl_id"], r["standard_type"], str(r["pchembl_value"])) for r in records
@@ -189,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("out", type=Path, help="results JSON to write (or, with --report, to read)")
     ap.add_argument("--targets", nargs="*", default=list(UNIPROT))
     ap.add_argument("--report", action="store_true", help="print the markdown table from an existing results JSON")
+    ap.add_argument(
+        "--within-assay",
+        action="store_true",
+        help="write the within-assay RELATIVE variability (pairs of compounds, offset cancels) instead",
+    )
     args = ap.parse_args(argv)
     if args.report:
         manifest = json.loads(
@@ -199,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     if os.environ.get("SMELTERY_NETWORK") != "1":
         print("error: this script uses the network; set SMELTERY_NETWORK=1", file=sys.stderr)
         return 2
+    if args.within_assay:
+        return _within_assay_main(args)
     status = _get(f"{API}/status.json")
     result = {"targets": {}, "provenance": {}}
     for name in args.targets:
@@ -222,6 +288,47 @@ def main(argv: list[str] | None = None) -> int:
         "attribution": "ChEMBL, EMBL-EBI, https://www.ebi.ac.uk/chembl/ (Zdrazil et al., Nucleic Acids Res. 2024)",
         "redistribution": "aggregates only; the per-record data are not redistributed",
     }  # fmt: skip
+    args.out.write_text(json.dumps(result, indent=1, sort_keys=True))
+    return 0
+
+
+def _provenance(status: dict) -> dict:
+    return {
+        "source": "ChEMBL", "chembl_db_version": status["chembl_db_version"],
+        "chembl_release_date": status["chembl_release_date"],
+        "retrieved_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "api": API,
+        "temperature_K": 298.15, "kcal_per_log10_unit": RT_LN10_KCAL,
+        "licence": "CC BY-SA 3.0 (https://chembl.gitbook.io/chembl-interface-documentation/about)",
+        "attribution": "ChEMBL, EMBL-EBI, https://www.ebi.ac.uk/chembl/ (Zdrazil et al., Nucleic Acids Res. 2024)",
+        "redistribution": "aggregates only; the per-record data are not redistributed",
+    }  # fmt: skip
+
+
+def _within_assay_main(args: argparse.Namespace) -> int:
+    status = _get(f"{API}/status.json")
+    result: dict = {"targets": {}, "pooled": {}, "provenance": _provenance(status)}
+    pooled: dict[str, list[list[float]]] = {"IC50": [], "Ki": []}
+    for name in args.targets:
+        t = fetch_target(UNIPROT[name])
+        recs = fetch_records(t["target_chembl_id"])
+        entry = {"target_chembl_id": t["target_chembl_id"], "inputs_sha256": inputs_digest(recs), "by_type": {}}
+        for typ in ("IC50", "Ki"):
+            dp = relative_doc_pairs(recs, typ)
+            pooled[typ].extend(dp)
+            entry["by_type"][typ] = {"document_pairs": dp, **relative_summary(dp)}
+        result["targets"][name] = entry
+        print(name, len(recs), "records", flush=True)
+    result["pooled"] = {typ: relative_summary(dp) for typ, dp in pooled.items()}
+    result["pooled"]["all"] = relative_summary(pooled["IC50"] + pooled["Ki"])
+    result["provenance"]["filters"] = {
+        "standard_relation": "=", "standard_units": "nM", "assay_type": "B (binding)",
+        "standard_type": ["IC50", "Ki"], "pchembl_value": "not null", "potential_duplicate": 0,
+    }  # fmt: skip
+    result["provenance"]["method"] = (
+        "for each pair of documents and each pair of compounds measured in both, "
+        "x = (p_A - p_B in doc 1) - (p_A - p_B in doc 2); RMSE and MUE of x; same type only; "
+        "document pairs are the resampling unit"
+    )
     args.out.write_text(json.dumps(result, indent=1, sort_keys=True))
     return 0
 
