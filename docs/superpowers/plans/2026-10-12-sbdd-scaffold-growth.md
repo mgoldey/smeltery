@@ -1794,6 +1794,17 @@ def _write_sdf(path: Path, mol: Chem.Mol) -> None:
     writer.close()
 
 
+def _read_records(path: Path) -> list[Chem.Mol | None]:
+    """Every record of an SDF, unsanitized, with None for one RDKit cannot parse.
+
+    A run that produced no molecules leaves an empty file, which `SDMolSupplier` refuses to open (OSError), so an
+    empty file is read as no records.
+    """
+    if path.stat().st_size == 0:
+        return []
+    return list(Chem.SDMolSupplier(str(path), sanitize=False, removeHs=False))
+
+
 @dataclass
 class ScaffoldGrowth:
     python: str  # the interpreter that has torch and DiffSBDD's dependencies
@@ -1874,7 +1885,7 @@ class ScaffoldGrowth:
         n_raw = 0
         for batch in range(n_batches):
             report = self._run_batch(workdir, batch, seed + batch, pocket, reference, fixed)
-            raws = list(Chem.SDMolSupplier(str(workdir / f"grown_{batch}.sdf"), sanitize=False, removeHs=False))
+            raws = _read_records(workdir / f"grown_{batch}.sdf")
             if len(raws) != report["n_raw"]:
                 raise GeneratorError(f"the runner reported {report['n_raw']} samples but the SDF holds {len(raws)}")
             got, lost = process_samples(
