@@ -101,3 +101,22 @@ def test_self_pair_with_given_poses_gives_exactly_zero_ddE():
     FieldInteraction().run([parent, twin], {"field": field})
     assert paired_delta(parent, twin, "dE_int").per_pose == (0.0, 0.0)
     assert all(abs(v) > 1e-3 for v in parent.per_pose["dE_int"])  # not vacuous: the field does something
+
+
+def test_a_given_pose_with_a_non_finite_core_coordinate_is_refused():
+    parent, fluoro, mapping = _default_run()
+    given, _ = _perturbed(fluoro, mapping, core_shift=0.0, new_shift=0.0)
+    xyz = np.array(given.coords_ang)
+    xyz[sorted(a for a, _ in mapping)[0]] = np.nan
+    with pytest.raises(ValueError, match="sits"):
+        _given_run(parent, Pose(given.symbols, xyz))
+
+
+def test_relax_unmapped_never_touches_the_given_pose_but_still_relaxes_the_others():
+    parent, fluoro, mapping = _default_run()
+    given, unmapped = _perturbed(fluoro, mapping, core_shift=0.0, new_shift=np.array([0.3, 0.0, 0.0]))
+    p2 = Candidate("parent", ACID, poses=list(parent.poses))
+    a2 = Candidate("4-F", FLUORO, poses=[given])
+    PairedPoses(parent_poses_given=True, analogue_poses_given=True, relax_unmapped=True).run([p2, a2], {"parent": p2})
+    assert len(a2.poses) == len(parent.poses)
+    assert np.array_equal(a2.poses[0].coords_ang[unmapped], given.coords_ang[unmapped])

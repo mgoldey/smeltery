@@ -309,8 +309,10 @@ class PairedPoses:
         if tuple(given.symbols) != sym:
             raise ValueError(f"{cand.name}: the given pose's atom order does not match the SMILES (with H added)")
         heavy = [(a, p) for a, p in mapping if amol.GetAtomWithIdx(a).GetAtomicNum() > 1]
-        worst = max(float(np.linalg.norm(given.coords_ang[a] - parent_pose0[p])) for a, p in heavy)
-        if worst > GIVEN_POSE_CORE_TOL_ANG:
+        if not heavy:
+            raise ValueError(f"{cand.name}: the common core has no heavy atom, so a given pose cannot be checked")
+        worst = float(np.max([np.linalg.norm(given.coords_ang[a] - parent_pose0[p]) for a, p in heavy]))
+        if not np.isfinite(worst) or worst > GIVEN_POSE_CORE_TOL_ANG:
             raise ValueError(
                 f"{cand.name}: a core atom of the given pose sits {worst:.2f} A from the parent's pose 0 "
                 f"(limit {GIVEN_POSE_CORE_TOL_ANG} A); the pose is not on the parent's core"

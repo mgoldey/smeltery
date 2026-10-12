@@ -181,3 +181,25 @@ def test_an_unexpected_error_in_repair_is_a_rejection_not_a_crash(raw_samples, s
     candidates, rejected = process_samples([raw_samples[SURVIVOR]], scaffold_spec, FilterConfig())
     assert candidates == [] and len(candidates) + len(rejected) == 1
     assert [r.reason for r in rejected] == ["scaffold_atom_mismatch"] and "RuntimeError" in rejected[0].detail
+
+
+def test_every_model_pose_is_in_smiles_atom_order_with_the_repaired_geometry(raw_samples, scaffold_spec):
+    """Not only the default-filter survivor: all four sanitizable samples, with every optional filter off."""
+    import re
+
+    from smeltery.generate.sbdd_post import repair
+
+    config = FilterConfig(require_connected=False, scaffold_match="off", forbidden_smarts={}, deduplicate=False)
+    candidates, rejected = process_samples(raw_samples, scaffold_spec, config, pose_source="model")
+    assert len(candidates) == 4
+    lost = {r.index for r in rejected}
+    kept = [i for i in range(len(raw_samples)) if i not in lost]
+    for cand, i in zip(candidates, kept):
+        reference = Chem.AddHs(Chem.MolFromSmiles(cand.smiles))
+        assert cand.poses[0].symbols == tuple(a.GetSymbol() for a in reference.GetAtoms())
+        mol, _ = repair(raw_samples[i], scaffold_spec)
+        Chem.SanitizeMol(mol)
+        assert Chem.MolToSmiles(mol) == cand.smiles
+        order = [int(x) for x in re.findall(r"\d+", mol.GetProp("_smilesAtomOutputOrder"))]
+        expected = np.asarray(mol.GetConformer().GetPositions())[order]
+        assert np.array_equal(cand.poses[0].coords_ang[: len(order)], expected)
