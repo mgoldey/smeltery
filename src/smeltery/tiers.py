@@ -231,7 +231,7 @@ class PairedPoses:
             raise NoCommonCoreError(
                 f"{cand.name}: MCS search timed out after mcs_timeout_s={self.mcs_timeout_s} s; an unfinished core is "
                 "not a core. Raise PairedPoses(mcs_timeout_s=...): the exact search on drug-sized molecules can take "
-                "tens of seconds (2 to 75 s on the danuglipron halogen analogues)."
+                "tens of seconds (2 to 75 s on a 12-analogue halogen series)."
             )
         core = Chem.MolFromSmarts(mcs.smartsString) if mcs.smartsString else None
         p_idx = pmol.GetSubstructMatch(core) if core is not None else ()
