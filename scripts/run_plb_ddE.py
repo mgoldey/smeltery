@@ -8,6 +8,13 @@
 
 The design, the statistics and the success criteria are fixed in docs/benchmarks/plb_plan.md BEFORE this runs.
 
+Implicit solvation (issue #28, docs/benchmarks/plb_pcm_plan.md): `--solvent MODEL=S` runs MODEL's field SCFs with
+ferric's IEF-PCM (`solvent=S`, a dielectric constant or a name such as "water"). A solvent model's reference leg is
+NOT the gas-phase vacuum SCF but the ligand ALONE in the same solvent (`--run alone:MODEL`), so
+dE_int(PCM) = E_PCM(in field) - E_PCM(alone). `--prior-cpu-hours` and `--est-scf-cpu-s` make the CPU cap a guard on the
+whole study (earlier stages and the SCFs in flight count). An SCF that fails is never retried: its pose gets no further
+tasks, the run goes on with the other poses, every finished SCF is cached, and the exit status is 1.
+
 What one task is: ONE SCF of one (ligand, pose): the vacuum RHF (`vac`) or the RHF in one model's point-charge
 field. Per model, dE_int = E_RHF(in field) - E_RHF(vacuum) is exactly what `smeltery.tiers.FieldInteraction`
 computes (tests/test_plb_measure.py checks the two agree on a small molecule); the vacuum energy does not depend
@@ -87,6 +94,14 @@ def scale_field(charges_bohr, eps: float) -> list[tuple[float, float, float, flo
     return [(q / eps, x, y, z) for q, x, y, z in charges_bohr]
 
 
+def parse_solvent(text: str):
+    """A `--solvent` value: a dielectric constant (float) or a name ferric knows ("water"); ferric rejects the rest."""
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
 def xyz_text(symbols, coords, comment: str) -> str:
     lines = [str(len(symbols)), comment]
     lines += [f"{s} {x:.10f} {y:.10f} {z:.10f}" for s, (x, y, z) in zip(symbols, coords, strict=True)]
@@ -109,7 +124,8 @@ def _init_worker(fields: dict[str, list]) -> None:
 
 
 def run_task(spec: dict) -> dict:
-    """One SCF: the vacuum RHF of a (ligand, pose) (`kind` "vac") or its RHF in one model's field (`kind` "field").
+    """One SCF: the vacuum RHF of a (ligand, pose) (`kind` "vac"), its RHF in one model's field (`kind` "field"), or
+    (with a solvent) the ligand alone in that model's solvent (`kind` "alone"), the reference leg of a PCM model.
 
     dE_int is assembled later as (E_field - E_vac) * HARTREE_TO_KCAL, exactly `FieldInteraction`'s arithmetic. The
     two SCFs are separate tasks because the vacuum energy does not depend on the charge model (computed once, shared)
@@ -120,8 +136,11 @@ def run_task(spec: dict) -> dict:
 
     t0, c0 = time.perf_counter(), time.process_time()
     out = {k: spec[k] for k in ("kind", "ligand", "pose", "basis", "net_charge")}
-    if spec["kind"] == "field":
+    if spec["kind"] in ("field", "alone"):
         out["model"] = spec["model"]
+    solvent = spec.get("solvent")
+    if solvent is not None:
+        out["solvent"] = solvent
     try:
         mol = ferric.Molecule.from_xyz_string(
             xyz_text(spec["symbols"], spec["coords"], f"{spec['ligand']} pose {spec['pose']}"),
@@ -129,11 +148,14 @@ def run_task(spec: dict) -> dict:
         )
         bs = ferric.BasisSet.bundled(spec["basis"])
         kw = {"energy_conv": spec["energy_conv"], "density_conv": spec["density_conv"]}
-        if spec["kind"] == "vac":
+        if solvent is not None:
+            kw["solvent"] = solvent
+        if spec["kind"] in ("vac", "alone"):
             r = ferric.run_rhf(mol, bs, **kw)
         else:
             r = ferric.run_rhf(mol, bs, point_charges=_FIELDS[spec["model"]], **kw)
         out["energy_hartree"] = float(r.energy)
+        out["iterations"] = int(r.iterations)
         out["converged"] = bool(r.converged)
         out["error"] = None if out["converged"] else "SCF did not converge"
     except Exception as exc:  # recorded, not raised: one bad pose must not kill a many-hour run
@@ -248,18 +270,38 @@ def cmd_run(a: argparse.Namespace) -> int:
         fields[model] = load_pocket(
             Path(path), cutoff_ang=a.cutoff, center_ang=tuple(round(float(v), 4) for v in pivot)
         )
-    unknown = [x for x in a.run if x != "vac" and x not in fields]
+    solvent = {m: None for m in fields}
+    for spec in a.solvent:
+        model, val = spec.split("=", 1)
+        if model not in fields:
+            raise SystemExit(f"--solvent names {model!r}, which is not a --field model")
+        solvent[model] = parse_solvent(val)
+    unknown = [
+        x
+        for x in a.run
+        if x != "vac"
+        and x not in fields
+        and not (x.startswith("alone:") and solvent.get(x.split(":", 1)[1]) is not None)
+    ]
     if unknown:
-        raise SystemExit(f"--run names {unknown}, which are neither 'vac' nor a --field model")
+        raise SystemExit(
+            f"--run names {unknown}, which are neither 'vac', a --field model, nor 'alone:MODEL' for a --solvent model"
+        )
     eps = {m: 1.0 for m in fields}
     for spec in a.eps:
         model, val = spec.split("=", 1)
         if model not in fields:
             raise SystemExit(f"--eps names {model!r}, which is not a --field model")
         eps[model] = float(val)
+    for m in fields:
+        if solvent[m] is not None and eps[m] != 1.0:
+            raise SystemExit(
+                f"{m}: a charge divisor (--eps) and a solvent (--solvent) are separate treatments; not both"
+            )
     ferric_fields = {m: scale_field([c.as_ferric_bohr() for c in f], eps[m]) for m, f in fields.items()}
     for m, f in fields.items():
         f.provenance["dielectric_eps"] = eps[m]
+        f.provenance["solvent"] = solvent[m]
         f.provenance["scaled_charge_sum_e"] = float(sum(c[0] for c in ferric_fields[m]))
     poses = build_poses({n: d["coords"] for n, d in ligs.items()}, pivot, a.poses, a.seed, a.jitter_deg, a.jitter_ang)
     names = sorted(ligs, key=lambda n: (n != ref, n))  # parent first
@@ -268,6 +310,9 @@ def cmd_run(a: argparse.Namespace) -> int:
     done = {task_key(r) for r in prior if r.get("error") is None}
     cpu_s = sum(r["cpu_s"] for r in prior)
     cap_s = a.max_cpu_hours * 3600.0
+    prior_s = a.prior_cpu_hours * 3600.0
+    # A failed SCF is never retried, not even by a restart: its pose is out for the rest of the study.
+    failed_poses = {r["pose"] for r in prior if r.get("error") is not None}
     todo = []
     pose_ids = range(a.poses) if a.only_poses is None else sorted(set(a.only_poses))
     if any(k not in range(a.poses) for k in pose_ids):
@@ -275,12 +320,17 @@ def cmd_run(a: argparse.Namespace) -> int:
     for k in pose_ids:  # pose-major: every ligand has the same number of poses whenever the run stops
         for n in names:
             for what in a.run:
-                key = ("vac", None, n, k) if what == "vac" else ("field", what, n, k)
+                if what == "vac":
+                    key = ("vac", None, n, k)
+                elif what.startswith("alone:"):
+                    key = ("alone", what.split(":", 1)[1], n, k)
+                else:
+                    key = ("field", what, n, k)
                 if key not in done:
                     todo.append(key)
     print(
-        f"{len(done)} SCFs done ({cpu_s / 3600:.2f} CPU-h), {len(todo)} to run on {a.workers} workers, "
-        f"cap {a.max_cpu_hours} CPU-h; run {a.run}",
+        f"{len(done)} SCFs done ({cpu_s / 3600:.2f} CPU-h here + {a.prior_cpu_hours} elsewhere), {len(todo)} to run on "
+        f"{a.workers} workers, cap {a.max_cpu_hours} CPU-h; run {a.run}; poses already failed {sorted(failed_poses)}",
         flush=True,
     )
 
@@ -297,8 +347,10 @@ def cmd_run(a: argparse.Namespace) -> int:
             "energy_conv": 1e-10,
             "density_conv": 1e-8,
         }
-        if kind == "field":
+        if kind in ("field", "alone"):
             s["model"] = model
+            if solvent[model] is not None:
+                s["solvent"] = solvent[model]
         return s
 
     stopped = False
@@ -309,18 +361,27 @@ def cmd_run(a: argparse.Namespace) -> int:
         max_workers=a.workers, mp_context=ctx, initializer=_init_worker, initargs=(ferric_fields,)
     ) as ex:
         pending: dict = {}
+        skipped: list = []
         queue = iter(todo)
 
         def submit_more():
             nonlocal stopped
             while len(pending) < a.workers and not stopped:
-                if cpu_s >= cap_s:
+                # the guard counts the CPU spent elsewhere and every SCF in flight (plus this one) at the estimate
+                if cpu_s + prior_s + a.est_scf_cpu_s * (len(pending) + 1) >= cap_s:
                     stopped = True
-                    print(f"CPU CAP REACHED ({cpu_s / 3600:.2f} >= {a.max_cpu_hours} CPU-h): no new SCFs", flush=True)
+                    print(
+                        f"CPU CAP GUARD ({(cpu_s + prior_s) / 3600:.2f} CPU-h spent + {len(pending) + 1} SCFs at "
+                        f"{a.est_scf_cpu_s:.0f} s >= {a.max_cpu_hours} CPU-h): no new SCFs",
+                        flush=True,
+                    )
                     return
                 key = next(queue, None)
                 if key is None:
                     return
+                if key[3] in failed_poses:  # its pose has failed: the pose is dropped for everything, so skip the work
+                    skipped.append(key)
+                    continue
                 pending[ex.submit(run_task, spec_of(key))] = key
 
         submit_more()
@@ -336,6 +397,9 @@ def cmd_run(a: argparse.Namespace) -> int:
                     )
                 with tasks_path.open("a") as fh:
                     fh.write(json.dumps(r) + "\n")
+                if r["error"] is not None:
+                    failed_poses.add(r["pose"])
+                    print(f"SCF FAILED, not retried; pose {r['pose']} gets no further tasks: {r['error']}", flush=True)
                 print(
                     f"{key[0]} {key[1] or ''} {r['ligand']} pose {r['pose']}: {r['error'] or 'ok'} "
                     f"wall {r['wall_s']:.0f}s cpu {r['cpu_s']:.0f}s (total {cpu_s / 3600:.2f} CPU-h)",
@@ -354,6 +418,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "cutoff_ang": a.cutoff,
         "models": list(fields),
         "field_eps": eps,
+        "field_solvent": solvent,
         "field_provenance": {m: dict(f.provenance) for m, f in fields.items()},
         "prep_provenance": {
             m: json.loads(Path(str(p) + ".json").read_text()) for m, p in (s.split("=", 1) for s in a.field)
@@ -369,7 +434,9 @@ def cmd_run(a: argparse.Namespace) -> int:
     (out / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
     with (out / "commands.log").open("a") as fh:
         fh.write(" ".join(sys.argv) + "\n")
-    return 0
+    if skipped:
+        print(f"{len(skipped)} tasks not run because their pose had failed", flush=True)
+    return 1 if failed_poses else 0
 
 
 def _prefix(ok: set[int], kept: list[int]) -> list[int]:
@@ -454,6 +521,13 @@ def cmd_assemble(a: argparse.Namespace) -> int:
     if a.base:
         base = json.loads(a.base.read_text())
         base_recs, reused = fold_base(base, a.base_model, meta, sha256_file(a.base))
+        if a.same_field_as_base:  # a solvent model must be the base model's field, not another one
+            bf = base["inputs"]["field_provenance"][a.base_model]
+            for m in meta["models"]:
+                f = meta["field_provenance"][m]
+                for k in ("input_sha256", "center_ang", "n_charges", "cutoff_ang"):
+                    if f[k] != bf[k]:
+                        raise SystemExit(f"{m}: field {k} {f[k]!r} differs from the base model's {bf[k]!r}")
         by = {**base_recs, **by}
         meta = {
             **meta,
@@ -467,6 +541,10 @@ def cmd_assemble(a: argparse.Namespace) -> int:
                 **meta["prep_provenance"],
             },
             "field_eps": {a.base_model: base["inputs"]["field_eps"][a.base_model], **meta["field_eps"]},
+            "field_solvent": {
+                a.base_model: base["inputs"].get("field_solvent", {}).get(a.base_model),
+                **meta.get("field_solvent", {}),
+            },
         }
     drop = {}
     for spec in a.drop_pose:
@@ -480,26 +558,27 @@ def cmd_assemble(a: argparse.Namespace) -> int:
     vac_ok = {k for k in range(npose) if all(("vac", None, n, k) in by for n in ligs)}
     kept = [k for k in range(npose) if k not in drop]
     vac_poses = _prefix({k for k in vac_ok}, kept)
-    n_by_model, pose_indices, dE, e_fld, dist = {}, {"vac": vac_poses}, {}, {}, {}
+    n_by_model, pose_indices, dE, e_fld, dist, e_alone = {}, {"vac": vac_poses}, {}, {}, {}, {}
+    solv = meta.get("field_solvent", {})
     for m in meta["models"]:
-        ok = {k for k in vac_ok if all(("field", m, n, k) in by for n in ligs)}
+        # a solvent model's reference leg is the ligand alone in the SAME solvent, not the gas-phase vacuum SCF
+        ref_leg = ("alone", m) if solv.get(m) is not None else ("vac", None)
+        ok = {k for k in range(npose) if all((*ref_leg, n, k) in by and ("field", m, n, k) in by for n in ligs)}
         poses_m = _prefix(ok, kept)
         pose_indices[m] = poses_m
         n_by_model[m] = len(poses_m)
         e_fld[m] = {n: [by[("field", m, n, k)]["energy_hartree"] for k in poses_m] for n in ligs}
-        dE[m] = {
-            n: [
-                (by[("field", m, n, k)]["energy_hartree"] - by[("vac", None, n, k)]["energy_hartree"]) * HARTREE_TO_KCAL
-                for k in poses_m
-            ]
-            for n in ligs
-        }
+        e_ref = {n: [by[(*ref_leg, n, k)]["energy_hartree"] for k in poses_m] for n in ligs}
+        if solv.get(m) is not None:
+            e_alone[m] = e_ref
+        dE[m] = {n: [(f - r) * HARTREE_TO_KCAL for f, r in zip(e_fld[m][n], e_ref[n], strict=True)] for n in ligs}
         dist[m] = {n: [by[("field", m, n, k)]["min_dist_to_field_ang"] for k in poses_m] for n in ligs}
     results = {
         "schema": SCHEMA,
         "dE_int_kcal_mol": dE,
         "E_vac_hartree": {n: [by[("vac", None, n, k)]["energy_hartree"] for k in vac_poses] for n in ligs},
         "E_field_hartree": e_fld,
+        **({"E_alone_hartree": e_alone} if e_alone else {}),
         "min_dist_to_field_ang": dist,
         "task_cpu_s": {
             f"{r['kind']}:{r.get('model') or ''}:{r['ligand']}:{r['pose']}": r["cpu_s"] for r in by.values()
@@ -528,6 +607,7 @@ def cmd_assemble(a: argparse.Namespace) -> int:
                 "density_conv": 1e-8,
                 "engine": "ferric",
                 "field": meta["field_provenance"],
+                **({"solvent_by_model": meta["field_solvent"]} if any(meta.get("field_solvent", {}).values()) else {}),
             }
         ],
         results=results,
@@ -565,6 +645,25 @@ def main(argv: list[str] | None = None) -> int:
         metavar="MODEL=EPS",
         help="divide the point charges of this --field model by EPS (screening); default 1 for every model",
     )
+    r.add_argument(
+        "--solvent",
+        action="append",
+        default=[],
+        metavar="MODEL=S",
+        help="run MODEL's SCFs with IEF-PCM solvent S (a dielectric constant or a name, e.g. water)",
+    )
+    r.add_argument(
+        "--prior-cpu-hours",
+        type=float,
+        default=0.0,
+        help="CPU-hours already spent elsewhere in this study (the cap guard)",
+    )
+    r.add_argument(
+        "--est-scf-cpu-s",
+        type=float,
+        default=0.0,
+        help="CPU seconds assumed for every SCF in flight (and the next one) when the cap guard decides",
+    )
     r.add_argument("--only-poses", type=int, nargs="+", default=None, help="run only these pose indices (default: all)")
     r.add_argument("--run", nargs="+", required=True, help="which SCFs: 'vac' and/or model names, e.g. vac amber14")
     r.add_argument(
@@ -578,6 +677,11 @@ def main(argv: list[str] | None = None) -> int:
         help="committed result file whose vacuum and --base-model energies are reused, not recomputed",
     )
     s.add_argument("--base-model", default="amber14")
+    s.add_argument(
+        "--same-field-as-base",
+        action="store_true",
+        help="refuse unless every new model's field (PQR sha256, centre, count, cutoff) is the base model's",
+    )
     s.add_argument("--drop-pose", action="append", default=[], metavar="K=REASON")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--result", type=Path, required=True)
