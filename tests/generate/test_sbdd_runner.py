@@ -71,6 +71,7 @@ def test_a_failed_run_writes_a_report_with_the_traceback_and_exits_1(tmp_path):
     assert proc.returncode == 1
     written = json.loads(report.read_text())
     assert written["ok"] is False and "Traceback" in written["error"]
+    assert "cuda_free_mib" in written
     assert written["error"].strip().splitlines()[-1] in proc.stderr
 
 

@@ -75,6 +75,11 @@ def git_info(repo):
 def run(request):
     started = time.time()
     repo = Path(request["diffsbdd_dir"])
+    own_dir = str(Path(__file__).resolve().parent)
+    if sys.path and sys.path[0] == own_dir:
+        del sys.path[
+            0
+        ]  # run by path, this directory (smeltery's model.py, base.py ...) would shadow DiffSBDD's modules
     sys.path.insert(0, str(repo))
     import numpy as np
     import torch
@@ -140,6 +145,18 @@ def run(request):
     }
 
 
+def free_gpu_mib():
+    """Free memory on the current CUDA device in MiB, or None; never raises (it runs while reporting a failure)."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return round(torch.cuda.mem_get_info()[0] / 2**20)
+    except BaseException:  # noqa: BLE001 - the failure report must still be written
+        pass
+    return None
+
+
 def main(argv):
     if len(argv) != 2:
         print("usage: _sbdd_runner.py request.json", file=sys.stderr)
@@ -152,7 +169,7 @@ def main(argv):
     try:
         report, status = run(request), 0
     except BaseException:  # noqa: BLE001 - CUDA out-of-memory and import errors must reach the report too
-        report, status = {"ok": False, "error": traceback.format_exc()}, 1
+        report, status = {"ok": False, "error": traceback.format_exc(), "cuda_free_mib": free_gpu_mib()}, 1
     Path(request["out_report"]).write_text(json.dumps(report, indent=2, sort_keys=True))
     if status:
         print(report["error"], file=sys.stderr)
