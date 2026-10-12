@@ -297,6 +297,7 @@ def _with_solvent(n_s=None, *, factor=0.5, shift=0.0, flip=None, solvent="water"
     for key in ("field_provenance", "prep_provenance"):
         inp[key]["S"] = copy.deepcopy(inp[key]["A"])
     inp["field_provenance"]["A"]["solvent"] = None
+    inp["field_provenance"]["A"]["dielectric_eps"] = inp["field_provenance"]["S"]["dielectric_eps"] = 1.0  # as the runner
     inp["field_provenance"]["S"]["solvent"] = solvent
     dE = {n: np.array(v)[:n_s] * factor + shift for n, v in res["dE_int_kcal_mol"]["A"].items()}
     if flip:
