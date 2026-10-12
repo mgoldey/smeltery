@@ -168,8 +168,9 @@ Every filter is independent and individually switchable. The rejection list is c
 - **`"embed"`**: returned candidates have `smiles` only and no poses. `PairedPoses`
   works exactly as today. The model acts as a proposer.
 - **`"model"`**: each candidate also carries one pose, built from the model's geometry:
-  1. the output is fitted rigidly onto the scaffold (stage 1), so the scaffold's heavy
-     atoms sit on the parent's coordinates and the grown atoms keep their position
+  1. the output is fitted rigidly onto the scaffold (stage 1; rmsd at most 0.3 Å, and
+     no more than about 0.1 Å per atom on the measured fixture), so the scaffold's heavy
+     atoms sit close to the parent's coordinates and the grown atoms keep their position
      relative to the scaffold;
   2. heavy atoms are put in the candidate SMILES's atom order (below);
   3. hydrogens are added with `Chem.AddHs(addCoords=True)`; there is no relaxation, so
@@ -179,11 +180,12 @@ Every filter is independent and individually switchable. The rejection list is c
 on `docs/tiers/paired_poses.md`). When set and a candidate already has poses, its first
 pose is pose 0 of the pair and poses 1..n-1 come from the existing path, so the pose
 count stays `len(parent.poses)`. The given pose is checked, not trusted: its symbols must
-equal those of the candidate SMILES with hydrogens added, and its core atoms (the
-atoms the common-substructure search maps onto the parent) must lie within 0.05 Å of the
-parent's pose 0 for heavy atoms, otherwise `ValueError`. Every mapped atom, hydrogens
-included, is then overwritten with the parent's pose-0 coordinate, so the core is an
-exact copy as in the default path. The default behavior is unchanged, and the self-pair
+equal those of the candidate SMILES with hydrogens added, and each heavy atom the
+common-substructure search maps onto the parent must lie within 0.5 Å of the parent's
+pose-0 position, otherwise `ValueError` (a sanity check against a mis-mapped core, such
+as a flipped ring, not a test of exactness). Every mapped atom, hydrogens included, is
+then overwritten with the parent's pose-0 coordinate, so the core is an exact copy as in
+the default path. A given pose is not relaxed, whatever `relax_unmapped` says. The default behavior is unchanged, and the self-pair
 anchor is extended to the new path.
 
 ### Atom-order invariant
