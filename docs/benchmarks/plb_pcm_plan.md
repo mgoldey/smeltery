@@ -122,3 +122,11 @@ Nothing is left running when the work ends.
 
 No relaxation or docking, no other basis, no cutoff scan, no other charge model, no distance-dependent dielectric, no COSMO, no reparameterisation of the cavity (ferric's defaults only), no pooling of tyk2 and cdk2, no change to `FieldInteraction` or its floor, no solvent option for the tier, no
 edit of existing numbers in `docs/limits.md` beyond adding a row (with a number and an existing source, `tests/test_limits.py`) and revising row U1's text to say what is now measured. No series-specific name goes into `src/`.
+
+## Amendment log (written while the stages ran; each entry before the result it concerns was looked at)
+
+* **A1, assembly (before any stage was assembled).** Each stage ran in its own cache directory (A: tyk2 water, B: tyk2 eps 4.0, C: cdk2 water) because a run rewrites its `meta.json` with only its own models. The tyk2 results file is assembled from the concatenation of A's and B's task caches and a merged `meta.json`
+  (union of the two models' provenance), with the stored gas model folded in by `assemble --base ... --same-field-as-base`; cdk2 the same with its own base. The merge only concatenates; no energy is edited. The analysis is `scripts/analyse_plb.py` unchanged.
+* **A2, measured cost (Stage A and B finished, no failure, nothing lost).** Stage A: 104 SCFs, 8.82 CPU-h (predicted 10.5; the CPU time of one SCF was 296 to 444 s against the pilot's 313 s, and the ratio to the stored gas cost is about 2.5, not 3.0). Stage B: 52 SCFs, 5.44 CPU-h (predicted 5.2). Cumulative with the 0.5 CPU-h reserved for the pilot, tests and mutation checks: 14.76 CPU-h.
+  Stage C's decision rule (cumulative <= 15.5 after A and B) is therefore **met** and Stage C runs, with cumulative guard 23.5 CPU-h and the measured cost 3.3 CPU-h per cdk2 pose (about 6.7 CPU-h for the two poses). Nothing else changes.
+* **A3, interruptions.** The agent session driving the work was cut off twice by a rate limit. The detached SCF processes were not affected (Stage A completed all 104 SCFs and Stage B all 52 with zero errors; the logs have no guard stop, failure or restart), and no SCF was lost or repeated.
