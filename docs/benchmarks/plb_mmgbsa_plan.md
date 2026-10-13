@@ -131,4 +131,9 @@ the environment), report `docs/benchmarks/plb_mmgbsa.md`, a `docs/limits.md` row
 
 ## Amendment log
 
-(Empty at the time of the commit. Amendments are appended here with the date and the reason, never edited into the sections above.)
+(Amendments are appended here with the date and the reason, never edited into the sections above.)
+
+* **A1, 2026-10-13, before any series energy.** Section 3.2 says the AM1-BCC charges are computed "from the PLB pose conformer". Reading what antechamber
+  writes (`sqm.in` for `-c bcc` on a test molecule outside the series: "Run semi-empirical minimization", no `maxcyc` line) shows sqm **minimises the geometry at
+  the AM1 level first**, so the charges are those of the AM1-optimised conformer started from the PLB pose, not of the PLB geometry itself. Nothing else changes
+  (same method, same code path as `ForceField(path="openmm")`); the sentence in 3.2 is to be read this way.
