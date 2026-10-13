@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations, permutations
 from pathlib import Path
 from typing import Any
@@ -80,6 +80,9 @@ class PlbResults:
     inputs: dict[str, Any]
     ferric: dict[str, Any]
     total_cpu_s: float
+    # model -> implicit-solvent setting (a dielectric constant or a name) of the models run with IEF-PCM; the others are
+    # gas phase. A solvent model's reference leg is the ligand alone in the same solvent (`E_alone_hartree`).
+    solvent: dict[str, Any] = field(default_factory=dict)
 
     @property
     def analogues(self) -> tuple[str, ...]:
@@ -169,14 +172,39 @@ def validate_results(rec: dict) -> PlbResults:
     if n_vac > n_poses or n_vac < max(int(v) for v in npm.values()):
         raise PlbResultsError("E_vac_hartree does not cover every pose of every model")
     e_vac = _array(res["E_vac_hartree"], ligands, n_vac, "E_vac_hartree")
+    solvent = {m: v for m, v in (inp.get("field_solvent") or {}).items() if v is not None}
+    if set(solvent) - set(models):
+        raise PlbResultsError(f"field_solvent names models that were not run: {sorted(set(solvent) - set(models))}")
+    for m, v in solvent.items():
+        ok = (isinstance(v, str) and v.strip() != "") or (
+            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 1.0
+        )
+        if not ok:
+            raise PlbResultsError(f"{m}: solvent {v!r} is neither a name nor a finite dielectric constant above 1")
+    for m in models:
+        recorded = inp["field_provenance"][m].get("solvent")
+        if recorded != solvent.get(m):
+            raise PlbResultsError(
+                f"{m}: field_provenance records solvent {recorded!r}, inputs.field_solvent {solvent.get(m)!r}"
+            )
     for m in models:
         n_m = int(npm[m])
         if not 2 <= n_m <= n_poses:
             raise PlbResultsError(f"{m}: {n_m} completed poses (need 2 to {n_poses})")
         dE[m] = _array(res["dE_int_kcal_mol"][m], ligands, n_m, f"dE_int_kcal_mol[{m}]")
         e_fld = _array(res["E_field_hartree"][m], ligands, n_m, f"E_field_hartree[{m}]")
-        if not np.allclose(dE[m], (e_fld - e_vac[:, :n_m]) * HARTREE_TO_KCAL, rtol=0, atol=1e-6):
-            raise PlbResultsError(f"{m}: dE_int does not equal (E_field - E_vac) * {HARTREE_TO_KCAL} kcal/mol/Eh")
+        if m in solvent:  # reference leg: the ligand alone in the same solvent, never the gas-phase vacuum energy
+            alone = res.get("E_alone_hartree", {})
+            if m not in alone:
+                raise PlbResultsError(
+                    f"{m}: a solvent model needs E_alone_hartree[{m}] (the ligand alone in the solvent)"
+                )
+            e_ref = _array(alone[m], ligands, n_m, f"E_alone_hartree[{m}]")
+            leg = "E_alone(solvent)"
+        else:
+            e_ref, leg = e_vac[:, :n_m], "E_vac"
+        if not np.allclose(dE[m], (e_fld - e_ref) * HARTREE_TO_KCAL, rtol=0, atol=1e-6):
+            raise PlbResultsError(f"{m}: dE_int does not equal (E_field - {leg}) * {HARTREE_TO_KCAL} kcal/mol/Eh")
         dist[m] = _array(res["min_dist_to_field_ang"][m], ligands, n_m, f"min_dist_to_field_ang[{m}]")
         if (dist[m] <= 0).any():
             raise PlbResultsError(f"{m}: a ligand atom coincides with a field charge")
@@ -192,6 +220,7 @@ def validate_results(rec: dict) -> PlbResults:
         inputs=inp,
         ferric=fer,
         total_cpu_s=float(res.get("total_cpu_s", math.nan)),
+        solvent=solvent,
     )
 
 
@@ -563,7 +592,7 @@ def dielectric_family(res: PlbResults) -> dict[str, float]:
     fam = {
         m: float(res.inputs["field_provenance"][m]["dielectric_eps"])
         for m in res.models
-        if "dielectric_eps" in res.inputs["field_provenance"][m]
+        if "dielectric_eps" in res.inputs["field_provenance"][m] and m not in res.solvent  # PCM is not a charge divisor
     }
     if not fam:
         return {}
@@ -647,6 +676,141 @@ def screening_analysis(res: PlbResults, x: np.ndarray, *, n_boot: int, seed: int
         "by_eps": rows,
         "slope_crosses_1_at_eps": crossing,
     }
+
+
+# ---- implicit solvation (issue #28, docs/benchmarks/plb_pcm_plan.md): thresholds and labels declared in advance
+
+RANK_SHIFT_THRESHOLD = 0.15  # |Delta-rho| the uniform-eps lane called a change (about 20 adjacent swaps at n = 12)
+SPREAD_NARROWS_BELOW, SPREAD_WIDENS_ABOVE = 0.8, 1.25
+
+
+def rank_change_label(delta: float, lo: float | None, hi: float | None) -> str:
+    """The plan's P1 label for Delta-rho = rho(solvent) - rho(gas) and its paired-bootstrap 95% CI."""
+    excludes_zero = lo is not None and hi is not None and (lo > 0 or hi < 0)
+    if delta >= RANK_SHIFT_THRESHOLD:
+        return "improves" if excludes_zero else "shift of at least 0.15 not distinguishable from zero"
+    if delta <= -RANK_SHIFT_THRESHOLD:
+        return "worsens" if excludes_zero else "shift of at least 0.15 not distinguishable from zero"
+    return "unchanged at the level this study can detect"
+
+
+def tracks_label(rho: float, p_two_sided: float, ci_lo: float | None, kendall: float) -> str:
+    """The tyk2 plan's Q1 criteria (also the PCM plan's P2): rho > 0, p < 0.05, CI excluding 0, tau-b > 0."""
+    if rho > 0 and p_two_sided < 0.05 and ci_lo is not None and ci_lo > 0 and kendall > 0:
+        return "tracks (weakly)"
+    if rho < 0 and p_two_sided < 0.05:
+        return "anti-correlated"
+    return "does not track at the level detectable"
+
+
+def spread_label(ratio: float) -> str:
+    if ratio < SPREAD_NARROWS_BELOW:
+        return "narrows the spread"
+    if ratio > SPREAD_WIDENS_ABOVE:
+        return "widens the spread"
+    return "about the same spread"
+
+
+def paired_delta_spearman_ci(x, y_a, y_b, *, n_boot: int, seed: int, level: float = 0.95) -> dict[str, Any]:
+    """Percentile CI of rho(x, y_a) - rho(x, y_b), resampling LIGANDS (the same resample for both correlations)."""
+    x, ya, yb = (np.asarray(v, dtype=float) for v in (x, y_a, y_b))
+    rng = np.random.default_rng(seed)
+    n = len(x)
+    vals = []
+    for _ in range(n_boot):
+        i = rng.integers(0, n, size=n)
+        if np.ptp(x[i]) == 0 or np.ptp(ya[i]) == 0 or np.ptp(yb[i]) == 0:
+            continue
+        d = spearman(x[i], ya[i]) - spearman(x[i], yb[i])
+        if np.isfinite(d):
+            vals.append(d)
+    v = np.array(vals)
+    a = (1 - level) / 2
+    return {
+        "lo": float(np.quantile(v, a)) if len(v) else None,
+        "hi": float(np.quantile(v, 1 - a)) if len(v) else None,
+        "n_valid": int(len(v)),
+        "n_boot": n_boot,
+    }
+
+
+def _vs_gas(
+    res: PlbResults, model: str, base: str, n_c: int, x: np.ndarray, *, n_boot: int, seed: int
+) -> dict[str, Any]:
+    """One solvent model against the gas-phase model on the first `n_c` poses both completed (the same geometries)."""
+    names = list(res.analogues)
+    d_s, d_g = res.dE[model][:, :n_c], res.dE[base][:, :n_c]
+    y_s = np.array([m.mean for m in paired_ddE(res, model, d_s).values()])
+    y_g = np.array([m.mean for m in paired_ddE(res, base, d_g).values()])
+    pts, pts_g = point_stats(x, y_s), point_stats(x, y_g)
+    null = permutation_null(x, y_s, seed=seed)
+    ci = {s_: bootstrap_ci(x, y_s, s_, n_boot=n_boot, seed=seed + 1 + j) for j, s_ in enumerate(("spearman", "slope"))}
+    delta = paired_delta_spearman_ci(x, y_s, y_g, n_boot=n_boot, seed=seed + 50)
+    d_rho = pts["spearman"] - pts_g["spearman"]
+    sems = np.array([m.sem for m in paired_ddE(res, model, d_s).values()])
+    ratio_sd = pts["sd_ratio"] / pts_g["sd_ratio"] if pts_g["sd_ratio"] else float("nan")
+    return {
+        "model": model,
+        "solvent": res.solvent[model],
+        "gas_model": base,
+        "n_poses": n_c,
+        "pose_indices": list(res.inputs["pose_indices"][model][:n_c]),
+        "point": pts,
+        "gas_point": pts_g,
+        "spearman_p_two_sided": null["spearman"]["p_two_sided"],
+        "kendall_p_two_sided": null["kendall"]["p_two_sided"],
+        "permutation_exact": null["exact"],
+        "bootstrap_ci_over_ligands": ci,
+        "ddE_mean": dict(zip(names, (float(v) for v in y_s), strict=True)),
+        "gas_ddE_mean": dict(zip(names, (float(v) for v in y_g), strict=True)),
+        "delta_spearman_vs_gas": d_rho,
+        "delta_spearman_paired_bootstrap_ci": delta,
+        "spearman_with_gas_ddE": spearman(y_g, y_s),
+        "mean_paired_sem": float(sems.mean()),
+        "mean_dE_int_kcal_mol": float(d_s.mean()),
+        "gas_mean_dE_int_kcal_mol": float(d_g.mean()),
+        "mean_dE_int_ratio_to_gas": float(d_s.mean() / d_g.mean()),
+        "sd_ratio_over_gas_sd_ratio": ratio_sd,
+        "n_ddE_sign_flips_vs_gas": int((np.sign(y_s) != np.sign(y_g)).sum()),
+        "n_dE_int_sign_flips_vs_gas": int((np.sign(d_s) != np.sign(d_g)).sum()),
+        "n_dE_int_values": int(d_s.size),
+        "labels": {
+            "rank_change": rank_change_label(d_rho, delta["lo"], delta["hi"]),
+            "tracks": tracks_label(
+                pts["spearman"], null["spearman"]["p_two_sided"], ci["spearman"]["lo"], pts["kendall"]
+            ),
+            "spread": spread_label(ratio_sd),
+        },
+    }
+
+
+def solvent_analysis(res: PlbResults, x: np.ndarray, *, n_boot: int, seed: int) -> dict[str, Any]:
+    """The pre-declared implicit-solvent analysis: every solvent model against the ONE gas-phase model on the poses
+    both completed, and (when there are several solvent models) every solvent model on the poses ALL of them completed.
+    Empty when the results carry no solvent model. Refuses a solvent model that is not the gas model's field."""
+    if not res.solvent:
+        return {}
+    gas = [m for m in res.models if m not in res.solvent]
+    if len(gas) != 1:
+        raise PlbResultsError(f"a solvent comparison needs exactly one gas-phase model, found {gas}")
+    base = gas[0]
+    pqr = res.inputs["prep_provenance"][base]["output_sha256"]
+    for m in res.solvent:
+        if res.inputs["prep_provenance"][m]["output_sha256"] != pqr:
+            raise PlbResultsError(f"{m} does not use the gas-phase model's field (PQR sha256 differs)")
+        if float(res.inputs["field_provenance"][m].get("dielectric_eps", 1.0)) != 1.0:
+            raise PlbResultsError(f"{m}: a solvent model must not also divide the field's charges")
+    solvent_models = [m for m in res.models if m in res.solvent]
+    n_all = min(res.dE[m].shape[1] for m in [base, *solvent_models])
+    out: dict[str, Any] = {"gas_model": base, "n_poses_common_all": n_all, "by_model": {}, "on_common_poses_of_all": {}}
+    for i, m in enumerate(solvent_models):
+        n_c = min(res.dE[m].shape[1], res.dE[base].shape[1])
+        out["by_model"][m] = _vs_gas(res, m, base, n_c, x, n_boot=n_boot, seed=seed + 1000 * (i + 1))
+        if len(solvent_models) > 1:
+            out["on_common_poses_of_all"][m] = _vs_gas(
+                res, m, base, n_all, x, n_boot=n_boot, seed=seed + 1000 * (i + 1) + 500
+            )
+    return out
 
 
 def _source_ids(lg) -> frozenset[str] | None:
@@ -756,8 +920,9 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
         }
         floors = {"0": 0.0, "noise_floor_4.07": DDE_NOISE_FLOOR_KCAL_MOL}
         # a screened copy of one force field's field is not a second charge model
-        if len(res.models) >= 2 and mi == 0 and not dielectric_family(res):
-            cm = charge_model_comparison(res, res.models[0], res.models[1], n_boot=n_boot, seed=seed + 500)
+        gas_models = [m for m in res.models if m not in res.solvent]  # a solvent model is not a second charge model
+        if len(gas_models) >= 2 and mi == 0 and not dielectric_family(res):
+            cm = charge_model_comparison(res, gas_models[0], gas_models[1], n_boot=n_boot, seed=seed + 500)
             out["charge_model_comparison"] = cm
             floors["charge_sensitivity"] = cm["charge_sensitivity_floor_kcal_mol"]
         if "charge_model_comparison" in out:
@@ -768,4 +933,7 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
     scr = screening_analysis(res, x, n_boot=n_boot, seed=seed + 600)
     if scr:
         out["screening"] = scr
+    sol = solvent_analysis(res, x, n_boot=n_boot, seed=seed + 700)
+    if sol:
+        out["solvent"] = sol
     return out

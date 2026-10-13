@@ -134,6 +134,40 @@ def tables(an: dict) -> str:
         out.append(
             f"\nFitted slope crosses 1 at eps = {'not within the range' if cr is None else f'{cr:.2f}'} (log-log interpolation, descriptive)\n"
         )
+    sv = an.get("solvent")
+    if sv:
+        out.append(
+            f"### Implicit solvation (IEF-PCM): the same field, both legs in the solvent, against the gas-phase model {sv['gas_model']} on the same poses (issue #28)\n"
+        )
+        hdr = (
+            "| model | solvent | poses | rho | p (perm., 2-sided) | rho 95% CI | tau-b | slope | slope 95% CI | sd ratio | "
+            "gas rho | gas slope | gas sd ratio | Delta-rho | Delta-rho 95% CI (paired) | rho with gas ddE | mean dE_int | gas mean dE_int | ratio | "
+            "ddE sign flips | dE_int sign flips | rank change | tracks | spread |"
+        )
+        sep = "|---|---|---:|---:|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---|---|---|"
+
+        def srow(r):
+            p, c, g = r["point"], r["bootstrap_ci_over_ligands"], r["gas_point"]
+            lb = r["labels"]
+            return (
+                f"| {r['model']} | {r['solvent']} | {r['n_poses']} | {p['spearman']:+.3f} | {r['spearman_p_two_sided']:.4f} | "
+                f"{fmt_ci(c['spearman'])} | {p['kendall']:+.3f} | {p['slope']:+.2f} | {fmt_ci(c['slope'])} | {p['sd_ratio']:.2f} | "
+                f"{g['spearman']:+.3f} | {g['slope']:+.2f} | {g['sd_ratio']:.2f} | {r['delta_spearman_vs_gas']:+.3f} | "
+                f"{fmt_ci(r['delta_spearman_paired_bootstrap_ci'])} | {r['spearman_with_gas_ddE']:+.3f} | "
+                f"{r['mean_dE_int_kcal_mol']:+.2f} | {r['gas_mean_dE_int_kcal_mol']:+.2f} | {r['mean_dE_int_ratio_to_gas']:.3f} | "
+                f"{r['n_ddE_sign_flips_vs_gas']}/{len(r['ddE_mean'])} | {r['n_dE_int_sign_flips_vs_gas']}/{r['n_dE_int_values']} | "
+                f"{lb['rank_change']} | {lb['tracks']} | {lb['spread']} |"
+            )
+
+        out.append(hdr)
+        out.append(sep)
+        out.extend(srow(r) for r in sv["by_model"].values())
+        if sv["on_common_poses_of_all"]:
+            out.append(f"\nOn the {sv['n_poses_common_all']} poses ALL solvent models completed:\n")
+            out.append(hdr)
+            out.append(sep)
+            out.extend(srow(r) for r in sv["on_common_poses_of_all"].values())
+        out.append("")
     return "\n".join(out)
 
 
