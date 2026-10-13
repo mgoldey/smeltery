@@ -168,6 +168,28 @@ def tables(an: dict) -> str:
             out.append(sep)
             out.extend(srow(r) for r in sv["on_common_poses_of_all"].values())
         out.append("")
+    dd = an.get("distance_dielectric")
+    if dd:
+        out.append(
+            f"### Distance-dependent dielectric eps(d) = max(1, s d), d = distance to the nearest ligand atom, against the unscreened model {dd['unscreened_model']} on the same poses (issue #28)\n"
+        )
+        out.append(
+            "| model | s (1/A) | poses | rho | p (perm., 2-sided) | rho 95% CI | tau-b | slope | sd ratio | unscreened rho | Delta-rho | "
+            "Delta-rho 95% CI (paired) | rho with unscreened ddE | mean dE_int | ratio to unscreened | ddE sign flips | dE_int sign flips | rank change | tracks |"
+        )
+        out.append("|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|---|")
+        for r in dd["by_model"].values():
+            p, c, g, lb = r["point"], r["bootstrap_ci_over_ligands"], r["gas_point"], r["labels"]
+            out.append(
+                f"| {r['model']} | {r['distance_dielectric_slope']:g} | {r['n_poses']} | {p['spearman']:+.3f} | "
+                f"{r['spearman_p_two_sided']:.4f} | {fmt_ci(c['spearman'])} | {p['kendall']:+.3f} | {p['slope']:+.2f} | "
+                f"{p['sd_ratio']:.2f} | {g['spearman']:+.3f} | {r['delta_spearman_vs_gas']:+.3f} | "
+                f"{fmt_ci(r['delta_spearman_paired_bootstrap_ci'])} | {r['spearman_with_gas_ddE']:+.3f} | "
+                f"{r['mean_dE_int_kcal_mol']:+.2f} | {r['mean_dE_int_ratio_to_gas']:.3f} | "
+                f"{r['n_ddE_sign_flips_vs_gas']}/{len(r['ddE_mean'])} | {r['n_dE_int_sign_flips_vs_gas']}/{r['n_dE_int_values']} | "
+                f"{lb['rank_change']} | {lb['tracks']} |"
+            )
+        out.append("")
     return "\n".join(out)
 
 
