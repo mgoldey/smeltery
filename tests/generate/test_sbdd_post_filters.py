@@ -174,7 +174,7 @@ def test_a_failing_pose_extraction_is_an_atom_order_rejection(raw_samples, scaff
 
 
 def test_an_unexpected_error_in_repair_is_a_rejection_not_a_crash(raw_samples, scaffold_spec, monkeypatch):
-    def boom(raw, spec):
+    def boom(*args, **kwargs):
         raise RuntimeError("z")
 
     monkeypatch.setattr("smeltery.generate.sbdd_post.repair", boom)

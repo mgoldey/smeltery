@@ -54,7 +54,7 @@ including model load. The runner passes `CUDA_VISIBLE_DEVICES` from `device`.
 
 ## Rejection reasons
 
-Filters run in this order: sanitize, connected, scaffold, forbidden, duplicate, size.
+Repairs (all off by default, see "Repairing over-valent output") run before sanitization. Filters run in this order: sanitize, connected, scaffold, forbidden, duplicate, size.
 
 | reason | meaning |
 |---|---|
@@ -69,6 +69,24 @@ Filters run in this order: sanitize, connected, scaffold, forbidden, duplicate, 
 
 The default forbidden list holds one pattern, `peroxide`: `[OX2][OX2]`. Replace it through
 `FilterConfig(forbidden_smarts={...})`.
+
+## Repairing over-valent output
+
+The model assigns bonds from distances and never sees valences, so most of its output fails sanitization because one
+atom, usually an O or N, has a bond too many. Three optional `FilterConfig` fields repair that; all default to off, so
+the counts under "Measured yield" are for no repair:
+
+- `salvage_bonds=N`: for each over-valent atom, drop its longest bond that is not a scaffold bond, at most N times
+  per sample. The scaffold's own bonds are never dropped.
+- `trim_stray_fragments=True`: a sample that falls into pieces (often because a salvaged bond was the only link to a
+  grown group) keeps the piece that holds the scaffold instead of being rejected `disconnected`. The grown atoms in
+  the discarded pieces are lost.
+- `scaffold_orders=True`: the scaffold's bond orders are forced onto the scaffold's bonds the model placed. Alone this
+  sanitizes 0 of 16; it only makes sense with `salvage_bonds`, which removes the bonds that crowd the scaffold.
+
+`provenance["repairs"]` counts the accepted candidates that used them (`salvaged`, `bonds_dropped`, `trimmed`). A
+repaired molecule is the model's geometry with some of its bonds removed and some orders overruled, so it is a
+proposal whose chemistry is chosen partly by these rules; the checks below are on sanitization and bond lengths only.
 
 ## Sampling until a target is met
 
@@ -110,8 +128,39 @@ SMOKE n_raw=4 accepted=0 rejected={'scaffold_lost': 1, 'unsanitizable': 3} wall=
 ```
 
 That run accepted no candidate, in line with the yield above. This setup is a poor proposer on that scaffold. `scaffold_match="topology"` admits 4 of the 16, but they include
-molecules that absorbed the carboxylic acid into a ring, so it is not the default. A yield study (scaffold size,
-`add_n_nodes`, resamplings, other scaffolds) is the next piece of work. Nothing beyond these counts is claimed.
+molecules that absorbed the carboxylic acid into a ring, so it is not the default. The yield study below widens this to 15 cells.
+
+## Yield study
+
+15 cells on the same parent (danuglipron in 7LCJ, 41 heavy atoms), 32 samples each (480 raw), 50 timesteps, 20
+resamplings, two GTX 1080s, about 6.7 minutes per cell. Five scaffolds regrow 3, 4, 9, 17 and 17 atoms, each at
+`add_n_nodes` equal to that count, 4 more, and unset. Accepted out of 32, no repair:
+
+| regrown | true count | +4 | unset |
+|---|---|---|---|
+| carboxylic acid (3) | 5 | 1 | 1 |
+| oxetane (4) | 8 | 3 | 2 |
+| cyanofluorobenzyl head (9) | 2 | 0 | 3 |
+| piperidine to oxetane (17) | 9 | 2 | 12 |
+| head to piperidine (17) | 0 | 0 | 1 |
+
+49 of 480 (10%). By `add_n_nodes`: true count 24 of 160, unset 19, true count + 4 only 6. With the size unset the
+model often returns the same molecule over and over (up to 25 of 32 duplicates). Rejections: 189 unsanitizable (112
+of them an O with too many bonds, 48 an N), 121 lost the scaffold, 63 duplicates, 58 disconnected.
+
+The same 480 raw samples re-scored with the repairs above (no new sampling):
+
+| repairs | accepted of 480 |
+|---|---|
+| none | 49 |
+| `salvage_bonds=4` | 62 |
+| `salvage_bonds=4`, `trim_stray_fragments` | 96 |
+| `salvage_bonds=4`, `trim_stray_fragments`, `scaffold_orders` | 334 (384 with `salvage_bonds=8`; 7x) |
+
+On the 16-sample fixture the last combination accepts 13. The accepted molecules still sanitize, hold the exact
+scaffold, and have no bond more than 1.3 times its covalent-radii sum, but some carry odd groups (an azo ester, an
+aminal), and nothing here says they bind. Pair the repairs with `forbidden_smarts` and a tier that scores them. Not
+varied: timesteps and resamplings, a stated attachment atom, other parents.
 
 ## Not claimed
 

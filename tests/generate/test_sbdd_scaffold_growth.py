@@ -339,3 +339,16 @@ def test_a_timeout_error_carries_the_stderr_tail(files, parent_candidate, scaffo
     )
     with pytest.raises(GeneratorError, match="stuck here"):
         gen.generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
+
+
+def test_repairs_are_counted_in_the_provenance(fake_runner, files, parent_candidate, scaffold_indices):
+    filters = FilterConfig(salvage_bonds=4, trim_stray_fragments=True, scaffold_orders=True)
+    result = _generator(fake_runner, files, filters=filters).generate(
+        parent_candidate, scaffold_indices, files["pocket"], seed=3
+    )
+    assert len(result.candidates) == 13
+    assert result.provenance["repairs"] == {"salvaged": 13, "bonds_dropped": 32, "trimmed": 10}
+    assert result.provenance["rejection_counts"] == {"unsanitizable": 2, "forbidden_substructure": 1}
+    plain = _generator(fake_runner, files).generate(parent_candidate, scaffold_indices, files["pocket"], seed=3)
+    assert plain.provenance["repairs"] == {}
+    json.dumps(result.provenance)

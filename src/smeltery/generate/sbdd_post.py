@@ -116,7 +116,7 @@ def _kabsch(moving: np.ndarray, fixed: np.ndarray) -> tuple[np.ndarray, np.ndarr
     return rot, shift, rmsd
 
 
-def repair(raw: Chem.Mol, spec: ScaffoldSpec) -> tuple[Chem.Mol, list[int]]:
+def repair(raw: Chem.Mol, spec: ScaffoldSpec, *, scaffold_orders: bool = False) -> tuple[Chem.Mol, list[int]]:
     """Fit the output onto the scaffold and make the scaffold's graph exactly the scaffold's.
 
     Adds scaffold bonds the model missed (with the scaffold's order), deletes bonds between two scaffold atoms
@@ -141,11 +141,48 @@ def repair(raw: Chem.Mol, spec: ScaffoldSpec) -> tuple[Chem.Mol, list[int]]:
             rw.RemoveBond(i, j)
     for b in spec.kekule.GetBonds():
         i, j = mapping[b.GetBeginAtomIdx()], mapping[b.GetEndAtomIdx()]
-        if rw.GetBondBetweenAtoms(i, j) is None:
+        have = rw.GetBondBetweenAtoms(i, j)
+        if have is None:
             rw.AddBond(i, j, b.GetBondType())
+        elif scaffold_orders:
+            have.SetBondType(b.GetBondType())
     for k, j in enumerate(mapping):
         rw.GetAtomWithIdx(j).SetFormalCharge(spec.kekule.GetAtomWithIdx(k).GetFormalCharge())
     return _with_coords(rw.GetMol(), pos @ rot.T + shift), mapping
+
+
+def salvage_valence(mol: Chem.Mol, protected: set[frozenset[int]], max_drops: int) -> tuple[Chem.Mol, int]:
+    """Drop the longest unprotected bond of each over-valent atom until `mol` sanitizes, at most `max_drops` times.
+
+    The model assigns bonds from distances and puts new atoms beside atoms that are already saturated, so most
+    unsanitizable output is an O, N or F with one bond too many; that bond is the longest, and the least certain, one.
+    `protected` holds the scaffold's own bonds (pairs of atom indices), which are never dropped. Returns the molecule
+    (sanitized when this succeeded; otherwise as far as it got, for the caller to reject) and the number of bonds
+    dropped. A different failure (a kekulization error, say) or no droppable bond ends the loop without raising.
+    """
+    work = Chem.RWMol(mol)
+    xyz = np.asarray(work.GetConformer().GetPositions(), dtype=float)
+    dropped = 0
+    while True:
+        trial = Chem.Mol(work)
+        try:
+            Chem.SanitizeMol(trial)
+            return trial, dropped
+        except Chem.AtomValenceException as e:
+            atom = int(e.cause.GetAtomIdx()) if hasattr(e, "cause") else -1
+        except Exception:  # noqa: BLE001 - not a valence problem; the caller reports the real error
+            return work.GetMol(), dropped
+        if dropped >= max_drops or atom < 0:
+            return work.GetMol(), dropped
+        options = [
+            (float(np.linalg.norm(xyz[atom] - xyz[n.GetIdx()])), n.GetIdx())
+            for n in work.GetAtomWithIdx(atom).GetNeighbors()
+            if frozenset((atom, n.GetIdx())) not in protected
+        ]
+        if not options:
+            return work.GetMol(), dropped
+        work.RemoveBond(atom, max(options)[1])
+        dropped += 1
 
 
 def smiles_and_pose(mol: Chem.Mol) -> tuple[str, Pose]:
@@ -195,10 +232,15 @@ class FilterConfig:
     deduplicate: bool = True
     min_heavy_atoms: int | None = None
     max_heavy_atoms: int | None = None
+    trim_stray_fragments: bool = False  # keep the piece holding the scaffold, not reject
+    scaffold_orders: bool = False  # force the scaffold's own bond orders (needs salvage_bonds to be of any use)
+    salvage_bonds: int = 0  # over-valent atoms: drop up to this many of their longest new bonds; 0 disables
 
     def __post_init__(self) -> None:
         if self.scaffold_match not in SCAFFOLD_MATCH_MODES:
             raise ValueError(f"scaffold_match must be one of {SCAFFOLD_MATCH_MODES}, not {self.scaffold_match!r}")
+        if self.salvage_bonds < 0:
+            raise ValueError("salvage_bonds must be at least 0")
         for label, smarts in self.forbidden_smarts.items():
             if Chem.MolFromSmarts(smarts) is None:
                 raise ValueError(f"forbidden_smarts[{label!r}] is not valid SMARTS: {smarts!r}")
@@ -234,13 +276,32 @@ def _classify(raw: Chem.Mol | None, spec: ScaffoldSpec, config: FilterConfig, qu
     if raw is None:
         return _Rejected("unsanitizable", "unreadable SDF record")
     try:
-        mol, _ = repair(raw, spec)
+        mol, mapping = repair(raw, spec, scaffold_orders=config.scaffold_orders)
     except RepairError as e:
         return _Rejected("scaffold_atom_mismatch", str(e))
     except Exception as e:  # noqa: BLE001 - one bad sample must be a rejection, never an exception
         return _Rejected("scaffold_atom_mismatch", f"repair failed: {type(e).__name__}: {e}")
     try:
+        dropped = 0
+        if config.salvage_bonds:
+            protected = {
+                frozenset((mapping[b.GetBeginAtomIdx()], mapping[b.GetEndAtomIdx()])) for b in spec.kekule.GetBonds()
+            }
+            mol, dropped = salvage_valence(mol, protected, config.salvage_bonds)
         Chem.SanitizeMol(mol)
+        trimmed = 0
+        if config.trim_stray_fragments:
+            groups = Chem.GetMolFrags(mol)
+            if len(groups) > 1:
+                keep = next(g for g in groups if mapping[0] in g)
+                trimmed = mol.GetNumAtoms() - len(keep)
+                mol = Chem.RWMol(mol)
+                for a in sorted((a for a in range(mol.GetNumAtoms()) if a not in keep), reverse=True):
+                    mol.RemoveAtom(a)
+                mol = mol.GetMol()
+                Chem.SanitizeMol(mol)
+        mol.SetIntProp("salvaged_bonds", dropped)
+        mol.SetIntProp("trimmed_atoms", trimmed)
         Chem.AssignStereochemistryFrom3D(mol)
         smiles = Chem.MolToSmiles(mol)
     except Exception as e:  # noqa: BLE001 - RDKit raises several exception types for the same condition
@@ -266,8 +327,13 @@ def process_samples(
     start_index: int = 0,
     first_number: int = 0,
     seen: set[str] | None = None,
+    stats: dict[str, int] | None = None,
 ) -> tuple[list[Candidate], list[Rejection]]:
-    """Repair, filter, deduplicate and name the raw outputs. Every input ends up as exactly one of the two lists."""
+    """Repair, filter, deduplicate and name the raw outputs. Every input ends up as exactly one of the two lists.
+
+    `stats`, if given, gains `salvaged` and `bonds_dropped` (accepted candidates that needed `salvage_bonds`, and the
+    bonds dropped for them) and `trimmed` (accepted candidates that lost stray fragments).
+    """
     if pose_source not in POSE_SOURCES:
         raise ValueError(f"pose_source must be one of {POSE_SOURCES}, not {pose_source!r}")
     seen = set() if seen is None else seen
@@ -300,6 +366,11 @@ def process_samples(
                 continue
             poses = [pose]
         seen.add(smiles)
+        if stats is not None and outcome.GetIntProp("salvaged_bonds"):
+            stats["salvaged"] = stats.get("salvaged", 0) + 1
+            stats["bonds_dropped"] = stats.get("bonds_dropped", 0) + outcome.GetIntProp("salvaged_bonds")
+        if stats is not None and outcome.GetIntProp("trimmed_atoms"):
+            stats["trimmed"] = stats.get("trimmed", 0) + 1
         candidates.append(Candidate(f"{name_prefix}-{number:04d}", smiles, poses=poses))
         number += 1
     return candidates, rejected

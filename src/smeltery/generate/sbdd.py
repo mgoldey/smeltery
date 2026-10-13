@@ -146,6 +146,7 @@ class ScaffoldGrowth:
         candidates: list[Candidate] = []
         rejected: list[Rejection] = []
         seen: set[str] = set()
+        repairs: dict[str, int] = {}
         runs: list[dict] = []
         n_raw = 0
         for batch in range(n_batches):
@@ -162,6 +163,7 @@ class ScaffoldGrowth:
                 start_index=n_raw,
                 first_number=len(candidates),
                 seen=seen,
+                stats=repairs,
             )
             n_raw += len(raws)
             candidates += got
@@ -178,6 +180,7 @@ class ScaffoldGrowth:
             "n_raw": n_raw,
             "n_accepted": len(candidates),
             "rejection_counts": result.rejection_counts(),
+            "repairs": repairs,
             "wall_time_s": round(time.time() - started, 3),
             "runs": runs,
         }
