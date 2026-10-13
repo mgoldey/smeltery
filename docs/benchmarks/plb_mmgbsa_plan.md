@@ -137,3 +137,17 @@ the environment), report `docs/benchmarks/plb_mmgbsa.md`, a `docs/limits.md` row
   writes (`sqm.in` for `-c bcc` on a test molecule outside the series: "Run semi-empirical minimization", no `maxcyc` line) shows sqm **minimises the geometry at
   the AM1 level first**, so the charges are those of the AM1-optimised conformer started from the PLB pose, not of the PLB geometry itself. Nothing else changes
   (same method, same code path as `ForceField(path="openmm")`); the sentence in 3.2 is to be read this way.
+* **A2, 2026-10-13, before any series energy was seen. Two cost-driven changes to sections 3.1 and 3.3, made after a pilot that was stopped by me, not by a result.** The pilot
+  (cdk2 parent, GAFF2, the protocol as committed) ran 12 CPU-minutes without finishing minimisation and was killed; its energies were never printed or read, and its output directory was deleted.
+  A timing test on the tyk2 protein alone (no ligand, nothing of the series scored) then measured one energy-and-force evaluation of the whole 4652-atom receptor at **4.2 s** with the xml's
+  CustomGBForce on one CPU thread, so the full-protein protocol (9034 atoms for cdk2, thousands of evaluations per minimisation) would cost tens of CPU-hours against the 6 CPU-h cap.
+  1. **GB force.** Section 3.3 said OBC2 "from OpenMM's `implicit/obc2.xml`". Instead the same model is built with OpenMM's **native `GBSAOBCForce`** (OBC type II, Amber igb 5; alpha 1.0, beta 0.8, gamma 4.85)
+     with the intrinsic radii (mbondi2) and the OBC screening parameters by element taken from OpenMM's own tables (`openmm.app.internal.customgbforces`), the charges from the NonbondedForce,
+     solute dielectric 1, solvent dielectric 78.5, and the force's default ACE surface-area term (the same 2.25936 kJ/mol/nm^2). Measured on the tyk2 receptor alone, same coordinates,
+     CPU platform: total energy -36969.98 kJ/mol (native) against -36970.03 kJ/mol (xml CustomGBForce), a difference of 1.3e-6 relative, and 0.63 s per evaluation against 4.2 s.
+  2. **Receptor truncation.** Section 3.1 said all chains kept. Instead the receptor is **every residue with any atom within 10 A of any atom of any PLB ligand pose of that series** (the union over all the series' ligands,
+     including cdk2's `lig_17`, so one receptor serves every ligand and the paired differences share it), whole residues, crystal waters dropped, protonation as shipped, `ignoreExternalBonds` so cut residues are
+     templated as in-chain, no capping or neutralisation of the cut ends (declared limitation; its effect on a difference of two ligands in the same receptor is not measured). A residue inside the shell with no
+     template is an error. The explicit TPO160 deletion and its guard are therefore dropped from the protocol (TPO160 lies about 17 A from the parent and outside the shell; the run records which non-standard residues, if any, stay).
+     The 10 A radius was fixed by cost (the shell holds a small fraction of the atoms) and was not varied.
+  Everything else in sections 3 to 6 is unchanged, including the restrained minimisation (protein heavy atoms, k = 10 kcal/mol/A^2), the tolerance, the single snapshot and the statistics.
