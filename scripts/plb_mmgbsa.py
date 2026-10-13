@@ -1,3 +1,4 @@
+# ruff: noqa: E501  (long docstring and report-table lines)
 """Single-structure MM/GBSA for the PLB series: dG = E(complex) - E(receptor) - E(ligand), one snapshot, GB solvation.
 
 Runs ONLY in the optional conda environment of docs/environments.md (OpenMM, openmmforcefields, openff-toolkit, AmberTools):
@@ -82,7 +83,9 @@ def min_distance_ang(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.sqrt(((a[:, None, :] - b[None, :, :]) ** 2).sum(-1)).min())
 
 
-def residues_in_shell(residue_xyz: dict[str, np.ndarray], ligand_xyz: np.ndarray, radius_ang: float) -> dict[str, float]:
+def residues_in_shell(
+    residue_xyz: dict[str, np.ndarray], ligand_xyz: np.ndarray, radius_ang: float
+) -> dict[str, float]:
     """{residue key: minimum atom-to-ligand distance} for the residues with an atom within `radius_ang` of the ligand atoms."""
     dist = {k: min_distance_ang(xyz, ligand_xyz) for k, xyz in residue_xyz.items()}
     return {k: d for k, d in dist.items() if d <= radius_ang}
@@ -196,8 +199,13 @@ def prepare_receptor(pdb_path: Path, ligand_xyz_ang: np.ndarray, radius_ang: flo
         else:
             xyz[f"{r.name}:{r.chain.id}:{r.id}"] = np.array([pos[index[a.index]] for a in r.atoms()])
     keep = residues_in_shell(xyz, ligand_xyz_ang, radius_ang)
-    dropped = [r for r in mod.topology.residues() if r.name not in WATER_NAMES and f"{r.name}:{r.chain.id}:{r.id}" not in keep]
-    far = {f"{r.name}:{r.chain.id}:{r.id}": min_distance_ang(xyz[f"{r.name}:{r.chain.id}:{r.id}"], ligand_xyz_ang) for r in dropped}
+    dropped = [
+        r for r in mod.topology.residues() if r.name not in WATER_NAMES and f"{r.name}:{r.chain.id}:{r.id}" not in keep
+    ]
+    far = {
+        f"{r.name}:{r.chain.id}:{r.id}": min_distance_ang(xyz[f"{r.name}:{r.chain.id}:{r.id}"], ligand_xyz_ang)
+        for r in dropped
+    }
     n_total = mod.topology.getNumResidues() - n_water
     mod.delete(to_delete + dropped)
     prov = {
@@ -246,7 +254,7 @@ def create_system(ff, topology):
 def ligand_molecule(symbols, coords_ang: np.ndarray, sdf_mol):
     """(openff Molecule with the pose as its conformer and AM1-BCC charges, charge provenance)."""
     s = _stack()
-    Molecule, unit = s["Molecule"], s["unit"]
+    Molecule = s["Molecule"]
     from openff.units import unit as ounit
 
     off = Molecule.from_rdkit(sdf_mol, allow_undefined_stereo=True, hydrogens_are_explicit=True)
@@ -324,7 +332,7 @@ def minimise_complex(system, positions_nm: np.ndarray, protein_heavy: list[int])
 def score_ligand(name: str, variant: str, plb_dir: Path, ligs: dict):
     """One (ligand, variant): the three energies on one minimised snapshot. Returns the task record (no energies printed)."""
     s = _stack()
-    mm, app, unit = s["openmm"], s["app"], s["unit"]
+    app, unit = s["app"], s["unit"]
     from rdkit import Chem
 
     t0, c0 = time.time(), _cpu_s()
@@ -341,7 +349,9 @@ def score_ligand(name: str, variant: str, plb_dir: Path, ligs: dict):
     system = create_system(ff, com.topology)
     dev = check_ligand_charges(system, n_p, off)
     pos0 = np.asarray(com.positions.value_in_unit(unit.nanometer))
-    heavy = [a.index for a in com.topology.atoms() if a.index < n_p and a.element is not None and a.element.symbol != "H"]
+    heavy = [
+        a.index for a in com.topology.atoms() if a.index < n_p and a.element is not None and a.element.symbol != "H"
+    ]
     pos, info = minimise_complex(system, pos0, heavy)
     ligand_move = float(np.sqrt(((pos[n_p:] - pos0[n_p:]) ** 2).sum(1).mean()) * 10.0)
 
@@ -412,7 +422,10 @@ def cmd_run(a: argparse.Namespace) -> int:
     todo = [(n, v, str(a.plb_dir), a.target) for v in a.variants for n in names if (n, v) not in done]
     cap_s = a.cpu_cap_h * 3600.0
     spent = sum(r.get("cpu_s", 0.0) for r in read_tasks(tasks_path))
-    print(f"{len(todo)} tasks to run, {len(done)} finished, {spent / 3600:.2f} CPU-h spent, cap {a.cpu_cap_h} CPU-h", flush=True)
+    print(
+        f"{len(todo)} tasks to run, {len(done)} finished, {spent / 3600:.2f} CPU-h spent, cap {a.cpu_cap_h} CPU-h",
+        flush=True,
+    )
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=a.workers, mp_context=ctx) as ex, tasks_path.open("a") as fh:
         pending, it = set(), iter(todo)

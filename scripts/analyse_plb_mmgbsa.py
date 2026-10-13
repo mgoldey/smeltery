@@ -1,3 +1,4 @@
+# ruff: noqa: E501  (long docstring and report-table lines)
 """Analyse a committed PLB MM/GBSA results file against experiment and the stored ddE study (issue #27).
 
     python scripts/analyse_plb_mmgbsa.py benchmarks/plb/results/cdk2_mmgbsa.json \\
@@ -167,7 +168,9 @@ def fmt_ci(ci: dict, nd: int = 2) -> str:
 
 
 def tables(an: dict) -> str:
-    out = [f"{an['target']}: n = {len(an['analogues'])} analogues, parent {an['reference']}; bootstrap {an['n_boot']}, seed {an['seed']}\n"]
+    out = [
+        f"{an['target']}: n = {len(an['analogues'])} analogues, parent {an['reference']}; bootstrap {an['n_boot']}, seed {an['seed']}\n"
+    ]
     out.append("| score | rho | rho 95% CI | p (perm., 2-sided) | tau-b | label |")
     out.append("|---|---:|---|---:|---:|---|")
 
@@ -182,7 +185,9 @@ def tables(an: dict) -> str:
             out.append(row(f"MM/GBSA ({v})", d["primary"]))
     out.append(row("smeltery ddE (amber14)", an["ddE_block"]))
     out.append(row("Crippen logP", an["crippen_logp_block"]))
-    out.append("\n| variant | Delta-rho vs ddE | 95% CI (paired) | reading | Delta-rho vs logP | 95% CI | rho(MM, ddE) | rho(MM, logP) |")
+    out.append(
+        "\n| variant | Delta-rho vs ddE | 95% CI (paired) | reading | Delta-rho vs logP | 95% CI | rho(MM, ddE) | rho(MM, logP) |"
+    )
     out.append("|---|---:|---|---|---:|---|---:|---:|")
     for v, d in an["variants"].items():
         if d["missing_ligands"]:
@@ -192,7 +197,9 @@ def tables(an: dict) -> str:
             f"| {v} | {a['delta_spearman']:+.3f} | {fmt_ci(a['paired_bootstrap_ci'])} | {a['label']} | {b['delta_spearman']:+.3f} | "
             f"{fmt_ci(b['paired_bootstrap_ci'])} | {d['spearman_with_ddE']:+.3f} | {d['spearman_with_logP']:+.3f} |"
         )
-    out.append("\n| variant | rho vdW | rho Coulomb | rho GB+SA | rho vdW+Coulomb | rho Coulomb+GB+SA | not converged |")
+    out.append(
+        "\n| variant | rho vdW | rho Coulomb | rho GB+SA | rho vdW+Coulomb | rho Coulomb+GB+SA | not converged |"
+    )
     out.append("|---|---:|---:|---:|---:|---:|---|")
     for v, d in an["variants"].items():
         if d["missing_ligands"]:

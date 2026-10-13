@@ -133,6 +133,14 @@ load, `ForceField().run` measured 7.1 ms (aspirin, mmff) and the OpenMM path 13.
 7.8 s aspirin, 48 s ibuprofen, dominated by AM1-BCC. Maxima of hundreds of ms to
 seconds in those runs were load. Nothing was tuned toward 9 ms.
 
+### MM/GBSA baseline (issue #27)
+
+`scripts/plb_mmgbsa.py` (a script, not part of the package) runs a single-snapshot MM/GBSA in this same conda environment: OpenMM's AMBER ff14SB
+protein, GAFF2 or Sage ligand parameters from AM1-BCC charges (sqm), OBC2 GB. Run it with the environment's `bin` first on `PATH` and
+`PYTHONPATH=src`. Measured 2026-10-13 in the environment built on 2026-10-10: 46 runs, 0.60 CPU-h, no new dependency and no extra.
+Its protocol, results and limits are in `docs/benchmarks/plb_mmgbsa.md`; `scripts/analyse_plb_mmgbsa.py` needs only numpy and RDKit.
+Cost note: the xml's `CustomGBForce` costs 4.2 s per energy-and-force evaluation of a 4652-atom protein on one CPU thread, OpenMM's native `GBSAOBCForce` 0.63 s.
+
 ## PoseBusters on Python 3.12 (issue #68)
 
 Verified 2026-10-10, Linux x86_64, throwaway venvs from PyPI wheels, one thread.

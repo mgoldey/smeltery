@@ -11,7 +11,6 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -121,6 +120,17 @@ def test_energy_terms_split_vdw_from_coulomb_against_the_analytic_values(tool):
     assert t["bonded"] == 0.0 and t["gbsa"] == 0.0
 
 
+def test_energy_terms_convert_the_bonded_energy_to_kcal(tool):
+    openmm = pytest.importorskip("openmm")
+    pytest.importorskip("openmmforcefields")
+    system = _two_particle_system(0.0, 0.0, 0.3, 0.0)
+    bond = openmm.HarmonicBondForce()
+    bond.addBond(0, 1, 0.40, 2000.0)  # r0 nm, k kJ/mol/nm^2
+    system.addForce(bond)
+    t = tool.energy_terms(system, np.array([[0.0, 0.0, 0.0], [0.45, 0.0, 0.0]]))
+    assert t["bonded"] == pytest.approx(0.5 * 2000.0 * 0.05**2 / 4.184, rel=1e-9)
+
+
 def test_two_distant_particles_have_no_binding_energy(tool):
     pytest.importorskip("openmm")
     pytest.importorskip("openmmforcefields")
@@ -137,7 +147,9 @@ def test_two_distant_particles_have_no_binding_energy(tool):
         tool.energy_terms(s2, near), tool.energy_terms(one(0.5), near[:1]), tool.energy_terms(one(-0.8), near[1:])
     )
     assert abs(e_far["total"]) < 1e-3
-    assert e_near["elec"] == pytest.approx(138.93545764438198 * 0.5 * -0.8 / 0.45 / 4.184, rel=1e-9)  # attraction: C - R - L < 0
+    assert e_near["elec"] == pytest.approx(
+        138.93545764438198 * 0.5 * -0.8 / 0.45 / 4.184, rel=1e-9
+    )  # attraction: C - R - L < 0
 
 
 def test_native_gb_force_equals_the_xml_custom_gb_force_on_a_fixture_peptide(tool):
@@ -231,7 +243,10 @@ def test_paired_delta_rho_is_mm_minus_ddE(fast):
     dgs = {"p": -40.0, **{n: -40.0 + 3.0 * v for n, v in DDG.items() if n != "p"}}
     res, ddE_an, tgt = _fake(DDG, {"gaff2": dgs})
     v = fast.analyse(res, ddE_an, tgt)["variants"]["gaff2"]
-    rho_ddE = fast.spearman([DDG[n] for n in sorted(DDG) if n != "p"], [ddE_an["models"]["amber14"]["per_ligand"][n]["ddE_mean"] for n in sorted(DDG) if n != "p"])
+    rho_ddE = fast.spearman(
+        [DDG[n] for n in sorted(DDG) if n != "p"],
+        [ddE_an["models"]["amber14"]["per_ligand"][n]["ddE_mean"] for n in sorted(DDG) if n != "p"],
+    )
     assert v["vs_ddE"]["delta_spearman"] == pytest.approx(1.0 - rho_ddE, rel=1e-12)
     assert v["vs_ddE"]["delta_spearman"] > 0
 
@@ -284,8 +299,8 @@ def test_committed_results_are_internally_consistent_and_match_the_manifest(targ
     assert res["reference"] == bench.reference
     assert set(res["ligands"]) <= {lg.name for lg in bench.ligands}
     assert res["total_cpu_s"] <= 6.0 * 3600.0
-    for name, per_v in res["ligands"].items():
-        for v, r in per_v.items():
+    for per_v in res["ligands"].values():
+        for r in per_v.values():
             dg = r["dG"]
             for t in ("vdw", "elec", "gbsa"):
                 assert _same(dg[t], r["E_complex"][t] - r["E_receptor"][t] - r["E_ligand"][t])
