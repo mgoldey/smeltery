@@ -1,0 +1,838 @@
+{
+  "campaign": "plb-cdk2-paired-ddE",
+  "ferric": {
+    "commit": "cddfd1aa57777430484f67ab72f52a3351687076",
+    "dirty": false,
+    "provenance": "VERIFIED from ferric.__build__ (stamped at build time)",
+    "source": "ferric.__build__",
+    "version": "0.1.0rc7"
+  },
+  "host": {
+    "node": "blacktea",
+    "python": "3.11.14"
+  },
+  "input_digest": "da78d0379da493ff4a13ea00b055a2e73873e0b8bd6ee6d67950f297c5317950",
+  "inputs": {
+    "basis": "sto-3g",
+    "commands": [
+      "scripts/run_plb_ddE.py run --plb-dir /tmp/claude-1000/-home-matt-qc-smeltery/c3789fb9-9f2c-43da-bb6f-e75d2bec0196/scratchpad/data/plb_cdk2/cdk2 --target cdk2 --field amber14_pcm_water=/tmp/claude-1000/-home-matt-qc-smeltery/c3789fb9-9f2c-43da-bb6f-e75d2bec0196/scratchpad/data/cdk2_amber14.pqr --solvent amber14_pcm_water=water --exclude lig_17=no_STO-3G_shells_for_Br_in_ferric_0.1.0rc7_plan_amendment_A1 --run alone:amber14_pcm_water amber14_pcm_water --only-poses 1 2 --poses 6 --seed 1 --workers 4 --out /tmp/claude-1000/-home-matt-qc-smeltery/c3789fb9-9f2c-43da-bb6f-e75d2bec0196/scratchpad/pcm_tyk2/runC --prior-cpu-hours 14.76 --max-cpu-hours 23.5 --est-scf-cpu-s 500"
+    ],
+    "cutoff_ang": 15.0,
+    "dropped_poses": {
+      "0": "AMBER_SCF_for_lig_20_pose_0_did_not_converge_in_the_gas_phase_run_pose_dropped_for_every_ligand_and_model_as_in_the_merged_cdk2_result"
+    },
+    "excluded_ligands": {
+      "lig_17": "no_STO-3G_shells_for_Br_in_ferric_0.1.0rc7_plan_amendment_A1"
+    },
+    "field_eps": {
+      "amber14": 1.0,
+      "amber14_pcm_water": 1.0
+    },
+    "field_provenance": {
+      "amber14": {
+        "center_ang": [
+          5.257,
+          44.2359,
+          51.2286
+        ],
+        "cutoff_ang": 15.0,
+        "input": "cdk2_amber14.pqr",
+        "input_sha256": "3c7fc6ee25e9e20277bd232cb8e3e2300e478f434227fc0ad5f5fe68493076d2",
+        "n_charges": 1046,
+        "n_total": 8990,
+        "pdb2pqr_version": null
+      },
+      "amber14_pcm_water": {
+        "center_ang": [
+          5.257,
+          44.2359,
+          51.2286
+        ],
+        "cutoff_ang": 15.0,
+        "dielectric_eps": 1.0,
+        "input": "cdk2_amber14.pqr",
+        "input_sha256": "3c7fc6ee25e9e20277bd232cb8e3e2300e478f434227fc0ad5f5fe68493076d2",
+        "n_charges": 1046,
+        "n_total": 8990,
+        "pdb2pqr_version": null,
+        "scaled_charge_sum_e": 4.682299999999991,
+        "solvent": "water"
+      }
+    },
+    "field_solvent": {
+      "amber14": null,
+      "amber14_pcm_water": "water"
+    },
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "ligand_atom_counts": {
+      "lig_1h1q": 45,
+      "lig_1h1r": 45,
+      "lig_1oi9": 46,
+      "lig_1oiu": 50,
+      "lig_1oiy": 49,
+      "lig_20": 49,
+      "lig_21": 49,
+      "lig_22": 49,
+      "lig_26": 49
+    },
+    "max_cpu_hours_last_invocation": 23.5,
+    "models": [
+      "amber14",
+      "amber14_pcm_water"
+    ],
+    "n_poses": 6,
+    "n_poses_by_model": {
+      "amber14": 5,
+      "amber14_pcm_water": 2
+    },
+    "pivot_ang": [
+      5.257013333333334,
+      44.23593111111111,
+      51.228557777777766
+    ],
+    "pose_geometry_sha256": {
+      "lig_1h1q": "b8eec395ce03f63faca4a09c82255992f83a3a3b3510d405d0b7288569d46b4b",
+      "lig_1h1r": "64655fc1ebea42f817417b82926ada9d079a84b8b20351fcfe884f7fe8b70974",
+      "lig_1oi9": "8d3b9b29166c9ede08b253404caf44f38122f81346801a3294e74d71d63c407b",
+      "lig_1oiu": "8c622216313575207804ece5eb4b2cd1cd67df007285881cd51c4a42f0829691",
+      "lig_1oiy": "b73c8b8e2ecdb8e591c33d3ed4015f84f5ff392baa703d45a14517f4511396b8",
+      "lig_20": "29458191175d7fa9f054f2169b0df9e235cd9352398a2242021cfbb04c9ffc97",
+      "lig_21": "e8753c3555fbf58371e1f19a483a7999e31da743192cc363fa7373a2c789da70",
+      "lig_22": "76717ab37ecb3bc8512865cf95cf447a6d8b8ab89cf50b84ad411aafa54662df",
+      "lig_26": "6250ca7d1f16c45fbf6afbdc5882849fbc271a1ded849249018624beb4d14466"
+    },
+    "pose_indices": {
+      "amber14": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "amber14_pcm_water": [
+        1,
+        2
+      ],
+      "vac": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "prep_provenance": {
+      "amber14": {
+        "center_ang": [
+          5.257,
+          44.2359,
+          51.2286
+        ],
+        "cutoff_ang": 15.0,
+        "deleted_residues_min_distance_to_center_ang": {
+          "ACE:A:-1": 24.218130381389887,
+          "ACE:B:174": 31.025341821968702,
+          "NME:A:297": 17.05326119456334,
+          "NME:B:434": 58.88453933563548,
+          "TPO:A:160": 21.289216955303914
+        },
+        "force_field": "amber14",
+        "force_field_files": {
+          "amber14-all.xml": "96d635545c36ce248e37d23ea82fa05ce4d2e1a6a42cd6d0ec5db3cfe30ca44c",
+          "amber14/tip3p.xml": "3f4b188dbcb6c02863230eaca231e927fb6bf3307ce947d8a50d0f46f6dd83d9"
+        },
+        "histidine_templates_matched": {
+          "HID": 5,
+          "HIE": 14
+        },
+        "ignore_external_bonds": true,
+        "input": "protein.pdb",
+        "input_sha256": "15d1e509d7951ca45ea266d51a627d5f452dcf0bb5bd48751ae57eb29e28ab69",
+        "margin_ang": 1.0,
+        "n_atoms_in_cutoff_sphere": 1046,
+        "n_atoms_written": 8990,
+        "n_waters_dropped_inside_cutoff": 1,
+        "net_charge_in_cutoff_sphere_e": 4.682300000000004,
+        "net_charge_written_e": 3.352873534367973e-14,
+        "openmm_version": "8.6.1",
+        "output": "cdk2_amber14.pqr",
+        "output_sha256": "3c7fc6ee25e9e20277bd232cb8e3e2300e478f434227fc0ad5f5fe68493076d2",
+        "protonation": "as given by the input file (PLB: PrepWizard/PropKa/Epik pH 7.4); NO protonation is changed",
+        "tool": "scripts/plb_pocket_charges.py",
+        "waters_dropped": true,
+        "waters_dropped_min_distance_to_center_ang": {
+          "HOH:A:2117": 5.875836431521901
+        }
+      },
+      "amber14_pcm_water": {
+        "center_ang": [
+          5.257,
+          44.2359,
+          51.2286
+        ],
+        "cutoff_ang": 15.0,
+        "deleted_residues_min_distance_to_center_ang": {
+          "ACE:A:-1": 24.218130381389887,
+          "ACE:B:174": 31.025341821968702,
+          "NME:A:297": 17.05326119456334,
+          "NME:B:434": 58.88453933563548,
+          "TPO:A:160": 21.289216955303914
+        },
+        "force_field": "amber14",
+        "force_field_files": {
+          "amber14-all.xml": "96d635545c36ce248e37d23ea82fa05ce4d2e1a6a42cd6d0ec5db3cfe30ca44c",
+          "amber14/tip3p.xml": "3f4b188dbcb6c02863230eaca231e927fb6bf3307ce947d8a50d0f46f6dd83d9"
+        },
+        "histidine_templates_matched": {
+          "HID": 5,
+          "HIE": 14
+        },
+        "ignore_external_bonds": true,
+        "input": "protein.pdb",
+        "input_sha256": "15d1e509d7951ca45ea266d51a627d5f452dcf0bb5bd48751ae57eb29e28ab69",
+        "margin_ang": 1.0,
+        "n_atoms_in_cutoff_sphere": 1046,
+        "n_atoms_written": 8990,
+        "n_waters_dropped_inside_cutoff": 1,
+        "net_charge_in_cutoff_sphere_e": 4.682300000000004,
+        "net_charge_written_e": 3.352873534367973e-14,
+        "openmm_version": "8.6.1",
+        "output": "cdk2_amber14.pqr",
+        "output_sha256": "3c7fc6ee25e9e20277bd232cb8e3e2300e478f434227fc0ad5f5fe68493076d2",
+        "protonation": "as given by the input file (PLB: PrepWizard/PropKa/Epik pH 7.4); NO protonation is changed",
+        "tool": "scripts/plb_pocket_charges.py",
+        "waters_dropped": true,
+        "waters_dropped_min_distance_to_center_ang": {
+          "HOH:A:2117": 5.875836431521901
+        }
+      }
+    },
+    "reference": "lig_1h1q",
+    "reused_from_base_result": {
+      "cpu_s_of_the_reused_scfs": 36233.582331014,
+      "ferric": {
+        "commit": "cddfd1aa57777430484f67ab72f52a3351687076",
+        "dirty": false,
+        "provenance": "VERIFIED from ferric.__build__ (stamped at build time)",
+        "source": "ferric.__build__",
+        "version": "0.1.0rc7"
+      },
+      "file_sha256": "cface836445225d0352b8cded8dec0968bc6a5e2c1465d27b06d37ea29b8924d",
+      "model": "amber14",
+      "pose_indices": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "smeltery_commit": "75f5e880b32d2dfd8b65ee134b20642dc6978be1"
+    },
+    "seed": 1,
+    "smeltery_commit": "b9508dc55be19664f7c5a9e3926b62e29c95280c",
+    "target": "cdk2"
+  },
+  "results": {
+    "E_alone_hartree": {
+      "amber14_pcm_water": {
+        "lig_1h1q": [
+          -1028.1385350794644,
+          -1028.1385395163209
+        ],
+        "lig_1h1r": [
+          -1482.1402931080702,
+          -1482.1403046757796
+        ],
+        "lig_1oi9": [
+          -1101.976303334321,
+          -1101.9763050251654
+        ],
+        "lig_1oiu": [
+          -1622.9561237457856,
+          -1622.9561845098651
+        ],
+        "lig_1oiy": [
+          -1193.641154424612,
+          -1193.641152064507
+        ],
+        "lig_20": [
+          -1140.5479201807348,
+          -1140.5479243149275
+        ],
+        "lig_21": [
+          -1140.556777689143,
+          -1140.5567910394211
+        ],
+        "lig_22": [
+          -1459.895467025372,
+          -1459.8954648457088
+        ],
+        "lig_26": [
+          -1140.5491468246155,
+          -1140.5491599939382
+        ]
+      }
+    },
+    "E_field_hartree": {
+      "amber14": {
+        "lig_1h1q": [
+          -1028.1718460045104,
+          -1028.1798005152004,
+          -1028.1638504193002,
+          -1028.164715384295,
+          -1028.1709209150854
+        ],
+        "lig_1h1r": [
+          -1482.1691592255115,
+          -1482.1770493968243,
+          -1482.1645071319813,
+          -1482.1633861429973,
+          -1482.1705687647554
+        ],
+        "lig_1oi9": [
+          -1102.006697846342,
+          -1102.0154289789034,
+          -1102.0324018515166,
+          -1102.0070929450767,
+          -1102.0216039391435
+        ],
+        "lig_1oiu": [
+          -1623.012880574223,
+          -1622.993684644945,
+          -1622.9719741152244,
+          -1622.9802398336292,
+          -1622.9849357889639
+        ],
+        "lig_1oiy": [
+          -1193.6771986988897,
+          -1193.6952139347122,
+          -1193.6564702618025,
+          -1193.668540349634,
+          -1193.669517163968
+        ],
+        "lig_20": [
+          -1140.6137662398614,
+          -1140.5906803208873,
+          -1140.5748193568397,
+          -1140.5797116305553,
+          -1140.583958304041
+        ],
+        "lig_21": [
+          -1140.585161440818,
+          -1140.597339282538,
+          -1140.586844292624,
+          -1140.583539726546,
+          -1140.5924250552544
+        ],
+        "lig_22": [
+          -1459.9275137469763,
+          -1459.9386750183558,
+          -1459.924198489693,
+          -1459.9253715372624,
+          -1459.9297914215413
+        ],
+        "lig_26": [
+          -1140.5853810895746,
+          -1140.5959565761596,
+          -1140.586305448035,
+          -1140.5836778861321,
+          -1140.5877893025531
+        ]
+      },
+      "amber14_pcm_water": {
+        "lig_1h1q": [
+          -1028.1922621083022,
+          -1028.2006932426525
+        ],
+        "lig_1h1r": [
+          -1482.1905113499947,
+          -1482.198972403467
+        ],
+        "lig_1oi9": [
+          -1102.0306558231368,
+          -1102.0398854615569
+        ],
+        "lig_1oiu": [
+          -1623.0490373235548,
+          -1623.02893462153
+        ],
+        "lig_1oiy": [
+          -1193.7058555630601,
+          -1193.7250065561998
+        ],
+        "lig_20": [
+          -1140.640018756068,
+          -1140.6159383149397
+        ],
+        "lig_21": [
+          -1140.6077524063544,
+          -1140.6206991381755
+        ],
+        "lig_22": [
+          -1459.9492005774496,
+          -1459.961513762093
+        ],
+        "lig_26": [
+          -1140.6086638289048,
+          -1140.6196470117366
+        ]
+      }
+    },
+    "E_vac_hartree": {
+      "lig_1h1q": [
+        -1028.1222130526353,
+        -1028.1222130504013,
+        -1028.1222130527178,
+        -1028.1222130526887,
+        -1028.1222130495607
+      ],
+      "lig_1h1r": [
+        -1482.122551223888,
+        -1482.1225512237893,
+        -1482.1225512239448,
+        -1482.1225512237943,
+        -1482.122551223862
+      ],
+      "lig_1oi9": [
+        -1101.9560959940814,
+        -1101.9560959846958,
+        -1101.9560959904707,
+        -1101.956095993315,
+        -1101.9560959875248
+      ],
+      "lig_1oiu": [
+        -1622.926022101391,
+        -1622.9260220987726,
+        -1622.9260221013715,
+        -1622.9260221013083,
+        -1622.926022101342
+      ],
+      "lig_1oiy": [
+        -1193.618474162205,
+        -1193.6184741621323,
+        -1193.6184741589054,
+        -1193.6184741621546,
+        -1193.6184741643651
+      ],
+      "lig_20": [
+        -1140.5278299162587,
+        -1140.5278299162173,
+        -1140.5278299162442,
+        -1140.5278299161987,
+        -1140.527829916226
+      ],
+      "lig_21": [
+        -1140.538343521096,
+        -1140.538343523157,
+        -1140.5383435231652,
+        -1140.5383435230838,
+        -1140.5383435231483
+      ],
+      "lig_22": [
+        -1459.8777373838725,
+        -1459.877737387476,
+        -1459.8777373826883,
+        -1459.8777373839503,
+        -1459.8777373823905
+      ],
+      "lig_26": [
+        -1140.5307064004796,
+        -1140.5307064003678,
+        -1140.530706400411,
+        -1140.5307064004796,
+        -1140.5307064004883
+      ]
+    },
+    "dE_int_kcal_mol": {
+      "amber14": {
+        "lig_1h1q": [
+          -31.14514752733227,
+          -36.136679748709646,
+          -26.127842005454,
+          -26.670615752742908,
+          -30.564647078107935
+        ],
+        "lig_1h1r": [
+          -29.246962585928305,
+          -34.198119898575,
+          -26.327729785805488,
+          -25.624298672488298,
+          -30.131461831819188
+        ],
+        "lig_1oi9": [
+          -31.753141698648978,
+          -37.232015989787335,
+          -47.88265073288649,
+          -32.00107037873664,
+          -41.10686026717388
+        ],
+        "lig_1oiu": [
+          -54.50451460464689,
+          -42.458888762421914,
+          -28.835324044980766,
+          -34.022140693595475,
+          -36.96889713476931
+        ],
+        "lig_1oiy": [
+          -36.85020312956628,
+          -48.154934331343,
+          -23.842914545386783,
+          -31.417006973535162,
+          -32.029965835444884
+        ],
+        "lig_20": [
+          -53.925857226852486,
+          -39.43922437907219,
+          -29.486319154634668,
+          -32.55626728938223,
+          -35.22109511784987
+        ],
+        "lig_21": [
+          -29.37868818141085,
+          -37.02039794119041,
+          -30.434692334728023,
+          -28.36104586420325,
+          -33.93667376836953
+        ],
+        "lig_22": [
+          -31.235139432023246,
+          -38.23894070405634,
+          -29.15478482090151,
+          -29.890882492363392,
+          -32.664402730371826
+        ],
+        "lig_26": [
+          -34.30888539857257,
+          -40.94510349363029,
+          -34.88892913302563,
+          -33.24010910214515,
+          -35.820061852708776
+        ]
+      },
+      "amber14_pcm_water": {
+        "lig_1h1q": [
+          -33.71421960897086,
+          -39.00205212143182
+        ],
+        "lig_1h1r": [
+          -31.512422578441647,
+          -36.814554945601955
+        ],
+        "lig_1oi9": [
+          -34.10670167080202,
+          -39.89732620071737
+        ],
+        "lig_1oiu": [
+          -58.30415031926874,
+          -45.65138430883897
+        ],
+        "lig_1oiy": [
+          -40.60057735883349,
+          -52.61948797998916
+        ],
+        "lig_20": [
+          -57.792728569321504,
+          -42.679429376599906
+        ],
+        "lig_21": [
+          -31.98711798782506,
+          -40.10293743773496
+        ],
+        "lig_22": [
+          -33.71831300374074,
+          -41.446320782725444
+        ],
+        "lig_26": [
+          -37.34748405940166,
+          -44.231271466896324
+        ]
+      }
+    },
+    "dropped_failures": [],
+    "failures": [],
+    "min_dist_to_field_ang": {
+      "amber14": {
+        "lig_1h1q": [
+          1.2186196191932728,
+          1.4156283293145873,
+          1.2512974820325031,
+          1.4258638064211158,
+          1.5296189103615572
+        ],
+        "lig_1h1r": [
+          1.224323963578824,
+          1.4005025964291327,
+          1.1933514003109962,
+          1.419594453599853,
+          1.5036083688825186
+        ],
+        "lig_1oi9": [
+          1.2180758617717653,
+          1.4127704443742932,
+          1.2399488231050642,
+          1.4245033208565332,
+          1.4711117056327339
+        ],
+        "lig_1oiu": [
+          1.2017820143588311,
+          1.395133792263782,
+          1.2308527460767817,
+          1.4295931389279624,
+          1.5092139253350818
+        ],
+        "lig_1oiy": [
+          1.2198685005989578,
+          1.3649780291217135,
+          1.1593218095957807,
+          1.4025226971399378,
+          1.4250954429793954
+        ],
+        "lig_20": [
+          1.039286894745344,
+          1.4209063188537152,
+          1.1985594999616493,
+          1.4256731146773378,
+          1.539328380608313
+        ],
+        "lig_21": [
+          1.2210159342678413,
+          1.377892963139182,
+          1.219362354483507,
+          1.4286114669731935,
+          1.5008312688479786
+        ],
+        "lig_22": [
+          1.2090753352244845,
+          1.439952897960248,
+          1.2582993648160756,
+          1.4159671766653477,
+          1.5533078096945507
+        ],
+        "lig_26": [
+          1.2349937697796813,
+          1.4066468142825743,
+          1.117142211739237,
+          1.4139742152798849,
+          1.518046173873977
+        ]
+      },
+      "amber14_pcm_water": {
+        "lig_1h1q": [
+          1.2186196191932728,
+          1.4156283293145873
+        ],
+        "lig_1h1r": [
+          1.224323963578824,
+          1.4005025964291327
+        ],
+        "lig_1oi9": [
+          1.2180758617717653,
+          1.4127704443742932
+        ],
+        "lig_1oiu": [
+          1.2017820143588311,
+          1.395133792263782
+        ],
+        "lig_1oiy": [
+          1.2198685005989578,
+          1.3649780291217135
+        ],
+        "lig_20": [
+          1.039286894745344,
+          1.4209063188537152
+        ],
+        "lig_21": [
+          1.2210159342678413,
+          1.377892963139182
+        ],
+        "lig_22": [
+          1.2090753352244845,
+          1.439952897960248
+        ],
+        "lig_26": [
+          1.2349937697796813,
+          1.4066468142825743
+        ]
+      }
+    },
+    "schema": "smeltery-plb-run/1",
+    "task_cpu_s": {
+      "alone:amber14_pcm_water:lig_1h1q:1": 524.988225319,
+      "alone:amber14_pcm_water:lig_1h1q:2": 381.55483956399985,
+      "alone:amber14_pcm_water:lig_1h1r:1": 784.219190613,
+      "alone:amber14_pcm_water:lig_1h1r:2": 491.8533349540003,
+      "alone:amber14_pcm_water:lig_1oi9:1": 567.556128312,
+      "alone:amber14_pcm_water:lig_1oi9:2": 369.82340283700023,
+      "alone:amber14_pcm_water:lig_1oiu:1": 983.8911409600001,
+      "alone:amber14_pcm_water:lig_1oiu:2": 903.9508788849994,
+      "alone:amber14_pcm_water:lig_1oiy:1": 731.1248774429998,
+      "alone:amber14_pcm_water:lig_1oiy:2": 460.4278380099995,
+      "alone:amber14_pcm_water:lig_20:1": 1016.8170819059999,
+      "alone:amber14_pcm_water:lig_20:2": 605.964358829,
+      "alone:amber14_pcm_water:lig_21:1": 600.1980198320002,
+      "alone:amber14_pcm_water:lig_21:2": 433.2600658170004,
+      "alone:amber14_pcm_water:lig_22:1": 544.5808779309996,
+      "alone:amber14_pcm_water:lig_22:2": 463.844078954,
+      "alone:amber14_pcm_water:lig_26:1": 462.886777962,
+      "alone:amber14_pcm_water:lig_26:2": 393.75019960700047,
+      "field:amber14:lig_1h1q:1": 0.0,
+      "field:amber14:lig_1h1q:2": 0.0,
+      "field:amber14:lig_1h1q:3": 0.0,
+      "field:amber14:lig_1h1q:4": 0.0,
+      "field:amber14:lig_1h1q:5": 0.0,
+      "field:amber14:lig_1h1r:1": 0.0,
+      "field:amber14:lig_1h1r:2": 0.0,
+      "field:amber14:lig_1h1r:3": 0.0,
+      "field:amber14:lig_1h1r:4": 0.0,
+      "field:amber14:lig_1h1r:5": 0.0,
+      "field:amber14:lig_1oi9:1": 0.0,
+      "field:amber14:lig_1oi9:2": 0.0,
+      "field:amber14:lig_1oi9:3": 0.0,
+      "field:amber14:lig_1oi9:4": 0.0,
+      "field:amber14:lig_1oi9:5": 0.0,
+      "field:amber14:lig_1oiu:1": 0.0,
+      "field:amber14:lig_1oiu:2": 0.0,
+      "field:amber14:lig_1oiu:3": 0.0,
+      "field:amber14:lig_1oiu:4": 0.0,
+      "field:amber14:lig_1oiu:5": 0.0,
+      "field:amber14:lig_1oiy:1": 0.0,
+      "field:amber14:lig_1oiy:2": 0.0,
+      "field:amber14:lig_1oiy:3": 0.0,
+      "field:amber14:lig_1oiy:4": 0.0,
+      "field:amber14:lig_1oiy:5": 0.0,
+      "field:amber14:lig_20:1": 0.0,
+      "field:amber14:lig_20:2": 0.0,
+      "field:amber14:lig_20:3": 0.0,
+      "field:amber14:lig_20:4": 0.0,
+      "field:amber14:lig_20:5": 0.0,
+      "field:amber14:lig_21:1": 0.0,
+      "field:amber14:lig_21:2": 0.0,
+      "field:amber14:lig_21:3": 0.0,
+      "field:amber14:lig_21:4": 0.0,
+      "field:amber14:lig_21:5": 0.0,
+      "field:amber14:lig_22:1": 0.0,
+      "field:amber14:lig_22:2": 0.0,
+      "field:amber14:lig_22:3": 0.0,
+      "field:amber14:lig_22:4": 0.0,
+      "field:amber14:lig_22:5": 0.0,
+      "field:amber14:lig_26:1": 0.0,
+      "field:amber14:lig_26:2": 0.0,
+      "field:amber14:lig_26:3": 0.0,
+      "field:amber14:lig_26:4": 0.0,
+      "field:amber14:lig_26:5": 0.0,
+      "field:amber14_pcm_water:lig_1h1q:1": 524.693236424,
+      "field:amber14_pcm_water:lig_1h1q:2": 385.13242613199964,
+      "field:amber14_pcm_water:lig_1h1r:1": 712.790324909,
+      "field:amber14_pcm_water:lig_1h1r:2": 515.8225831750001,
+      "field:amber14_pcm_water:lig_1oi9:1": 572.535815231,
+      "field:amber14_pcm_water:lig_1oi9:2": 368.9560989640004,
+      "field:amber14_pcm_water:lig_1oiu:1": 966.9521175210001,
+      "field:amber14_pcm_water:lig_1oiu:2": 504.67847065199976,
+      "field:amber14_pcm_water:lig_1oiy:1": 758.5364876650001,
+      "field:amber14_pcm_water:lig_1oiy:2": 465.63235061600017,
+      "field:amber14_pcm_water:lig_20:1": 598.0200984160001,
+      "field:amber14_pcm_water:lig_20:2": 416.1547704040004,
+      "field:amber14_pcm_water:lig_21:1": 567.9652442249999,
+      "field:amber14_pcm_water:lig_21:2": 399.54170742600036,
+      "field:amber14_pcm_water:lig_22:1": 543.2362130410002,
+      "field:amber14_pcm_water:lig_22:2": 437.656348513,
+      "field:amber14_pcm_water:lig_26:1": 486.99136653799997,
+      "field:amber14_pcm_water:lig_26:2": 396.55716480199953,
+      "vac::lig_1h1q:1": 0.0,
+      "vac::lig_1h1q:2": 0.0,
+      "vac::lig_1h1q:3": 0.0,
+      "vac::lig_1h1q:4": 0.0,
+      "vac::lig_1h1q:5": 0.0,
+      "vac::lig_1h1r:1": 0.0,
+      "vac::lig_1h1r:2": 0.0,
+      "vac::lig_1h1r:3": 0.0,
+      "vac::lig_1h1r:4": 0.0,
+      "vac::lig_1h1r:5": 0.0,
+      "vac::lig_1oi9:1": 0.0,
+      "vac::lig_1oi9:2": 0.0,
+      "vac::lig_1oi9:3": 0.0,
+      "vac::lig_1oi9:4": 0.0,
+      "vac::lig_1oi9:5": 0.0,
+      "vac::lig_1oiu:1": 0.0,
+      "vac::lig_1oiu:2": 0.0,
+      "vac::lig_1oiu:3": 0.0,
+      "vac::lig_1oiu:4": 0.0,
+      "vac::lig_1oiu:5": 0.0,
+      "vac::lig_1oiy:1": 0.0,
+      "vac::lig_1oiy:2": 0.0,
+      "vac::lig_1oiy:3": 0.0,
+      "vac::lig_1oiy:4": 0.0,
+      "vac::lig_1oiy:5": 0.0,
+      "vac::lig_20:1": 0.0,
+      "vac::lig_20:2": 0.0,
+      "vac::lig_20:3": 0.0,
+      "vac::lig_20:4": 0.0,
+      "vac::lig_20:5": 0.0,
+      "vac::lig_21:1": 0.0,
+      "vac::lig_21:2": 0.0,
+      "vac::lig_21:3": 0.0,
+      "vac::lig_21:4": 0.0,
+      "vac::lig_21:5": 0.0,
+      "vac::lig_22:1": 0.0,
+      "vac::lig_22:2": 0.0,
+      "vac::lig_22:3": 0.0,
+      "vac::lig_22:4": 0.0,
+      "vac::lig_22:5": 0.0,
+      "vac::lig_26:1": 0.0,
+      "vac::lig_26:2": 0.0,
+      "vac::lig_26:3": 0.0,
+      "vac::lig_26:4": 0.0,
+      "vac::lig_26:5": 0.0
+    },
+    "total_cpu_s_all_tasks_incl_failures_and_reruns": 20342.544142389,
+    "total_cpu_s_used_in_results": 20342.544142389
+  },
+  "smeltery_version": "0.0.2.dev193+g41aa9acee.d20261012",
+  "started_utc": "2026-10-13T05:07:35Z",
+  "tiers": [
+    {
+      "basis": "sto-3g",
+      "density_conv": 1e-08,
+      "energy_conv": 1e-10,
+      "engine": "ferric",
+      "field": {
+        "amber14": {
+          "center_ang": [
+            5.257,
+            44.2359,
+            51.2286
+          ],
+          "cutoff_ang": 15.0,
+          "input": "cdk2_amber14.pqr",
+          "input_sha256": "3c7fc6ee25e9e20277bd232cb8e3e2300e478f434227fc0ad5f5fe68493076d2",
+          "n_charges": 1046,
+          "n_total": 8990,
+          "pdb2pqr_version": null
+        },
+        "amber14_pcm_water": {
+          "center_ang": [
+            5.257,
+            44.2359,
+            51.2286
+          ],
+          "cutoff_ang": 15.0,
+          "dielectric_eps": 1.0,
+          "input": "cdk2_amber14.pqr",
+          "input_sha256": "3c7fc6ee25e9e20277bd232cb8e3e2300e478f434227fc0ad5f5fe68493076d2",
+          "n_charges": 1046,
+          "n_total": 8990,
+          "pdb2pqr_version": null,
+          "scaled_charge_sum_e": 4.682299999999991,
+          "solvent": "water"
+        }
+      },
+      "method": "RHF",
+      "name": "field_interaction",
+      "solvent_by_model": {
+        "amber14": null,
+        "amber14_pcm_water": "water"
+      }
+    }
+  ]
+}

@@ -1,10 +1,10 @@
+# ruff: noqa: E501  (long assertion lines)
 """Implicit solvation (IEF-PCM) in the PLB runner: the two legs, the cap guard, the no-retry rule, and the loader.
 
-The production design is docs/benchmarks/plb_pcm_plan.md. Nothing here uses a PLB ligand: the SCFs are on a 6-atom
-methanol so the whole file runs in about a minute.
+The production design is docs/benchmarks/plb_pcm_plan.md. The SCFs here are on a 6-atom methanol (no PLB ligand), so
+the whole file runs in about a minute.
 
-Mutation checks (made by hand, each made at least one test below fail, then reverted) are listed in the PR body and
-in docs/benchmarks/plb_pcm.md.
+The mutation checks made by hand while writing it are listed in docs/benchmarks/plb_pcm.md.
 """
 
 from __future__ import annotations
@@ -297,7 +297,9 @@ def _with_solvent(n_s=None, *, factor=0.5, shift=0.0, flip=None, solvent="water"
     for key in ("field_provenance", "prep_provenance"):
         inp[key]["S"] = copy.deepcopy(inp[key]["A"])
     inp["field_provenance"]["A"]["solvent"] = None
-    inp["field_provenance"]["A"]["dielectric_eps"] = inp["field_provenance"]["S"]["dielectric_eps"] = 1.0  # as the runner
+    inp["field_provenance"]["A"]["dielectric_eps"] = inp["field_provenance"]["S"]["dielectric_eps"] = (
+        1.0  # as the runner
+    )
     inp["field_provenance"]["S"]["solvent"] = solvent
     dE = {n: np.array(v)[:n_s] * factor + shift for n, v in res["dE_int_kcal_mol"]["A"].items()}
     if flip:
@@ -574,3 +576,60 @@ def test_a_solvent_model_on_a_different_field_is_refused_when_the_same_field_is_
     argv = ["assemble", "--out", str(out), "--result", str(tmp_path / "r.json"), "--base", str(BASE)]
     with pytest.raises(SystemExit, match="input_sha256"):
         run.main([*argv, "--same-field-as-base"])
+
+
+# ---------------------------------------------------------------------------------------------- merging stage directories
+
+
+def _stage(tmp_path, name, model, **meta_extra):
+    d = tmp_path / name
+    d.mkdir()
+    meta = {
+        "target": "t",
+        "seed": 1,
+        "n_poses": 8,
+        "models": [model],
+        "field_eps": {model: 1.0},
+        "field_solvent": {model: 4.0},
+        "field_provenance": {model: {"input_sha256": "a" * 64}},
+        "prep_provenance": {model: {"output_sha256": "a" * 64}},
+        "max_cpu_hours_last_invocation": 3.0 if name == "a" else 9.0,
+        **meta_extra,
+    }
+    (d / "meta.json").write_text(json.dumps(meta))
+    (d / "tasks.jsonl").write_text(json.dumps({"model": model, "energy_hartree": -1.5}) + "\n")
+    (d / "commands.log").write_text(f"cmd {name}\n")
+    return d
+
+
+def test_merge_unites_models_and_concatenates_tasks_without_touching_energies(tmp_path):
+    merge = _script("merge_plb_runs")
+    a, b = _stage(tmp_path, "a", "m1"), _stage(tmp_path, "b", "m2")
+    assert merge.main([str(tmp_path / "out"), str(a), str(b)]) == 0
+    meta = json.loads((tmp_path / "out" / "meta.json").read_text())
+    assert meta["models"] == ["m1", "m2"] and set(meta["field_solvent"]) == {"m1", "m2"}
+    assert set(meta["prep_provenance"]) == {"m1", "m2"} and "max_cpu_hours_last_invocation" not in meta
+    lines = (tmp_path / "out" / "tasks.jsonl").read_text().splitlines()
+    assert [json.loads(x)["model"] for x in lines] == ["m1", "m2"] and json.loads(lines[0])["energy_hartree"] == -1.5
+    assert (tmp_path / "out" / "commands.log").read_text() == "cmd a\ncmd b\n"
+
+
+def test_merge_records_every_stages_commit(tmp_path):
+    merge = _script("merge_plb_runs")
+    a = _stage(tmp_path, "a", "m1", smeltery_commit="1" * 40)
+    b = _stage(tmp_path, "b", "m2", smeltery_commit="2" * 40)
+    assert merge.main([str(tmp_path / "out"), str(a), str(b)]) == 0
+    meta = json.loads((tmp_path / "out" / "meta.json").read_text())
+    assert meta["smeltery_commit"] == "1" * 40 and meta["smeltery_commits_by_run"] == ["1" * 40, "2" * 40]
+
+
+def test_merge_refuses_runs_that_differ_in_any_shared_input_or_repeat_a_model(tmp_path):
+    merge = _script("merge_plb_runs")
+    a = _stage(tmp_path, "a", "m1")
+    with pytest.raises(SystemExit, match="seed"):
+        merge.main([str(tmp_path / "o1"), str(a), str(_stage(tmp_path, "b", "m2", seed=2))])
+    with pytest.raises(SystemExit, match="two runs"):
+        merge.main([str(tmp_path / "o2"), str(a), str(_stage(tmp_path, "c", "m1"))])
+    (tmp_path / "o3").mkdir()
+    with pytest.raises(SystemExit, match="exists"):
+        merge.main([str(tmp_path / "o3"), str(a)])

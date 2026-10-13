@@ -540,7 +540,11 @@ def cmd_assemble(a: argparse.Namespace) -> int:
                 a.base_model: base["inputs"]["prep_provenance"][a.base_model],
                 **meta["prep_provenance"],
             },
-            "field_eps": {a.base_model: base["inputs"]["field_eps"][a.base_model], **meta["field_eps"]},
+            # a base written before the screening study has no field_eps: its field is the unscreened one
+            "field_eps": {
+                a.base_model: base["inputs"].get("field_eps", {}).get(a.base_model, 1.0),
+                **meta["field_eps"],
+            },
             "field_solvent": {
                 a.base_model: base["inputs"].get("field_solvent", {}).get(a.base_model),
                 **meta.get("field_solvent", {}),
