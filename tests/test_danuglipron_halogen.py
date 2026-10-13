@@ -105,7 +105,7 @@ def _fake_cands():
     ]
 
 
-def _fake_one_pose(name, smiles, pose, field):
+def _fake_one_pose(name, smiles, pose, field, energy_conv=1e-10):
     return float(pose.coords_ang[1, 0]), 100.0, None
 
 
@@ -135,7 +135,7 @@ def test_cap_counts_every_in_flight_scf_at_its_estimate(tmp_path, monkeypatch):
 _RUN_LOG: list[Path] = []
 
 
-def _failing_one_pose(name, smiles, pose, field):
+def _failing_one_pose(name, smiles, pose, field, energy_conv=1e-10):
     x = float(pose.coords_ang[1, 0])
     with open(_RUN_LOG[0], "a") as f:  # side effect visible from the forked worker
         f.write(f"{name}{x:.1f}\n")
@@ -167,6 +167,9 @@ def test_a_failed_scf_keeps_the_inflight_results_and_is_never_retried(tmp_path, 
 
 def test_real_worker_returns_a_failed_scf_with_its_cpu_instead_of_raising(monkeypatch):
     class Boom:
+        def __init__(self, **kw):
+            pass
+
         def run(self, cands, ctx):
             sum(i * i for i in range(300000))  # burn measurable CPU
             raise RuntimeError("SCF did not converge")
