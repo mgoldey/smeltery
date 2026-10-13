@@ -142,9 +142,8 @@ the provider's own energy (measured, torchani 2.9.0, torch 2.13.0 CPU):
 |---|---|---|
 | 1e-4 | 4.0e-07 | met |
 | 1e-3 | 3.8e-05 | met |
-| 1e-2 | 3.0e-03 | not met (central-difference truncation, not a provider error) |
 
-The test asserts steps 1e-4 and 1e-3 only; the 1e-2 row is recorded, not hidden. The bar and the flags are
+The test asserts both steps. Larger steps (1e-2 to 3e-2 Å) were needed only for the float32 path, to rise above its energy resolution; in float64 they measure central-difference truncation, so they are not part of this table. The bar and the flags are
 unchanged (`supports_external_charges = False`, `supported_charge_states = {0}`: still no anion, no pocket). It agrees with the OpenMM-ML provider on this
 geometry to 2.1e-3 kcal/mol in energy and 2.8e-6 relative in forces. One molecule, one geometry, CPU, no
 error bars; the anion result above is untouched by this.
