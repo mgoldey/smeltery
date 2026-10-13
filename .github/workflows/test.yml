@@ -91,6 +91,33 @@ jobs:
             exit 1
           fi
 
+  # The ml-potential tests need torch, so the `test` job skips them. This job installs the extra (CPU torch, which
+  # keeps the download small) and fails if any of them still skips for a missing module (issue #22).
+  ml-potential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      UV_TORCH_BACKEND: cpu
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install (dev + ml-potential extras, ferric from PyPI)
+        run: uv sync --extra dev --extra ml-potential --no-sources
+
+      - name: ML potential tests (real ANI-2x)
+        run: |
+          set -o pipefail
+          uv run --no-sync pytest -q -rs tests/test_ml_potential.py tests/test_torchani_potential.py | tee /tmp/ml.txt
+          if grep -iE '^SKIPPED.*(ml-potential|openmm|torch)' /tmp/ml.txt; then
+            echo "::error::an ml-potential test skipped for a missing module; the job install is not effective"
+            exit 1
+          fi
+
   # The BUILT wheel installed with plain pip into a fresh venv, with and without each extra the wheel declares
   # (issue #31). The matrix comes from the wheel's own metadata, so a new extra is covered the moment it exists;
   # scripts/wheel_smoke.py refuses an extra it has no checks for, and tests/test_wheel_smoke.py guards the same.
