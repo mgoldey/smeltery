@@ -7,10 +7,11 @@
 - **Quantity:** none. It writes `Candidate.poses`, not a `per_pose` quantity (`produces()` is empty).
 - The parent gets `n_poses` ETKDG conformers, MMFF94-optimised, aligned onto conformer 0, each given a seeded rigid jitter. With `parent_poses_given=True` the parent's existing poses (for example from `docking`) are used unjittered.
 - Analogue pose *i*: every atom the maximum common substructure maps onto the parent is copied exactly from parent pose *i*; unmapped atoms come from a fresh embedding aligned onto the core. A molecule paired with itself therefore gets identical coordinates and a per-pose difference of exactly 0.0.
+- With `analogue_poses_given=True`, an analogue that already has poses keeps its first pose as pose 0 of the pair: its non-core atoms are used as given, and every core atom is still copied exactly from parent pose *0*. Poses 1 onward are built as above.
 
 ## Native settings
 
-`PairedPoses.settings()` reports these eight keys, taken straight from the dataclass fields (`src/smeltery/tiers.py`).
+`PairedPoses.settings()` reports these nine keys, taken straight from the dataclass fields (`src/smeltery/tiers.py`).
 
 | key | default |
 |---|---|
@@ -22,6 +23,7 @@
 | `mcs_timeout_s` | `10` (too short for drug-sized molecules: 9 of the 12 danuglipron halogen analogues time out and raise `NoCommonCoreError`; the exact search took 2 to 75 s there, so the example passes 900; `docs/benchmarks/danuglipron_halogen.md`) |
 | `parent_poses_given` | `False` |
 | `relax_unmapped` | `False` |
+| `analogue_poses_given` | `False` |
 
 ## Cost
 
@@ -43,6 +45,8 @@
 - That the poses are bound poses. The jitter is a seeded rigid perturbation "to mimic the spread of docked poses" (docstring), not a search.
 - That the analogue geometry is relaxed, unless `relax_unmapped=True`; and with it on, that the ΔΔE is unchanged, since it moves the substituent.
 - That a zero self-pair certifies the mapping. It certifies that mapped atoms are copied; it was shown in the campaign (`experiments/danuglipron/RESULTS.md`, M17) that a wrong atom correspondence is pinned to the parent's coordinates and measures as zero drift.
+
+- That a given analogue pose is a bound pose. Only its atom order and the position of its core are checked (each mapped heavy atom within 0.5 Å of parent pose 0); the non-core atoms are taken as supplied.
 
 ## Evidence
 

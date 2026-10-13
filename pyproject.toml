@@ -96,6 +96,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "needs_ferric: needs the real ferric engine; skipped only under SMELTERY_NO_FERRIC=1 (scripts/dev-check.sh)",
+    "gpu: needs the external DiffSBDD environment and a GPU; skipped unless SMELTERY_SBDD_PYTHON, SMELTERY_SBDD_DIR, SMELTERY_SBDD_CKPT and SMELTERY_SBDD_POCKET are set",
 ]
 
 [tool.ruff]
