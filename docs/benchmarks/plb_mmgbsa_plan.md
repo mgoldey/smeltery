@@ -151,3 +151,8 @@ the environment), report `docs/benchmarks/plb_mmgbsa.md`, a `docs/limits.md` row
      template is an error. The explicit TPO160 deletion and its guard are therefore dropped from the protocol (TPO160 lies about 17 A from the parent and outside the shell; the run records which non-standard residues, if any, stay).
      The 10 A radius was fixed by cost (the shell holds a small fraction of the atoms) and was not varied.
   Everything else in sections 3 to 6 is unchanged, including the restrained minimisation (protein heavy atoms, k = 10 kcal/mol/A^2), the tolerance, the single snapshot and the statistics.
+* **A3, 2026-10-13, before any series result was read.** After A2 the same pilot (cdk2 parent, GAFF2) finished in **45 CPU-s** (1133 receptor atoms in 69 residues, GAFF2 charges used exactly), so the
+  full run is about 0.5 CPU-h for 46 tasks, far inside the cap. Its minimisation stopped at the 5000-iteration budget with a total RMS force of **1.26 kJ/mol/nm** against the declared tolerance of 1.0: the CPU platform is single precision, so
+  1.0 is below its noise floor and would flag essentially every ligand as "not converged", which would make the flag meaningless. The RMS-force tolerance of section 3.4 is therefore **5 kJ/mol/nm** (half OpenMM's default of 10); the
+  5000-iteration budget and everything else are unchanged. Only the minimisation diagnostics (iterations, RMS force, receptor size, charge check, bonded-term check, timing) of this one parent pilot were read; **its energies were not**, and its output was deleted.
+

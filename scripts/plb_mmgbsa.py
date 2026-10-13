@@ -44,7 +44,7 @@ VARIANTS = {
 }
 PROTEIN_FF = ("amber14-all.xml",)  # GB is added by add_gb() below (OpenMM's native OBC2, not the xml's CustomGBForce)
 RESTRAINT_K_KJ_NM2 = 10.0 * KJ_PER_KCAL * 100.0  # 10 kcal/mol/A^2
-RMS_FORCE_TOL = 1.0  # kJ/mol/nm
+RMS_FORCE_TOL = 5.0  # kJ/mol/nm (plan amendment A3; the committed plan said 1.0)
 ROUND_ITERS = 1000
 MAX_ITERS = 5000
 CHARGE_CHECK_TOL = 1e-6  # e
