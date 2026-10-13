@@ -1,0 +1,1406 @@
+{
+ "command": [
+  "/home/matt/qc/smeltery/.claude/worktrees/agent-aab8b693ade3b5a12/scripts/plb_mmgbsa.py",
+  "run",
+  "--plb-dir",
+  "/tmp/claude-1000/plb_fetch/all/tyk2",
+  "--target",
+  "tyk2",
+  "--out",
+  "/tmp/claude-1000/-home-matt-qc-smeltery/c3789fb9-9f2c-43da-bb6f-e75d2bec0196/scratchpad/prod_tyk2",
+  "--workers",
+  "4",
+  "--variants",
+  "gaff2",
+  "sage"
+ ],
+ "errors": [],
+ "ligands": {
+  "lig_ejm_31": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 833.5943142453661,
+     "elec": -1949.0299913045842,
+     "gbsa": -742.3399904713364,
+     "vdw": -367.80613834508233
+    },
+    "E_ligand": {
+     "bonded": 14.857633920940149,
+     "elec": -215.86805850027318,
+     "gbsa": -18.609043316504863,
+     "vdw": 7.545066143717209
+    },
+    "E_receptor": {
+     "bonded": 818.7366803244261,
+     "elec": -1711.1965023851092,
+     "gbsa": -748.8642477420058,
+     "vdw": -332.71287316548313
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 0.0,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 32.493717,
+    "dG": {
+     "bonded": -6.039613253960852e-14,
+     "elec": -21.96543041920185,
+     "gbsa": 25.133300587174272,
+     "total": -39.47046115534404,
+     "vdw": -42.63833132331641
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.3250250010605832,
+     "rms_force_kj_mol_nm": 4.787459725363248
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 32.7555935382843
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 838.7010450659559,
+     "elec": -1950.2037292186285,
+     "gbsa": -741.5397631860437,
+     "vdw": -365.207084985116
+    },
+    "E_ligand": {
+     "bonded": 19.809020979646196,
+     "elec": -217.28760350350493,
+     "gbsa": -17.80589658731637,
+     "vdw": 13.447015943515563
+    },
+    "E_receptor": {
+     "bonded": 818.8920240863097,
+     "elec": -1711.3944304750946,
+     "gbsa": -748.7640486907626,
+     "vdw": -333.0078281466008
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 0.0,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 48.21794700000004,
+    "dG": {
+     "bonded": 2.4868995751603507e-14,
+     "elec": -21.521695240028947,
+     "gbsa": 25.030182092035233,
+     "total": -42.13778593002448,
+     "vdw": -45.64627278203079
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.39496975616114144,
+     "rms_force_kj_mol_nm": 4.6334571118822305
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 48.707902669906616
+   }
+  },
+  "lig_ejm_42": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 833.9384431645711,
+     "elec": -1935.9214111309443,
+     "gbsa": -741.4798333042495,
+     "vdw": -369.33185257842763
+    },
+    "E_ligand": {
+     "bonded": 15.16258175017894,
+     "elec": -203.0568141752454,
+     "gbsa": -17.993365562459957,
+     "vdw": 7.557610236062507
+    },
+    "E_receptor": {
+     "bonded": 818.7758614143921,
+     "elec": -1710.845865770704,
+     "gbsa": -748.9373694015028,
+     "vdw": -332.70256078441446
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.942890293094024e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 49.157242,
+    "dG": {
+     "bonded": 7.460698725481052e-14,
+     "elec": -22.01873118499492,
+     "gbsa": 25.450901659713253,
+     "total": -40.75473155535727,
+     "vdw": -44.18690203007568
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.26666153251653396,
+     "rms_force_kj_mol_nm": 4.875255621384287
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 49.56373190879822
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 836.5267565683124,
+     "elec": -1936.2102343899649,
+     "gbsa": -740.8043984657784,
+     "vdw": -366.6480088109998
+    },
+    "E_ligand": {
+     "bonded": 17.74530678113414,
+     "elec": -204.4542084634842,
+     "gbsa": -17.042701861207206,
+     "vdw": 13.934415711446714
+    },
+    "E_receptor": {
+     "bonded": 818.7814497871789,
+     "elec": -1710.741740648416,
+     "gbsa": -748.9262085703298,
+     "vdw": -333.02793564306694
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.942890293094024e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 49.03178299999996,
+    "dG": {
+     "bonded": -6.039613253960852e-13,
+     "elec": -21.014285278064648,
+     "gbsa": 25.164511965758606,
+     "total": -43.4042621916862,
+     "vdw": -47.55448887937956
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2427265845361664,
+     "rms_force_kj_mol_nm": 4.964905660707169
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 49.363762855529785
+   }
+  },
+  "lig_ejm_43": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 838.3005206693535,
+     "elec": -1919.4782799815016,
+     "gbsa": -742.1621517517625,
+     "vdw": -371.4037581988854
+    },
+    "E_ligand": {
+     "bonded": 19.503268778233913,
+     "elec": -193.48249197479788,
+     "gbsa": -16.593746037729236,
+     "vdw": 7.863555052332612
+    },
+    "E_receptor": {
+     "bonded": 818.7972518911197,
+     "elec": -1710.9725058118938,
+     "gbsa": -749.0551175771109,
+     "vdw": -332.40811956366935
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -7.771561172376096e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 76.490178,
+    "dG": {
+     "bonded": -5.3290705182007514e-14,
+     "elec": -15.023282194809894,
+     "gbsa": 23.486711863077605,
+     "total": -38.395764019281,
+     "vdw": -46.859193687548654
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.4612622976700101,
+     "rms_force_kj_mol_nm": 4.548772302633785
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 77.35694527626038
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 835.1116610615778,
+     "elec": -1920.4733896286805,
+     "gbsa": -741.7797949197337,
+     "vdw": -368.3203296423541
+    },
+    "E_ligand": {
+     "bonded": 16.374478052811856,
+     "elec": -194.8383087278662,
+     "gbsa": -15.777496583692038,
+     "vdw": 14.035608211891578
+    },
+    "E_receptor": {
+     "bonded": 818.7371830087653,
+     "elec": -1711.376449030585,
+     "gbsa": -748.9392240959379,
+     "vdw": -332.6114518078008
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -7.771561172376096e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 75.23855599999999,
+    "dG": {
+     "bonded": 6.359357485052897e-13,
+     "elec": -14.258631870229237,
+     "gbsa": 22.936925759896223,
+     "total": -41.06619215677729,
+     "vdw": -49.74448604644491
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.5200552193867216,
+     "rms_force_kj_mol_nm": 4.256019512026271
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 75.77581572532654
+   }
+  },
+  "lig_ejm_45": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 838.4329362346158,
+     "elec": -1928.530357874955,
+     "gbsa": -740.0741525548319,
+     "vdw": -372.3021317955488
+    },
+    "E_ligand": {
+     "bonded": 19.855095799056564,
+     "elec": -195.7255204651372,
+     "gbsa": -18.072005220274608,
+     "vdw": 7.422852874856999
+    },
+    "E_receptor": {
+     "bonded": 818.5778404355589,
+     "elec": -1711.0693646276864,
+     "gbsa": -748.8419036172685,
+     "vdw": -332.50046968633137
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 5.551115123125783e-17,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 71.691752,
+    "dG": {
+     "bonded": 3.623767952376511e-13,
+     "elec": -21.735472782131353,
+     "gbsa": 26.839756282711168,
+     "total": -42.12023148349425,
+     "vdw": -47.22451498407443
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.29227348884634075,
+     "rms_force_kj_mol_nm": 4.868128943922653
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 72.39304685592651
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 825.5535229494081,
+     "elec": -1929.6974777037228,
+     "gbsa": -739.3190904355226,
+     "vdw": -368.5126492396366
+    },
+    "E_ligand": {
+     "bonded": 7.058784534752406,
+     "elec": -196.96762294990012,
+     "gbsa": -17.331828130337225,
+     "vdw": 13.851977515624284
+    },
+    "E_receptor": {
+     "bonded": 818.4947384146558,
+     "elec": -1711.1016411334053,
+     "gbsa": -748.882618430885,
+     "vdw": -332.54858482212006
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 5.551115123125783e-17,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 69.29777199999998,
+    "dG": {
+     "bonded": -4.3520742565306136e-14,
+     "elec": -21.62821362041737,
+     "gbsa": 26.895356125699617,
+     "total": -44.548899427858586,
+     "vdw": -49.816041933140795
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2917664322720168,
+     "rms_force_kj_mol_nm": 4.759272984430488
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 69.81922197341919
+   }
+  },
+  "lig_ejm_46": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 837.2805922003123,
+     "elec": -1925.6376217808483,
+     "gbsa": -741.5894823552419,
+     "vdw": -372.0270236158373
+    },
+    "E_ligand": {
+     "bonded": 18.591427882982366,
+     "elec": -194.1507596151274,
+     "gbsa": -17.177693146323097,
+     "vdw": 7.530901510816641
+    },
+    "E_receptor": {
+     "bonded": 818.6891643173299,
+     "elec": -1710.7582749808068,
+     "gbsa": -748.9587301132347,
+     "vdw": -332.85419086910815
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -1.3877787807814457e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 47.46897200000001,
+    "dG": {
+     "bonded": 6.394884621840902e-14,
+     "elec": -20.72858718491409,
+     "gbsa": 24.54694090431585,
+     "total": -42.88538053814399,
+     "vdw": -46.70373425754581
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2364113509641848,
+     "rms_force_kj_mol_nm": 4.959314645473431
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 47.986478090286255
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 816.7709372588057,
+     "elec": -1926.7241667825394,
+     "gbsa": -740.6371157789343,
+     "vdw": -368.75257992899935
+    },
+    "E_ligand": {
+     "bonded": -2.1805465925677106,
+     "elec": -195.5395085342222,
+     "gbsa": -16.50234445704547,
+     "vdw": 13.682752651580653
+    },
+    "E_receptor": {
+     "bonded": 818.9514838513735,
+     "elec": -1710.7790963683901,
+     "gbsa": -748.8788832792616,
+     "vdw": -333.0796206043454
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -1.3877787807814457e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 46.75280500000002,
+    "dG": {
+     "bonded": -8.304468224196171e-14,
+     "elec": -20.40556187992712,
+     "gbsa": 24.7441119573727,
+     "total": -45.017161898789126,
+     "vdw": -49.355711976234616
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.23265464760728488,
+     "rms_force_kj_mol_nm": 4.50945244498967
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 47.13320016860962
+   }
+  },
+  "lig_ejm_47": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 852.9242902854708,
+     "elec": -1923.2045395055786,
+     "gbsa": -741.0087933064437,
+     "vdw": -370.25848254997214
+    },
+    "E_ligand": {
+     "bonded": 34.24067002130083,
+     "elec": -195.4455678580705,
+     "gbsa": -16.093284085202647,
+     "vdw": 11.101411119760005
+    },
+    "E_receptor": {
+     "bonded": 818.6836202641704,
+     "elec": -1710.8028415695,
+     "gbsa": -748.9106757249068,
+     "vdw": -332.83558659233057
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.6653345369377348e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 47.92187000000001,
+    "dG": {
+     "bonded": -4.405364961712621e-13,
+     "elec": -16.956130078008073,
+     "gbsa": 23.995166503665708,
+     "total": -41.48527065174438,
+     "vdw": -48.52430707740157
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2878463199843938,
+     "rms_force_kj_mol_nm": 4.537809672085878
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 48.558515310287476
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 842.621846755258,
+     "elec": -1924.990855215873,
+     "gbsa": -740.7072127393852,
+     "vdw": -369.66704842214887
+    },
+    "E_ligand": {
+     "bonded": 23.80502369857518,
+     "elec": -197.02143178720783,
+     "gbsa": -15.789617027093897,
+     "vdw": 15.295360593793603
+    },
+    "E_receptor": {
+     "bonded": 818.8168230566831,
+     "elec": -1710.9145415732507,
+     "gbsa": -748.9394856225214,
+     "vdw": -333.0830557616846
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.6653345369377348e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 45.85036299999996,
+    "dG": {
+     "bonded": -2.5224267119483557e-13,
+     "elec": -17.054881855414322,
+     "gbsa": 24.021889910230044,
+     "total": -44.91234519944241,
+     "vdw": -51.87935325425788
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.34451618364252035,
+     "rms_force_kj_mol_nm": 4.282605505641986
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 46.23358488082886
+   }
+  },
+  "lig_ejm_48": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 845.3985913764026,
+     "elec": -1921.1060828926438,
+     "gbsa": -740.75608677285,
+     "vdw": -375.4293072330644
+    },
+    "E_ligand": {
+     "bonded": 26.52940490082844,
+     "elec": -194.61909893326546,
+     "gbsa": -16.365535289187438,
+     "vdw": 7.564582828402832
+    },
+    "E_receptor": {
+     "bonded": 818.8691864755743,
+     "elec": -1711.1768406164053,
+     "gbsa": -748.8516768799599,
+     "vdw": -332.8152962428966
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.942890293094024e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 75.589758,
+    "dG": {
+     "bonded": -1.9895196601282805e-13,
+     "elec": -15.31014334297302,
+     "gbsa": 24.46112539629728,
+     "total": -41.027611765246576,
+     "vdw": -50.17859381857063
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.39264932947935116,
+     "rms_force_kj_mol_nm": 4.885177288099847
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 76.64240646362305
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 847.7765067978678,
+     "elec": -1922.399749218877,
+     "gbsa": -740.0950287578033,
+     "vdw": -372.06688163676756
+    },
+    "E_ligand": {
+     "bonded": 28.843936917916526,
+     "elec": -195.74044814871777,
+     "gbsa": -15.792493497484216,
+     "vdw": 13.886080248701196
+    },
+    "E_receptor": {
+     "bonded": 818.9325698799506,
+     "elec": -1711.227270794549,
+     "gbsa": -748.8661938225295,
+     "vdw": -333.099194410519
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.942890293094024e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 70.18284800000004,
+    "dG": {
+     "bonded": 6.501466032204917e-13,
+     "elec": -15.432030275610344,
+     "gbsa": 24.563658562210335,
+     "total": -43.722139188349146,
+     "vdw": -52.853767474949784
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.43177301365326437,
+     "rms_force_kj_mol_nm": 4.666276020537394
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 70.6172354221344
+   }
+  },
+  "lig_ejm_50": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 833.0129069074392,
+     "elec": -1899.58718838311,
+     "gbsa": -744.48722161197,
+     "vdw": -368.9772449332583
+    },
+    "E_ligand": {
+     "bonded": 14.439904144506196,
+     "elec": -160.73157924554982,
+     "gbsa": -27.805230482654338,
+     "vdw": 7.354650543696208
+    },
+    "E_receptor": {
+     "bonded": 818.5730027629328,
+     "elec": -1709.338359282866,
+     "gbsa": -749.7805055202261,
+     "vdw": -333.0164760919828
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -2.220446049250313e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 37.67383100000001,
+    "dG": {
+     "bonded": 1.900701818158268e-13,
+     "elec": -29.51724985469434,
+     "gbsa": 33.09851439091051,
+     "total": -39.73415484875537,
+     "vdw": -43.31541938497173
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2732092291405021,
+     "rms_force_kj_mol_nm": 4.975767606957416
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 38.149810552597046
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 837.4754470142606,
+     "elec": -1901.0544259518372,
+     "gbsa": -743.7558837757467,
+     "vdw": -366.2776964373654
+    },
+    "E_ligand": {
+     "bonded": 18.62301841218501,
+     "elec": -162.85222194366128,
+     "gbsa": -26.76340905677981,
+     "vdw": 13.220576689726249
+    },
+    "E_receptor": {
+     "bonded": 818.8524286020755,
+     "elec": -1710.501531099443,
+     "gbsa": -749.2664060452975,
+     "vdw": -332.9549149461214
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -2.220446049250313e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 33.30111100000005,
+    "dG": {
+     "bonded": 3.552713678800501e-14,
+     "elec": -27.700672908732997,
+     "gbsa": 32.27393132633054,
+     "total": -41.9700997633727,
+     "vdw": -46.54335818097028
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2569656523988005,
+     "rms_force_kj_mol_nm": 4.758031002678316
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 33.44643759727478
+   }
+  },
+  "lig_ejm_54": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 832.5792940017462,
+     "elec": -1966.5571879777156,
+     "gbsa": -741.8531844433863,
+     "vdw": -372.08413255440774
+    },
+    "E_ligand": {
+     "bonded": 13.66873745541105,
+     "elec": -232.45304765370489,
+     "gbsa": -19.10123586359782,
+     "vdw": 7.012489713206997
+    },
+    "E_receptor": {
+     "bonded": 818.9105565463357,
+     "elec": -1710.8490353252032,
+     "gbsa": -749.0444335367885,
+     "vdw": -333.01836566315825
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -1.1102230246251565e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 55.514314999999996,
+    "dG": {
+     "bonded": -4.849454171562684e-13,
+     "elec": -23.255104998807468,
+     "gbsa": 26.292484956999942,
+     "total": -43.04087664626451,
+     "vdw": -46.07825660445649
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.29123770090019946,
+     "rms_force_kj_mol_nm": 4.600300337141282
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 56.256484031677246
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 843.6574365341555,
+     "elec": -1967.2240854775582,
+     "gbsa": -740.8016895896363,
+     "vdw": -369.1005012109018
+    },
+    "E_ligand": {
+     "bonded": 24.59526266839453,
+     "elec": -233.55063266481582,
+     "gbsa": -18.53798749938843,
+     "vdw": 13.530489156836872
+    },
+    "E_receptor": {
+     "bonded": 819.0621738657616,
+     "elec": -1710.6835611820168,
+     "gbsa": -749.0318877708945,
+     "vdw": -333.2532853935009
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -2.498001805406602e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 40.056557000000055,
+    "dG": {
+     "bonded": -5.719869022868806e-13,
+     "elec": -22.989891630725623,
+     "gbsa": 26.768185680646603,
+     "total": -45.59941092431739,
+     "vdw": -49.377704974237794
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2677681922527845,
+     "rms_force_kj_mol_nm": 4.530442083037805
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 40.30117344856262
+   }
+  },
+  "lig_ejm_55": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 831.5370595507624,
+     "elec": -1956.021224445023,
+     "gbsa": -742.3356186188746,
+     "vdw": -369.0645312718271
+    },
+    "E_ligand": {
+     "bonded": 12.667522005846562,
+     "elec": -225.57487027259475,
+     "gbsa": -16.718669672201607,
+     "vdw": 7.839454874403311
+    },
+    "E_receptor": {
+     "bonded": 818.8695375449159,
+     "elec": -1711.0104870025732,
+     "gbsa": -748.5378110229667,
+     "vdw": -333.27048622195036
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.942890293094024e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 38.12569900000001,
+    "dG": {
+     "bonded": -1.4033219031261979e-13,
+     "elec": -19.435867169855157,
+     "gbsa": 22.92086207629371,
+     "total": -40.14850501784163,
+     "vdw": -43.63349992428004
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2749685886019122,
+     "rms_force_kj_mol_nm": 4.894974351771732
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 38.63559365272522
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 838.0967171364886,
+     "elec": -1957.6165409073974,
+     "gbsa": -741.0548680704043,
+     "vdw": -365.35042828806166
+    },
+    "E_ligand": {
+     "bonded": 19.121950168874488,
+     "elec": -226.3806183260988,
+     "gbsa": -16.187319970508035,
+     "vdw": 15.028933747538446
+    },
+    "E_receptor": {
+     "bonded": 818.9747669676138,
+     "elec": -1712.0573193756973,
+     "gbsa": -748.2596731109741,
+     "vdw": -332.9631958641622
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 1.942890293094024e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 35.01235600000001,
+    "dG": {
+     "bonded": 2.3092638912203256e-13,
+     "elec": -19.17860320560132,
+     "gbsa": 23.39212501107783,
+     "total": -43.2026443659612,
+     "vdw": -47.416166171437936
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.2766688738720097,
+     "rms_force_kj_mol_nm": 4.50267008955764
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 35.24161219596863
+   }
+  },
+  "lig_jmc_23": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 837.5712142901137,
+     "elec": -1947.3398120796994,
+     "gbsa": -739.037004336749,
+     "vdw": -372.33093752493687
+    },
+    "E_ligand": {
+     "bonded": 18.84950328674079,
+     "elec": -209.40012844104643,
+     "gbsa": -20.646788070425334,
+     "vdw": 7.70626798878973
+    },
+    "E_receptor": {
+     "bonded": 818.7217110033732,
+     "elec": -1710.019246579163,
+     "gbsa": -749.2979657290035,
+     "vdw": -333.0303925298219
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 0.0,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 49.692852999999985,
+    "dG": {
+     "bonded": -2.7711166694643907e-13,
+     "elec": -27.92043705948987,
+     "gbsa": 30.90774946267989,
+     "total": -44.01950058071499,
+     "vdw": -47.00681298390472
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.286744197320225,
+     "rms_force_kj_mol_nm": 4.493038385679142
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 50.20224332809448
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 817.2228988289303,
+     "elec": -1947.3235224378748,
+     "gbsa": -738.9223006309828,
+     "vdw": -368.81366319421386
+    },
+    "E_ligand": {
+     "bonded": -1.4908464570956328,
+     "elec": -210.60665166598716,
+     "gbsa": -19.921806319151983,
+     "vdw": 13.91533415645062
+    },
+    "E_receptor": {
+     "bonded": 818.7137452860259,
+     "elec": -1710.2663001912908,
+     "gbsa": -749.1350587258064,
+     "vdw": -333.09785555640536
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": 0.0,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 44.954684999999984,
+    "dG": {
+     "bonded": 4.707345624410664e-14,
+     "elec": -26.450570580596775,
+     "gbsa": 30.134564413975568,
+     "total": -45.94714796088027,
+     "vdw": -49.631141794259115
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.25325765305284254,
+     "rms_force_kj_mol_nm": 4.500620641450461
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 45.29373812675476
+   }
+  },
+  "lig_jmc_27": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 838.0613794837011,
+     "elec": -1937.185795606089,
+     "gbsa": -737.8489828429116,
+     "vdw": -373.52856426321887
+    },
+    "E_ligand": {
+     "bonded": 19.411884788407843,
+     "elec": -199.18858158991532,
+     "gbsa": -19.065230032956677,
+     "vdw": 7.437235029506026
+    },
+    "E_receptor": {
+     "bonded": 818.6494946952935,
+     "elec": -1711.004641054314,
+     "gbsa": -748.9623442332627,
+     "vdw": -332.6582438603968
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -8.326672684688674e-17,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 48.541619,
+    "dG": {
+     "bonded": -2.0961010704922955e-13,
+     "elec": -26.992572961859537,
+     "gbsa": 30.178591423307765,
+     "total": -45.121536970880086,
+     "vdw": -48.3075554323281
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.31944778668809837,
+     "rms_force_kj_mol_nm": 4.604348464932003
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 48.99712109565735
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 817.9225148754764,
+     "elec": -1937.0426569692454,
+     "gbsa": -737.8086564532136,
+     "vdw": -370.6992800635259
+    },
+    "E_ligand": {
+     "bonded": -0.9465010627910035,
+     "elec": -200.51979388519666,
+     "gbsa": -18.421905486985413,
+     "vdw": 13.340765657188363
+    },
+    "E_receptor": {
+     "bonded": 818.8690159382669,
+     "elec": -1710.832524106869,
+     "gbsa": -748.8960996648591,
+     "vdw": -333.135904292027
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -8.326672684688674e-17,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 43.084352000000024,
+    "dG": {
+     "bonded": 5.004885395010206e-13,
+     "elec": -25.690338977179778,
+     "gbsa": 29.509348698630863,
+     "total": -47.085131707235675,
+     "vdw": -50.90414142868726
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.28585653836177777,
+     "rms_force_kj_mol_nm": 4.659599412899764
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 43.29155087471008
+   }
+  },
+  "lig_jmc_28": {
+   "gaff2": {
+    "E_complex": {
+     "bonded": 838.851180192791,
+     "elec": -1927.6745769520662,
+     "gbsa": -740.0232410120224,
+     "vdw": -373.82153028397926
+    },
+    "E_ligand": {
+     "bonded": 20.294003436021548,
+     "elec": -196.96732183081747,
+     "gbsa": -16.40637667665943,
+     "vdw": 7.755033207755577
+    },
+    "E_receptor": {
+     "bonded": 818.5571767567695,
+     "elec": -1710.526597249813,
+     "gbsa": -748.9484631479868,
+     "vdw": -332.77754022167437
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -1.6653345369377348e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 50.29487899999998,
+    "dG": {
+     "bonded": -3.552713678800501e-14,
+     "elec": -20.180657871435756,
+     "gbsa": 25.33159881262385,
+     "total": -43.648082328872405,
+     "vdw": -48.79902327006046
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.28560156315736185,
+     "rms_force_kj_mol_nm": 4.808970675178199
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 50.723186016082764
+   },
+   "sage": {
+    "E_complex": {
+     "bonded": 825.5939905937773,
+     "elec": -1929.8278253816075,
+     "gbsa": -739.0368863454172,
+     "vdw": -370.15129295782987
+    },
+    "E_ligand": {
+     "bonded": 6.836129753345031,
+     "elec": -198.47399325881506,
+     "gbsa": -15.66486853628998,
+     "vdw": 13.899048530484622
+    },
+    "E_receptor": {
+     "bonded": 818.7578608404332,
+     "elec": -1711.5979960169252,
+     "gbsa": -748.6811850619671,
+     "vdw": -332.6880571330789
+    },
+    "charges": {
+     "charge_method": "AM1-BCC (antechamber/sqm via openff-toolkit), started from the PLB pose; sqm minimises first",
+     "charge_sum_e": -1.6653345369377348e-16,
+     "formal_charge": 0,
+     "max_deviation_from_system_e": 0.0
+    },
+    "cpu_s": 43.92307199999999,
+    "dG": {
+     "bonded": -8.784084570834239e-13,
+     "elec": -19.75583610586719,
+     "gbsa": 25.309167252839863,
+     "total": -45.808953208263766,
+     "vdw": -51.36228435523556
+    },
+    "minimisation": {
+     "converged": true,
+     "iterations_budget_used": 1000,
+     "ligand_rms_displacement_ang": 0.28506945720302834,
+     "rms_force_kj_mol_nm": 4.952307881296285
+    },
+    "receptor": {
+     "n_atoms_receptor": 1101,
+     "n_residues_in_file_without_water": 290,
+     "n_residues_kept": 67,
+     "n_waters_dropped": 2,
+     "nearest_dropped_residue_ang": 10.047978911701595,
+     "protein_sha256": "9090684f4bdae90afbe5f2698a14c778396c024c19ceb6333de4808d9e29fae6",
+     "residue_names_non_standard_kept": [],
+     "shell_radius_ang": 10.0
+    },
+    "wall_s": 44.14932107925415
+   }
+  }
+ },
+ "protocol": {
+  "max_minimisation_iterations": 5000,
+  "plan": "docs/benchmarks/plb_mmgbsa_plan.md",
+  "protein_ff": [
+   "amber14-all.xml"
+  ],
+  "restraint_k_kj_mol_nm2": 4184.0,
+  "rms_force_tol_kj_mol_nm": 5.0,
+  "shell_radius_ang": 10.0,
+  "variants": {
+   "gaff2": {
+    "forcefield": "gaff-2.11",
+    "generator": "gaff"
+   },
+   "sage": {
+    "forcefield": "openff_unconstrained-2.2.1.offxml",
+    "generator": "smirnoff"
+   }
+  }
+ },
+ "reference": "lig_ejm_42",
+ "schema": "smeltery-plb-mmgbsa/1",
+ "script_sha256": "90e97b1b131f4f64fa4d03d58dd286a067f57eca657ce9f58c2d55a86eb026a8",
+ "target": "tyk2",
+ "total_cpu_s": 1325.560892,
+ "variants": [
+  "gaff2",
+  "sage"
+ ],
+ "versions": {
+  "openff-toolkit": "0.18.0",
+  "openmm": "8.6.1",
+  "openmmforcefields": "0.16.0"
+ }
+}

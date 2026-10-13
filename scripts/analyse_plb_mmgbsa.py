@@ -21,9 +21,11 @@ import numpy as np
 
 from smeltery.benchmark import load_benchmark
 from smeltery.gates import spearman
-from smeltery.plb_measure import _stat_block, paired_delta_spearman_ci, tracks_label
+from smeltery.plb_measure import _source_ids, _stat_block, paired_delta_spearman_ci, tracks_label
 
 SEED = 20261010
+# The ddE and logP blocks use the seeds the ddE studies used (SEED + 200 for the first model, SEED + 101 for Crippen logP), so
+# their intervals are the ones already published in plb_cdk2.md and plb_tyk2.md; the MM/GBSA blocks use SEED + 10 and SEED + 40.
 N_BOOT = 10_000
 COMPONENTS = ("vdw", "elec", "gbsa")
 
@@ -51,7 +53,14 @@ def _block(x, y, seed: int) -> dict[str, Any]:
 
 
 def analyse_variant(
-    res: dict, variant: str, names: list[str], extra: list[str], x_by_name: dict[str, float], ddE: dict, logp: dict
+    res: dict,
+    variant: str,
+    names: list[str],
+    extra: list[str],
+    x_by_name: dict[str, float],
+    ddE: dict,
+    logp: dict,
+    same_source: list[str] | None = None,
 ) -> dict[str, Any]:
     ref = res["reference"]
     lig = res["ligands"]
@@ -100,6 +109,15 @@ def analyse_variant(
             xk = np.array([x_by_name[n] for n in keep])
             yk = np.array([dg[n] for n in keep])
             out["drop_unconverged"] = {"ligands": keep, "spearman": spearman(xk, yk), "n": len(keep)}
+    if same_source and 3 <= len(same_source) < len(names):
+        # NOT pre-declared in the MM/GBSA plan (the tyk2 ddE plan declared it for ddE); added after the primary result was
+        # read, because the series mixes two publications, and labelled as post hoc wherever it is quoted.
+        xs = np.array([x_by_name[n] for n in same_source])
+        out["post_hoc_same_source_as_parent"] = {
+            "ligands": list(same_source),
+            "ddE_spearman": spearman(xs, [ddE[n] for n in same_source]),
+            **_block(xs, [dg[n] for n in same_source], SEED + 70),
+        }
     if extra:
         names_all = [*names, *extra]
         xa = np.array([x_by_name[n] for n in names_all])
@@ -133,12 +151,14 @@ def analyse(res: dict, ddE_an: dict, target) -> dict[str, Any]:
         "extra_ligands_descriptive_only": extra,
         "exp_ddg": {n: ddg[n] for n in (ref, *names, *extra)},
         "ddE_amber14_pose_mean": ddE,
-        "ddE_block": _block(x, [ddE[n] for n in names], SEED + 50),
-        "crippen_logp_block": _block(x, [logp[n] for n in names], SEED + 60),
+        "ddE_block": _block(x, [ddE[n] for n in names], SEED + 200),
+        "crippen_logp_block": _block(x, [logp[n] for n in names], SEED + 101),
         "variants": {},
     }
+    sources = {lg.name: _source_ids(lg) for lg in target.ligands}
+    same = [n for n in names if sources.get(n) and sources[n] == sources.get(ref)]
     for v in res["variants"]:
-        out["variants"][v] = analyse_variant(res, v, names, extra, ddg, ddE, logp)
+        out["variants"][v] = analyse_variant(res, v, names, extra, ddg, ddE, logp, same)
     return out
 
 
@@ -182,6 +202,14 @@ def tables(an: dict) -> str:
             f"| {v} | {c['vdw']:+.3f} | {c['elec']:+.3f} | {c['gbsa']:+.3f} | {c['vdw_plus_elec_vacuum_mm']:+.3f} | "
             f"{c['elec_plus_gbsa_polar']:+.3f} | {', '.join(d['unconverged_minimisations']) or 'none'} |"
         )
+    for v, d in an["variants"].items():
+        h = d.get("post_hoc_same_source_as_parent")
+        if h:
+            p, c, pm = h["point"], h["bootstrap_ci_over_ligands"], h["permutation"]
+            out.append(
+                f"\nPOST HOC, not pre-declared ({v}): the {p['n']} analogues from the parent's own publication: MM/GBSA rho {p['spearman']:+.3f} "
+                f"{fmt_ci(c['spearman'])}, p {pm['spearman']['p_two_sided']:.4f}; ddE rho on the same ligands {h['ddE_spearman']:+.3f}"
+            )
     for v, d in an["variants"].items():
         w = d.get("with_excluded_ligands_descriptive")
         if w:

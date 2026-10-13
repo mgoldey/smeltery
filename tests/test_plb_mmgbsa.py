@@ -80,12 +80,17 @@ def test_relative_score_is_analogue_minus_parent(tool):
         tool.relative_scores({"a": 1.0}, "p")
 
 
-def test_deleted_residue_guard_refuses_one_near_the_ligand(tool):
-    lig = np.array([[0.0, 0.0, 0.0]])
-    far = {"TPO:A:160": np.array([[0.0, 0.0, 17.0], [0.0, 0.0, 20.0]])}
-    assert tool.check_deleted_far(far, lig, 10.0)["TPO:A:160"] == pytest.approx(17.0, rel=1e-12)
-    with pytest.raises(tool.MmgbsaError, match="TPO:A:160"):
-        tool.check_deleted_far({"TPO:A:160": np.array([[0.0, 0.0, 9.0]])}, lig, 10.0)
+def test_shell_keeps_a_residue_with_any_atom_within_the_radius_and_drops_the_rest(tool):
+    lig = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+    res = {
+        "near": np.array([[0.0, 0.0, 30.0], [5.0, 9.99, 0.0]]),  # one atom 9.99 A from the second ligand atom
+        "edge": np.array([[0.0, 10.01, 0.0]]),
+        "far": np.array([[0.0, 0.0, 17.0], [0.0, 0.0, 20.0]]),
+    }
+    kept = tool.residues_in_shell(res, lig, 10.0)
+    assert set(kept) == {"near"}
+    assert kept["near"] == pytest.approx(9.99, rel=1e-12)
+    assert set(tool.residues_in_shell(res, lig, 10.5)) == {"near", "edge"}
 
 
 # ------------------------------------------------------------------------------------------------ OpenMM energy terms
@@ -133,6 +138,33 @@ def test_two_distant_particles_have_no_binding_energy(tool):
     )
     assert abs(e_far["total"]) < 1e-3
     assert e_near["elec"] == pytest.approx(138.93545764438198 * 0.5 * -0.8 / 0.45 / 4.184, rel=1e-9)  # attraction: C - R - L < 0
+
+
+def test_native_gb_force_equals_the_xml_custom_gb_force_on_a_fixture_peptide(tool):
+    """The amendment A2 claim: add_gb() is the same OBC2 model as implicit/obc2.xml (on a real 6-residue fixture)."""
+    openmm = pytest.importorskip("openmm")
+    pytest.importorskip("openmmforcefields")
+    from openmm import app, unit
+
+    pdb = app.PDBFile(str(ROOT / "tests" / "data" / "plb" / "mini_cdk2.pdb"))
+    mod = app.Modeller(pdb.topology, pdb.positions)
+    mod.delete([r for r in mod.topology.residues() if r.name in ("HOH", "TPO")])
+    pos = np.asarray(mod.positions.value_in_unit(unit.nanometer))
+    native = tool.create_system(app.ForceField("amber14-all.xml"), mod.topology)
+    xml = app.ForceField("amber14-all.xml", "implicit/obc2.xml").createSystem(
+        mod.topology, nonbondedMethod=app.NoCutoff, constraints=None, ignoreExternalBonds=True
+    )
+    ref = openmm.Platform.getPlatformByName("Reference")
+
+    def gb_energy(system):
+        for f in system.getForces():
+            f.setForceGroup(2 if type(f).__name__ in ("CustomGBForce", "GBSAOBCForce") else 0)
+        ctx = openmm.Context(system, openmm.VerletIntegrator(0.001), ref)
+        ctx.setPositions(pos)
+        return ctx.getState(getEnergy=True, groups={2}).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+
+    assert gb_energy(native) == pytest.approx(gb_energy(xml), rel=1e-4)
+    assert abs(gb_energy(native)) > 1.0
 
 
 def _one_particle_system(openmm, q):

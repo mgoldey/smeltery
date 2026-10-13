@@ -464,6 +464,7 @@ def cmd_assemble(a: argparse.Namespace) -> int:
                 "E_ligand",
                 "minimisation",
                 "charges",
+                "receptor",
                 "cpu_s",
                 "wall_s",
             )
