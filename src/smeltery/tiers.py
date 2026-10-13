@@ -909,8 +909,9 @@ CC_LINK_SCALE = 1.09 / 1.53
 #: the link H made an optimization DIVERGE; delete-host at 1.305 A converged in 6 steps). Those numbers
 #: come from the issue text. A re-run on the Gly3 fixture (tests/data/gly3_ff14sb.json, STO-3G, 40
 #: steps) did NOT reproduce a divergence at 0.433 A (keep), 0.90 A (rcd) or 1.47 A (delete-host): all
-#: three descended without a step increase; none converged in 40 steps. So the true boundary is
-#: system-dependent or unobserved here; this value is a conservative placeholder, and it is a knob.
+#: three descended without a step increase; none converged in 40 steps. A 150-step scan (benchmarks/qmmm_link/
+#: scan.json, docs/benchmarks/qmmm_link_threshold.md) converged all ten runs, keep down to 0.075 A: no divergence.
+#: So the true boundary is system-dependent or unobserved here; this value is a conservative placeholder, a knob.
 MIN_LINK_CHARGE_DISTANCE_ANG = (0.443 + 1.305) / 2
 
 BOUNDARY_SCHEMES = ("keep", "delete-host", "rc", "rcd")

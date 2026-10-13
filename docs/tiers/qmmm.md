@@ -31,7 +31,7 @@
 | `mm_force_field` | the provenance of the caller's `MmParameters` |
 | `mm_terms` | derived: which MM terms ferric applies |
 
-`min_link_charge_distance_ang` is a placeholder, not a measurement: it is the midpoint of two distances quoted in issue #19 (0.443 and 1.305 angstrom) that the implementation could not reproduce, and it is a constructor knob (`MIN_LINK_CHARGE_DISTANCE_ANG` in `src/smeltery/tiers.py`).
+`min_link_charge_distance_ang` is a placeholder, not a measurement: it is the midpoint of two distances quoted in issue #19 (0.443 and 1.305 angstrom) that the implementation could not reproduce, and a 150-step optimisation scan on the Gly3 fixture (`docs/benchmarks/qmmm_link_threshold.md`) did not reproduce a divergence at any distance down to 0.075 angstrom, so the value is still unmeasured; it is a constructor knob (`MIN_LINK_CHARGE_DISTANCE_ANG` in `src/smeltery/tiers.py`).
 
 ## Cost
 
