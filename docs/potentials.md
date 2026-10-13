@@ -110,7 +110,7 @@ anything in solvent or in a pocket. The provider's `supported_charge_states = {0
 ionization-aware potential (a model with a charge input, or a different tier) is needed for the danuglipron
 anion. Not tried: AIMNet2 (OpenMM-ML lists it; its published scope includes charged species, UNVERIFIED here).
 
-## Force validation (acceptance bar `FORCE_FD_RELATIVE_BAR = 1e-4`): NOT MET
+## Force validation (acceptance bar `FORCE_FD_RELATIVE_BAR = 1e-4`): NOT MET by the OpenMM-ML path, MET by the float64 torchani provider
 
 `check_forces` on acetic acid (fixed geometry in the test file, `||F_fd - F|| / ||F||`):
 
@@ -132,6 +132,23 @@ What does hold: against an independent float64 central difference of torchani's 
 provider's forces agree to a relative 1.02e-4 (float32 autograd precision), asserted below 1e-3
 (`test_forces_match_torchanis_own_float64_finite_difference`). That is a different, looser comparison from the bar.
 
+### The float64 provider that meets the bar (`TorchaniAni2x`, `smeltery.providers.torchani_ani2x`)
+
+The float32 limit is OpenMM-ML's, not ANI-2x's. `TorchaniAni2x` runs torchani's ensemble model in float64 and takes
+forces by autograd from the same graph (no OpenMM, no unit slip). Same acetic-acid geometry, `check_forces` against
+the provider's own energy (measured, torchani 2.9.0, torch 2.13.0 CPU):
+
+| FD step (Å) | `||F_fd - F|| / ||F||` | vs bar 1e-4 |
+|---|---|---|
+| 1e-4 | 4.0e-07 | met |
+| 1e-3 | 3.8e-05 | met |
+| 1e-2 | 3.0e-03 | not met (central-difference truncation, not a provider error) |
+
+The test asserts steps 1e-4 and 1e-3 only; the 1e-2 row is recorded, not hidden. The bar and the flags are
+unchanged (`supports_external_charges = False`, `supported_charge_states = {0}`: still no anion, no pocket). It agrees with the OpenMM-ML provider on this
+geometry to 2.1e-3 kcal/mol in energy and 2.8e-6 relative in forces. One molecule, one geometry, CPU, no
+error bars; the anion result above is untouched by this.
+
 ### An upstream bug found on the way (openmmml 1.8)
 
 OpenMM-ML 1.8's ANI path returns forces **10x too small**: it differentiates with respect to positions in
@@ -151,7 +168,7 @@ relaxation stalled at a force of 1.8 kcal/mol/Å; with it, acetic acid converged
 
 ## Not done
 
-* No CI job installs the extra (torch is large); the real-backend tests skip with a reason in CI.
+* No CI job installs the extra (torch is large); the real-backend tests, including the float64 force bar, skip with a reason in CI.
 * No GPU run: CPU was enough, so GPU support for the GTX 1080s (sm_61) was not tested.
 * The per-species geometry-relaxation and stretch numbers above came from throwaway scripts that were not
   committed; the energy-pair table is reproducible with `examples/ani2x_charge_probe.py`.
