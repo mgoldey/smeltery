@@ -199,3 +199,82 @@ def test_run_field_tier_cache_is_keyed_on_the_force_field(tmp_path, monkeypatch)
     assert len(json.loads(cache.read_text())) == 6
     ex.run_field_tier(_fake_cands(), _fake_field(), "CHARMM", 1, cache)
     assert len(json.loads(cache.read_text())) == 12
+
+
+def _seed_default_cache(cache, monkeypatch, fail_name):
+    """A cache written at the default threshold: every pose done, `fail_name`'s pose 1 a cached failure."""
+    monkeypatch.setattr(ex, "_one_pose", _fake_one_pose)
+    ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache)
+    data = json.loads(cache.read_text())
+    cands = _fake_cands()
+    fkey = json.dumps(
+        {k: _fake_field().provenance.get(k) for k in ("input_sha256", "pdb2pqr_ff", "cutoff_ang")}, sort_keys=True
+    )
+    import hashlib
+
+    for c in cands:
+        if c.name == fail_name:
+            k = hashlib.sha256((fkey + "T" + c.name + c.poses[1].to_xyz()).encode()).hexdigest()
+            data[k] = {"dE": None, "cpu_s": 5.0, "error": "SCF did not converge"}
+    cache.write_text(json.dumps(data))
+
+
+def _spy_one_pose(name, smiles, pose, field, energy_conv=1e-10):
+    x = float(pose.coords_ang[1, 0])
+    with open(_RUN_LOG[0], "a") as f:  # a side effect visible from the worker process
+        f.write(f"{name} {x:.1f} {energy_conv:g}\n")
+    return x + 0.5, 50.0, None
+
+
+def _logged_failure(name, smiles, pose, field, energy_conv=1e-10):
+    with open(_RUN_LOG[0], "a") as f:
+        f.write(f"{name}\n")
+    return None, 10.0, "SCF did not converge"
+
+
+def _ran(tmp_path):
+    return [ln for ln in (tmp_path / "ran.txt").read_text().splitlines()]
+
+
+def test_a_looser_threshold_retries_a_cached_failure_once_and_reuses_the_tighter_successes(tmp_path, monkeypatch):
+    cache = tmp_path / "c.json"
+    _seed_default_cache(cache, monkeypatch, "A")
+    _RUN_LOG[:] = [tmp_path / "ran.txt"]
+    monkeypatch.setattr(ex, "_one_pose", _spy_one_pose)
+    cands = _fake_cands()
+    ex.run_field_tier(cands, _fake_field(), "T", 1, cache, energy_conv=1e-6)
+    assert _ran(tmp_path) == ["A 0.8 1e-06"]  # only the failed pose runs, and at the new threshold
+    a, b = cands
+    assert a.per_pose["dE_int"] == pytest.approx([0.7, 1.3, 0.9])  # tighter successes reused as they were, one retried
+    assert b.per_pose["dE_int"] == pytest.approx([0.7, 0.8, 0.9])
+    data = json.loads(cache.read_text())
+    assert sum(1 for v in data.values() if v.get("reused_from_energy_conv") == 1e-10) == 5
+    ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, energy_conv=1e-6)
+    assert len(_ran(tmp_path)) == 1  # a second call at the new threshold runs nothing
+
+
+def test_a_failure_at_the_new_threshold_is_final(tmp_path, monkeypatch):
+    cache = tmp_path / "c.json"
+    _seed_default_cache(cache, monkeypatch, "A")
+    _RUN_LOG[:] = [tmp_path / "ran.txt"]
+    monkeypatch.setattr(ex, "_one_pose", _logged_failure)
+    with pytest.raises(ex.ScfFailed):
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, energy_conv=1e-6)
+    with pytest.raises(ex.ScfFailed, match="cached SCF failure"):
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, energy_conv=1e-6)
+    assert len(_ran(tmp_path)) == 1  # not retried a second time
+
+
+def test_the_real_worker_hands_the_threshold_to_the_tier(monkeypatch):
+    got = {}
+
+    class Spy:
+        def __init__(self, **kw):
+            got.update(kw)
+
+        def run(self, cands, ctx):
+            cands[0].per_pose["dE_int"] = [1.0]
+
+    monkeypatch.setattr(ex, "FieldInteraction", Spy)
+    ex._one_pose("A", "C", _fake_cands()[0].poses[0], None, 1e-6)
+    assert got == {"energy_conv": 1e-6}
