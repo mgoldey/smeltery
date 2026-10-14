@@ -163,3 +163,29 @@ pose existed, so the first run is reported as not completed. Seven pose-0 SCFs h
 * Nothing from this run supports a ranking, an agreement with the campaign, or a statement about experiment.
 
 **Seen since the plan:** the first run's CPU times (above), that `pyr-C28-F` pose 0 does not converge, and that the pyridine-site SCFs are the slow ones. No energy or ddE.
+
+## Amendment A2 (written after the second run failed and before any new SCF)
+
+**What happened and what was decided.** Run 2 left 3 jittered-pose SCFs unconverged (`pyr-C28-F`, `pyr-C28-Cl`, `bzim-C9-F`) and 4 converged (parent, `bzim-C9-Cl`, `bzim-C9-CH3`,
+`pyr-C28-CH3`). The project owner read ferric issue #410 as competing convergence thresholds against the numerical noise floor and directed: **raise the energy
+threshold and move forward.** That is a deliberate change of treatment, made on that instruction and not after seeing any ddE (none exists).
+
+**Changes (everything else in the plan and A1 stands).**
+
+1. **`energy_conv` is raised from 1e-10 to 1e-6 Hartree** for every SCF run from now on (`--energy-conv 1e-6`; `density_conv` stays 1e-8; no other convergence aid). 1e-6 Ha is
+   6.3e-4 kcal/mol, about 2000 times below the declared 1.26 kcal/mol floor, so it cannot move a dE_int that the study treats as resolved. It is one value, chosen now, not scanned.
+2. **The cache key now includes the threshold**, so the three failures cached at 1e-10 are not failures at 1e-6 and get **one** attempt at the new threshold. A failure at 1e-6 is final: no
+   retry, no further loosening, the study reports it and stops (the plan's section 5 rule, unchanged).
+3. **The 4 jittered-pose SCFs that converged at 1e-10 are reused as they are**: a result converged to 1e-10 satisfies a 1e-6 criterion. The mixture of thresholds in the record is therefore
+   {1e-10 for those 4, 1e-6 for the rest}, listed per SCF in the run record's cache (`reused_from_energy_conv`). The 7 pose-0 SCFs stay excluded (A1).
+4. **Model B (CHARMM) is not run** (`--skip-model-b`), as before; criterion 4 is reported SKIPPED.
+5. **Cost.** 24 SCFs remain (14 molecules x 2 jittered poses, minus the 4 reused), at about 1900 CPU-s each: about 12.7 CPU-h. The call cap is 13.0 CPU-h with 2500 CPU-s per in-flight SCF.
+   Study total spent so far is about 19.9 CPU-h; this call brings it to at most about 32.9 CPU-h, **over the 30 CPU-h total of A1.** That is a disclosed deviation: the instruction was to move forward, and
+   stopping at the old total would again produce no result.
+6. **Looser convergence can change which SCFs converge** and by up to about 1e-6 Ha (6e-4 kcal/mol) the energies it does return. It cannot be excluded that a looser threshold accepts a different SCF
+   solution than a tighter one would; no check of that is made beyond the pre-existing sanity assertions (self-anchor exactly 0, non-inert field).
+
+**What this still does not support.** Same as A1: 2 poses, 1-dof SEMs, rho of +-1 by construction, no ranking finer than the floor, no statement about experiment.
+
+**Seen since A1:** the failure pattern (3 of 7 jittered-pose SCFs unconverged at 1e-10, all F or Cl) and the cached CPU times. No energy of a failed SCF exists; the 4 reused dE values are in the cache
+but no ddE has been computed or looked at.
