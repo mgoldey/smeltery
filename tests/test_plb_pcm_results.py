@@ -123,6 +123,11 @@ def test_the_solvent_statistics_recompute_to_rel_1e12(case):
     names = list(res.analogues)
     x = np.array([stored["exp_ddg"][n] for n in names])
     again = pm.solvent_analysis(res, x, n_boot=stored["n_boot"], seed=stored["seed"] + 700)
+    # records written before issue #28 lack the distance-dielectric key; for a PCM model it is None, so drop it
+    for section in ("by_model", "on_common_poses_of_all"):
+        for rec in again[section].values():
+            if rec.get("distance_dielectric_slope") is None:
+                rec.pop("distance_dielectric_slope", None)
     assert _same(again, stored["solvent"])
     for lg in [g for g in target.ligands if g.name in stored["exp_ddg"]]:  # an excluded ligand is not in the file
         assert stored["exp_ddg"][lg.name] == pytest.approx(lg.ddg_kcal_mol, abs=1e-12)
