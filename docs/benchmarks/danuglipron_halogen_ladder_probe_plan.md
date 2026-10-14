@@ -1,0 +1,13 @@
+# Halogen scan: would ferric's existing convergence ladder rescue the DIIS failures? A smallest-viable probe (issue #6)
+
+Written before any run, after the AURORA result (`danuglipron_halogen_accel_plan.md`): AURORA converged none of 6 cases within 5,000 CPU-s. ferric's `default_ladder()` (rungs: plain DIIS; ADIIS; ADIIS + level shift 0.5; ADIIS + level shift 1.0 + SOSCF; + Fermi smearing) is used by its CLI and by `run_dft`, but the Python `run_rhf` is a single rung. This probe asks only whether rungs 1-3 can converge a case plain DIIS cannot. It is what must be true before asking ferric to expose the ladder; it is not a scan result.
+
+* **Case (one):** `bnz-C34-Cl`, pose index 0, the cheapest of the four DIIS failures at 1e-6 (4,955 CPU-s recorded). Same frozen poses and field as the accel study (`prepare` output). RHF/STO-3G, `energy_conv` 1e-6, `density_conv` 1e-8.
+* **Probes (3, run in parallel, field SCF only; the vacuum SCF is run only if the field SCF converges):**
+  A = rung 1: `diis="adiis"`, `max_iter` 60. B = rung 2: A + `level_shift` 0.5, `max_iter` 60. C = rung 3: `diis="adiis"`, `level_shift` 1.0, `soscf=True`, `max_iter` 80.
+  Rung 4 (smearing) is left out: fractional occupations change the energy, so it is not a rescue of the same quantity.
+* **Per-probe limit: 2,500 CPU-s** (killed beyond). At about 50 CPU-s per iteration that is roughly 50 iterations, short of rungs 2-3's 60-80, so **a probe that is killed is a truncated test, not evidence that the rung fails**; only a convergence is a conclusion.
+* **Not like the real ladder:** Python cannot carry the previous rung's density forward, so each probe starts from the MINAO guess (the real ladder warm-starts each rung). One probe per rung, not the sequence.
+* **Budget:** at most 3 x 2,500 = 7,500 CPU-s (2.1 CPU-h). With the AURORA/TRAH study (8.33 CPU-h spent plus up to 2.8 for its two TRAH jobs) the total can reach about 13.2 CPU-h against the 12 CPU-h set for the accel study; the overage is this probe, run at the project owner's request. Nothing else is run.
+* **Outcome language:** per probe: converged or killed, iterations if converged, CPU-s, dE_int if converged. If any converges: "a ladder rung converges a DIIS-failed case; the ladder is worth exposing in `run_rhf`, and this one converged value is unverified against DIIS (there is none)". If none converges: "inconclusive, not a negative", and no ferric issue is filed on this evidence.
+* **ferric build:** the same dev wheel as the accel study, whose default `max_iter` is 200; the probes set `max_iter` explicitly as above. (The accel study's AURORA/TRAH jobs ran with that 200 default, not the rc7 default of 100 in the plan; that is a deviation to be stated in its report.)
