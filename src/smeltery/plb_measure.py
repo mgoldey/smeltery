@@ -29,7 +29,7 @@ import numpy as np
 
 from .funnel import paired_delta, resolved, unpaired_delta
 from .gates import charge_sensitivity, spearman
-from .model import HARTREE_TO_KCAL, Candidate, Measurement
+from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, Measurement
 from .pocket import DDE_NOISE_FLOOR_KCAL_MOL
 
 SCHEMA = "smeltery-plb-run/1"
@@ -83,6 +83,9 @@ class PlbResults:
     # model -> implicit-solvent setting (a dielectric constant or a name) of the models run with IEF-PCM; the others are
     # gas phase. A solvent model's reference leg is the ligand alone in the same solvent (`E_alone_hartree`).
     solvent: dict[str, Any] = field(default_factory=dict)
+    # model -> slope s (1/Angstrom) of the distance-dependent dielectric eps(d) = max(1, s d) on that model's field,
+    # d being each charge's distance to the nearest atom of the scored ligand pose (`distance_dielectric_field`).
+    distance_dielectric: dict[str, float] = field(default_factory=dict)
 
     @property
     def analogues(self) -> tuple[str, ...]:
@@ -181,6 +184,19 @@ def validate_results(rec: dict) -> PlbResults:
         )
         if not ok:
             raise PlbResultsError(f"{m}: solvent {v!r} is neither a name nor a finite dielectric constant above 1")
+    ddd = {m: float(v) for m, v in (inp.get("field_distance_dielectric") or {}).items() if v is not None}
+    if set(ddd) - set(models):
+        raise PlbResultsError(
+            f"field_distance_dielectric names models that were not run: {sorted(set(ddd) - set(models))}"
+        )
+    for m, v in ddd.items():
+        if not (math.isfinite(v) and v > 0) or m in solvent:
+            raise PlbResultsError(
+                f"{m}: distance-dielectric slope {v!r} must be positive and finite, and not with a solvent"
+            )
+    for m in models:
+        if inp["field_provenance"][m].get("distance_dielectric_slope") != (ddd.get(m)):
+            raise PlbResultsError(f"{m}: field_provenance and inputs.field_distance_dielectric disagree on the slope")
     for m in models:
         recorded = inp["field_provenance"][m].get("solvent")
         if recorded != solvent.get(m):
@@ -221,6 +237,7 @@ def validate_results(rec: dict) -> PlbResults:
         ferric=fer,
         total_cpu_s=float(res.get("total_cpu_s", math.nan)),
         solvent=solvent,
+        distance_dielectric=ddd,
     )
 
 
@@ -582,6 +599,21 @@ def charge_model_comparison(res: PlbResults, model_a: str, model_b: str, *, n_bo
     }
 
 
+def distance_dielectric_field(charges_bohr, ligand_coords_ang, slope: float) -> list[tuple[float, float, float, float]]:
+    """Divide each point charge (q, x, y, z in Bohr) by eps(d) = max(1, slope * d), d in Angstrom the distance of the
+    charge to the NEAREST atom of `ligand_coords_ang` (an (n, 3) array). Positions are untouched. A heuristic charge
+    scaling, not a reaction-field model: see docs/benchmarks/plb_ddd_plan.md section 1."""
+    if not (math.isfinite(slope) and slope > 0):
+        raise ValueError(f"slope must be positive and finite, got {slope}")
+    lig = np.asarray(ligand_coords_ang, dtype=float)
+    out = []
+    for q, x, y, z in charges_bohr:
+        xyz_ang = np.array([x, y, z]) / ANGSTROM_TO_BOHR
+        d = float(np.sqrt(((lig - xyz_ang) ** 2).sum(-1)).min())
+        out.append((q / max(1.0, slope * d), x, y, z))
+    return out
+
+
 def dielectric_family(res: PlbResults) -> dict[str, float]:
     """model -> relative permittivity, for the models of ONE force field whose field provenance has `dielectric_eps`.
 
@@ -592,7 +624,9 @@ def dielectric_family(res: PlbResults) -> dict[str, float]:
     fam = {
         m: float(res.inputs["field_provenance"][m]["dielectric_eps"])
         for m in res.models
-        if "dielectric_eps" in res.inputs["field_provenance"][m] and m not in res.solvent  # PCM is not a charge divisor
+        if "dielectric_eps" in res.inputs["field_provenance"][m]
+        and m not in res.solvent  # PCM is not a charge divisor
+        and m not in res.distance_dielectric  # a distance-dependent dielectric is not a uniform divisor
     }
     if not fam:
         return {}
@@ -751,7 +785,8 @@ def _vs_gas(
     ratio_sd = pts["sd_ratio"] / pts_g["sd_ratio"] if pts_g["sd_ratio"] else float("nan")
     return {
         "model": model,
-        "solvent": res.solvent[model],
+        "solvent": res.solvent.get(model),
+        "distance_dielectric_slope": res.distance_dielectric.get(model),
         "gas_model": base,
         "n_poses": n_c,
         "pose_indices": list(res.inputs["pose_indices"][model][:n_c]),
@@ -790,7 +825,7 @@ def solvent_analysis(res: PlbResults, x: np.ndarray, *, n_boot: int, seed: int) 
     Empty when the results carry no solvent model. Refuses a solvent model that is not the gas model's field."""
     if not res.solvent:
         return {}
-    gas = [m for m in res.models if m not in res.solvent]
+    gas = [m for m in res.models if m not in res.solvent and m not in res.distance_dielectric]
     if len(gas) != 1:
         raise PlbResultsError(f"a solvent comparison needs exactly one gas-phase model, found {gas}")
     base = gas[0]
@@ -810,6 +845,30 @@ def solvent_analysis(res: PlbResults, x: np.ndarray, *, n_boot: int, seed: int) 
             out["on_common_poses_of_all"][m] = _vs_gas(
                 res, m, base, n_all, x, n_boot=n_boot, seed=seed + 1000 * (i + 1) + 500
             )
+    return out
+
+
+def distance_dielectric_analysis(res: PlbResults, x: np.ndarray, *, n_boot: int, seed: int) -> dict[str, Any]:
+    """The pre-declared distance-dielectric analysis (issue #28): every such model against the ONE unscreened model on
+    the poses both completed. Empty when the results carry none. Refuses a model that is not the unscreened model's
+    field (PQR sha256), or that also divides the charges uniformly or sits in a solvent."""
+    if not res.distance_dielectric:
+        return {}
+    base = [m for m in res.models if m not in res.solvent and m not in res.distance_dielectric]
+    if len(base) != 1:
+        raise PlbResultsError(f"a distance-dielectric comparison needs exactly one unscreened model, found {base}")
+    base = base[0]
+    pqr = res.inputs["prep_provenance"][base]["output_sha256"]
+    out: dict[str, Any] = {"unscreened_model": base, "by_model": {}}
+    for i, m in enumerate(res.models):
+        if m not in res.distance_dielectric:
+            continue
+        if res.inputs["prep_provenance"][m]["output_sha256"] != pqr:
+            raise PlbResultsError(f"{m} does not use the unscreened model's field (PQR sha256 differs)")
+        if m in res.solvent or float(res.inputs["field_provenance"][m].get("dielectric_eps", 1.0)) != 1.0:
+            raise PlbResultsError(f"{m}: a distance-dielectric model must not also be a solvent or a uniform divisor")
+        n_c = min(res.dE[m].shape[1], res.dE[base].shape[1])
+        out["by_model"][m] = _vs_gas(res, m, base, n_c, x, n_boot=n_boot, seed=seed + 1000 * (i + 1))
     return out
 
 
@@ -920,7 +979,8 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
         }
         floors = {"0": 0.0, "noise_floor_4.07": DDE_NOISE_FLOOR_KCAL_MOL}
         # a screened copy of one force field's field is not a second charge model
-        gas_models = [m for m in res.models if m not in res.solvent]  # a solvent model is not a second charge model
+        # a solvent or distance-dielectric model is not a second charge model
+        gas_models = [m for m in res.models if m not in res.solvent and m not in res.distance_dielectric]
         if len(gas_models) >= 2 and mi == 0 and not dielectric_family(res):
             cm = charge_model_comparison(res, gas_models[0], gas_models[1], n_boot=n_boot, seed=seed + 500)
             out["charge_model_comparison"] = cm
@@ -936,4 +996,7 @@ def analyse(res: PlbResults, target, *, seed: int = 20261010, n_boot: int = 10_0
     sol = solvent_analysis(res, x, n_boot=n_boot, seed=seed + 700)
     if sol:
         out["solvent"] = sol
+    ddd = distance_dielectric_analysis(res, x, n_boot=n_boot, seed=seed + 800)
+    if ddd:
+        out["distance_dielectric"] = ddd
     return out

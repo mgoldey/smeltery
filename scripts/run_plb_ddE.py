@@ -55,6 +55,7 @@ import numpy as np  # noqa: E402
 
 from smeltery.benchmark import heavy_canonical, load_benchmark  # noqa: E402
 from smeltery.model import HARTREE_TO_KCAL  # noqa: E402
+from smeltery.plb_measure import distance_dielectric_field  # noqa: E402
 from smeltery.pocket import load_pocket  # noqa: E402
 from smeltery.record import RunRecord, ferric_identity  # noqa: E402
 
@@ -153,7 +154,10 @@ def run_task(spec: dict) -> dict:
         if spec["kind"] in ("vac", "alone"):
             r = ferric.run_rhf(mol, bs, **kw)
         else:
-            r = ferric.run_rhf(mol, bs, point_charges=_FIELDS[spec["model"]], **kw)
+            field = _FIELDS[spec["model"]]
+            if spec.get("ddd_slope") is not None:  # the field depends on this ligand pose (issue #28)
+                field = distance_dielectric_field(field, spec["coords"], spec["ddd_slope"])
+            r = ferric.run_rhf(mol, bs, point_charges=field, **kw)
         out["energy_hartree"] = float(r.energy)
         out["iterations"] = int(r.iterations)
         out["converged"] = bool(r.converged)
@@ -293,6 +297,18 @@ def cmd_run(a: argparse.Namespace) -> int:
         if model not in fields:
             raise SystemExit(f"--eps names {model!r}, which is not a --field model")
         eps[model] = float(val)
+    ddd = {m: None for m in fields}
+    for spec in a.ddd:
+        model, val = spec.split("=", 1)
+        if model not in fields:
+            raise SystemExit(f"--ddd names {model!r}, which is not a --field model")
+        ddd[model] = float(val)
+        if not ddd[model] > 0:
+            raise SystemExit(f"--ddd {model}: the slope must be positive")
+        if solvent[model] is not None or eps[model] != 1.0:
+            raise SystemExit(
+                f"{model}: a distance-dependent dielectric is its own treatment: not with --solvent or --eps"
+            )
     for m in fields:
         if solvent[m] is not None and eps[m] != 1.0:
             raise SystemExit(
@@ -302,6 +318,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     for m, f in fields.items():
         f.provenance["dielectric_eps"] = eps[m]
         f.provenance["solvent"] = solvent[m]
+        f.provenance["distance_dielectric_slope"] = ddd[m]
         f.provenance["scaled_charge_sum_e"] = float(sum(c[0] for c in ferric_fields[m]))
     poses = build_poses({n: d["coords"] for n, d in ligs.items()}, pivot, a.poses, a.seed, a.jitter_deg, a.jitter_ang)
     names = sorted(ligs, key=lambda n: (n != ref, n))  # parent first
@@ -351,6 +368,8 @@ def cmd_run(a: argparse.Namespace) -> int:
             s["model"] = model
             if solvent[model] is not None:
                 s["solvent"] = solvent[model]
+            if ddd[model] is not None:
+                s["ddd_slope"] = ddd[model]
         return s
 
     stopped = False
@@ -419,6 +438,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "models": list(fields),
         "field_eps": eps,
         "field_solvent": solvent,
+        "field_distance_dielectric": ddd,
         "field_provenance": {m: dict(f.provenance) for m, f in fields.items()},
         "prep_provenance": {
             m: json.loads(Path(str(p) + ".json").read_text()) for m, p in (s.split("=", 1) for s in a.field)
@@ -549,6 +569,10 @@ def cmd_assemble(a: argparse.Namespace) -> int:
                 a.base_model: base["inputs"].get("field_solvent", {}).get(a.base_model),
                 **meta.get("field_solvent", {}),
             },
+            "field_distance_dielectric": {
+                a.base_model: base["inputs"].get("field_distance_dielectric", {}).get(a.base_model),
+                **meta.get("field_distance_dielectric", {}),
+            },
         }
     drop = {}
     for spec in a.drop_pose:
@@ -648,6 +672,14 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         metavar="MODEL=EPS",
         help="divide the point charges of this --field model by EPS (screening); default 1 for every model",
+    )
+    r.add_argument(
+        "--ddd",
+        action="append",
+        default=[],
+        metavar="MODEL=SLOPE",
+        help="distance-dependent dielectric eps(d) = max(1, SLOPE*d) per charge, d = distance (A) to the nearest atom "
+        "of the scored ligand pose (issue #28, docs/benchmarks/plb_ddd_plan.md)",
     )
     r.add_argument(
         "--solvent",
