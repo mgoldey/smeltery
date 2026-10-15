@@ -63,6 +63,9 @@ docking = ["vina>=1.2.7", "meeko>=0.8.0", "rdkit>=2024.3", "scipy>=1.11", "gemmi
 # measured in docs/potentials.md (openmm 8.6.1, openmmml 1.8, torchani 2.9.0); torchani 2.9.0 pins torch<=2.13.
 # openmmml's FORCE_SCALE correction is verified for 1.8 only. Pulls torch (~GBs): never part of CI's extras.
 ml-potential = ["openmm>=8.6.1", "openmmml>=1.8", "torchani>=2.9.0", "torch>=2.0,<=2.13", "numpy"]
+# smeltery.providers.aimnet2 only (docs/benchmarks/aimnet2_anion.md). Separate from `ml-potential` so CI's resolve of
+# that extra does not pull aimnet's warp-lang/nvalchemi stack; aimnet needs torch>=2.8 and Python>=3.11.
+aimnet2 = ["aimnet>=0.2.0", "torch>=2.8", "numpy"]
 # Third-party imports of the frozen ferric code under experiments/ (psutil: binding_energy's memory check;
 # scipy: the run_* scripts). Not core: nothing under src/smeltery imports them.
 experiments = ["psutil>=5.9", "scipy>=1.11"]
