@@ -102,6 +102,106 @@ class PoseGateError(RuntimeError):
     """Raised when a quantum tier is handed a pose that failed (or never had) its validity check."""
 
 
+class PoseGeometryError(PoseGateError):
+    """A pose is not the molecule it is labelled as: wrong atoms, or a bonded atom far from its partner."""
+
+
+#: Open Babel's bond-perception rule: two atoms are bonded if they are within the sum of their covalent radii plus this
+#: slack (Å). A standard convention, not fitted to any data here. A real C-F bond is 1.35 Å against a 1.78 Å limit.
+BOND_SLACK_ANG = 0.45
+#: Two atoms closer than this (Å) are on top of each other whatever they are.
+MIN_ATOM_SEPARATION_ANG = 0.4
+
+
+def pose_geometry_problems(smiles: str, pose: Pose) -> list[str]:
+    """Why `pose` cannot be the molecule `smiles` (with hydrogens added); empty if it can.
+
+    Needs only RDKit and no PoseBusters report, so quantum tiers can always run it. Three checks, cheapest first:
+    1. composition: the pose has exactly the elements of the SMILES with H added;
+    2. connectivity: bonds perceived from the geometry (`BOND_SLACK_ANG` rule) make as many pieces as the SMILES has
+       fragments, so an atom stranded far from the molecule (an isolated open-shell atom no closed-shell SCF can
+       converge) is caught whatever the atom order;
+    3. when the atoms are in SMILES-with-H order, every graph bond is within the same limit, which also catches a
+       stretched bond whose far end happens to land near some other atom.
+    It does not judge bond lengths or angles beyond that (PoseBusters does); it is a sanity floor.
+    """
+    from collections import Counter
+
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return [f"unparseable SMILES {smiles!r}"]
+    mol = Chem.AddHs(mol)
+    want = Counter(a.GetSymbol() for a in mol.GetAtoms())
+    have = Counter(pose.symbols)
+    if want != have:
+        return [f"composition {dict(sorted(have.items()))} does not match the SMILES {dict(sorted(want.items()))}"]
+    x = np.asarray(pose.coords_ang, dtype=float)
+    if not np.isfinite(x).all():
+        return ["non-finite coordinates"]
+    table = Chem.GetPeriodicTable()
+    rcov = np.array([table.GetRcovalent(s) for s in pose.symbols])
+    d = np.linalg.norm(x[:, None, :] - x[None, :, :], axis=2)
+    limit = rcov[:, None] + rcov[None, :] + BOND_SLACK_ANG
+    n = len(pose.symbols)
+    problems: list[str] = []
+    close = [(i, j) for i in range(n) for j in range(i + 1, n) if d[i, j] < MIN_ATOM_SEPARATION_ANG]
+    if close:
+        problems.append(
+            "atoms on top of each other: "
+            + ", ".join(f"{pose.symbols[i]}{i}-{pose.symbols[j]}{j}" for i, j in close[:5])
+        )
+    adj = (d <= limit) & ~np.eye(n, dtype=bool)
+    seen, pieces = np.zeros(n, dtype=bool), []
+    for start in range(n):
+        if seen[start]:
+            continue
+        stack, comp = [start], []
+        seen[start] = True
+        while stack:
+            i = stack.pop()
+            comp.append(i)
+            for j in np.nonzero(adj[i] & ~seen)[0]:
+                seen[j] = True
+                stack.append(int(j))
+        pieces.append(comp)
+    want_pieces = len(Chem.GetMolFrags(mol))
+    if len(pieces) != want_pieces:
+        small = sorted(pieces, key=len)[: len(pieces) - want_pieces]
+        problems.append(
+            f"{len(pieces)} connected pieces where the SMILES has {want_pieces}; stranded: "
+            + "; ".join(",".join(f"{pose.symbols[i]}{i}" for i in c[:4]) for c in small[:3])
+        )
+    if tuple(a.GetSymbol() for a in mol.GetAtoms()) == tuple(pose.symbols):
+        broken = [
+            (b.GetBeginAtomIdx(), b.GetEndAtomIdx())
+            for b in mol.GetBonds()
+            if d[b.GetBeginAtomIdx(), b.GetEndAtomIdx()] > limit[b.GetBeginAtomIdx(), b.GetEndAtomIdx()]
+        ]
+        if broken:
+            worst = sorted(broken, key=lambda ij: -d[ij])[:3]
+            problems.append(
+                "bonded atoms too far apart: "
+                + ", ".join(f"{pose.symbols[i]}{i}-{pose.symbols[j]}{j} {d[i, j]:.2f} A" for i, j in worst)
+                + f" ({len(broken)} bond(s))"
+            )
+    return problems
+
+
+def require_sound_geometry(cand: Candidate) -> None:
+    """Raise `PoseGeometryError` if any pose of `cand` cannot be the molecule it is labelled as."""
+    if not cand.smiles:
+        return
+    bad = {i: pr for i, p in enumerate(cand.poses) if (pr := pose_geometry_problems(cand.smiles, p))}
+    if bad:
+        detail = "; ".join(f"pose {i}: {' / '.join(pr)}" for i, pr in list(bad.items())[:4])
+        raise PoseGeometryError(
+            f"{cand.name}: {len(bad)} of {len(cand.poses)} pose(s) are not this molecule ({detail}). "
+            "For poses built by PairedPoses this is the unrelaxed substituent junction: use relax_unmapped=True."
+        )
+
+
 @dataclass(frozen=True)
 class PoseVerdict:
     """One pose: which PoseBusters checks passed and which failed."""
@@ -251,6 +351,7 @@ def require_passing_poses(cand: Candidate, ctx: dict | None = None) -> None:
     if report is None:
         if ctx and ctx.get("require_pose_report"):
             raise PoseGateError(f"{cand.name}: no pose report, and ctx['require_pose_report'] is set")
+        require_sound_geometry(cand)
         return
     if len(report.verdicts) != len(cand.poses):
         raise PoseGateError(
@@ -260,3 +361,4 @@ def require_passing_poses(cand: Candidate, ctx: dict | None = None) -> None:
     if bad or not report.all_passed:
         detail = "; ".join(f"pose {i}: {', '.join(c) or 'no checks ran'}" for i, c in bad.items())
         raise PoseGateError(f"{cand.name}: refusing to run a quantum tier on poses that failed PoseBusters ({detail})")
+    require_sound_geometry(cand)  # after PoseBusters, whose findings are more detailed; before the SCF either way

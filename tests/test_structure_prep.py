@@ -206,6 +206,7 @@ propanol = "CCCO"
 
 [poses]
 n_poses = 2
+relax_unmapped = true
 
 [[pocket.site]]
 q = 1.0

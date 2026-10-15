@@ -57,6 +57,7 @@ butanol = "CCCCO"
 
 [poses]
 n_poses = 3
+relax_unmapped = true
 
 [[pocket.site]]
 q = 1.0
@@ -217,7 +218,11 @@ def test_an_unranked_run_exits_zero_and_a_rerun_reproduces_the_digest_and_the_de
         out_dir = tmp_path / f"run{i}"
         assert main(["run", str(p), "--out", str(out_dir)]) == 0
         printed = capsys.readouterr().out
-        assert "UNRANKED" in printed and "propanol, butanol" in printed.replace("] | [", "")  # one tie group
+        (tie_line,) = [ln for ln in printed.splitlines() if ln.startswith("tie groups")]
+        assert "UNRANKED" in printed and sorted(tie_line.split(": ", 1)[1].split(", ")) == [
+            "butanol",
+            "propanol",
+        ]  # one tie group (order within a group is arbitrary)
         (path,) = out_dir.glob("run-*.json")
         records.append(json.loads(path.read_text()))
     a, b = records
@@ -237,7 +242,7 @@ def test_the_cli_adds_no_arithmetic_it_equals_the_library_called_by_hand():
 
     cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
     parent = cands[0]
-    PairedPoses(n_poses=3).run(cands, {"parent": parent})
+    PairedPoses(n_poses=3, relax_unmapped=True).run(cands, {"parent": parent})
     xyz = parent.poses[0].coords_ang
     u = xyz[2] - xyz[1]
     field = [PointCharge(1.0, tuple(float(v) for v in xyz[2] + 3.0 * u / (u @ u) ** 0.5))]
@@ -279,6 +284,7 @@ def test_the_configured_floor_alone_decides_whether_a_resolved_difference_is_ran
 
 
 GATED = SMALL.format(floor=0.0) + "\n[gates]\nposebusters = true\n"
+GATED_UNRELAXED = GATED.replace("relax_unmapped = true\n", "")
 
 
 def test_gates_change_the_digest():
@@ -318,7 +324,7 @@ def _cli(*args):
 def test_posebusters_rejects_unrelaxed_analogue_poses_loudly_with_the_reason(tmp_path):
     pytest.importorskip("posebusters", reason="needs the posebusters extra")
     p = tmp_path / "pb.toml"
-    p.write_text(GATED)
+    p.write_text(GATED_UNRELAXED)
     r = _cli("run", str(p), "--plan")
     assert r.returncode == 3, r.stdout + r.stderr
     assert "stage 'posebusters' failed" in r.stderr and "propanol" in r.stderr and "relax_unmapped = true" in r.stderr
@@ -327,7 +333,7 @@ def test_posebusters_rejects_unrelaxed_analogue_poses_loudly_with_the_reason(tmp
 def test_relaxing_only_the_substituent_lets_the_same_poses_pass_posebusters(tmp_path):
     pytest.importorskip("posebusters", reason="needs the posebusters extra")
     p = tmp_path / "pb_relax.toml"
-    p.write_text(GATED.replace("n_poses = 3", "n_poses = 3\nrelax_unmapped = true"))
+    p.write_text(GATED)
     r = _cli("run", str(p), "--plan")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "no SCF run" in r.stdout and "posebusters" in r.stdout
