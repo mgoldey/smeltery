@@ -189,3 +189,20 @@ threshold and move forward.** That is a deliberate change of treatment, made on 
 
 **Seen since A1:** the failure pattern (3 of 7 jittered-pose SCFs unconverged at 1e-10, all F or Cl) and the cached CPU times. No energy of a failed SCF exists; the 4 reused dE values are in the cache
 but no ddE has been computed or looked at.
+
+## Amendment A3 (written after the broken-pose finding and before any SCF of a rebuilt pose)
+
+**What happened.** A 16-atom fragment of `bnz-C34-F` showed that the runs-1-to-3 poses have the halogen stranded 3.3 to 8.2 Å from its carbon in 5 of the 6 failed cases (`docs/benchmarks/danuglipron_halogen_accel.md`, "Cause found"); `PairedPoses` was run with its default `relax_unmapped=False`. The SCF failures, A2's threshold change, ferric#410 and the AURORA/TRAH study all rest on those poses. A3 replaces the pose construction and discards nothing already written, but no energy from runs 1-3 is carried into the A3 result.
+
+**Changes (everything else in the plan, A1 and A2 stands unless stated).**
+
+1. **Poses are rebuilt with `relax_unmapped=True`:** MMFF94 relaxes only the unmapped (substituent) atoms with the mapped atoms held fixed, so every mapped coordinate is still an exact copy of the parent pose. Same seeds, same `--poses 2 --skip-first-poses 1` (A1). This moves the substituent, so it changes the ddE: a deliberate change of treatment, justified by the old geometry being unphysical.
+2. **A geometry gate runs before any SCF.** `smeltery.gates.pose_geometry_problems` (composition, connectivity by the Open Babel bond rule, per-bond limit; it is also now enforced by `require_passing_poses`) is applied to every pose of every molecule. Any failure stops the run before an SCF starts; the failing poses are reported and nothing is scored, tuned or dropped.
+3. **The same gate is applied to the OLD (unrelaxed) poses of all 14 molecules and both poses,** once, to say how many of the 28 were stranded and how many of those had converged. This is a count, not a result.
+4. **`energy_conv` returns to the tier default 1e-10** (A2's reason was the broken poses); `density_conv` stays 1e-8. Parent and self-pair poses are not relaxed, so the parent's cached SCFs at 1e-10 are reused; all 24 analogue SCFs (12 analogues x 2 poses) are new, since their coordinates changed. A failed SCF is final (no retry, no loosening), as in the original plan.
+5. **Model B is not run** (`--skip-model-b`): criterion 4 stays SKIPPED.
+6. **Budget:** cap 8 CPU-h for this run, 2,500 CPU-s assumed per in-flight SCF. The earlier runs' 29.0 CPU-h against the 30 CPU-h cap and the later 13.2 CPU-h are spent; this is new spend, and the project owner approved the rebuilt-pose plan on 2026-10-15 without naming a number, so the 8 CPU-h is mine and is stated here.
+
+**Outcome language.** Unchanged from the plan and A1/A2: with 2 poses a paired SEM has 1 degree of freedom, rho is +-1 by construction, nothing supports a ranking finer than the floor or any statement about the campaign or experiment. If every SCF converges, the scan's criteria are reported as the plan defines them, on the rebuilt poses, and not compared with the broken-pose runs. If any SCF fails on a pose that passed the geometry gate, that is reported as a new finding and the run stops.
+
+**Seen before A3:** the bond lengths of the six stored failed poses, the fragment SCFs (stored and repaired geometry), and that AURORA, TRAH and three ladder rungs converged none of the broken poses. No energy of a rebuilt pose exists.
