@@ -1,0 +1,16 @@
+{
+  "note": "Transcribed from the console output of benchmarks/danuglipron_halogen/fragment_check/*.py.txt (dev ferric wheel, RHF/STO-3G, energy_conv 1e-6, density_conv 1e-8, max_iter 200). The fragment is the difluoro-benzonitrile ring of bnz-C34-F cut at the CH2-O bond and H-capped (16 atoms), at its stored pose-0 position.",
+  "stored_halogen_to_carbon_bond_angstrom": {"pyr-C28-F": null, "pyr-C28-Cl": 3.3, "bzim-C9-F": 4.68, "bnz-C34-Cl": 7.05, "bnz-C36-F": 5.75, "bnz-C34-F": 8.22},
+  "stored_longest_bond_angstrom": {"pyr-C28-F": 2.14, "pyr-C28-Cl": 3.3, "bzim-C9-F": 4.68, "bnz-C34-Cl": 7.05, "bnz-C36-F": 5.75, "bnz-C34-F": 8.22},
+  "stored_geometry": {
+    "0": {"converged": false, "iterations": 200},
+    "10": {"converged": true, "iterations": 112}, "50": {"converged": true, "iterations": 96},
+    "200": {"converged": true, "iterations": 159}, "500": {"converged": true, "iterations": 98},
+    "1000": {"converged": true, "iterations": 99}, "2000": {"converged": true, "iterations": 78},
+    "4000": {"converged": true, "iterations": 104}
+  },
+  "repaired_geometry_cf_1p35": {
+    "0": {"converged": true, "iterations": 19}, "50": {"converged": true, "iterations": 19},
+    "1000": {"converged": true, "iterations": 18}, "6458": {"converged": true, "iterations": 18}
+  }
+}

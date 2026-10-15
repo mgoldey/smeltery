@@ -35,3 +35,15 @@ def test_the_plans_precede_the_run_and_state_the_caps():
     plan = (ROOT / "docs" / "benchmarks" / "danuglipron_halogen_accel_plan.md").read_text()
     assert "12 CPU-h" in plan and "5,000 CPU-s" in plan
     assert ACCEL["settings"]["study_cap_cpu_s"] == 12 * 3600 and ACCEL["settings"]["job_cpu_limit_s"] == 5000
+
+
+def test_the_fragment_check_numbers_equal_the_record():
+    fc = json.loads((RES / "halogen_fragment_check.json").read_text())
+    longest = fc["stored_longest_bond_angstrom"]
+    for name, d in longest.items():
+        assert f"{d}" in DOC, name
+    assert max(longest.values()) == 8.22 and longest["pyr-C28-F"] == 2.14
+    assert fc["stored_geometry"]["0"] == {"converged": False, "iterations": 200}
+    assert sorted(v["iterations"] for v in fc["stored_geometry"].values() if v["converged"])[0] == 78
+    assert all(v["converged"] and v["iterations"] in (18, 19) for v in fc["repaired_geometry_cf_1p35"].values())
+    assert "18 to 19 iterations" in DOC and "78 to 159" in DOC and "1.35 Å" in DOC

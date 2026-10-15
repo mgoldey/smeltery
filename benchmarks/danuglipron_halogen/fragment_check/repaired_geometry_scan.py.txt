@@ -1,0 +1,31 @@
+import sys,time,multiprocessing as mp,resource
+sys.argv=['x',sys.argv[1],'bnz-C34-F']
+exec(open(sys.argv[0].replace('x','')+'/tmp/claude-1000/-home-matt-qc-smeltery/c3789fb9-9f2c-43da-bb6f-e75d2bec0196/scratchpad/frag.py').read().split("def job")[0]) if False else None
+src=open('/tmp/claude-1000/-home-matt-qc-smeltery/c3789fb9-9f2c-43da-bb6f-e75d2bec0196/scratchpad/frag.py').read().split("def job")[0]
+exec(src)
+import numpy as np
+# the stretched F is the last F in fs; its bonded carbon is the ring-closure carbon nearest... take the carbon list index 9 (graph neighbour)
+iF=[i for i,s in enumerate(fs) if s=='F'][1]
+# graph neighbour of that F in the molecule: the heavy atom 'C40' -> position in keep
+nb=[n.GetIdx() for n in mol.GetAtomWithIdx(keep[iF]).GetNeighbors()][0]
+iC=keep.index(nb)
+ring=[i for i,s in enumerate(fs) if s=='C' and np.linalg.norm(fx[i]-fx[iC])<1.6 or i==iC]
+cen=fx[[keep.index(a.GetIdx()) for a in mol.GetAtoms() if a.GetIdx() in keep and a.GetIsAromatic()]].mean(axis=0)
+u=fx[iC]-cen; u/=np.linalg.norm(u)
+fx2=fx.copy(); fx2[iF]=fx[iC]+1.35*u
+print("old C-F",np.linalg.norm(fx[iF]-fx[iC]),"new",np.linalg.norm(fx2[iF]-fx[iC]),"min dist",(np.linalg.norm(fx2[:,None]-fx2[None],axis=2)+9*np.eye(len(fx2))).min())
+xs2="%d\nrepaired\n"%len(fs)+"\n".join("%s %.10f %.10f %.10f"%(s,*p) for s,p in zip(fs,fx2))+"\n"
+ch=__import__('numpy').array(__import__('json').load(open(sys.argv[1]+'/field.json'))['charges'])
+d=np.linalg.norm(ch[:,1:4][:,None,:]-fx2[None]*1.8897259886,axis=2).min(axis=1); order=np.argsort(d)
+def job(q,n):
+    resource.setrlimit(resource.RLIMIT_CPU,(900,960))
+    import ferric
+    mol_=ferric.Molecule.from_xyz_string(xs2,charge=0); bs=ferric.BasisSet.bundled('sto-3g')
+    pcs=[tuple(x) for x in ch[order[:n]]] if n else None
+    t=time.process_time()
+    r=ferric.run_rhf(mol_,bs,energy_conv=1e-6,density_conv=1e-8,max_iter=200,point_charges=pcs)
+    q.put((bool(r.converged),int(r.iterations),str(r.exit_reason),r.energy,time.process_time()-t))
+for n in [0,50,1000,6458]:
+    q=mp.Queue();p=mp.Process(target=job,args=(q,n));p.start();p.join()
+    try: print(n,q.get(timeout=1),flush=True)
+    except Exception: print(n,"killed",p.exitcode,flush=True)

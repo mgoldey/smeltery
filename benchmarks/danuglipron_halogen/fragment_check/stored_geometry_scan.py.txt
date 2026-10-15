@@ -1,0 +1,42 @@
+import json, sys, time, resource, multiprocessing as mp
+import numpy as np
+from rdkit import Chem
+IN=sys.argv[1]; CASE=sys.argv[2]
+cases={c['name']:c for c in json.load(open(IN+'/cases.json'))}
+c=cases[CASE]
+lines=c['xyz'].splitlines()[2:]
+sym=[l.split()[0] for l in lines]; xyz=np.array([[float(v) for v in l.split()[1:]] for l in lines])
+mol=Chem.AddHs(Chem.MolFromSmiles(c['smiles']))
+assert [a.GetSymbol() for a in mol.GetAtoms()]==sym
+# benzylic CH2: carbon bonded to O and to an aromatic carbon of the ring bearing the nitrile
+patt=Chem.MolFromSmarts('N#Cc1ccc([CH2]O)c(F)c1')
+m=mol.GetSubstructMatch(patt); cut=(m[6],m[7])  # CH2, O
+seen={m[0]}; stack=[m[0]]
+while stack:
+    i=stack.pop()
+    for n in mol.GetAtomWithIdx(i).GetNeighbors():
+        j=n.GetIdx()
+        if {i,j}=={cut[0],cut[1]} or j in seen: continue
+        seen.add(j); stack.append(j)
+keep=sorted(seen)
+cap=xyz[cut[0]]+1.09*(xyz[cut[1]]-xyz[cut[0]])/np.linalg.norm(xyz[cut[1]]-xyz[cut[0]])
+fs=[sym[i] for i in keep]+['H']; fx=np.vstack([xyz[keep],cap])
+xs="%d\nfragment of %s\n"%(len(fs),CASE)+"\n".join("%s %.10f %.10f %.10f"%(s,*p) for s,p in zip(fs,fx))+"\n"
+print(len(fs),"atoms",''.join(sorted(set(fs))), 'nelec odd?', sum({'H':1,'C':6,'N':7,'O':8,'F':9,'Cl':17}[s] for s in fs)%2)
+ch=np.array(json.load(open(IN+'/field.json'))['charges'])
+B=1.8897259886
+d=np.linalg.norm(ch[:,1:4][:,None,:]-fx[None,:,:]*B,axis=2).min(axis=1)
+order=np.argsort(d); print("nearest charge Å", d[order[0]]/B, "farthest", d[order[-1]]/B)
+def job(q,n,kw):
+    resource.setrlimit(resource.RLIMIT_CPU,(900,960))
+    import ferric
+    mol=ferric.Molecule.from_xyz_string(xs,charge=0); bs=ferric.BasisSet.bundled('sto-3g')
+    pcs=[tuple(x) for x in ch[order[:n]]] if n else None
+    t=time.process_time()
+    r=ferric.run_rhf(mol,bs,energy_conv=1e-6,density_conv=1e-8,point_charges=pcs,**kw)
+    q.put((bool(r.converged),int(r.iterations),str(r.exit_reason),r.energy,time.process_time()-t))
+for kw in ({"max_iter":200},):
+    for n in [0,10,50,200,500,1000,2000,4000,6458]:
+        q=mp.Queue();p=mp.Process(target=job,args=(q,n,kw));p.start();p.join()
+        try: print(n,kw,q.get(timeout=1),flush=True)
+        except Exception: print(n,kw,"killed",p.exitcode,flush=True)
