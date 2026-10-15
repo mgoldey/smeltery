@@ -86,7 +86,8 @@ the counts under "Measured yield" are for no repair:
 
 `provenance["repairs"]` counts the accepted candidates that used them (`salvaged`, `bonds_dropped`, `trimmed`). A
 repaired molecule is the model's geometry with some of its bonds removed and some orders overruled, so it is a
-proposal whose chemistry is chosen partly by these rules; the checks below are on sanitization and bond lengths only.
+proposal whose chemistry is chosen partly by these rules. "Validating the repaired molecules" below measures what that
+costs: the repairs add real yield, but about half of what they add fails PoseBusters' ligand-only geometry checks.
 
 ## Sampling until a target is met
 
@@ -161,6 +162,49 @@ On the 16-sample fixture the last combination accepts 13. The accepted molecules
 scaffold, and have no bond more than 1.3 times its covalent-radii sum, but some carry odd groups (an azo ester, an
 aminal), and nothing here says they bind. Pair the repairs with `forbidden_smarts` and a tier that scores them. Not
 varied: timesteps and resamplings, a stated attachment atom, other parents.
+
+## Validating the repaired molecules
+
+The bond-length check above is weak, so the molecules were checked further. The study was regenerated with the same
+seeds (49 of 480 accepted without repair, per-cell counts within one of the first run). Everything here is one parent
+and one pocket, with small samples; none of it is a benchmark.
+
+**PoseBusters on the model's own pose, ligand-only checks** (a check that hung for 120 s counts as neither pass nor
+fail):
+
+| set | molecules | pass | fail | timeout |
+|---|---|---|---|---|
+| unrepaired | 49 | 40 (82%) | 9 | 0 |
+| repaired, also in the unrepaired set | 28 | 22 | 5 | 1 |
+| repaired only | 354 | 145 (44% of 333 conclusive) | 188 | 21 |
+
+The repaired-only failures are mostly `internal_steric_clash` and `internal_energy`, then `bond_angles`: dropped
+bonds and forced orders leave crowded, strained geometry that sanitization does not see. The repairs still yield 145
+geometry-passing molecules against 40 without them. The receptor-aware PoseBusters check is not reported as a
+comparison, because the two groups were run on different subsets of cells.
+
+**`PairedPoses`** (`parent_poses_given=True`, `relax_unmapped=True`, `mcs_timeout_s=300`) on 20 repaired-only molecules
+that passed the ligand-only check, and 10 unrepaired controls. The exact MCS search did not finish within 300 s for 9
+of 20 and 6 of 10, so about half could not be paired on drug-sized molecules; raising `mcs_timeout_s` is the lever.
+Of the paired poses, 8 of 11 repaired-only and 3 of 4 unrepaired passed the ligand-only check again. The failures are
+`bond_lengths` at the copied-core and new-substituent junction, even with `relax_unmapped`.
+
+**ferric RHF/STO-3G `FieldInteraction`** in the 7LCJ pocket field, pose 0, paired against the parent (dE_int −16.64
+kcal/mol), on the 8 repaired-only and 3 unrepaired molecules that paired and passed:
+
+| set | converged | ddE (kcal/mol) |
+|---|---|---|
+| repaired only | 8 of 8 | +6.4, +2.8, −8.8, +1.4, +2.9, +3.5, +2.5, +1.1 |
+| unrepaired | 2 of 3 (one SCF did not converge) | −6.0, +4.5 |
+
+The two groups cover the same range. This cannot show that the repairs are harmless: the samples are tiny, each is
+filtered by three earlier cuts (8 of 354), and dE_int is a fixed-geometry field interaction that does not contain
+internal strain. The molecules also differ chemically from the parent, so a ddE mixes substituent chemistry with
+geometry artefacts. Differences of 1 to 3 kcal/mol are within the pocket-charge sensitivity floors in `limits.md`.
+
+**What to take from it.** The repairs are a yield tool with a quality cost: roughly half of the molecules they add are
+strained, and half of all candidates cannot be paired without a longer MCS budget. Keep them off by default, turn them
+on when yield is the limit, and run a geometry gate (PoseBusters ligand-only) before any quantum tier.
 
 ## Not claimed
 
