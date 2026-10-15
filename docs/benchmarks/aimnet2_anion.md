@@ -9,9 +9,11 @@ The model's training level (wB97M-D3) differs from the reference functional and 
 
 ## Result in one line
 
-AIMNet2 uses the charge (unlike ANI-2x), and its carboxylate errors are within the plan's 5 kcal/mol bar, **but charge -1 is not entered in `supported_charge_states`**, because the methoxide pair, which
-the plan's rule includes ("every pair error and isodesmic error involving it"), misses the bar at 7.3 kcal/mol. The danuglipron anion is therefore still refused by `evaluate`.
-The outcome is the plan's rule applied as written; the bar and the species were not changed after seeing the numbers.
+AIMNet2 uses the charge (unlike ANI-2x), but **charge -1 is not entered in `supported_charge_states`.** The pair that keeps it out is **methoxide - methanol, +7.3 kcal/mol, over the 5.0 bar**. The two
+carboxylate pairs were inside the bar (acetate +3.9, benzoate +2.9), but the plan's rule counts every pair involving the charge state, and two small molecules is thin evidence in any case. This
+document does **not** say -1 is supported for carboxylates. The danuglipron anion is therefore still refused by `evaluate`.
+The rule was applied as written; the bar and the species were not changed after seeing the numbers, and the project owner confirmed keeping it. A carboxylate-specific rule is a new, separately
+pre-declared plan: `docs/benchmarks/aimnet2_carboxylate_plan.md`.
 
 ## Is the charge used?
 
@@ -59,7 +61,7 @@ beyond this check.
 ## Charge states entered
 
 `supported_charge_states = {0, +1}` by the rule. +1 rests on **one** pair (methylammonium) and 0 on the control; neither is evidence about drug-sized molecules. -1 is excluded by the methoxide pair.
-Whether the plan's rule should count alkoxide, which is not a carboxylate, is a decision for the project owner; changing the rule after these numbers would be a different measurement.
+The project owner decided to keep the rule as written; -1 stays out, and any carboxylate-only rule is the separate plan above, not a retrofit of this one.
 
 ## GPU run (c)
 
