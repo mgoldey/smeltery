@@ -45,10 +45,14 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "import openmm, openmmml, torch, torchani",
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",
     ],
+    "aimnet2": ["import aimnet, torch", "from smeltery.providers.aimnet2 import Aimnet2"],
 }
 #: extras too heavy to install on every run: `check` only proves that pip can RESOLVE them unless `--full` is given
 #: (the release workflow gives it). The reason is stated so the next person can judge whether it still holds.
-HEAVY_EXTRAS = {"ml-potential": "pulls torch and torchani (several GB)"}
+HEAVY_EXTRAS = {
+    "ml-potential": "pulls torch and torchani (several GB)",
+    "aimnet2": "pulls torch and the aimnet warp/nvalchemi stack (several GB)",
+}
 #: extras that exist only for development; never part of a user's install.
 SKIP_EXTRAS = {"dev"}
 
