@@ -1,0 +1,39 @@
+{
+ "case": "bnz-C34-Cl",
+ "cpu_limit_s": 2500,
+ "results": {
+  "A_rung1": {
+   "killed_at_cpu_limit": true,
+   "exitcode": -24,
+   "cpu_s": 2500.0,
+   "probe": {
+    "diis": "adiis",
+    "max_iter": 60
+   },
+   "wall_s": 2533.3160305023193
+  },
+  "B_rung2": {
+   "killed_at_cpu_limit": true,
+   "exitcode": -24,
+   "cpu_s": 2500.0,
+   "probe": {
+    "diis": "adiis",
+    "level_shift": 0.5,
+    "max_iter": 60
+   },
+   "wall_s": 2552.4403660297394
+  },
+  "C_rung3": {
+   "killed_at_cpu_limit": true,
+   "exitcode": -24,
+   "cpu_s": 2500.0,
+   "probe": {
+    "diis": "adiis",
+    "level_shift": 1.0,
+    "soscf": true,
+    "max_iter": 80
+   },
+   "wall_s": 2554.4418561458588
+  }
+ }
+}
