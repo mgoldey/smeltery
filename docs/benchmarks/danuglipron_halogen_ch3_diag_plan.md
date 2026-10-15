@@ -32,3 +32,13 @@ At most 3 CPU-h in total; each SCF is limited to 1,500 CPU-s by `RLIMIT_CPU`; 3 
 
 A diagnosis is stated as what was measured (for example "converges in vacuum in k iterations, fails in the 6,458-charge field"), not as a cause beyond that. It is not evidence about ferric unless a
 stage isolates ferric from smeltery's geometry, which none of these does.
+
+## Addendum A (written after stage 2/3 results for `pyr-C28-CH3` at 0/50/1,000 charges and `bzim-C9-CH3` at 1,000, before any 6,458-charge SCF of a failure)
+
+**Seen:** both failing molecules converge with up to 1,000 charges in 40 to 60 iterations, 588 to 720 CPU-s; run 4's failure was at 6,458 charges, which the plan above had only for the control.
+
+**Added (project owner's instruction):** `pyr-C28-CH3` and `bzim-C9-CH3` pose 0 are run with all 6,458 charges, same settings as the other stage-3 SCFs (`energy_conv` 1e-10, `density_conv` 1e-8,
+`max_iter` 200, 1,500 CPU-s limit, STO-3G RHF, charge 0). Two SCFs, at most 2 x 1,500 CPU-s = 0.83 CPU-h; this takes the diagnosis to at most about 4 CPU-h against the 3 CPU-h written above, a disclosed
+overrun (the first attempt's SCFs were lost to a recording bug, `scf_attempt1_crashed.log`). Interpretation rules, fixed now: converges within 200 iterations and 1,500 CPU-s: run 4's failure is not reproduced
+at these settings, and it is reported as "the failure needs the 2,500 CPU-s limit or a different setting to explain" and not as a cause; does not converge: the failure reproduces in this harness without the
+scan runner, and it is reported as such. Neither outcome changes the A3 status of the two SCFs (failed, final).
