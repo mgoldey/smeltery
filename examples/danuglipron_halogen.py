@@ -197,9 +197,21 @@ class BoundPosePairedPoses(PairedPoses):
                 cand.poses = self._paired(pmol, parent_poses, cand)
 
 
-def make_pairing(bound: Pose, n_poses: int) -> BoundPosePairedPoses:
-    """The pairing tier as this example runs it: default seed, jitter and core rules, MCS limit `MCS_TIMEOUT_S`."""
-    return BoundPosePairedPoses(bound, n_poses=n_poses, mcs_timeout_s=MCS_TIMEOUT_S)
+def make_pairing(bound: Pose, n_poses: int, relax_unmapped: bool = False) -> BoundPosePairedPoses:
+    """The pairing tier as this example runs it: default seed, jitter and core rules, MCS limit `MCS_TIMEOUT_S`.
+
+    `relax_unmapped=True` (plan amendment A3) MMFF-relaxes only the substituent atoms, mapped atoms held fixed. Without
+    it the substituent is a rigidly aligned fresh embedding whose junction can be metres of bond length wrong: runs 1-3
+    had halogens 3.3 to 8.2 Angstrom from their carbon.
+    """
+    return BoundPosePairedPoses(bound, n_poses=n_poses, mcs_timeout_s=MCS_TIMEOUT_S, relax_unmapped=relax_unmapped)
+
+
+def geometry_report(cands: list[Candidate]) -> dict[str, list[list[str]]]:
+    """Per candidate, per pose: why that pose cannot be the candidate's molecule (empty list = sound). No SCF is run."""
+    from smeltery.gates import pose_geometry_problems
+
+    return {c.name: [pose_geometry_problems(c.smiles, p) for p in c.poses] for c in cands}
 
 
 class CpuCapReached(RuntimeError):
@@ -410,6 +422,16 @@ def main(argv: list[str] | None = None) -> int:
         default=DECLARED_FLOOR_KCAL_MOL,
         help="declared systematic floor for the cut (kcal/mol); default " + DECLARED_FLOOR_SOURCE,
     )
+    ap.add_argument(
+        "--relax-unmapped",
+        action="store_true",
+        help="plan amendment A3: MMFF-relax the substituent atoms of every analogue pose (mapped atoms stay fixed)",
+    )
+    ap.add_argument(
+        "--geometry-only",
+        action="store_true",
+        help="build the poses, write the geometry report (out/pose_geometry*.json) and stop: no SCF is run",
+    )
     ap.add_argument("--sites", default=None, help="comma-separated subset of " + ",".join(SITES) + " (default: all)")
     ap.add_argument(
         "--skip-model-b",
@@ -437,12 +459,28 @@ def main(argv: list[str] | None = None) -> int:
     selfpair = Candidate("parent-self", PARENT_SMILES)
     cands = [parent, *analogues, selfpair]
     k0 = args.skip_first_poses
-    poses = make_pairing(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), args.poses + k0)
+    poses = make_pairing(bound_pose_in_smiles_order(data / "conf_00_cryo_em.xyz"), args.poses + k0, args.relax_unmapped)
     poses.run(cands, {"parent": parent})
     for c in cands:  # amendment A1: the first k0 pose indices are dropped for EVERY molecule, before any SCF
         c.poses = c.poses[k0:]
 
     args.out.mkdir(exist_ok=True)
+    geo = geometry_report(cands)  # amendment A3: every pose of every molecule is checked before any SCF
+    bad = {n: [i for i, pr in enumerate(prs) if pr] for n, prs in geo.items() if any(prs)}
+    n_poses_total = sum(len(v) for v in geo.values())
+    print(
+        f"geometry gate (relax_unmapped={args.relax_unmapped}): {sum(len(v) for v in bad.values())} of {n_poses_total} "
+        f"poses fail: {bad or 'none'}",
+        flush=True,
+    )
+    (args.out / f"pose_geometry_relax{int(args.relax_unmapped)}.json").write_text(
+        json.dumps({"relax_unmapped": args.relax_unmapped, "n_poses": n_poses_total, "problems": geo}, indent=1)
+    )
+    if args.geometry_only:
+        return 0
+    if bad:
+        print("stopping before any SCF: poses that are not their molecule are never scored", file=sys.stderr)
+        return 2
     cache = args.out / "halogen-scf-cache.json"  # content-addressed, so shared by runs with different --poses
     cap_s = args.cap_cpu_hours * 3600.0
     tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s, args.est_scf_cpu_s, args.energy_conv)

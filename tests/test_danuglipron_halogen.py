@@ -278,3 +278,32 @@ def test_the_real_worker_hands_the_threshold_to_the_tier(monkeypatch):
     monkeypatch.setattr(ex, "FieldInteraction", Spy)
     ex._one_pose("A", "C", _fake_cands()[0].poses[0], None, 1e-6)
     assert got == {"energy_conv": 1e-6}
+
+
+def test_geometry_report_flags_a_stranded_halogen_and_passes_a_sound_pose():
+    import numpy as np
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    from smeltery import Candidate, Pose
+
+    mol = Chem.AddHs(Chem.MolFromSmiles("Fc1ccccc1"))
+    assert AllChem.EmbedMolecule(mol, randomSeed=7) == 0
+    xyz = np.array([list(mol.GetConformer().GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
+    syms = tuple(a.GetSymbol() for a in mol.GetAtoms())
+    stranded = xyz.copy()
+    stranded[0] = xyz[1] + np.array([8.2, 0.0, 0.0])  # as bnz-C34-F in runs 1-3
+    cand = Candidate("fluorobenzene", "Fc1ccccc1", [Pose(syms, xyz), Pose(syms, stranded)])
+    rep = ex.geometry_report([cand])
+    assert rep["fluorobenzene"][0] == []
+    assert rep["fluorobenzene"][1] and any("connected pieces" in m for m in rep["fluorobenzene"][1])
+
+
+def test_the_pairing_tier_is_unrelaxed_by_default_and_relaxed_on_request():
+    import numpy as np
+
+    from smeltery import Pose
+
+    bound = Pose(("C",), np.zeros((1, 3)))
+    assert ex.make_pairing(bound, 2).settings()["relax_unmapped"] is False
+    assert ex.make_pairing(bound, 2, relax_unmapped=True).settings()["relax_unmapped"] is True
