@@ -1,0 +1,20 @@
+{
+ "smiles": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)[O-])N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
+ "n_atoms": 70,
+ "net_charge": -1,
+ "devices": {
+  "cpu": {
+   "energy_kcal_mol": -1176319.553763809,
+   "wall_s": 0.04945741499250289,
+   "torch": "2.7.1+cu126"
+  },
+  "cuda:0": {
+   "energy_kcal_mol": -1176319.5538143788,
+   "wall_s": 0.028666643993346952,
+   "torch": "2.7.1+cu126"
+  }
+ },
+ "energy_difference_kcal_mol": -5.056988447904587e-05,
+ "max_force_difference_kcal_mol_ang": 9.625905764831799e-05,
+ "max_force_component_kcal_mol_ang": 47.39171358509351
+}

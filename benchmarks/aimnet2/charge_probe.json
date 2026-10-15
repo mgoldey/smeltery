@@ -1,0 +1,142 @@
+{
+ "settings": {
+  "provider": "aimnet2-wb97m-d3",
+  "model": "aimnet2 (ensemble member 0)",
+  "device": "cpu",
+  "precision": "float64 (model and external modules)",
+  "supported_charge_states": [
+   -1,
+   0,
+   1
+  ],
+  "license_id": "MIT",
+  "weights_license_source": "https://huggingface.co/isayevlab/aimnet2-wb97m-d3 (model card metadata: license: mit)",
+  "aimnet": "0.2.0",
+  "torch": "2.9.1+cu128"
+ },
+ "species": {
+  "acetic acid": {
+   "charge": 0,
+   "dft": -143777.26826461937,
+   "model": -143852.20330991282
+  },
+  "acetate": {
+   "charge": -1,
+   "dft": -143424.22227459832,
+   "model": -143495.21497093586
+  },
+  "benzoic acid": {
+   "charge": 0,
+   "dft": -264107.6362589911,
+   "model": -264256.7013700167
+  },
+  "benzoate": {
+   "charge": -1,
+   "dft": -263761.3276322105,
+   "model": -263907.52462760697
+  },
+  "methanol": {
+   "charge": 0,
+   "dft": -72629.15708717734,
+   "model": -72662.80235164988
+  },
+  "methoxide": {
+   "charge": -1,
+   "dft": -72242.0289769558,
+   "model": -72268.35298207933
+  },
+  "methylamine": {
+   "charge": 0,
+   "dft": -60161.67358241842,
+   "model": -60190.11288260624
+  },
+  "methylammonium": {
+   "charge": 1,
+   "dft": -60382.947818162276,
+   "model": -60412.625054991455
+  },
+  "ethanol": {
+   "charge": 0,
+   "dft": -97304.45794152915,
+   "model": -97351.58393016487
+  },
+  "dimethyl ether": {
+   "charge": 0,
+   "dft": -97292.41583077375,
+   "model": -97339.5070658717
+  }
+ },
+ "bar_kcal_mol": 5.0,
+ "charge_used": {
+  "acetate_coords_charge_-1": -143495.21497093586,
+  "acetate_coords_charge_0": -143373.82859981176,
+  "differs": true
+ },
+ "pairs": {
+  "acetate - acetic acid": {
+   "dft": 353.04599002105533,
+   "model": 356.98833897695295,
+   "error": 3.9423489558976144
+  },
+  "benzoate - benzoic acid": {
+   "dft": 346.30862678057747,
+   "model": 349.1767424097052,
+   "error": 2.868115629127715
+  },
+  "methoxide - methanol": {
+   "dft": 387.12811022154347,
+   "model": 394.44936957054597,
+   "error": 7.321259349002503
+  },
+  "methylammonium - methylamine": {
+   "dft": -221.27423574385466,
+   "model": -222.5121723852135,
+   "error": -1.2379366413588286
+  },
+  "dimethyl ether - ethanol": {
+   "dft": 12.042110755399335,
+   "model": 12.076864293165272,
+   "error": 0.034753537765936926
+  }
+ },
+ "isodesmic": {
+  "acetate + methanol -> acetic acid + methoxide": {
+   "dft": 34.08212020047358,
+   "model": 37.461030593607575,
+   "error": 3.3789103931339923
+  },
+  "benzoate + methanol -> benzoic acid + methoxide": {
+   "dft": 40.819483440951444,
+   "model": 45.27262716082623,
+   "error": 4.453143719874788
+  }
+ },
+ "geometry": {
+  "acetate": {
+   "model_vs_xtb_max_bond_change_ang": 0.02578866903188226
+  },
+  "benzoate": {
+   "model_vs_xtb_max_bond_change_ang": 0.011111702070569995
+  },
+  "methoxide": {
+   "model_vs_xtb_max_bond_change_ang": 0.035023663682906436
+  },
+  "methylammonium": {
+   "model_vs_xtb_max_bond_change_ang": 0.023547379983857475
+  },
+  "acetic acid": {
+   "model_vs_xtb_max_bond_change_ang": 0.011359249545627836
+  },
+  "benzoic acid": {
+   "model_vs_xtb_max_bond_change_ang": 0.009773060459381755
+  }
+ },
+ "force_fd": {
+  "bar": 0.0001,
+  "relative_error": {
+   "0.0001": 0.0011225866609715035,
+   "0.001": 0.00016010882842864988,
+   "0.01": 0.0012209970783736133
+  }
+ }
+}
