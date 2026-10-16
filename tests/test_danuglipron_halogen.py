@@ -276,8 +276,8 @@ def test_the_real_worker_hands_the_threshold_to_the_tier(monkeypatch):
             cands[0].per_pose["dE_int"] = [1.0]
 
     monkeypatch.setattr(ex, "FieldInteraction", Spy)
-    ex._one_pose("A", "C", _fake_cands()[0].poses[0], None, 1e-6)
-    assert got == {"energy_conv": 1e-6}
+    ex._one_pose("A", "C", _fake_cands()[0].poses[0], None, 1e-6, 200)
+    assert got == {"energy_conv": 1e-6, "max_iter": 200}  # amendment A4 hands the limit to the tier too
 
 
 def test_geometry_report_flags_a_stranded_halogen_and_passes_a_sound_pose():
@@ -307,3 +307,47 @@ def test_the_pairing_tier_is_unrelaxed_by_default_and_relaxed_on_request():
     bound = Pose(("C",), np.zeros((1, 3)))
     assert ex.make_pairing(bound, 2).settings()["relax_unmapped"] is False
     assert ex.make_pairing(bound, 2, relax_unmapped=True).settings()["relax_unmapped"] is True
+
+
+def _spy_max_iter_one_pose(name, smiles, pose, field, energy_conv=1e-10, max_iter=None):
+    x = float(pose.coords_ang[1, 0])
+    with open(_RUN_LOG[0], "a") as f:
+        f.write(f"{name} {x:.1f} {max_iter}\n")
+    return x + 0.5, 50.0, None
+
+
+def test_a_larger_max_iter_retries_a_cached_failure_once_and_reuses_the_successes(tmp_path, monkeypatch):
+    """Amendment A4: a failure under the engine's iteration limit is not a failure under 200; a success is reused."""
+    cache = tmp_path / "c.json"
+    _seed_default_cache(cache, monkeypatch, "A")
+    _RUN_LOG[:] = [tmp_path / "ran.txt"]
+    monkeypatch.setattr(ex, "_one_pose", _spy_max_iter_one_pose)
+    cands = _fake_cands()
+    ex.run_field_tier(cands, _fake_field(), "T", 1, cache, max_iter=200)
+    assert _ran(tmp_path) == ["A 0.8 200"]  # only the failed pose runs, with the new limit passed through
+    a, b = cands
+    assert a.per_pose["dE_int"] == pytest.approx([0.7, 1.3, 0.9])
+    data = json.loads(cache.read_text())
+    assert sum(1 for v in data.values() if v.get("reused_from_max_iter") == "engine default") == 5
+    assert not any("reused_from_energy_conv" in v for v in data.values())  # the threshold did not change
+    ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, max_iter=200)
+    assert len(_ran(tmp_path)) == 1
+
+
+def test_a_failure_at_the_larger_max_iter_is_final(tmp_path, monkeypatch):
+    cache = tmp_path / "c.json"
+    _seed_default_cache(cache, monkeypatch, "A")
+    _RUN_LOG[:] = [tmp_path / "ran.txt"]
+    monkeypatch.setattr(ex, "_one_pose", _logged_failure_mi)
+    with pytest.raises(ex.ScfFailed):
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, max_iter=200)
+    n = len(_ran(tmp_path))
+    with pytest.raises(ex.ScfFailed):
+        ex.run_field_tier(_fake_cands(), _fake_field(), "T", 1, cache, max_iter=200)
+    assert len(_ran(tmp_path)) == n  # cached as failed, not retried
+
+
+def _logged_failure_mi(name, smiles, pose, field, energy_conv=1e-10, max_iter=None):
+    with open(_RUN_LOG[0], "a") as f:
+        f.write(f"{name}\n")
+    return None, 10.0, "SCF did not converge"

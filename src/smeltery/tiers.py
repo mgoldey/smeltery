@@ -357,6 +357,7 @@ class FieldInteraction:
     basis: str = "sto-3g"
     energy_conv: float = 1e-10
     density_conv: float = 1e-8
+    max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
     name: str = "field_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
 
@@ -366,6 +367,7 @@ class FieldInteraction:
             "basis": self.basis,
             "energy_conv": self.energy_conv,
             "density_conv": self.density_conv,
+            "max_iter": self.max_iter,
             "engine": "ferric",
             "field": self.field_provenance,
         }
@@ -422,6 +424,8 @@ class FieldInteraction:
             for i, pose in enumerate(cand.poses):
                 mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
                 kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
+                if self.max_iter is not None:
+                    kw["max_iter"] = self.max_iter
                 vac = ferric.run_rhf(mol, bs, **kw)
                 fld = ferric.run_rhf(mol, bs, point_charges=charges, **kw)
                 if not (vac.converged and fld.converged):

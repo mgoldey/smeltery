@@ -10,7 +10,7 @@
 
 ## Native settings
 
-`FieldInteraction.settings()` reports `method`, `basis`, `energy_conv`, `density_conv`, `engine` and `field`.
+`FieldInteraction.settings()` reports `method`, `basis`, `energy_conv`, `density_conv`, `max_iter`, `engine` and `field`.
 
 | key | default |
 |---|---|
@@ -18,8 +18,11 @@
 | `basis` | `sto-3g` |
 | `energy_conv` | `1e-10` |
 | `density_conv` | `1e-08` |
+| `max_iter` | `None` |
 | `engine` | `ferric` |
 | `field` | provenance of the pocket field after a run (file digest, pdb2pqr30 version, cutoff); `None` before |
+
+`max_iter=None` leaves ferric's own iteration limit in force. In ferric 0.1.0rc7 that limit is 100: one measured field SCF of a 70-atom ligand in 6,458 charges stopped at 100 iterations unconverged and converged in 111 with `max_iter=200` (`benchmarks/danuglipron_halogen/ch3_diag/order_diag.json`). A value is passed to every SCF of the tier, vacuum and field.
 
 ## Cost
 

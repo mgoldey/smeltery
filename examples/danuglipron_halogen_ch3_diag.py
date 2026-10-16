@@ -30,6 +30,7 @@ from rdkit import Chem
 
 sys.path.insert(0, str(Path(__file__).parent))
 import danuglipron_halogen as dh  # noqa: E402
+
 from smeltery import Candidate, load_pocket  # noqa: E402
 
 NAMES = ["parent", "pyr-C28-CH3", "bzim-C9-CH3", "bnz-C34-CH3"]
@@ -64,7 +65,10 @@ def geometry_stats(smiles, pose, charges_xyz_ang):
     syms = list(pose.symbols)
     heavy = [i for i, s in enumerate(syms) if s != "H"]
     pt = Chem.GetPeriodicTable()
-    bonded = {(min(b.GetBeginAtomIdx(), b.GetEndAtomIdx()), max(b.GetBeginAtomIdx(), b.GetEndAtomIdx())) for b in mol.GetBonds()}
+    bonded = {
+        (min(b.GetBeginAtomIdx(), b.GetEndAtomIdx()), max(b.GetBeginAtomIdx(), b.GetEndAtomIdx()))
+        for b in mol.GetBonds()
+    }
     worst, worst_ratio = None, 0.0
     if mol.GetNumAtoms() == len(syms):  # atom order is AddHs order when the counts agree (checked by the gate)
         for i, j in bonded:
@@ -158,10 +162,8 @@ def stage_scf(out: Path, workers: int, names=None, ns=None, tag="scf_diag") -> N
     for name in names or [*FAILED, CONTROL]:
         xyz = out / f"{name}_pose0.xyz"
         xs = xyz.read_text().split("\n")[2:]
-        coords = np.array([[float(v) for v in l.split()[1:4]] for l in xs if l.strip()])
-        d = np.linalg.norm(
-            np.array([c.xyz_ang for c in field])[:, None, :] - coords[None], axis=2
-        ).min(axis=1)
+        coords = np.array([[float(v) for v in ln.split()[1:4]] for ln in xs if ln.strip()])
+        d = np.linalg.norm(np.array([c.xyz_ang for c in field])[:, None, :] - coords[None], axis=2).min(axis=1)
         order = np.argsort(d)
         rows = np.array([c.as_ferric_bohr() for c in field])[order]
         cpath = out / f"{name}_charges_nearest_first.json"
@@ -189,9 +191,7 @@ def _order_job(q, label, max_iter, order, xyz_path, charges_pqr, charges_nearest
     bs = ferric.BasisSet.bundled("sto-3g")
     rows = json.loads(Path(charges_pqr if order == "pqr" else charges_nearest).read_text())
     kw = {} if max_iter is None else {"max_iter": max_iter}
-    r = ferric.run_rhf(
-        mol, bs, energy_conv=1e-10, density_conv=1e-8, point_charges=[tuple(x) for x in rows], **kw
-    )
+    r = ferric.run_rhf(mol, bs, energy_conv=1e-10, density_conv=1e-8, point_charges=[tuple(x) for x in rows], **kw)
     q.put(
         {
             "run": label,

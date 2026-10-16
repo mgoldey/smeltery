@@ -1,0 +1,29 @@
+[
+ {
+  "run": "R3",
+  "max_iter": null,
+  "order": "nearest",
+  "converged": true,
+  "iterations": 64,
+  "energy": -1877.6418040242952,
+  "cpu_s": 839.539462412
+ },
+ {
+  "run": "R1",
+  "max_iter": null,
+  "order": "pqr",
+  "converged": false,
+  "iterations": 100,
+  "energy": -1877.641804028527,
+  "cpu_s": 1102.740070779
+ },
+ {
+  "run": "R2",
+  "max_iter": 200,
+  "order": "pqr",
+  "converged": true,
+  "iterations": 111,
+  "energy": -1877.6418040256722,
+  "cpu_s": 1144.665630748
+ }
+]
