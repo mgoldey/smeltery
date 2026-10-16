@@ -1,0 +1,2 @@
+{"name": "bzim-C9-CH3", "n_charges": 6458, "converged": true, "iterations": 43, "exit": "None", "energy": -1877.6300659715962, "cpu_s": 694.938011292}
+{"name": "pyr-C28-CH3", "n_charges": 6458, "converged": true, "iterations": 64, "exit": "None", "energy": -1877.6418040242952, "cpu_s": 786.583235177}

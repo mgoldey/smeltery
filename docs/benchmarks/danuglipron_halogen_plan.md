@@ -206,3 +206,27 @@ but no ddE has been computed or looked at.
 **Outcome language.** Unchanged from the plan and A1/A2: with 2 poses a paired SEM has 1 degree of freedom, rho is +-1 by construction, nothing supports a ranking finer than the floor or any statement about the campaign or experiment. If every SCF converges, the scan's criteria are reported as the plan defines them, on the rebuilt poses, and not compared with the broken-pose runs. If any SCF fails on a pose that passed the geometry gate, that is reported as a new finding and the run stops.
 
 **Seen before A3:** the bond lengths of the six stored failed poses, the fragment SCFs (stored and repaired geometry), and that AURORA, TRAH and three ladder rungs converged none of the broken poses. No energy of a rebuilt pose exists.
+
+## Amendment A4 (written after the diagnosis of run 4's two failures, before any SCF it describes)
+
+**What happened.** Run 4 (A3) left `pyr-C28-CH3` and `bzim-C9-CH3` pose 0 unconverged. The diagnosis (`docs/benchmarks/danuglipron_halogen_ch3_diag_plan.md`, addenda A and B; records in
+`benchmarks/danuglipron_halogen/ch3_diag/`) found: with all 6,458 charges both converge when ferric is called directly with `max_iter=200` (43 and 64 iterations); the tier's own call (ferric's default limit,
+charges in PQR order) stopped `pyr-C28-CH3` unconverged at 100 iterations, and `max_iter=200` with the same call converged it in 111. So run 4's two failures are the engine's default iteration limit, which
+`FieldInteraction` did not set, and not a property of the poses or the field. Charge order also changes the iteration count (111 PQR order, 64 nearest first) without changing the energy; this is recorded, not tuned.
+
+**Changes (everything else in the plan, A1 and A3 stands).**
+
+1. **`FieldInteraction` gains `max_iter` (default `None` = ferric's own limit, so existing callers are unchanged).** The runner passes `--max-iter 200` to every SCF of this run, vacuum and field alike. 200 is one value
+   chosen now from the diagnosis (the pose that needed 111), not scanned. `max_iter` enters the cache key.
+2. **The two run-4 failures are re-attempted once at 200.** This overrides A3's "a failed SCF is final" for these two SCFs only, because the cause is now identified as the iteration limit and not the SCF. SCFs that
+   converged under the engine's limit are reused as they are (an SCF that converged before any limit applied has the same iteration path under a larger one). A failure at 200 is final: no retry, no further change.
+3. **Charge order is not changed** (the tier's PQR order stays) so as not to alter what the already-converged SCFs were computed with.
+4. **Scope:** `--poses 2 --skip-first-poses 1` (pose 0 and pose 1 of A1/A3), all 12 analogues, parent and self-pair; Model B (CHARMM) skipped; `energy_conv` 1e-10, `density_conv` 1e-8, `--relax-unmapped`.
+5. **Budget:** cap **10 CPU-h** for this call (my number: the project owner said to write A4 and run it without naming one), 2,500 CPU-s assumed per in-flight SCF. Expected: the two re-attempts at about 2,300 CPU-s each
+   (vacuum plus field) and pose 1 for 14 molecules at about 1,700 CPU-s each, about 8 CPU-h. If the cap stops submission the run is resumable from the cache. Study spend so far is about 29.0 (runs 1 to 2) + 13.2
+   (accelerator study) + 4.3 (run 4) + about 5 (diagnosis) CPU-h; this call brings it to about 60 CPU-h against the original 30 CPU-h plan, a disclosed overrun.
+
+**Outcome language.** Unchanged: 2 poses, 1-dof SEMs, rho +-1 by construction, no ranking finer than the 1.26 kcal/mol declared floor, no statement about the campaign or experiment. Any SCF that fails at
+`max_iter` 200 is a finding, final, and reported as it is.
+
+**Seen before A4:** the diagnosis numbers above; the pose-0 dE_int values of 8 analogues exist in the cache from run 4 but no ddE has been computed or read from them.

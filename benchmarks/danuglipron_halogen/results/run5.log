@@ -1,0 +1,67 @@
+field A (AMBER): 6458 charges, net -1.00; field B: skipped
+geometry gate (relax_unmapped=True): 0 of 28 poses fail: none
+  AMBER: 9 cached (9 reused from the default energy_conv 1e-10 and engine max_iter), 19 to run on 6 workers (energy_conv 1e-10, max_iter 200)
+  AMBER: bnz-C36-Cl pose 0 done, 1408 CPU-s (0.39 CPU-h this call)
+  AMBER: parent-self pose 0 done, 1498 CPU-s (0.81 CPU-h this call)
+  AMBER: bnz-C36-CH3 pose 0 done, 1773 CPU-s (1.30 CPU-h this call)
+  AMBER: parent pose 1 done, 1889 CPU-s (1.82 CPU-h this call)
+  AMBER: bzim-C9-CH3 pose 0 done, 2168 CPU-s (2.43 CPU-h this call)
+  AMBER: pyr-C28-CH3 pose 0 done, 2223 CPU-s (3.04 CPU-h this call)
+  AMBER: bzim-C9-F pose 1 done, 1638 CPU-s (3.50 CPU-h this call)
+  AMBER: pyr-C28-F pose 1 done, 1526 CPU-s (3.92 CPU-h this call)
+  AMBER: bzim-C9-Cl pose 1 done, 2039 CPU-s (4.49 CPU-h this call)
+  AMBER: bzim-C9-CH3 pose 1 done, 1845 CPU-s (5.00 CPU-h this call)
+  AMBER: pyr-C28-Cl pose 1 done, 1525 CPU-s (5.43 CPU-h this call)
+  AMBER: pyr-C28-CH3 pose 1 done, 1883 CPU-s (5.95 CPU-h this call)
+  AMBER: bnz-C34-Cl pose 1 done, 1023 CPU-s (6.23 CPU-h this call)
+  AMBER: bnz-C34-F pose 1 done, 1592 CPU-s (6.68 CPU-h this call)
+  AMBER: bnz-C36-F pose 1 done, 1032 CPU-s (6.96 CPU-h this call)
+  AMBER: bnz-C34-CH3 pose 1 done, 1336 CPU-s (7.33 CPU-h this call)
+  AMBER: bnz-C36-Cl pose 1 done, 1642 CPU-s (7.79 CPU-h this call)
+  AMBER: bnz-C36-CH3 pose 1 done, 1426 CPU-s (8.19 CPU-h this call)
+  AMBER: parent-self pose 1 done, 1402 CPU-s (8.58 CPU-h this call)
+
+[1] self-anchor: per-pose ddE = [0.0, 0.0] (exactly 0.0); parent dE_int per pose = [-18.41, -14.53] kcal/mol (field non-zero). The campaign's re-embedding self-anchor was +0.31; this construction copies, so it is 0.
+
+[3] paired vs unpaired (AMBER, 2 poses, kcal/mol)
+analogue       paired ddE  pairedSEM  unpairedSEM  unp/pair      rho
+bzim-C9-F          -1.245      0.228        2.907     12.74   1.0000
+bzim-C9-Cl         -2.445      0.253        2.926     11.57   1.0000
+bzim-C9-CH3        -0.764      0.916        2.192      2.39   1.0000
+pyr-C28-F          +0.940      0.257        2.566     10.00   1.0000
+pyr-C28-Cl         +1.795      0.674        2.314      3.43   1.0000
+pyr-C28-CH3        -1.371      1.430        3.886      2.72   1.0000
+bnz-C34-F          -3.869      1.158        2.090      1.80   1.0000
+bnz-C34-Cl         +6.286     10.056       12.150      1.21   1.0000
+bnz-C34-CH3        +2.522      2.540        4.880      1.92   1.0000
+bnz-C36-F          +0.801      0.301        2.538      8.44   1.0000
+bnz-C36-Cl         +1.384      0.606        2.352      3.88   1.0000
+bnz-C36-CH3        -0.472      0.070        2.792     39.68   1.0000
+    criterion 3: PASS, paired SEM < unpaired SEM for all analogues
+
+[2] comparison with campaign-recorded values: UNVERIFIED: no campaign per-analogue values available
+analogue            ours  ours SEM  recorded  agrees
+bzim-C9-F         -1.245     0.228       n/a     n/a
+bzim-C9-Cl        -2.445     0.253       n/a     n/a
+bzim-C9-CH3       -0.764     0.916       n/a     n/a
+pyr-C28-F         +0.940     0.257       n/a     n/a
+pyr-C28-Cl        +1.795     0.674       n/a     n/a
+pyr-C28-CH3       -1.371     1.430       n/a     n/a
+bnz-C34-F         -3.869     1.158       n/a     n/a
+bnz-C34-Cl        +6.286    10.056       n/a     n/a
+bnz-C34-CH3       +2.522     2.540       n/a     n/a
+bnz-C36-F         +0.801     0.301       n/a     n/a
+bnz-C36-Cl        +1.384     0.606       n/a     n/a
+bnz-C36-CH3       -0.472     0.070       n/a     n/a
+    rho (analogue vs parent per-pose dE_int) against campaign (0.78, 0.9997): 0 inside, 12 outside ['bnz-C34-CH3', 'bnz-C34-Cl', 'bnz-C34-F', 'bnz-C36-CH3', 'bnz-C36-Cl', 'bnz-C36-F', 'bzim-C9-CH3', 'bzim-C9-Cl', 'bzim-C9-F', 'pyr-C28-CH3', 'pyr-C28-Cl', 'pyr-C28-F']
+    CH3 paired SEM against campaign (1.0, 3.5): 2 inside, 2 outside ['bnz-C36-CH3', 'bzim-C9-CH3']
+
+[4] second charge model NOT run (--skip-model-b): sign flips and Spearman between models unmeasured.
+    declared floor 1.26 kcal/mol (1.26 kcal/mol, docs/limits.md L6 (cdk2; L11 tyk2 is 0.67), a lower bound from other targets)
+    cut(keep=3, z=2, floor=1.260): groups=[['bnz-C34-F', 'bzim-C9-Cl', 'pyr-C28-CH3', 'bzim-C9-F', 'bzim-C9-CH3', 'bnz-C36-CH3'], ['bnz-C36-F', 'pyr-C28-F', 'bnz-C36-Cl', 'pyr-C28-Cl', 'bnz-C34-CH3', 'bnz-C34-Cl']]
+     UNRANKED at the boundary keep=3 falls inside the unresolved group ['bnz-C34-F', 'bzim-C9-Cl', 'pyr-C28-CH3', 'bzim-C9-F', 'bzim-C9-CH3', 'bnz-C36-CH3']; refusing to cut it
+     8/11 adjacent gaps are at or below the floor; none is ranked across.
+    CPU spent in the SCFs behind this table: 12.14 CPU-h
+
+[5] run record: benchmarks/danuglipron_halogen/results/danuglipron-halogen-38fa833cb90c.json
+    ferric 0.1.0rc7 commit cddfd1aa57777430484f67ab72f52a3351687076 (VERIFIED from ferric.__build__ (stamped at build time))

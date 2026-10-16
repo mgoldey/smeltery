@@ -1,0 +1,23 @@
+field A (AMBER): 6458 charges, net -1.00; field B: skipped
+geometry gate (relax_unmapped=True): 0 of 28 poses fail: none
+  AMBER: 1 cached (0 reused from energy_conv 1e-10), 27 to run on 6 workers (energy_conv 1e-10)
+  AMBER: bzim-C9-F pose 0 done, 1400 CPU-s (0.39 CPU-h this call)
+  AMBER: bzim-C9-Cl pose 0 done, 1476 CPU-s (0.80 CPU-h this call)
+  AMBER: pyr-C28-Cl pose 0 done, 1596 CPU-s (1.24 CPU-h this call)
+  AMBER: pyr-C28-F pose 0 done, 1642 CPU-s (1.70 CPU-h this call)
+  AMBER: pyr-C28-CH3 pose 0 FAILED (pyr-C28-CH3 pose 0: SCF did not converge), 2109 CPU-s (2.28 CPU-h this call)
+  AMBER: bzim-C9-CH3 pose 0 FAILED (bzim-C9-CH3 pose 0: SCF did not converge), 2129 CPU-s (2.88 CPU-h this call)
+  AMBER: bnz-C34-Cl pose 0 done, 1183 CPU-s (3.20 CPU-h this call)
+  AMBER: bnz-C34-F pose 0 done, 1370 CPU-s (3.58 CPU-h this call)
+  AMBER: bnz-C36-F pose 0 done, 1255 CPU-s (3.93 CPU-h this call)
+  AMBER: bnz-C34-CH3 pose 0 done, 1399 CPU-s (4.32 CPU-h this call)
+Traceback (most recent call last):
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen.py", line 649, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen.py", line 486, in main
+    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s, args.est_scf_cpu_s, args.energy_conv)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen.py", line 337, in run_field_tier
+    raise ScfFailed("; ".join(failures))
+ScfFailed: pyr-C28-CH3 pose 0: pyr-C28-CH3 pose 0: SCF did not converge; bzim-C9-CH3 pose 0: bzim-C9-CH3 pose 0: SCF did not converge

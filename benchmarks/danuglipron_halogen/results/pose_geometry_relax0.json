@@ -1,0 +1,130 @@
+{
+ "relax_unmapped": false,
+ "n_poses": 28,
+ "problems": {
+  "parent": [
+   [],
+   []
+  ],
+  "bzim-C9-F": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F23",
+    "bonded atoms too far apart: C22-F23 4.68 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F23",
+    "bonded atoms too far apart: C22-F23 3.34 A (1 bond(s))"
+   ]
+  ],
+  "bzim-C9-Cl": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl23",
+    "bonded atoms too far apart: C22-Cl23 3.02 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl23",
+    "bonded atoms too far apart: C22-Cl23 4.30 A (1 bond(s))"
+   ]
+  ],
+  "bzim-C9-CH3": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: C0,H44,H43,H42",
+    "bonded atoms too far apart: C0-C1 6.44 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: C0,H44,H43,H42",
+    "bonded atoms too far apart: C0-C1 3.12 A (1 bond(s))"
+   ]
+  ],
+  "pyr-C28-F": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F11",
+    "bonded atoms too far apart: C10-F11 2.14 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F11",
+    "bonded atoms too far apart: C10-F11 3.37 A (1 bond(s))"
+   ]
+  ],
+  "pyr-C28-Cl": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl11",
+    "bonded atoms too far apart: C10-Cl11 3.30 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl11",
+    "bonded atoms too far apart: C10-Cl11 6.01 A (1 bond(s))"
+   ]
+  ],
+  "pyr-C28-CH3": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: C0,H44,H43,H42",
+    "bonded atoms too far apart: C0-C1 8.74 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: C0,H44,H43,H42",
+    "bonded atoms too far apart: C0-C1 3.78 A (1 bond(s))"
+   ]
+  ],
+  "bnz-C34-F": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F41",
+    "bonded atoms too far apart: C40-F41 8.22 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F41",
+    "bonded atoms too far apart: C40-F41 7.72 A (1 bond(s))"
+   ]
+  ],
+  "bnz-C34-Cl": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl41",
+    "bonded atoms too far apart: C40-Cl41 7.05 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl41",
+    "bonded atoms too far apart: C40-Cl41 8.65 A (1 bond(s))"
+   ]
+  ],
+  "bnz-C34-CH3": [
+   [],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: C0,H44,H43,H42",
+    "bonded atoms too far apart: C0-C1 5.99 A (1 bond(s))"
+   ]
+  ],
+  "bnz-C36-F": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F41",
+    "bonded atoms too far apart: C40-F41 5.75 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: F41",
+    "bonded atoms too far apart: C40-F41 5.66 A (1 bond(s))"
+   ]
+  ],
+  "bnz-C36-Cl": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl41",
+    "bonded atoms too far apart: C40-Cl41 7.78 A (1 bond(s))"
+   ],
+   [
+    "2 connected pieces where the SMILES has 1; stranded: Cl41",
+    "bonded atoms too far apart: C40-Cl41 4.34 A (1 bond(s))"
+   ]
+  ],
+  "bnz-C36-CH3": [
+   [
+    "2 connected pieces where the SMILES has 1; stranded: C0,H44,H43,H42",
+    "bonded atoms too far apart: C0-C1 4.53 A (1 bond(s))"
+   ],
+   [
+    "bonded atoms too far apart: C0-C1 2.96 A (1 bond(s))"
+   ]
+  ],
+  "parent-self": [
+   [],
+   []
+  ]
+ }
+}

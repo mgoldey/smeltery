@@ -227,7 +227,7 @@ DEFAULT_ENERGY_CONV = 1e-10
 
 
 def _one_pose(
-    name: str, smiles: str, pose: Pose, field, energy_conv: float = DEFAULT_ENERGY_CONV
+    name: str, smiles: str, pose: Pose, field, energy_conv: float = DEFAULT_ENERGY_CONV, max_iter: int | None = None
 ) -> tuple[float | None, float, str | None]:
     """Worker: (dE_int, CPU seconds, error) of one pose, through the real `FieldInteraction` tier.
 
@@ -237,7 +237,7 @@ def _one_pose(
     t0 = time.process_time()
     c = Candidate(name, smiles, [pose])
     try:
-        FieldInteraction(energy_conv=energy_conv).run([c], {"field": field})
+        FieldInteraction(energy_conv=energy_conv, max_iter=max_iter).run([c], {"field": field})
     except RuntimeError as e:
         return None, time.process_time() - t0, str(e)
     return c.per_pose["dE_int"][0], time.process_time() - t0, None
@@ -252,6 +252,7 @@ def run_field_tier(
     cap_cpu_s: float | None = None,
     est_cpu_s: float = 0.0,
     energy_conv: float = DEFAULT_ENERGY_CONV,
+    max_iter: int | None = None,
 ) -> FieldInteraction:
     """`FieldInteraction` over every pose of every candidate, one process per pose, with a resumable cache.
 
@@ -259,7 +260,9 @@ def run_field_tier(
     the pose geometry plus the field's input digest and force field, so a stale entry cannot be reused. A non-default
     `energy_conv` (amendment A2) is part of the key, so a failure cached at the default threshold is NOT a failure at
     the new one and is retried once; a SUCCESS cached at the default (tighter) threshold satisfies the looser one and is
-    reused as it is, counted in the log.
+    reused as it is, counted in the log. A `max_iter` (amendment A4) is part of the key the same way: a failure cached
+    under the engine's own limit is retried once under the larger one, and a success under the engine's limit
+    (converged before any limit mattered) is reused.
     Work is scheduled pose-major with `workers` calls in flight (never the whole queue). Each entry stores the
     worker's CPU seconds. A new SCF is submitted only if the CPU spent by THIS call, plus `est_cpu_s` for every SCF
     in flight and for the new one, stays within `cap_cpu_s`; if work remains when that stops submission,
@@ -268,12 +271,14 @@ def run_field_tier(
     SCFs are collected and cached.
     """
     cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
-    tier = FieldInteraction(energy_conv=energy_conv)
+    tier = FieldInteraction(energy_conv=energy_conv, max_iter=max_iter)
     tier.field_provenance = getattr(field, "provenance", None)
     fkey = json.dumps(
         {k: tier.field_provenance.get(k) for k in ("input_sha256", "pdb2pqr_ff", "cutoff_ang")}, sort_keys=True
     )
-    econv_tag = "" if energy_conv == DEFAULT_ENERGY_CONV else f"|energy_conv={energy_conv:g}"
+    econv_tag = ("" if energy_conv == DEFAULT_ENERGY_CONV else f"|energy_conv={energy_conv:g}") + (
+        "" if max_iter is None else f"|max_iter={max_iter}"
+    )
     legacy = {
         (c.name, i): hashlib.sha256((fkey + tag + c.name + p.to_xyz()).encode()).hexdigest()
         for c in cands
@@ -293,14 +298,20 @@ def run_field_tier(
     for k, new_key in keys.items():  # a tighter-threshold SUCCESS satisfies a looser one; a failure never carries over
         old = cache.get(legacy[k])
         if new_key not in cache and new_key != legacy[k] and old is not None and old.get("error") is None:
-            cache[new_key] = {**old, "reused_from_energy_conv": DEFAULT_ENERGY_CONV}
+            cache[new_key] = {**old}
+            if energy_conv != DEFAULT_ENERGY_CONV:
+                cache[new_key]["reused_from_energy_conv"] = DEFAULT_ENERGY_CONV
+            if max_iter is not None:
+                cache[new_key]["reused_from_max_iter"] = "engine default"
             reused += 1
     todo = sorted(
         ((c, i) for c in cands for i in range(len(c.poses)) if keys[(c.name, i)] not in cache), key=lambda t: t[1]
     )
     print(
-        f"  {tag}: {len(keys) - len(todo)} cached ({reused} reused from energy_conv {DEFAULT_ENERGY_CONV:g}), "
-        f"{len(todo)} to run on {workers} workers (energy_conv {energy_conv:g})",
+        f"  {tag}: {len(keys) - len(todo)} cached ({reused} reused from the default energy_conv "
+        f"{DEFAULT_ENERGY_CONV:g} "
+        f"and engine max_iter), {len(todo)} to run on {workers} workers (energy_conv {energy_conv:g}, "
+        f"max_iter {max_iter if max_iter is not None else 'engine default'})",
         flush=True,
     )
     spent = 0.0
@@ -316,7 +327,8 @@ def run_field_tier(
                     if cap_cpu_s is not None and spent + est_cpu_s * (len(live) + 1) > cap_cpu_s:
                         break
                     c, i = pending.pop()
-                    live[ex.submit(_one_pose, c.name, c.smiles, c.poses[i], field, energy_conv)] = (c, i)
+                    extra = {} if max_iter is None else {"max_iter": max_iter}
+                    live[ex.submit(_one_pose, c.name, c.smiles, c.poses[i], field, energy_conv, **extra)] = (c, i)
                 if not live:
                     break
                 done, _ = wait(live, return_when=FIRST_COMPLETED)
@@ -411,6 +423,12 @@ def main(argv: list[str] | None = None) -> int:
         help="SCF energy threshold in Hartree (plan amendment A2 raises it from the default 1e-10)",
     )
     ap.add_argument(
+        "--max-iter",
+        type=int,
+        default=None,
+        help="SCF iteration limit for every SCF (plan amendment A4); default leaves ferric's own limit (100 in rc7)",
+    )
+    ap.add_argument(
         "--skip-first-poses",
         type=int,
         default=0,
@@ -483,14 +501,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cache = args.out / "halogen-scf-cache.json"  # content-addressed, so shared by runs with different --poses
     cap_s = args.cap_cpu_hours * 3600.0
-    tier_a = run_field_tier(cands, field_a, "AMBER", args.workers, cache, cap_s, args.est_scf_cpu_s, args.energy_conv)
+    tier_a = run_field_tier(
+        cands, field_a, "AMBER", args.workers, cache, cap_s, args.est_scf_cpu_s, args.energy_conv, args.max_iter
+    )
     # Model B: the SAME poses under CHARMM charges, in separate candidates so per_pose stays model-specific.
     tier_b = parent_b = None
     cands_b: list[Candidate] = []
     if field_b is not None:
         cands_b = [Candidate(c.name, c.smiles, c.poses) for c in cands if c is not selfpair]
         tier_b = run_field_tier(
-            cands_b, field_b, "CHARMM", args.workers, cache, cap_s, args.est_scf_cpu_s, args.energy_conv
+            cands_b, field_b, "CHARMM", args.workers, cache, cap_s, args.est_scf_cpu_s, args.energy_conv, args.max_iter
         )
         parent_b = cands_b[0]
 

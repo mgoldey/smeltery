@@ -77,3 +77,15 @@ def test_tier_writing_an_undeclared_per_pose_key_fails_validation():
         run_checked(Sneaky(), [c], {"field": []})
     # a tier that writes only what it declared passes
     run_checked(FieldInteraction(), [c], {"field": []})
+
+
+@pytest.mark.needs_ferric
+def test_field_interaction_max_iter_reaches_both_scfs():
+    """An iteration limit of 1 cannot converge: the tier must raise its non-convergence error; the default must not."""
+    c = Candidate("c", "O")
+    PairedPoses(n_poses=1).run([c], {"parent": c})
+    FieldInteraction().run([c], {"field": _field()})  # engine default converges water
+    assert FieldInteraction().settings()["max_iter"] is None
+    with pytest.raises(RuntimeError, match="did not converge"):
+        FieldInteraction(max_iter=1).run([c], {"field": _field()})
+    assert FieldInteraction(max_iter=200).settings()["max_iter"] == 200

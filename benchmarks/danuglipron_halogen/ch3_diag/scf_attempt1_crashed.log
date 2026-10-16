@@ -1,0 +1,86 @@
+Process Process-1:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+{"name": "pyr-C28-CH3", "n_charges": 0, "converged": false, "exit": "killed (exit code 1)"}
+Process Process-2:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+{"name": "pyr-C28-CH3", "n_charges": 50, "converged": false, "exit": "killed (exit code 1)"}
+Process Process-3:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+{"name": "pyr-C28-CH3", "n_charges": 1000, "converged": false, "exit": "killed (exit code 1)"}
+Process Process-5:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+Process Process-6:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+{"name": "bzim-C9-CH3", "n_charges": 1000, "converged": false, "exit": "killed (exit code 1)"}
+Process Process-4:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+{"name": "bzim-C9-CH3", "n_charges": 0, "converged": false, "exit": "killed (exit code 1)"}
+Process Process-7:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
+{"name": "bnz-C34-CH3", "n_charges": 0, "converged": false, "exit": "killed (exit code 1)"}
+Process Process-8:
+Traceback (most recent call last):
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/home/matt/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/matt/qc/smeltery/examples/danuglipron_halogen_ch3_diag.py", line 136, in _scf
+    "exit": str(r.exit_reason),
+                ^^^^^^^^^^^^^
+AttributeError: 'builtins.RhfResult' object has no attribute 'exit_reason'
