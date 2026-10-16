@@ -42,3 +42,24 @@ stage isolates ferric from smeltery's geometry, which none of these does.
 overrun (the first attempt's SCFs were lost to a recording bug, `scf_attempt1_crashed.log`). Interpretation rules, fixed now: converges within 200 iterations and 1,500 CPU-s: run 4's failure is not reproduced
 at these settings, and it is reported as "the failure needs the 2,500 CPU-s limit or a different setting to explain" and not as a cause; does not converge: the failure reproduces in this harness without the
 scan runner, and it is reported as such. Neither outcome changes the A3 status of the two SCFs (failed, final).
+
+## Addendum B (written after the 6,458-charge results, before any SCF it describes)
+
+**Seen:** at 6,458 charges, `bzim-C9-CH3` pose 0 converged in 43 iterations (695 CPU-s) and `pyr-C28-CH3` pose 0 in 64 (787 CPU-s), at `energy_conv` 1e-10, `density_conv` 1e-8, `max_iter` 200, charges passed
+nearest-ligand-atom first. Run 4 failed the same two poses (same cache keys, verified) in 2,109 and 2,129 CPU-s (vacuum plus field) through `FieldInteraction`, which passes charges in PQR file order and does not
+set `max_iter`. So the failure is not reproduced by this harness, and the two differences are: (i) `max_iter` left at the engine default instead of 200, (ii) charge order. Nothing else in the call differs (read in
+`src/smeltery/tiers.py`, `FieldInteraction.run`).
+
+**Test (field SCF only, `pyr-C28-CH3` pose 0, 6,458 charges, `energy_conv` 1e-10, `density_conv` 1e-8, 2,500 CPU-s limit each, three runs, one pose, no other variation):**
+
+| run | max_iter | charge order |
+|---|---|---|
+| R1 | engine default | PQR file order (the tier's exact call) |
+| R2 | 200 | PQR file order |
+| R3 | engine default | nearest-ligand-atom first |
+
+**Reading, fixed now:** R1 not converged and R2/R3 converged: the difference is the variable that differs between R1 and the converged run (R2: iteration limit; R3: order). R1 converged: run 4's failure is not reproduced
+by the tier's own call either, and is reported as "not reproduced, cause unknown" (nondeterminism or an environment difference is then a hypothesis, untested). R1 not converged and R2 not converged: the order is
+the cause. Every outcome is reported for one pose only. It does not change the A3 status of run 4's two SCFs.
+
+**Budget:** at most 3 x 2,500 CPU-s = 2.1 CPU-h, expected about 0.6 CPU-h; brings the diagnosis to at most about 6 CPU-h, a disclosed overrun of the 3 CPU-h written above. Three workers.

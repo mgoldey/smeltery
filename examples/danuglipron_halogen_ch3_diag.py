@@ -180,9 +180,68 @@ def stage_scf(out: Path, workers: int, names=None, ns=None, tag="scf_diag") -> N
             (out / f"{tag}.json").write_text(json.dumps(results, indent=1))
 
 
+def _order_job(q, label, max_iter, order, xyz_path, charges_pqr, charges_nearest):
+    resource.setrlimit(resource.RLIMIT_CPU, (2500, 2560))
+    import ferric
+
+    t0 = time.process_time()
+    mol = ferric.Molecule.from_xyz_string(Path(xyz_path).read_text(), charge=0)
+    bs = ferric.BasisSet.bundled("sto-3g")
+    rows = json.loads(Path(charges_pqr if order == "pqr" else charges_nearest).read_text())
+    kw = {} if max_iter is None else {"max_iter": max_iter}
+    r = ferric.run_rhf(
+        mol, bs, energy_conv=1e-10, density_conv=1e-8, point_charges=[tuple(x) for x in rows], **kw
+    )
+    q.put(
+        {
+            "run": label,
+            "max_iter": max_iter,
+            "order": order,
+            "converged": bool(r.converged),
+            "iterations": int(r.iterations),
+            "energy": r.energy,
+            "cpu_s": time.process_time() - t0,
+        }
+    )
+
+
+def _order_run(args):
+    q = mp.Queue()
+    p = mp.Process(target=_order_job, args=(q, *args))
+    p.start()
+    p.join()
+    try:
+        return q.get(timeout=1)
+    except Exception:
+        return {"run": args[0], "converged": False, "exit": f"killed at the CPU limit (exit code {p.exitcode})"}
+
+
+def stage_order(out: Path) -> None:
+    """Addendum B: the same field SCF with the tier's call (R1), max_iter 200 (R2), and nearest-first order (R3)."""
+    from multiprocessing.pool import ThreadPool
+
+    data = dh.find_data_dir()
+    field = load_pocket(data / "7LCJ_pocket.pdb", ff="AMBER")
+    pqr = out / "all_charges_pqr_order.json"
+    pqr.write_text(json.dumps([list(c.as_ferric_bohr()) for c in field]))
+    xyz = str(out / "pyr-C28-CH3_pose0.xyz")
+    near = str(out / "pyr-C28-CH3_charges_nearest_first.json")
+    jobs = [
+        ("R1", None, "pqr", xyz, str(pqr), near),
+        ("R2", 200, "pqr", xyz, str(pqr), near),
+        ("R3", None, "nearest", xyz, str(pqr), near),
+    ]
+    results = []
+    with ThreadPool(3) as pool:
+        for r in pool.imap_unordered(_order_run, jobs):
+            results.append(r)
+            print(json.dumps(r), flush=True)
+            (out / "order_diag.json").write_text(json.dumps(results, indent=1))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("stage", choices=["poses", "scf"])
+    ap.add_argument("stage", choices=["poses", "scf", "order"])
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--names", default=None, help="comma-separated subset of the stage-2 molecules (addendum A)")
@@ -191,6 +250,8 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.stage == "poses":
         stage_poses(a.out)
+    elif a.stage == "order":
+        stage_order(a.out)
     else:
         stage_scf(
             a.out,
