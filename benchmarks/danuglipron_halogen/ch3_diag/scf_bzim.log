@@ -1,0 +1,2 @@
+{"name": "bzim-C9-CH3", "n_charges": 50, "converged": true, "iterations": 21, "exit": "None", "energy": -1877.639377960826, "cpu_s": 542.755200621}
+{"name": "bzim-C9-CH3", "n_charges": 0, "converged": true, "iterations": 109, "exit": "None", "energy": -1877.6009744511293, "cpu_s": 1233.309724967}

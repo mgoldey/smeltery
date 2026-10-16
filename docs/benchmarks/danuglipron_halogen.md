@@ -1,5 +1,8 @@
 # Danuglipron halogen scan through the funnel (issue #6): report
 
+> **Superseded.** The runs below were measured on poses whose halogen sat away from its carbon and, for run 4's two CH3 failures, under ferric's default iteration limit. The scan completed afterwards, with every SCF converged:
+> see [danuglipron_halogen_scan.md](danuglipron_halogen_scan.md). Nothing below is carried into that result.
+
 Plan: [danuglipron_halogen_plan.md](danuglipron_halogen_plan.md), including amendments A1 (committed before the second run) and A2 (committed before the third).
 
 ## Outcome: the scan did NOT complete, three times. Criteria 1 to 4 are NOT MEASURED. No paired ddE exists.
