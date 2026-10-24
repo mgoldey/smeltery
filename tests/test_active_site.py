@@ -69,6 +69,7 @@ def test_binding_energy_reports_two_separate_scf_energies(tmp_path):
     assert r.delta_e_kcal_mol == pytest.approx(r.delta_e_hartree * 627.5094740631)
     assert r.n_pocket_charges == 3
     assert set(r.charges_vacuum) == set(r.charges_field) == {"hirshfeld", "lowdin"}
+    assert r.vacuum_converged is True and r.field_converged is True
 
 
 def test_binding_energy_accepts_a_pqr_path_and_keeps_every_charge(tmp_path):
@@ -76,6 +77,75 @@ def test_binding_energy_accepts_a_pqr_path_and_keeps_every_charge(tmp_path):
     r = P.compute_binding_energy(_xyz(tmp_path), pqr, basis="sto-3g", min_available_gb=0)
     assert r.n_pocket_charges == 3  # no default cutoff
     assert inspect.signature(P.compute_binding_energy).parameters.keys().isdisjoint({"cutoff_ang", "cutoff"})
+
+
+def _unconverged(which):
+    """The real compute_energy, but the `which` SCF ("vacuum", "field" or "both") reports converged=False."""
+    real = BE.compute_energy
+
+    def fake(embedded, *, use_field, **kw):
+        r = real(embedded, use_field=use_field, **kw)
+        if which == "both" or (which == "field") == use_field:
+            r.converged = False
+        return r
+
+    return fake
+
+
+@pytest.mark.parametrize("which", ["vacuum", "field"])
+def test_an_unconverged_scf_raises_by_default_and_is_flagged_when_allowed(tmp_path, monkeypatch, which):
+    monkeypatch.setattr(BE, "compute_energy", _unconverged(which))
+    with pytest.raises(RuntimeError, match=f"{which} SCF did not converge"):
+        P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0)
+    r = P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0, require_converged=False)
+    assert (r.vacuum_converged, r.field_converged) == ((False, True) if which == "vacuum" else (True, False))
+
+
+def test_both_scfs_unconverged_names_both_and_says_how_to_fix_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(BE, "compute_energy", _unconverged("both"))
+    with pytest.raises(
+        RuntimeError, match=r"vacuum and field SCF did not converge.*run_rhf default max_iter is 100; pass max_iter="
+    ):
+        P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0)
+
+
+def test_max_iter_reaches_both_real_scfs(tmp_path):
+    # Real SCFs, no mock: water/STO-3G converges at ferric's defaults (first test above), not in one iteration.
+    with pytest.raises(RuntimeError, match="vacuum and field SCF did not converge"):
+        P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0, max_iter=1)
+    r = P.compute_binding_energy(
+        _xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0, max_iter=1, require_converged=False
+    )
+    assert (r.vacuum_converged, r.field_converged) == (False, False)
+
+
+def test_df_aux_passes_through_to_both_scfs(tmp_path):
+    aux = "def2-universal-jkfit"
+    exact = P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0)
+    r = P.compute_binding_energy(_xyz(tmp_path), FIELD, basis="sto-3g", min_available_gb=0, df_j_aux=aux, df_k_aux=aux)
+    emb = _embed()
+    pcs = [c.as_ferric_bohr() for c in FIELD]
+    vac = ferric.run_rhf(emb.mol, emb.basis_set, df_j_aux=aux, df_k_aux=aux)
+    fld = ferric.run_rhf(emb.mol, emb.basis_set, point_charges=pcs, df_j_aux=aux, df_k_aux=aux)
+    # Exact equality: the same deterministic ferric call with the same inputs (measured difference 0.0).
+    assert (r.e_vacuum, r.e_field) == (vac.energy, fld.energy)
+    # negative control: RI-JK is a different (fitted) energy, so the kwargs were not silently dropped
+    assert abs(r.e_vacuum - exact.e_vacuum) > 1e-7 and abs(r.e_field - exact.e_field) > 1e-7
+
+
+def test_dft_empty_df_aux_selects_exact_jk(tmp_path):
+    # run_dft defaults to RI-J; "" is ferric's opt-out spelling. Kills an `if v` (truthiness) filter,
+    # which would drop "" and silently keep RI-J.
+    kw = {"basis": "sto-3g", "method": "dft", "xc": "PBE", "min_available_gb": 0}
+    ri = P.compute_binding_energy(_xyz(tmp_path), FIELD, **kw)
+    r = P.compute_binding_energy(_xyz(tmp_path), FIELD, df_j_aux="", df_k_aux="", **kw)
+    emb = _embed()
+    pcs = [c.as_ferric_bohr() for c in FIELD]
+    vac = ferric.run_dft(emb.mol, emb.basis_set, functional="PBE", df_j_aux="", df_k_aux="")
+    fld = ferric.run_dft(emb.mol, emb.basis_set, functional="PBE", point_charges=pcs, df_j_aux="", df_k_aux="")
+    assert (r.e_vacuum, r.e_field) == (vac.total_energy, fld.total_energy)
+    # negative control: the RI-J fitting shift (measured ~4.4e-4 Ha here) is visible in both SCFs
+    assert abs(r.e_vacuum - ri.e_vacuum) > 1e-4 and abs(r.e_field - ri.e_field) > 1e-4
 
 
 @pytest.mark.skipif(
