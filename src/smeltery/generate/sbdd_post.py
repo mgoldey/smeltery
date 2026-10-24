@@ -302,6 +302,11 @@ def _classify(raw: Chem.Mol | None, spec: ScaffoldSpec, config: FilterConfig, qu
                 Chem.SanitizeMol(mol)
         mol.SetIntProp("salvaged_bonds", dropped)
         mol.SetIntProp("trimmed_atoms", trimmed)
+        # The scaffold correspondence, for a caller that wants to pair without an MCS search. Recorded
+        # AFTER trimming, which renumbers atoms: `mapping` is indices into the untrimmed molecule, so a
+        # trimmed candidate carries no mapping rather than a stale one.
+        if not trimmed:
+            mol.SetProp("_scaffold_mapping", " ".join(str(int(i)) for i in mapping))
         Chem.AssignStereochemistryFrom3D(mol)
         smiles = Chem.MolToSmiles(mol)
     except Exception as e:  # noqa: BLE001 - RDKit raises several exception types for the same condition
@@ -315,6 +320,26 @@ def _classify(raw: Chem.Mol | None, spec: ScaffoldSpec, config: FilterConfig, qu
     if label is not None:
         return _Rejected("forbidden_substructure", label, smiles)
     return mol
+
+
+def _scaffold_map_in_smiles_order(mol: Chem.Mol, spec: ScaffoldSpec) -> list[tuple[int, int]]:
+    """`repair`'s scaffold mapping, renumbered into the atom order of `Chem.MolToSmiles(mol)`.
+
+    A `Candidate` carries SMILES, and `PairedPoses` builds its molecule from that SMILES, so a mapping
+    expressed in `mol`'s own atom order would point at the wrong atoms. `_smilesAtomOutputOrder` (set by
+    `MolToSmiles`) gives output position per input atom, which is the renumbering. Returns [] when the
+    mapping is absent (a trimmed candidate) or the order is unavailable: the mapping is a convenience and
+    never fails a candidate.
+    """
+    if not mol.HasProp("_scaffold_mapping") or not mol.HasProp("_smilesAtomOutputOrder"):
+        return []
+    try:
+        mapping = [int(x) for x in mol.GetProp("_scaffold_mapping").split()]
+        order = [int(x) for x in re.findall(r"\d+", mol.GetProp("_smilesAtomOutputOrder"))]
+        position = {atom: pos for pos, atom in enumerate(order)}
+        return [(position[m], int(spec.indices[k])) for k, m in enumerate(mapping) if m in position]
+    except Exception:  # noqa: BLE001 - a convenience, never fail a candidate over it
+        return []
 
 
 def process_samples(
@@ -371,6 +396,15 @@ def process_samples(
             stats["bonds_dropped"] = stats.get("bonds_dropped", 0) + outcome.GetIntProp("salvaged_bonds")
         if stats is not None and outcome.GetIntProp("trimmed_atoms"):
             stats["trimmed"] = stats.get("trimmed", 0) + 1
-        candidates.append(Candidate(f"{name_prefix}-{number:04d}", smiles, poses=poses))
+        cand = Candidate(f"{name_prefix}-{number:04d}", smiles, poses=poses)
+        # The repair mapping as (candidate heavy atom, parent heavy atom) pairs, in the candidate's own
+        # canonical-SMILES atom order. A caller hands it to
+        # `PairedPoses(known_cores={cand.name: cand.scaffold_map})`, which cross-validates it against a
+        # heavy-atom MCS; the tier never reads it off the candidate, so the check cannot be bypassed by
+        # attaching a mapping here.
+        scaffold_map = _scaffold_map_in_smiles_order(outcome, spec)
+        if scaffold_map:
+            cand.scaffold_map = scaffold_map
+        candidates.append(cand)
         number += 1
     return candidates, rejected

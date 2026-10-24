@@ -102,6 +102,90 @@ def _pose_from_conf(mol: Chem.Mol, conf_id: int) -> Pose:
     return Pose(tuple(a.GetSymbol() for a in mol.GetAtoms()), xyz)
 
 
+def _core_is_structural(amol: Chem.Mol, pmol: Chem.Mol, heavy_mapping: list[tuple[int, int]]) -> bool:
+    """True if `heavy_mapping` is injective, preserves elements, and maps every internal bond onto a bond.
+
+    A necessary condition on any correspondence, and the cheap first screen. It is NOT sufficient:
+    it cannot tell a correct mapping from a symmetry-equivalent relabelling, which is what the MCS
+    cross-check in `_paired` decides.
+    """
+    d = {int(a): int(p) for a, p in heavy_mapping}
+    if len(set(d.values())) != len(d):
+        return False
+    for a, p in d.items():
+        if amol.GetAtomWithIdx(a).GetSymbol() != pmol.GetAtomWithIdx(p).GetSymbol():
+            return False
+    for b in amol.GetBonds():
+        i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+        if i in d and j in d and pmol.GetBondBetweenAtoms(d[i], d[j]) is None:
+            return False
+    return True
+
+
+def _loose_bond_params():
+    params = Chem.AdjustQueryParameters.NoAdjustments()
+    params.makeBondsGeneric = True
+    return params
+
+
+_LOOSE_BONDS = _loose_bond_params()
+
+
+def _automorphisms(mol: Chem.Mol) -> list[dict[int, int]]:
+    """Every symmetry of `mol`'s own graph, as atom -> atom maps.
+
+    `GetSubstructMatches(self, uniquify=False)` enumerates the automorphism group: matching a molecule
+    against itself without uniquifying returns one match per symmetry. Stereochemistry is stripped from
+    a copy first, and bonds are compared loosely, so that groups which are chemically equivalent but
+    written differently in a Kekule structure -- a carboxylate's two oxygens, one single-bonded and one
+    double-bonded -- come out as the symmetry they are.
+    """
+    loose = Chem.Mol(mol)
+    Chem.RemoveStereochemistry(loose)
+    query = Chem.AdjustQueryProperties(loose, _LOOSE_BONDS)
+    return [dict(enumerate(m)) for m in loose.GetSubstructMatches(query, uniquify=False, maxMatches=10000)]
+
+
+def _agrees_with_any(
+    known: list[tuple[int, int]], mcs_mappings: list[dict[int, int]], autos: list[dict[int, int]]
+) -> bool:
+    """True if `known` agrees with some MCS mapping after some automorphism of the parent.
+
+    Agreement has to be modulo symmetry, not atom-for-atom. The two CH2 arms of a piperidine either
+    side of its N are interchangeable, so the generator's index order and the MCS's pick differ on
+    exactly those atoms while both are correct -- 11 of 130 real molecules did, always as the same
+    pairwise swap. Comparing against the core's own matches is not enough: that swap is a symmetry of
+    the whole PARENT, not of the extracted core, so the parent's automorphism group is what has to be
+    quotiented out.
+    """
+    for mm in mcs_mappings:
+        shared = [(a, p) for a, p in known if a in mm]
+        if not shared:
+            continue
+        for auto in autos:
+            if all(auto.get(mm[a], mm[a]) == p for a, p in shared):
+                return True
+    return False
+
+
+def _extend_core_to_hydrogens(
+    amol: Chem.Mol, pmol: Chem.Mol, heavy_mapping: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """Extend a heavy-atom core to its hydrogens by index order.
+
+    `Chem.AddHs` preserves heavy-atom indices and appends hydrogens contiguously, so each mapped heavy
+    atom's hydrogen neighbours pair in index order. An H-count mismatch leaves that pair's hydrogens
+    unmapped rather than guessed; the heavy pair stays mapped.
+    """
+    mapping = list(heavy_mapping)
+    for a_h, p_h in heavy_mapping:
+        a_hs = sorted(n.GetIdx() for n in amol.GetAtomWithIdx(a_h).GetNeighbors() if n.GetAtomicNum() == 1)
+        p_hs = sorted(n.GetIdx() for n in pmol.GetAtomWithIdx(p_h).GetNeighbors() if n.GetAtomicNum() == 1)
+        for i in range(min(len(a_hs), len(p_hs))):
+            mapping.append((a_hs[i], p_hs[i]))
+    return mapping
+
+
 def _rigid_jitter(xyz: np.ndarray, rng: np.random.Generator, max_deg: float, max_shift: float) -> np.ndarray:
     """Rotate about the centroid by a random axis/angle and translate."""
     axis = rng.normal(size=3)
@@ -164,10 +248,21 @@ class PairedPoses:
     parent_poses_given: bool = False
     relax_unmapped: bool = False
     analogue_poses_given: bool = False
+    #: Known scaffold cores: analogue name -> list of (analogue HEAVY atom, parent HEAVY atom) pairs.
+    #: Supplied by a caller that knows the correspondence by construction (`ScaffoldGrowth` pins the
+    #: scaffold, measured at 0.045-0.059 A RMSD with every element symbol and all 43/43 internal bonds
+    #: preserved). A named core skips the MCS SEARCH but not its check: it is validated against a
+    #: heavy-atom MCS, up to graph automorphism, and a conflict refuses. Hydrogens are added by
+    #: `_extend_core_to_hydrogens`, so pass heavy atoms only.
+    known_cores: dict[str, list[tuple[int, int]]] | None = field(default=None, repr=False, compare=False)
     name: str = "paired_poses"
     #: Per analogue name: (analogue atom, parent atom) pairs copied exactly. Read
-    #: by `smeltery.generate.pairs_from_candidates`; reset on every `run`.
+    #: by `smeltery.generate.pairs_from_candidates`; reset on every `run`. OUTPUT ONLY:
+    #: a known core goes in through `known_cores`, never through this field.
     scaffold_maps: dict[str, list[tuple[int, int]]] = field(default_factory=dict, repr=False, compare=False)
+    #: Names whose known core could not be cross-checked because the MCS found no core at all.
+    #: Not observed on 130 generated molecules; a caller that cares should treat these as suspect.
+    unvalidated_cores: set[str] = field(default_factory=set, repr=False, compare=False)
 
     def settings(self) -> dict:
         return {
@@ -224,48 +319,119 @@ class PairedPoses:
                     xyz if cid == cids[0] else _rigid_jitter(xyz, rng, self.jitter_deg, self.jitter_ang)
                 )
             parent.poses = [Pose(psym, x) for x in parent_poses]
+        # Known cores come from exactly one place: the `known_cores` field, or `ctx["known_cores"]` for
+        # a caller that builds them per run. `scaffold_maps` is this tier's OUTPUT and is never read as
+        # input -- doing so would feed one run's results back into the next as trusted mappings.
+        provided: dict[str, list[tuple[int, int]]] = {}
+        for src in (self.known_cores, ctx.get("known_cores")):
+            if isinstance(src, dict):
+                provided.update(src)
+
+        # Reset the published maps and the unvalidated-core set; both are per-run.
         self.scaffold_maps = {}
+        self.unvalidated_cores = set()
 
         for cand in candidates:
             if cand is parent:
                 continue
-            cand.poses = self._paired(pmol, parent_poses, cand)
+            override = provided.get(cand.name)
+            cand.poses = self._paired(pmol, parent_poses, cand, override, override is not None)
 
-    def _paired(self, pmol: Chem.Mol, parent_poses: list[np.ndarray], cand: Candidate) -> list[Pose]:
+    def _paired(
+        self,
+        pmol: Chem.Mol,
+        parent_poses: list[np.ndarray],
+        cand: Candidate,
+        provided_mapping=None,
+        validate_known_core: bool = False,
+    ) -> list[Pose]:
         amol = _mol_with_h(cand.smiles)
-        mcs = rdFMCS.FindMCS(
-            [pmol, amol],
-            atomCompare=rdFMCS.AtomCompare.CompareElements,
-            bondCompare=rdFMCS.BondCompare.CompareOrder,
-            ringMatchesRingOnly=True,
-            completeRingsOnly=True,
-            timeout=self.mcs_timeout_s,
-        )
-        if mcs.canceled:
-            raise NoCommonCoreError(
-                f"{cand.name}: MCS search timed out after mcs_timeout_s={self.mcs_timeout_s} s; an unfinished core is "
-                "not a core. Raise PairedPoses(mcs_timeout_s=...): the exact search on drug-sized molecules can take "
-                "tens of seconds (2 to 75 s on a 12-analogue halogen series)."
+        if provided_mapping is not None:
+            heavy_mapping = [(int(a), int(p)) for a, p in provided_mapping]
+            if not heavy_mapping:
+                raise NoCommonCoreError(f"{cand.name}: the provided scaffold mapping is empty")
+            # Cross-validate a known core against a heavy-atom MCS (cheap: median 0.00 s, mean 2.15 s
+            # over 130 generated molecules, and a usable core was found for all 130).
+            self.unvalidated_cores.discard(cand.name)
+            if validate_known_core:
+                known_heavy = list(heavy_mapping)
+                pmol_h, amol_h = Chem.RemoveHs(pmol), Chem.RemoveHs(amol)
+                if not _core_is_structural(amol_h, pmol_h, known_heavy):
+                    raise NoCommonCoreError(
+                        f"{cand.name}: the provided scaffold mapping is not a structural correspondence "
+                        f"(injective, element- and bond-preserving): {known_heavy[:5]}..."
+                    )
+                mcs = rdFMCS.FindMCS(
+                    [pmol_h, amol_h],
+                    atomCompare=rdFMCS.AtomCompare.CompareElements,
+                    bondCompare=rdFMCS.BondCompare.CompareOrder,
+                    ringMatchesRingOnly=True,
+                    completeRingsOnly=True,
+                    timeout=self.mcs_timeout_s,
+                )
+                # A cancelled search still validates: cancellation bounds the PROOF of maximality, not
+                # the correctness of the core it already found.
+                core = Chem.MolFromSmarts(mcs.smartsString) if mcs.smartsString else None
+                p_match = pmol_h.GetSubstructMatch(core) if core is not None else ()
+                matches = amol_h.GetSubstructMatches(core, uniquify=False) if core is not None else ()
+                if p_match and matches:
+                    mcs_mappings = [dict(zip(m, p_match, strict=True)) for m in matches]
+                    if not _agrees_with_any(known_heavy, mcs_mappings, _automorphisms(pmol_h)):
+                        shared = [(a, p, mcs_mappings[0][a]) for a, p in known_heavy if a in mcs_mappings[0]]
+                        raise NoCommonCoreError(
+                            f"{cand.name}: the provided scaffold mapping conflicts with the MCS core on "
+                            f"{sum(1 for _, p, m in shared if p != m)} of {len(shared)} shared atoms and with "
+                            f"none of the {len(mcs_mappings)} symmetry-equivalent matches; "
+                            f"(analogue, provided, mcs) e.g. {[t for t in shared if t[1] != t[2]][:4]}"
+                        )
+                else:
+                    # Not seen in 130 molecules; the mapping is used but flagged, never silently trusted.
+                    self.unvalidated_cores.add(cand.name)
+            # Extend the heavy-atom core to hydrogens (mechanical, index order).
+            mapping = _extend_core_to_hydrogens(amol, pmol, heavy_mapping)
+            if not mapping:
+                raise NoCommonCoreError(f"{cand.name}: the provided scaffold mapping is empty")
+            for a, p in mapping:
+                if a < 0 or a >= amol.GetNumAtoms() or p < 0 or p >= pmol.GetNumAtoms():
+                    raise NoCommonCoreError(f"{cand.name}: scaffold mapping index out of range")
+                if amol.GetAtomWithIdx(a).GetSymbol() != pmol.GetAtomWithIdx(p).GetSymbol():
+                    raise NoCommonCoreError(f"{cand.name}: scaffold mapping pairs atoms of different elements")
+        else:
+            mcs = rdFMCS.FindMCS(
+                [pmol, amol],
+                atomCompare=rdFMCS.AtomCompare.CompareElements,
+                bondCompare=rdFMCS.BondCompare.CompareOrder,
+                ringMatchesRingOnly=True,
+                completeRingsOnly=True,
+                timeout=self.mcs_timeout_s,
             )
-        core = Chem.MolFromSmarts(mcs.smartsString) if mcs.smartsString else None
-        p_idx = pmol.GetSubstructMatch(core) if core is not None else ()
-        a_idx = amol.GetSubstructMatch(core) if core is not None else ()
-        if not p_idx or not a_idx:
-            raise NoCommonCoreError(f"{cand.name}: no common core with the parent")
-        mapping = list(zip(a_idx, p_idx, strict=True))  # (analogue atom, parent atom)
+            if mcs.canceled:
+                raise NoCommonCoreError(
+                    f"{cand.name}: MCS search timed out after mcs_timeout_s={self.mcs_timeout_s} s; "
+                    "an unfinished core is not a core. Raise PairedPoses(mcs_timeout_s=...): "
+                    "the exact search on drug-sized molecules can take tens of seconds."
+                )
+            core = Chem.MolFromSmarts(mcs.smartsString) if mcs.smartsString else None
+            p_idx = pmol.GetSubstructMatch(core) if core is not None else ()
+            a_idx = amol.GetSubstructMatch(core) if core is not None else ()
+            if not p_idx or not a_idx:
+                raise NoCommonCoreError(f"{cand.name}: no common core with the parent")
+            mapping = list(zip(a_idx, p_idx, strict=True))  # (analogue atom, parent atom)
+            if (
+                Chem.MolToSmiles(Chem.RemoveHs(amol)) == Chem.MolToSmiles(Chem.RemoveHs(pmol))
+                and len(mapping) != amol.GetNumAtoms()
+            ):
+                raise NoCommonCoreError(
+                    f"{cand.name}: identical to the parent but the core maps {len(mapping)} of "
+                    f"{amol.GetNumAtoms()} atoms; refusing a degraded self-mapping"
+                )
+        # One gate for both routes: a core too small to pair on is refused whether it was searched
+        # for or supplied.
         n_heavy = sum(1 for a, _ in mapping if amol.GetAtomWithIdx(a).GetAtomicNum() > 1)
         if n_heavy < self.min_core_heavy:
             raise NoCommonCoreError(
                 f"{cand.name}: common core has {n_heavy} heavy atom(s), fewer than "
                 f"min_core_heavy={self.min_core_heavy}; refusing a degraded mapping"
-            )
-        if (
-            Chem.MolToSmiles(Chem.RemoveHs(amol)) == Chem.MolToSmiles(Chem.RemoveHs(pmol))
-            and len(mapping) != amol.GetNumAtoms()
-        ):
-            raise NoCommonCoreError(
-                f"{cand.name}: identical to the parent but the core maps {len(mapping)} of "
-                f"{amol.GetNumAtoms()} atoms; refusing a degraded self-mapping"
             )
         self.scaffold_maps[cand.name] = mapping
         sym = tuple(a.GetSymbol() for a in amol.GetAtoms())
