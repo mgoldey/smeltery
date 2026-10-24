@@ -338,7 +338,11 @@ class PairedPoses:
             cand.poses = self._paired(pmol, parent_poses, cand, override, override is not None)
 
     def _paired(
-        self, pmol: Chem.Mol, parent_poses: list[np.ndarray], cand: Candidate, provided_mapping=None,
+        self,
+        pmol: Chem.Mol,
+        parent_poses: list[np.ndarray],
+        cand: Candidate,
+        provided_mapping=None,
         validate_known_core: bool = False,
     ) -> list[Pose]:
         amol = _mol_with_h(cand.smiles)
@@ -391,9 +395,7 @@ class PairedPoses:
                 if a < 0 or a >= amol.GetNumAtoms() or p < 0 or p >= pmol.GetNumAtoms():
                     raise NoCommonCoreError(f"{cand.name}: scaffold mapping index out of range")
                 if amol.GetAtomWithIdx(a).GetSymbol() != pmol.GetAtomWithIdx(p).GetSymbol():
-                    raise NoCommonCoreError(
-                        f"{cand.name}: scaffold mapping pairs atoms of different elements"
-                    )
+                    raise NoCommonCoreError(f"{cand.name}: scaffold mapping pairs atoms of different elements")
         else:
             mcs = rdFMCS.FindMCS(
                 [pmol, amol],

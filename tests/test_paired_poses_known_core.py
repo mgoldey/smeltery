@@ -44,9 +44,7 @@ def test_self_pair_anchor_holds_with_a_known_core():
     """Pairing a molecule with itself must copy every atom, as on the MCS path."""
     parent = Candidate("parent", PARENT, poses=[_pose(PARENT)])
     analogue = Candidate("self", PARENT, poses=[_pose(PARENT)])
-    tier = PairedPoses(
-        parent_poses_given=True, n_poses=1, known_cores={"self": _heavy_identity(PARENT)}
-    )
+    tier = PairedPoses(parent_poses_given=True, n_poses=1, known_cores={"self": _heavy_identity(PARENT)})
     _run(tier, parent, analogue)
     # every mapped atom is an exact copy of the parent's coordinate
     assert np.allclose(analogue.poses[0].coords_ang, parent.poses[0].coords_ang, atol=1e-9)
