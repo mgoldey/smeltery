@@ -217,7 +217,16 @@ class ScaffoldGrowth:
             runner = str(Path(self.runner).resolve())
         env = dict(os.environ)
         if self.device is not None:
-            env["CUDA_VISIBLE_DEVICES"] = str(self.device)
+            # CUDA_VISIBLE_DEVICES takes device indices ("0", "0,1"), not torch device strings.
+            # "cuda:0" parses as no visible device, so the runner finds no GPU and silently falls
+            # back to CPU: ~50x slower for identical-looking output. Refuse it instead.
+            device = str(self.device)
+            if not all(part.strip().isdigit() for part in device.split(",") if part.strip()):
+                raise ValueError(
+                    f"device={device!r} is not a CUDA_VISIBLE_DEVICES value; use an index "
+                    f'like "0" or "0,1", not a torch device string'
+                )
+            env["CUDA_VISIBLE_DEVICES"] = device
         try:
             proc = subprocess.run(
                 [self.python, runner, str(request)],

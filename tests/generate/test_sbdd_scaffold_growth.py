@@ -169,6 +169,23 @@ def test_the_device_sets_cuda_visible_devices_and_none_leaves_it_alone(
     assert on.provenance["runs"][0]["cuda_visible_devices"] == "1"
 
 
+def test_a_torch_device_string_is_refused_rather_than_run_on_cpu(
+    fake_runner, files, parent_candidate, scaffold_indices
+):
+    """CUDA_VISIBLE_DEVICES="cuda:0" leaves no visible device, so the runner would silently
+    fall back to CPU and return correct-looking output ~50x slower. Refuse it instead."""
+    gen = _generator(fake_runner, files, device="cuda:0")
+    with pytest.raises(ValueError, match="not a CUDA_VISIBLE_DEVICES value"):
+        gen.generate(parent_candidate, scaffold_indices, files["pocket"], seed=1)
+
+
+def test_a_comma_separated_device_list_is_accepted(fake_runner, files, parent_candidate, scaffold_indices):
+    result = _generator(fake_runner, files, device="0,1").generate(
+        parent_candidate, scaffold_indices, files["pocket"], seed=1
+    )
+    assert result.provenance["runs"][0]["cuda_visible_devices"] == "0,1"
+
+
 def test_every_sample_rejected_is_a_result_not_an_error(fake_runner, files, parent_candidate, scaffold_indices):
     """Review focus 4."""
     gen = _generator(fake_runner, files, filters=FilterConfig(forbidden_smarts={"phosphorus": "[P]"}))
