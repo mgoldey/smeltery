@@ -83,6 +83,9 @@ def compute_binding_energy(
     min_available_gb: float = 2.0,
     df_j_aux: str | None = None,
     df_k_aux: str | None = None,
+    max_iter: int | None = None,
+    energy_conv: float | None = None,
+    density_conv: float | None = None,
     require_converged: bool = True,
 ) -> BindingEnergyResult:
     """Field-vs-vacuum electrostatic binding energy for a ligand in a pocket, with
@@ -99,14 +102,18 @@ def compute_binding_energy(
     because a delta_e built from a non-stationary energy is not a binding energy.
     `require_converged=False` returns instead, with `vacuum_converged` /
     `field_converged` saying which SCF did not converge; check them before using
-    the numbers.
+    the numbers. `max_iter` / `energy_conv` / `density_conv` pass through to both
+    SCFs; ferric's `run_rhf` default `max_iter` is 100, too few for some ligands
+    (smeltery #110), so raising it is the usual fix for that error.
 
     `df_j_aux` / `df_k_aux` pass through to `ferric.run_rhf` / `run_dft` (both
     SCFs). The default `None` leaves ferric's own choice: exact J/K for
-    `method="rhf"`, RI-J/RI-K (def2-universal-jkfit) for `method="dft"`. For RHF on
-    a drug-sized ligand the exact J/K build dominates the cost; passing
-    `"def2-universal-jkfit"` for both is much faster but adds the usual RI fitting
-    error, which is why it is not the default here.
+    `method="rhf"`; for `method="dft"`, RI-J (def2-universal-jkfit), plus RI-K for
+    hybrids only. A DFT caller asks for exact J/K with `df_j_aux=""` /
+    `df_k_aux=""` (ferric's opt-out spelling; `None` means "ferric's default", not
+    "off"). For RHF on a drug-sized ligand the exact J/K build dominates the cost;
+    passing `"def2-universal-jkfit"` for both is much faster but adds the usual RI
+    fitting error, which is why it is not the default here.
 
     WHAT THIS NUMBER CANNOT DO: RANK ANALOGUES.
 
@@ -136,12 +143,23 @@ def compute_binding_energy(
     field = pocket if isinstance(pocket, PocketField) else load_pocket(pocket, ff=ff)
     embedded = embed_ligand(ligand_xyz, pocket=field, basis=basis)
 
-    scf_kwargs = {k: v for k, v in (("df_j_aux", df_j_aux), ("df_k_aux", df_k_aux)) if v is not None}
+    # `is not None`, not truthiness: "" is a real value (exact J/K), not "unset".
+    passthrough = {
+        "df_j_aux": df_j_aux,
+        "df_k_aux": df_k_aux,
+        "max_iter": max_iter,
+        "energy_conv": energy_conv,
+        "density_conv": density_conv,
+    }
+    scf_kwargs = {k: v for k, v in passthrough.items() if v is not None}
     e_vac = compute_energy(embedded, method=method, xc=xc, use_field=False, **scf_kwargs)
     e_field = compute_energy(embedded, method=method, xc=xc, use_field=True, **scf_kwargs)
     if require_converged and not (e_vac.converged and e_field.converged):
         failed = [name for name, e in (("vacuum", e_vac), ("field", e_field)) if not e.converged]
-        raise RuntimeError(f"{ligand_xyz}: {' and '.join(failed)} SCF did not converge")
+        raise RuntimeError(
+            f"{ligand_xyz}: {' and '.join(failed)} SCF did not converge (ferric's run_rhf default max_iter is 100; "
+            "pass max_iter=..., or require_converged=False to inspect)"
+        )
     charges_vacuum = compute_charges(embedded, e_vac)
     charges_field = compute_charges(embedded, e_field)
 
