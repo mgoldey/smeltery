@@ -7,6 +7,9 @@ distance cutoff (truncation is not monotone: 10 A was worse than 12 A, and the
 net charge wandered between +0.02 and +3.55 e), so none is added here.
 
 `compute_binding_energy` does NOT rank analogues; see `DDE_NOISE_FLOOR_KCAL_MOL`.
+
+`compute_interaction_energy` is the other route: both partners QM (e.g. the ligand and a link-H-capped residue from
+`residue_fragment_from_pqr`), counterpoise-corrected for BSSE.
 """
 
 from .binding_energy import (
@@ -18,6 +21,7 @@ from .binding_energy import (
 )
 from .embedding import EmbeddedLigand, embed_ligand, embed_ligand_from_coords
 from .energy import EnergyResult, compute_alpha_atomic, compute_charges, compute_energy
+from .interaction_energy import Fragment, InteractionEnergyResult, compute_interaction_energy
 from .loader import (
     PDB2PQR,
     Pdb2PqrUnavailableError,
@@ -35,6 +39,7 @@ from .prescreen import (
     prescreen_pose,
 )
 from .relaxation import RelaxedPose, RelaxedPoseQmmm, relax_pose_in_pocket, relax_pose_in_pocket_field
+from .residue_fragment import LinkCap, ResidueFragment, residue_fragment_from_pqr
 
 __all__ = [
     "BatchPrescreenEntry",
@@ -42,6 +47,9 @@ __all__ = [
     "DDE_NOISE_FLOOR_KCAL_MOL",
     "EmbeddedLigand",
     "EnergyResult",
+    "Fragment",
+    "InteractionEnergyResult",
+    "LinkCap",
     "PDB2PQR",
     "Pdb2PqrUnavailableError",
     "PocketField",
@@ -49,12 +57,14 @@ __all__ = [
     "RANKS_ANALOGUES",
     "RelaxedPose",
     "RelaxedPoseQmmm",
+    "ResidueFragment",
     "batch_prescreen",
     "check_available_memory",
     "compute_alpha_atomic",
     "compute_binding_energy",
     "compute_charges",
     "compute_energy",
+    "compute_interaction_energy",
     "embed_ligand",
     "embed_ligand_from_coords",
     "file_digest",
@@ -65,4 +75,5 @@ __all__ = [
     "prescreen_pose",
     "relax_pose_in_pocket",
     "relax_pose_in_pocket_field",
+    "residue_fragment_from_pqr",
 ]
