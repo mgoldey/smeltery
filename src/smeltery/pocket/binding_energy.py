@@ -4,7 +4,8 @@
           - E(ligand, QM, vacuum)
 
 The pocket is always classical point charges; only the ligand is a QM
-`Molecule`, so there is no supermolecular interaction energy and no BSSE.
+`Molecule`, so there is no supermolecular interaction energy and no BSSE (for that, with both partners QM and
+counterpoise-corrected, see `interaction_energy.compute_interaction_energy`).
 The stages are reusable on their own (load the pocket once, embed per
 geometry): `load_pocket` -> `embed_ligand` -> `compute_energy` (twice) ->
 `compute_charges`.
