@@ -4,7 +4,8 @@ Boys-Bernardi CP for the Cs water dimer at RHF, monomers in the dimer basis via 
 the O basis, no nucleus). Independent of ferric: different integral code, SCF and ghost implementation.
 
 Usage (needs pyscf, not a smeltery dependency): python make_water_dimer_cp_pyscf.py
-Generated 2026-10-27 with PySCF 2.13.1 (conv_tol 1e-11). Not collected by pytest.
+Generated 2026-10-27 with PySCF 2.13.1 (conv_tol 1e-11). Not collected by pytest; the live
+test imports `energy`, `A` and `B` from it.
 """
 
 import json
@@ -31,13 +32,14 @@ def energy(real, ghost, basis):
     return e
 
 
-out = {}
-for basis in ("cc-pvdz", "sto-3g"):
-    out[basis] = {
-        "e_dimer": energy(A + B, [], basis),
-        "e_a_dimer_basis": energy(A, B, basis),
-        "e_b_dimer_basis": energy(B, A, basis),
-        "e_a_monomer_basis": energy(A, [], basis),
-        "e_b_monomer_basis": energy(B, [], basis),
-    }
-print(json.dumps(out, indent=1))
+if __name__ == "__main__":
+    out = {}
+    for basis in ("cc-pvdz", "sto-3g"):
+        out[basis] = {
+            "e_dimer": energy(A + B, [], basis),
+            "e_a_dimer_basis": energy(A, B, basis),
+            "e_b_dimer_basis": energy(B, A, basis),
+            "e_a_monomer_basis": energy(A, [], basis),
+            "e_b_monomer_basis": energy(B, [], basis),
+        }
+    print(json.dumps(out, indent=1))

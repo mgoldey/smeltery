@@ -87,8 +87,9 @@ class _FakeEngine:
     So E_AB = -6.003, E_A(AB) = E_B(AB) = -3.03, E_A = E_B = -3.0: dE_CP = +0.057, dE_raw = -0.003, BSSE = +0.06.
     """
 
-    def __init__(self, converged: bool = True):
+    def __init__(self, converged: bool = True, ghost_shift: float = -0.01):
         self.converged = converged
+        self.ghost_shift = ghost_shift
         self.calls: list[dict] = []
         self.BasisSet = types.SimpleNamespace(bundled=lambda name: name)
         self.Molecule = types.SimpleNamespace(
@@ -99,7 +100,7 @@ class _FakeEngine:
         rows = mol.xyz.splitlines()[2:]
         n_real = sum(not r.startswith("@") for r in rows)
         ghosts = len(rows) - n_real
-        e = -1.0 * n_real - 0.01 * ghosts - (0.003 if n_real == 6 else 0.0)
+        e = -1.0 * n_real + self.ghost_shift * ghosts - (0.003 if n_real == 6 else 0.0)
         self.calls.append({"n_real": n_real, "ghosts": ghosts, "charge": mol.charge, "pcs": point_charges})
         return types.SimpleNamespace(energy=e, converged=self.converged)
 
@@ -158,6 +159,81 @@ def test_dimer_charge_is_the_sum(monkeypatch):
     assert (6, 0, 0) in by_kind and (3, 3, 1) in by_kind and (3, 3, -1) in by_kind
 
 
+def test_point_charges_on_a_qm_atom_are_dropped_once_for_all_five_terms(monkeypatch):
+    """Charges 1.0 A from A's O and from B's O are inside the 1.5 A cutoff and must reach NO term (the filter runs
+    against A AND B); one 2.0 A from A's O reaches all five."""
+    fake = _FakeEngine()
+    monkeypatch.setattr(ie, "ferric", fake)
+    ax, ay, az = WATER_A.coords_angstrom[0]
+    bx, by, bz = WATER_B.coords_angstrom[0]
+    near_a = PointCharge(-0.4, (ax, ay, az - 1.0))
+    near_b = PointCharge(0.2, (bx, by + 1.0, bz))
+    far = PointCharge(0.3, (ax, ay, az - 2.0))
+    with pytest.warns(UserWarning, match="dropped 2 of 3 point charges"):
+        r = compute_interaction_energy(WATER_A, WATER_B, point_charges=[near_a, near_b, far])
+    assert [c["pcs"] for c in fake.calls] == [[far.as_ferric_bohr()]] * 5
+    assert r.point_charges_dropped == [near_a, near_b] and r.n_point_charges_used == 1
+
+
+def test_bonded_fragments_are_refused():
+    """An O-H bond (0.97 A) split between A and B is an uncapped cut, not an interaction."""
+    a = Fragment(["O", "H"], WATER_A.coords_angstrom[:2])
+    b = Fragment(["H"], WATER_A.coords_angstrom[2:])
+    with pytest.raises(ValueError, match="covalently bonded"):
+        compute_interaction_energy(a, b)
+
+
+def test_coincident_atoms_within_one_fragment_are_refused():
+    with pytest.raises(ValueError, match="coincident atoms"):
+        Fragment(["H", "H"], [(0.0, 0.0, 0.0), (0.1, 0.0, 0.0)])
+
+
+def test_negative_bsse_is_refused(monkeypatch):
+    """Ghosts that RAISE a monomer's energy (BSSE -0.06 Ha here) mean a broken ghost or term, not a result."""
+    monkeypatch.setattr(ie, "ferric", _FakeEngine(ghost_shift=+0.01))
+    with pytest.raises(RuntimeError, match="BSSE = -6.000e-02 Ha"):
+        compute_interaction_energy(WATER_A, WATER_B)
+
+
+HI = Fragment(["H", "I"], [(0.0, 0.0, 0.0), (0.0, 0.0, 1.61)])
+HE = Fragment(["He"], [(0.0, 0.0, 4.5)])
+
+
+def test_ecp_ghost_refused_when_ferric_attaches_ecps_to_ghosts(monkeypatch):
+    monkeypatch.setattr(ie, "ferric", _FakeEngine())
+    monkeypatch.setattr(ie, "ferric_ghost_has_no_ecp", lambda: False)
+    with pytest.raises(ValueError, match=r"\['I'\] carry an ECP in def2-svp.*PR #572"):
+        compute_interaction_energy(HI, HE, basis="def2-svp")
+
+
+def test_ecp_ghost_allowed_by_a_fixed_ferric_or_an_all_electron_basis(monkeypatch):
+    monkeypatch.setattr(ie, "ferric", _FakeEngine())
+    probed = []
+    monkeypatch.setattr(ie, "ferric_ghost_has_no_ecp", lambda: probed.append(1) or True)
+    compute_interaction_energy(HI, HE, basis="def2-svp")
+    assert probed == [1]
+    monkeypatch.setattr(ie, "ferric_ghost_has_no_ecp", lambda: pytest.fail("no ECP basis: must not probe"))
+    compute_interaction_energy(HI, HE, basis="sto-3g")
+
+
+@pytest.mark.needs_ferric
+def test_ghost_ecp_probe_on_the_installed_ferric():
+    """He + @I (def2-svp, 1.5 A), computed here independently of the probe: +1.865e-3 Ha ABOVE He with the bug
+    (ferric <= 0.1.0rc8), -3.744e-4 below with ferric PR #572. The probe must read that sign, and the guard must
+    refuse exactly when the installed ferric has the bug."""
+    import ferric
+
+    bs = ferric.BasisSet.bundled("def2-svp")
+    he = ferric.run_rhf(ferric.Molecule.from_xyz_string("1\nx\nHe 0 0 0\n", 0, 1), bs).energy
+    ghost = ferric.run_rhf(ferric.Molecule.from_xyz_string("2\nx\nHe 0 0 0\n@I 0 0 1.5\n", 0, 1), bs).energy
+    assert abs(ghost - he) > 1e-4  # either way, far from round-off: the probe discriminates
+    ie.ferric_ghost_has_no_ecp.cache_clear()
+    assert ie.ferric_ghost_has_no_ecp() is (ghost < he)
+    if ghost > he:
+        with pytest.raises(ValueError, match="PR #572"):
+            compute_interaction_energy(HI, HE, basis="def2-svp")
+
+
 def test_unconverged_term_is_fatal(monkeypatch):
     monkeypatch.setattr(ie, "ferric", _FakeEngine(converged=False))
     with pytest.raises(RuntimeError, match="did not converge for the dimer term"):
@@ -203,7 +279,7 @@ def _assert_matches_pyscf(r, ref, tol):
 def test_water_dimer_cc_pvdz_matches_pyscf_counterpoise():
     """Independent construction: PySCF's ghost atoms, integrals and SCF. dE_CP = -3.682 kcal/mol."""
     r = compute_interaction_energy(WATER_A, WATER_B, basis="cc-pvdz")
-    _assert_matches_pyscf(r, PYSCF_REF["cc-pvdz"], 2e-6)
+    _assert_matches_pyscf(r, PYSCF_REF["cc-pvdz"], 1e-9)  # measured 1.5e-11 (pinned build and PyPI 0.1.0rc8)
     assert r.delta_e_kcal_mol == pytest.approx(-3.682, abs=0.002)
     # The uncorrected value is 2.1 kcal/mol away: a test that cannot tell them apart is not a test of CP.
     assert r.delta_e_uncorrected_hartree * HARTREE_TO_KCAL == pytest.approx(-5.787, abs=0.002)
@@ -213,7 +289,7 @@ def test_water_dimer_cc_pvdz_matches_pyscf_counterpoise():
 def test_water_dimer_sto3g_bsse_dominates_and_matches_pyscf():
     """At STO-3G the BSSE (+4.13 kcal/mol) is three times the CP interaction (-1.40): uncorrected is mostly artifact."""
     r = compute_interaction_energy(WATER_A, WATER_B, basis="sto-3g")
-    _assert_matches_pyscf(r, PYSCF_REF["sto-3g"], 2e-6)
+    _assert_matches_pyscf(r, PYSCF_REF["sto-3g"], 1e-7)  # measured 4.7e-8 (pinned build and PyPI 0.1.0rc8)
     assert r.bsse_kcal_mol == pytest.approx(4.130, abs=0.002)
     assert r.delta_e_kcal_mol == pytest.approx(-1.401, abs=0.002)
 
@@ -229,7 +305,7 @@ def test_water_dimer_against_live_pyscf():
     ns = runpy.run_path(str(script), run_name="not_main")
     ref = {k: ns["energy"](*args, "cc-pvdz") for k, args in _pyscf_terms(ns).items()}
     r = compute_interaction_energy(WATER_A, WATER_B, basis="cc-pvdz")
-    _assert_matches_pyscf(r, ref, 2e-6)
+    _assert_matches_pyscf(r, ref, 1e-9)
 
 
 def _pyscf_terms(ns):

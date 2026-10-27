@@ -3,8 +3,9 @@
 Ported from ferric `tools/active_site/interaction_energy.residue_fragment_from_pqr` (July 2026), generalised:
 ferric capped exactly the N(i)-C(i-1) and C(i)-N(i+1) backbone bonds, found by residue NUMBER. That caps a bond that
 is not there at a chain break (numbering continues across a gap) and misses one that is (a disulfide). Here the
-severed bonds are found from the geometry: every covalent bond between a residue atom and an atom outside it, by the
-same rule `smeltery.gates` uses (covalent radii + `BOND_SLACK_ANG`, Open Babel's convention).
+contacts are found from the geometry, by the rule `smeltery.gates` uses (covalent radii + `BOND_SLACK_ANG`, Open
+Babel's convention), and only two kinds are capped: the peptide bond (atom `C` to atom `N`) and the disulfide (`SG` to
+`SG`). Any other contact within bonding distance is refused, as a clash or a link this code does not model.
 
 CAPPING. Each severed partner is replaced by a hydrogen on the original bond vector at a standard X-H length
 (`LINK_BOND_LENGTH_ANG`: C-H 1.09, N-H 1.01, S-H 1.34 A). This is the standard link-atom scheme and an approximation:
@@ -39,6 +40,8 @@ STANDARD_RESIDUES = frozenset(
 
 #: Covalent radii (Angstrom; RDKit's table, which `smeltery.gates` reads) for the elements of STANDARD_RESIDUES.
 _RCOV = {"H": 0.31, "C": 0.76, "N": 0.71, "O": 0.66, "S": 1.05}
+#: Severed bonds that are capped, by atom-name pair: the peptide bond and the disulfide. Anything else is refused.
+_CAPPABLE = ({"C", "N"}, {"SG"})
 #: Radius assumed for an atom of a non-standard residue when deciding whether it might be bonded: the largest above.
 _RCOV_UNKNOWN = max(_RCOV.values())
 
@@ -127,9 +130,10 @@ def residue_fragment_from_pqr(
     `cap=False` returns the bare residue with its dangling valences, for diagnostics only: it is not a valid molecule
     and an SCF on it converges to a meaningless energy.
 
-    Refuses: an unknown atom name in the residue (element not C/N/O/S/H), an atom of a non-standard residue within
-    bonding distance (a covalent ligand or metal: the partner's element cannot be read from its name), a severed bond
-    at a hydrogen, and coincident atoms.
+    Refuses: a residue with no hydrogens (not hydrogen-complete), an unknown atom name in the residue (element not
+    C/N/O/S/H), an atom of a non-standard residue within bonding distance (a covalent ligand or metal: the partner's
+    element cannot be read from its name), any contact within bonding distance other than C-N (peptide) or SG-SG
+    (disulfide), and coincident atoms.
     """
     text = pqr if isinstance(pqr, str) and "\n" in pqr else Path(pqr).read_text()
     atoms = parse_pqr_atoms(text)
@@ -157,6 +161,11 @@ def residue_fragment_from_pqr(
             raise ValueError(f"cannot read an element for {a.label()} (only C/N/O/S/H of standard residues)")
         symbols.append(el)
     coords = [a.xyz for a in sel]
+    if "H" not in symbols:
+        raise ValueError(
+            f"{label} has no hydrogens: not a hydrogen-complete residue (a raw PDB?). Protonate it first "
+            "(PDB2PQR); capping a residue without its H's still leaves dangling valences."
+        )
 
     q = sum(charges[i] for i in sel_idx)
     if charge is None:
@@ -185,8 +194,11 @@ def residue_fragment_from_pqr(
                         f"{a.label()} is {d:.2f} A from {b.label()} of a non-standard residue: possibly a covalent "
                         "bond to a partner whose element cannot be read from its name; refusing to cap it"
                     )
-                if ea == "H" or eb == "H":
-                    raise ValueError(f"{a.label()} - {b.label()} ({d:.2f} A) would be a severed bond at a hydrogen")
+                if {a.name, b.name} not in _CAPPABLE:
+                    raise ValueError(
+                        f"{a.label()} - {b.label()} at {d:.2f} A is within bonding distance but is neither a peptide "
+                        "bond (C-N) nor a disulfide (SG-SG): a clash, or a link this code does not cap"
+                    )
                 symbols.append("H")
                 coords.append(_place_link_atom(a.xyz, b.xyz, LINK_BOND_LENGTH_ANG[ea]))
                 caps.append(LinkCap(k, a.label(), b.label(), LINK_BOND_LENGTH_ANG[ea]))
