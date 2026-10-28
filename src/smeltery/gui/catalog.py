@@ -402,8 +402,7 @@ def _build() -> dict[str, Method]:
             tier="field_dft_interaction",
             wired=False,
             why_unwired=(
-                "a library tier; smeltery run's [field_interaction] section selects RHF, "
-                "with no key for a functional"
+                "a library tier; smeltery run's [field_interaction] section selects RHF, with no key for a functional"
             ),
             summary=(
                 "The same dE_int as field_interaction, from KS-DFT instead of RHF. D3(BJ) is "
