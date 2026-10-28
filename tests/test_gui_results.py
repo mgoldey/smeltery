@@ -177,3 +177,9 @@ def test_pose_sdf_missing_file(ranked):
     path.unlink()
     with pytest.raises(ValueError, match=r"4-Br\.sdf"):
         pose_sdf(ranked, "4-Br")
+
+
+def test_candidates_are_in_config_order(tmp_path):
+    run = load_run(make_run_dir(tmp_path))
+    assert list(run.candidates) == list(CANDIDATES)
+    assert run.analogues == [n for n in CANDIDATES if n != run.parent]

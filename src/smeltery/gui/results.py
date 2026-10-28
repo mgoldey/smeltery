@@ -38,9 +38,11 @@ class Run:
 
     @property
     def candidates(self) -> dict[str, str]:
-        """Name -> SMILES, parent included, in the record's key order. The record is written with sort_keys
-        (`smeltery.record`), so that is name order, not config order; rank order comes from `groups`."""
-        return dict(self.record["inputs"]["candidates"])
+        """Name -> SMILES, parent included, in config order (`results.candidate_order`). The record is written
+        with sort_keys, so a record without that list gives name order; rank order always comes from `groups`."""
+        smiles = self.record["inputs"]["candidates"]
+        order = self.record["results"].get("candidate_order") or sorted(smiles)
+        return {n: smiles[n] for n in order}
 
     @property
     def analogues(self) -> list[str]:
