@@ -14,20 +14,11 @@ import pytest
 from gui_fixture import make_run_dir
 
 ROOT = Path(__file__).resolve().parent.parent
-SHIM_SITE = ROOT / "tests" / "_gui_shims" / "site"
-
-
-@pytest.fixture(autouse=True)
-def _contract_modules(monkeypatch):
-    """TEMPORARY: until smeltery.gui.results / scenes and smeltery.decisions are merged, use the shims."""
-    from _gui_shims import install
-
-    install(monkeypatch)
 
 
 def _subprocess_env() -> dict:
-    """Env for a child Python that sees this checkout (and the shims while the real modules are missing)."""
-    paths = [str(SHIM_SITE), str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]
+    """Env for a child Python that sees this checkout."""
+    paths = [str(ROOT / "src"), os.environ.get("PYTHONPATH", "")]
     return {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in paths if p)}
 
 
@@ -404,3 +395,12 @@ def test_resolve_out_prefers_the_command_line(monkeypatch, tmp_path):
     monkeypatch.delenv(app.ENV_OUT)
     with pytest.raises(ValueError, match=app.ENV_OUT):
         app.resolve_out(None)
+
+
+def test_smeltery_gui_subcommand_reaches_the_app_parser(tmp_path, capsys):
+    from smeltery import cli
+
+    with pytest.raises(SystemExit) as e:
+        cli.main(["gui", "--help"])
+    assert e.value.code == 0 and "--desktop" in capsys.readouterr().out
+    assert cli.main(["gui", str(tmp_path / "nothing"), "--no-browser"]) == 2

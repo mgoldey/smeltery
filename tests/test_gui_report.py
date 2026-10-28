@@ -256,3 +256,12 @@ def test_browser_with_cdn_files_draws_structures_and_poses(results, tmp_path):
     assert info["errors"] == [] and not info["viewerFailed"]
     assert info["mol2dImgs"] == 3 and info["canvases"] >= 1
     assert info["viewerMsg"].startswith("4-F, pose 0 with the parent")
+
+
+def test_smeltery_report_subcommand_writes_the_report(tmp_path, capsys):
+    from smeltery import cli
+
+    dest = tmp_path / "r.html"
+    assert cli.main(["report", str(make_run_dir(tmp_path)), "-o", str(dest)]) == 0
+    assert dest.read_text().startswith("<!doctype html>")
+    assert cli.main(["report", str(tmp_path / "nothing")]) == 2

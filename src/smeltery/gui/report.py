@@ -763,10 +763,10 @@ def write_report(run, path: str | Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`smeltery-report RUN_OR_OUT [-o report.html]`. Exit 0 on success, 2 when the run cannot be loaded."""
+    """`smeltery report RUN_OR_OUT [-o report.html]`. Exit 0 on success, 2 when the run cannot be loaded."""
     from . import results
 
-    ap = argparse.ArgumentParser(prog="smeltery-report", description="Write a self-contained HTML report of a run.")
+    ap = argparse.ArgumentParser(prog="smeltery report", description="Write a self-contained HTML report of a run.")
     ap.add_argument("run", type=Path, help="a run-*.json, or an OUT directory holding exactly one")
     ap.add_argument("-o", "--output", type=Path, default=Path("report.html"), help="HTML file to write")
     args = ap.parse_args(argv)

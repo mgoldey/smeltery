@@ -918,9 +918,20 @@ def _describe_plan(plan: Plan, digest: str) -> str:
     )
 
 
+#: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.
+VIEWERS = {"gui": "smeltery.gui.app", "report": "smeltery.gui.report"}
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in VIEWERS:  # imported only when asked for: they need no tier, and gui needs the gui extra
+        import importlib
+
+        return importlib.import_module(VIEWERS[argv[0]]).main(argv[1:])
     ap = argparse.ArgumentParser(prog="smeltery", description="Tiered, measurement-disciplined funnel.")
     sub = ap.add_subparsers(dest="command", required=True)
+    sub.add_parser("gui", help="browse a finished run, record decisions (smeltery gui OUT --help)")
+    sub.add_parser("report", help="write a self-contained HTML report of a run (smeltery report OUT --help)")
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
     run.add_argument("--out", type=Path, default=Path("out"), help="directory for the run record")
