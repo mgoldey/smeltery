@@ -69,6 +69,11 @@ aimnet2 = ["aimnet>=0.2.0", "torch>=2.8", "numpy"]
 # Third-party imports of the frozen ferric code under experiments/ (psutil: binding_energy's memory check;
 # scipy: the run_* scripts). Not core: nothing under src/smeltery imports them.
 experiments = ["psutil>=5.9", "scipy>=1.11"]
+# The GUI (smeltery.gui.app, docs/gui.md): the Marimo app and its views. Only smeltery.gui.views imports these, and
+# only inside functions, so `import smeltery.gui` works without the extra. mols2grid needs pandas and pulls it in.
+gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
+# `smeltery gui OUT --desktop`: the same app in a pywebview window instead of a browser tab.
+desktop = ["pywebview>=5", "marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
 # dependency: nothing under src/smeltery imports it; tests that need it skip without it.
 pocket-charges = ["openmm>=8.6.1"]
