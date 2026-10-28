@@ -22,6 +22,7 @@ smeltery has no grade scheme of its own. These three facts are the smallest hone
 |---|---|---|---|
 | [paired_poses](paired_poses.md) | yes | measured | n/a |
 | [field_interaction](field_interaction.md) | yes | measured | UNMEASURED |
+| [field_dft_interaction](field_dft_interaction.md) | yes | measured | UNMEASURED |
 | [surface_esp](surface_esp.md) | yes | UNMEASURED | UNMEASURED |
 | [gfn2](gfn2.md) | yes | measured | measured |
 | [forcefield](forcefield.md) | yes | measured | UNMEASURED |

@@ -668,6 +668,9 @@ def _qmmm_engine_gap() -> str | None:
 TIER_PLAN: dict[str, Reach] = {
     "paired_poses": Reach("cli"),
     "field_interaction": Reach("cli"),
+    # The DFT counterpart of field_interaction. The CLI has no [dft] section to select a functional,
+    # so it is reached from the library scenario on water rather than by the CLI trace.
+    "field_dft_interaction": Reach("library", note="water in a two-charge field; PBE/STO-3G"),
     "forcefield": Reach("cli", note="the MMFF path; the openmm path is declared in OPENMM_REASON below"),
     "gfn2": Reach(
         "cli",
@@ -724,13 +727,25 @@ def run_library_tiers() -> None:
     Each runs only if its requirement is met; the reach is measured by the caller's tier trace."""
     import numpy as np
 
-    from smeltery import Candidate, Pose, Rescoring, VinaScoreProvider
-    from smeltery.tiers import MmParameters, Qmmm, SurfaceEsp, run_checked
+    from smeltery import Candidate, PointCharge, Pose, Rescoring, VinaScoreProvider
+    from smeltery.tiers import FieldDftInteraction, MmParameters, Qmmm, SurfaceEsp, run_checked
 
     cands = [Candidate("parent", "C", _poses()), Candidate("a", "C", _poses())]
     tier = Rescoring(VinaScoreProvider([-5.0, -6.0]))
     run_checked(tier, cands, {})
     assert tier.produces() == {"rescore": "kcal/mol"} and tier.is_delta_g is False
+
+    if TIER_PLAN["field_dft_interaction"].needs() is None:
+        # Water in a symmetric two-charge field: both SCF legs plus the separate D3(BJ) call, small
+        # enough to run every time (0.34 s; the 74-atom ligand it was validated against needs ~190 s).
+        w = Pose(("O", "H", "H"), np.array([[0.0, 0.0, 0.0], [0.9572, 0.0, 0.0], [-0.2400, 0.9266, 0.0]]))
+        c = Candidate("water", "O", [w])
+        tier = FieldDftInteraction()
+        run_checked(tier, [c], {"field": [PointCharge(-0.5, (4.0, 0.0, 0.0)), PointCharge(0.5, (-4.0, 0.0, 0.0))]})
+        assert set(c.per_pose) == set(tier.produces())
+        # E_d3 is geometry-only and must stay OUT of dE_int, so the two cannot be the same number.
+        assert np.isfinite([c.per_pose["dE_int"], c.per_pose["E_d3"]]).all()
+        assert c.per_pose["dE_int"][0] != c.per_pose["E_d3"][0]
 
     if TIER_PLAN["surface_esp"].needs() is None:
         water = Pose(("O", "H", "H"), np.array([[0.0, 0.0, 0.117], [0.0, 0.757, -0.469], [0.0, -0.757, -0.469]]))
