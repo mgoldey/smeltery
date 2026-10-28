@@ -56,7 +56,47 @@ parity gate, with the candidate count in and out for drawing the funnel.
 
 ## Not yet
 
-- No frontend.
 - No cost per stage: tier `estimate_cost` needs posed candidates. Running `--plan` from the GUI would give real ones.
 - One ranked stage only, as in `smeltery run`. A second ranker would need a measured floor, and none of the wired
   ones has one.
+
+## Running the GUI
+
+```sh
+pip install 'smeltery[gui]'
+smeltery gui OUT                      # OUT: a `smeltery run --out` directory, or its run-*.json
+smeltery gui OUT --port 8123 --no-browser
+smeltery gui OUT --desktop            # a desktop window instead of a browser tab: pip install 'smeltery[desktop]'
+```
+
+`smeltery gui` calls `smeltery.gui.app.main` (also `python -m smeltery.gui.app OUT ...`). It serves the Marimo app in
+`smeltery/gui/views/notebook.py` on 127.0.0.1 with `marimo run`. That file is an ordinary Marimo notebook, so
+`SMELTERY_GUI_OUT=OUT marimo edit src/smeltery/gui/views/notebook.py` opens it for editing (or pass `-- --out OUT`).
+Without the extra, the command says what to install and exits 2. `import smeltery.gui` never needs the extra.
+
+The app has four tabs:
+
+- **Results**: the forest plot (paired ddE, mean ± z·SEM, in cut order), the "resolved?" matrix, the funnel and the
+  per-pose paired lines. Tie groups are bands labelled "(no order)". The keep boundary is drawn only where the cut
+  placed one; an UNRANKED cut is labelled across the plot instead. Nothing here decides more than `funnel.cut` did:
+  the matrix is `funnel.resolved` with the run's own z and floor.
+- **Grid**: every candidate with its ddE, tie group, what the cut did and its current decision. Tick candidates in
+  the grid (or pick them in the form), choose a status and a reason, and press **Record decision**. Decisions are
+  saved to `OUT/decisions-<input_digest[:12]>.json` by `smeltery.decisions.DecisionSet.dump`, all or nothing. Its
+  validation refuses, for example, `within_tie_choice` or `other` without a note, and the app shows the refusal. An
+  existing file that does not validate is reported and never overwritten.
+- **Pose**: Mol\* showing analogue pose *i* with the parent's pose *i* superposed, the receptor when the run has
+  one, and the field's point charges (`smeltery.gui.scenes.pose_scene`).
+- **Pipeline**: the builder above. It shows the palette by rung, the stages in execution order with each `check()`
+  issue under its stage, a knob form per stage, and the config TOML. Until the pipeline checks clean, the TOML is a
+  draft headed by what blocks it. The builder starts from the one `*.toml` in OUT if there is exactly one, else from
+  `Pipeline.minimal` with the run's candidates and cut settings.
+
+The browser loads Mol\* (pinned in `smeltery.gui.views.pose.MOLSTAR_VERSION`) and the grid's RDKit.js and jQuery
+from CDNs, so it needs network access to them.
+
+![Results on an UNRANKED cut](img/gui-results-unranked.png)
+
+![Grid with two within-tie decisions recorded](img/gui-grid-decisions.png)
+
+![Pose view](img/gui-pose.png)

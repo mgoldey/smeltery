@@ -7,3 +7,6 @@ out/
 *.swo
 *~
 .claude/
+
+# marimo writes session caches next to a notebook it runs (src/smeltery/gui/views/notebook.py)
+__marimo__/
