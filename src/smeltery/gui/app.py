@@ -38,6 +38,33 @@ def resolve_out(cli_args=None) -> Path:
     return Path(value)
 
 
+def sibling_runs(out: Path, *, limit: int = 60) -> list[Path]:
+    """Other run directories beside `out`, for the Compare tab. Never includes `out` itself.
+
+    A comparison needs several runs and the app is given one, so the siblings are found rather than
+    configured: every immediate sibling directory of `out` that holds a `run-*.json`. That is a
+    convention, not a contract -- a study whose runs live elsewhere shows nothing here, and the tab
+    says so rather than pretending the comparison is unavailable in principle.
+    """
+    out = Path(out)
+    # `out` may be the OUT directory or a run-*.json inside it; siblings are always beside the DIRECTORY.
+    # Excluding by the passed path alone would leave a record's own directory in the list, since a file
+    # path never equals a directory path.
+    out_dir = out if out.is_dir() else out.parent
+    base = out_dir.parent
+    if not base.is_dir():
+        return []
+    found = []
+    for d in sorted(base.iterdir()):
+        if not d.is_dir() or d.resolve() == out_dir.resolve():
+            continue
+        if any(d.glob("run-*.json")):
+            found.append(d)
+        if len(found) >= limit:
+            break
+    return found
+
+
 # ---------------------------------------------------------------------------- decisions
 
 

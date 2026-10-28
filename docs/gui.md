@@ -76,7 +76,7 @@ smeltery gui OUT --desktop            # a desktop window instead of a browser ta
 `SMELTERY_GUI_OUT=OUT marimo edit src/smeltery/gui/views/notebook.py` opens it for editing (or pass `-- --out OUT`).
 Without the extra, the command says what to install and exits 2. `import smeltery.gui` never needs the extra.
 
-The app has four tabs:
+The app has five tabs:
 
 - **Results**: the forest plot (paired ddE, mean ± z·SEM, in cut order), the "resolved?" matrix, the funnel and the
   per-pose paired lines. Tie groups are bands labelled "(no order)". The keep boundary is drawn only where the cut
@@ -89,6 +89,15 @@ The app has four tabs:
   existing file that does not validate is reported and never overwritten.
 - **Pose**: Mol\* showing analogue pose *i* with the parent's pose *i* superposed, the receptor when the run has
   one, and the field's point charges (`smeltery.gui.scenes.pose_scene`).
+- **Compare**: several runs differenced **per key** instead of pooled. The runs offered are the directories
+  beside this one that hold a `run-*.json` (`smeltery.gui.app.sibling_runs`); arms are picked, never inferred,
+  because guessing which runs form an arm is how a comparison silently becomes a pooling of unlike things. The
+  key is the run directory, its campaign or its parent. The floor band is the run's own systematic floor: a
+  difference inside it is **not resolved** and its marker is drawn hollow, and the caption gives the pooled
+  number labelled `CONFOUNDED` beside the per-key one, since the gap between them is the finding. Keys only one
+  arm produced for are listed rather than dropped — an arm producing nothing for a key is a result about that
+  arm. A per-key difference compares summary statistics over *different* molecules, so it carries no SEM and
+  none is invented (`smeltery.gui.compare`).
 - **Pipeline**: the builder above. It shows the palette by rung, the stages in execution order with each `check()`
   issue under its stage, a knob form per stage, and the config TOML. Until the pipeline checks clean, the TOML is a
   draft headed by what blocks it. The builder starts from the one `*.toml` in OUT if there is exactly one, else from

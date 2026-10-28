@@ -16,11 +16,12 @@ with app.setup:
     import marimo as mo
 
     from smeltery.decisions import REASONS, STATUSES
-    from smeltery.gui import Pipeline
+    from smeltery.gui import Comparison, Pipeline
     from smeltery.gui import app as gui_app
     from smeltery.gui.results import ddE_table, funnel_rows, load_run, per_pose_table, resolved_matrix
     from smeltery.gui.scenes import pose_scene
     from smeltery.gui.views import builder
+    from smeltery.gui.views.compare import compare_figure, comparison_caption, unpaired_table
     from smeltery.gui.views.forest import forest_figure
     from smeltery.gui.views.funnel import funnel_figure
     from smeltery.gui.views.grid import grid_iframe, grid_records, molgrid, selected_candidates
@@ -28,7 +29,7 @@ with app.setup:
     from smeltery.gui.views.per_pose import per_pose_figure
     from smeltery.gui.views.pose import pose_iframe
 
-    TABS = ("Results", "Grid", "Pose", "Pipeline")
+    TABS = ("Results", "Grid", "Pose", "Compare", "Pipeline")
 
 
 @app.cell
@@ -89,6 +90,110 @@ def _(nav, rows, run, unit):
     )
     results_view if nav.value == "Results" else None  # noqa: B018 (the cell's output)
     return (results_view,)
+
+
+# ------------------------------------------------------------------------------------------------ Compare
+
+
+@app.cell
+def _(out_dir, run):
+    # A comparison needs several runs and the app is given one, so the siblings are discovered. Each is
+    # loaded defensively: a sibling that is not a readable run is listed with its reason, never dropped
+    # silently, because a missing arm is what makes a comparison wrong rather than merely incomplete.
+    _loaded, _bad = {}, []
+    for _d in gui_app.sibling_runs(out_dir):
+        try:
+            _loaded[_d.name] = load_run(_d)
+        except Exception as _e:  # noqa: BLE001 - any unreadable sibling is reported, not raised
+            _bad.append((_d.name, str(_e)))
+    _loaded[out_dir.name if out_dir.is_dir() else out_dir.parent.name] = run
+    sibling_by_name = dict(sorted(_loaded.items()))
+    unreadable_siblings = _bad
+    return sibling_by_name, unreadable_siblings
+
+
+@app.cell
+def _(sibling_by_name):
+    _names = list(sibling_by_name)
+    # Arms are CHOSEN, never inferred. Guessing which runs form an arm is how a comparison silently
+    # becomes a pooling of unlike things, which is the one failure this tab exists to prevent.
+    arm_a = mo.ui.multiselect(_names, label="Arm A (runs)", value=_names[:1])
+    arm_b = mo.ui.multiselect(_names, label="Arm B (runs)", value=_names[1:2])
+    key_by = mo.ui.dropdown(
+        {"run directory": "dir", "campaign": "campaign", "parent": "parent"},
+        value="campaign",
+        label="Compare per",
+    )
+    return arm_a, arm_b, key_by
+
+
+@app.cell
+def _(arm_a, arm_b, key_by, nav, run, sibling_by_name, unit, unreadable_siblings):
+    def _key(name, r):
+        return {"dir": name, "campaign": r.campaign, "parent": r.parent}[key_by.value]
+
+    def _values(names):
+        out = {}
+        for _n in names:
+            _r = sibling_by_name[_n]
+            out.setdefault(_key(_n, _r), []).extend(x["mean"] for x in ddE_table(_r))
+        return out
+
+    _body = []
+    if not arm_a.value or not arm_b.value:
+        _body.append(mo.callout(mo.md("Pick runs for both arms."), kind="neutral"))
+    elif set(arm_a.value) & set(arm_b.value):
+        _body.append(
+            mo.callout(
+                mo.md("A run is in **both** arms. An arm compared with itself is not a comparison."),
+                kind="warn",
+            )
+        )
+    else:
+        # The floor comes from the run, not from this tab: it is the same systematic floor the cut used.
+        _cmp = Comparison.from_values(
+            _values(arm_a.value),
+            _values(arm_b.value),
+            label_a=" + ".join(arm_a.value),
+            label_b=" + ".join(arm_b.value),
+            floor=run.floor,
+            unit=unit,
+        )
+        _unpaired = unpaired_table(_cmp)
+        _body += [
+            compare_figure(_cmp),
+            mo.callout(mo.md(comparison_caption(_cmp)), kind="info"),
+            mo.md(
+                f"Floor **{run.floor:g} {unit}** ({run.floor_source}), from the run. A difference inside it is "
+                "**not resolved**, and its marker is drawn hollow."
+            ),
+        ]
+        if _unpaired:
+            _body += [
+                mo.md("#### Keys only one arm produced for"),
+                mo.md("An arm producing nothing for a key is a result about that arm, not a missing value."),
+                mo.ui.table(_unpaired, selection=None),
+            ]
+    if unreadable_siblings:
+        _body.append(
+            mo.callout(
+                mo.md("Not readable as runs: " + "; ".join(f"`{n}` ({e})" for n, e in unreadable_siblings)),
+                kind="warn",
+            )
+        )
+    compare_view = mo.vstack(
+        [
+            mo.md("### Compare runs, per key"),
+            mo.md(
+                "Runs beside this one. Differences are taken **per key**, never by pooling every molecule: "
+                "pooling compares mixtures of keys, not arms."
+            ),
+            mo.hstack([arm_a, arm_b, key_by], justify="start", gap=2, align="start"),
+            *_body,
+        ]
+    )
+    compare_view if nav.value == "Compare" else None  # noqa: B018 (the cell's output)
+    return (compare_view,)
 
 
 # ------------------------------------------------------------------------------------------------ Decisions + Grid

@@ -323,7 +323,7 @@ def test_app_runs_every_cell_headless(tmp_path, monkeypatch, unranked):
     from smeltery.gui.views.notebook import app
 
     _, defs = app.run()
-    for name in ("results_view", "grid_panel", "decision_view", "pose_view", "pipeline_view"):
+    for name in ("results_view", "grid_panel", "decision_view", "pose_view", "compare_view", "pipeline_view"):
         assert defs[name] is not None, name
     assert defs["run"].unranked is unranked
     assert defs["nav"].value == "Results"

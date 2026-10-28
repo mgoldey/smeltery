@@ -8,6 +8,8 @@ reason this module exists, so it is asserted on real figures rather than on a to
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from smeltery.gui import Comparison
@@ -120,3 +122,69 @@ def test_figure_draws_without_a_toolkit_error():
     assert any(sh.type == "rect" for sh in fig.layout.shapes)
     empty = compare_figure(Comparison.from_values({"x": [1.0]}, {"y": [2.0]}, label_a="A", label_b="B"))
     assert any("cannot be compared" in (a.text or "") for a in empty.layout.annotations)
+
+
+# ---------------------------------------------------------------------------- sibling discovery
+
+# `make_run_dir(root)` writes `root/out`, so a shared parent for two runs means two roots under one
+# directory and comparing `a/out` with `b/out` -- which is the real layout of a study: one directory
+# per run, side by side.
+
+
+def _two_runs(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from gui_fixture import make_run_dir
+
+    base = tmp_path / "study"
+    base.mkdir()
+    return make_run_dir(base / "armA"), make_run_dir(base / "armB"), base
+
+
+def test_sibling_runs_finds_run_directories_beside_one_and_never_itself(tmp_path):
+    """Discovery is by convention, so its edges are pinned rather than left to chance."""
+    from smeltery.gui.app import sibling_runs
+
+    a, b, base = _two_runs(tmp_path)
+    # Siblings are looked for beside the OUT directory, i.e. inside its own parent.
+    assert sibling_runs(a) == []  # a/out has no sibling run inside a/
+    (base / "armA" / "not-a-run").mkdir()
+    assert sibling_runs(a) == [], "a directory without run-*.json is never offered"
+
+    # Put two runs under one parent, the way a study lays them out.
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    import shutil
+
+    shutil.copytree(a, flat / "armA")
+    shutil.copytree(b, flat / "armB")
+    found = sibling_runs(flat / "armA")
+    assert [p.name for p in found] == ["armB"]
+    assert (flat / "armA").resolve() not in [p.resolve() for p in found], "a run is never its own sibling"
+
+
+def test_sibling_runs_on_a_record_path_looks_beside_its_directory(tmp_path):
+    """Given OUT/run-*.json rather than OUT, the siblings are OUT's siblings."""
+    import shutil
+
+    from smeltery.gui.app import sibling_runs
+
+    a, b, _ = _two_runs(tmp_path)
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    shutil.copytree(a, flat / "armA")
+    shutil.copytree(b, flat / "armB")
+    record = next((flat / "armA").glob("run-*.json"))
+    assert [p.name for p in sibling_runs(record)] == ["armB"]
+
+
+def test_sibling_runs_of_a_lone_directory_is_empty_not_an_error(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from gui_fixture import make_run_dir
+
+    from smeltery.gui.app import sibling_runs
+
+    assert sibling_runs(make_run_dir(tmp_path / "only")) == []
