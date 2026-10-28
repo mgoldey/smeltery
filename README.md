@@ -52,7 +52,8 @@ Each tier has a page stating what it computes, its settings, its measured cost, 
 systematic floor and what it is not licensed to claim: [docs/tiers/index.md](docs/tiers/index.md).
 
 For a GUI, `smeltery.gui` presents the tiers as a hierarchy of methods and lets you assemble them into a pipeline that
-compiles to a `smeltery run` config: [docs/gui.md](docs/gui.md).
+compiles to a `smeltery run` config: [docs/gui.md](docs/gui.md). A review of the tools for viewing results and choosing
+candidates, with a plan: [docs/gui-review.md](docs/gui-review.md).
 
 ## Example
 
