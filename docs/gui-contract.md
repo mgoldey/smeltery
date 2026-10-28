@@ -14,6 +14,7 @@ Added under `record.results`. None of these feed `input_digest`, which hashes in
 |---|---|---|
 | `per_pose` | `{candidate: {quantity: [float, ...]}}` | Raw per-pose values for every candidate, parent included, for each `per_pose` quantity a stage wrote (`dE_int`, and `E_mmff`, `E_mmff_relaxed` and `E_gfn2` when those gates ran). In each quantity's declared unit. |
 | `units` | `{quantity: unit}` | The unit of each quantity in `per_pose`. |
+| `candidate_order` | `[name, ...]` | The candidates in config order, parent included, after any `[decisions]` rejections are dropped. The record is written with sorted keys, so this is where the order lives. |
 | `poses` | `{candidate: {"file": "poses/<file>.sdf", "sha256": hex, "n_poses": int}}` | One SDF per candidate. The path is relative to `OUT`. |
 | `field` | `[[q, x, y, z], ...]` | The pocket point charges, with positions in Angstrom, in the poses' frame. |
 | `receptor` | `{"file": str, "sha256": hex}` or `null` | A receptor `.pdb` in the poses' frame, when one exists: `structure/receptor.pdb`, or the `[pocket] file` when it is a `.pdb`. A path outside `OUT` is stored as the absolute path. |
