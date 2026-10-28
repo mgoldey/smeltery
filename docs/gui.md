@@ -8,8 +8,10 @@ widget, a Qt app or a web page reading `catalog_json()`) draws what it returns a
 A run is a pipeline of **stages**. Each stage is one **method** from the catalog. A method has:
 
 - a **rung** on the method hierarchy, cheapest first: `input` → `geometry` → `check` → `empirical` →
-  `semiempirical` → `ab_initio` → `embedded_qm` → `decision`. `hierarchy()` returns the methods grouped by rung, which
-  gives the palette.
+  `semiempirical` → `ab_initio` → `embedded_qm` → `designable` → `decision`. `hierarchy()` returns the methods grouped
+  by rung, which gives the palette. The ladder up to `embedded_qm` is ordered by physical rigour; `designable` is not a
+  further step up it but a different question (would a chemist make this molecule?), placed last because an interaction
+  energy is what makes that question worth asking and because the answer belongs in front of whoever reads the cut.
 - a **role** for the candidate list, using the same kinds `smeltery run` logs: `prep`, `search`, `pair`, `field`, `gate`,
   `recorded`, `measure`, `rank`. Only `rank` (the paired cut) removes candidates. A gate either passes everyone or
   stops the run.

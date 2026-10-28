@@ -24,8 +24,13 @@ RUNGS: tuple[tuple[str, str], ...] = (
     ("check", "Hard refusals on what the next rung needs (electron parity, pose validity)"),
     ("empirical", "Force fields and empirical scores"),
     ("semiempirical", "Tight-binding QM (GFN2-xTB)"),
-    ("ab_initio", "ferric Hartree-Fock in the pocket field"),
+    ("ab_initio", "ferric wavefunction and density-functional methods in the pocket field"),
     ("embedded_qm", "QM/MM with a covalent QM-MM boundary"),
+    # Not a step up the rigour ladder: a different question. The rungs above ask how strongly a pose
+    # interacts; this one asks whether a chemist would make the molecule at all. It is placed after them
+    # because an interaction energy is what makes the question worth asking, and before `decision`
+    # because the answer belongs in front of whoever reads the cut.
+    ("designable", "Would a chemist make it? Properties and synthesizability, from the SMILES alone"),
     ("decision", "The paired cut: ties and UNRANKED are answers"),
 )
 RUNG_INDEX = {name: i for i, (name, _) in enumerate(RUNGS)}
@@ -388,6 +393,19 @@ def _build() -> dict[str, Method]:
             params=params_from_dataclass(FieldInteraction, {"basis": "ferric basis set name"}),
         ),
         Method(
+            "field_dft_interaction",
+            "Field interaction (ferric PBE + D3)",
+            "ab_initio",
+            "measure",
+            needs=("poses", "field"),
+            provides=("dE_int",),
+            tier="field_dft_interaction",
+            wired=False,
+            why_unwired="a library tier; smeltery run's [field_interaction] section selects RHF, with no key for a functional",
+            summary="The same dE_int as field_interaction, from KS-DFT instead of RHF. D3(BJ) is reported separately and cancels in dE_int at fixed geometry.",
+            exclusive=("field_interaction",),
+        ),
+        Method(
             "surface_esp",
             "Surface ESP",
             "ab_initio",
@@ -406,6 +424,17 @@ def _build() -> dict[str, Method]:
             tier="qmmm",
             wired=False,
             why_unwired="needs MM parameters and a QM partition of a whole-structure pose; not in smeltery run",
+        ),
+        Method(
+            "designability",
+            "Designability (property drift, SA)",
+            "designable",
+            "measure",
+            # Descriptors of the SMILES, so it needs no pose and no field: the parent comes from the run itself.
+            tier="designability",
+            wired=False,
+            why_unwired="a library tier; smeltery run has no stage for it",
+            summary="Drift from the parent in MW, logP, TPSA, QED and synthetic accessibility. A counterweight to dE_int, which rewards added atoms; it gates nothing.",
         ),
         Method(
             "cut",
