@@ -72,6 +72,11 @@ experiments = ["psutil>=5.9", "scipy>=1.11"]
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
 # dependency: nothing under src/smeltery imports it; tests that need it skip without it.
 pocket-charges = ["openmm>=8.6.1"]
+# scripts/plb_pocket_charges.py --prep only (repair an unprepped crystal pocket before typing: missing side-chain
+# heavy atoms, a missing chain-terminal atom, absent hydrogens). pdbfixer is from the OpenMM project, pure Python,
+# and needs only numpy and openmm, so this extra adds no new stack. openmm.app.Modeller cannot add missing HEAVY
+# atoms, which is why this is a separate tool and not a few lines. Nothing under src/smeltery imports it.
+pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
 
 [tool.uv.sources]
 # An exact commit, not a branch: the run record reports this SHA, read back

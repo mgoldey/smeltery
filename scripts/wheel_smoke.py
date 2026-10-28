@@ -35,6 +35,10 @@ EXTRA_CHECKS: dict[str, list[str]] = {
     "gemmi": ["import gemmi"],
     "rdkit": ["import rdkit"],
     "pocket-charges": ["import openmm"],
+    # pdbfixer repairs an unprepped crystal pocket (missing side-chain heavy atoms, a missing chain
+    # terminal, absent hydrogens) before the force field types it; openmm.app.Modeller cannot add
+    # missing HEAVY atoms, which is why the extra exists. Used by scripts/plb_pocket_charges.py --prep.
+    "pocket-prep": ["import openmm, pdbfixer"],
     "posebusters": ["import posebusters, rdkit", "from smeltery.gates import posebusters_check"],
     "docking": [
         "import vina, meeko, rdkit, scipy, gemmi",
