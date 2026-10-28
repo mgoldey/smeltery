@@ -2,8 +2,6 @@
 UNRANKED banner only for an unranked cut, no order inside a tie group, pinned CDN files, and no way for a record
 string to break out of the page; and it renders in a real browser with the CDN unreachable, saying the viewer could
 not load instead of leaving a blank box.
-
-Until `smeltery.gui.results` is merged, the data layer is the contract-shaped stand-in in tests/_report_shims.
 """
 
 import importlib
@@ -12,7 +10,6 @@ import json
 import re
 import shutil
 import subprocess
-import sys
 from html import escape
 from pathlib import Path
 
@@ -27,18 +24,8 @@ JSON_BLOCK = re.compile(r'<script type="application/json" id="([^"]+)">(.*?)</sc
 
 
 @pytest.fixture
-def results(monkeypatch):
-    try:
-        return importlib.import_module("smeltery.gui.results")
-    except ModuleNotFoundError as e:
-        if e.name != "smeltery.gui.results":
-            raise
-    shim = Path(__file__).parent / "_report_shims" / "results.py"
-    spec = importlib.util.spec_from_file_location("smeltery.gui.results", shim)
-    mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "smeltery.gui.results", mod)
-    spec.loader.exec_module(mod)
-    return mod
+def results():
+    return importlib.import_module("smeltery.gui.results")
 
 
 def _edit_record(out: Path, edit) -> None:

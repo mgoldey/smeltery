@@ -18,7 +18,8 @@ from pathlib import Path
 from smeltery.funnel import resolved
 from smeltery.model import Measurement
 
-#: `record.results` keys the viewers read. The first group is as old as the cut; the second came with pose output.
+#: `record.results` keys the viewers read. The first group is as old as the cut and `load_run` requires it; the second
+#: came with pose output, so a record that predates it still loads and only the views that need it refuse.
 _RESULT_KEYS = ("paired_ddE", "unpaired_sem", "cut", "funnel")
 _POSE_KEYS = ("per_pose", "units", "poses", "field", "receptor")
 
@@ -78,6 +79,22 @@ class Run:
     def unranked(self) -> bool:
         return bool(self.record["results"]["cut"]["unranked"])
 
+    @property
+    def has_pose_output(self) -> bool:
+        """False for a record that predates pose output: its ranking can be shown, its poses cannot."""
+        return all(k in self.record["results"] for k in _POSE_KEYS)
+
+
+def pose_output(run: Run, key: str):
+    """`record.results[key]` for a pose-output key, or a ValueError saying the record predates pose output."""
+    try:
+        return run.record["results"][key]
+    except KeyError:
+        raise ValueError(
+            f"{run.campaign}: the run record has no results.{key}; it predates pose output "
+            "(docs/gui-contract.md section 1) and must be re-run with this smeltery to show it"
+        ) from None
+
 
 def _check_record(record: dict, where: Path) -> None:
     for key in ("campaign", "inputs", "results"):
@@ -90,12 +107,6 @@ def _check_record(record: dict, where: Path) -> None:
     for key in _RESULT_KEYS:
         if key not in results:
             raise ValueError(f"{where}: run record has no results.{key}")
-    missing = [k for k in _POSE_KEYS if k not in results]
-    if missing:
-        raise ValueError(
-            f"{where}: run record has no results.{missing[0]} (missing: {missing}); it predates pose output "
-            "(docs/gui-contract.md section 1) and must be re-run with this smeltery to be viewed"
-        )
 
 
 def load_run(path: str | Path) -> Run:
@@ -168,7 +179,7 @@ def resolved_matrix(run: Run) -> tuple[list[str], list[list[bool]]]:
 def per_pose_table(run: Run, quantity: str = "dE_int") -> list[dict]:
     """One row per (analogue, pose) in cut order: candidate, pose, value, parent_value, paired (value -
     parent_value). Poses pair by index. KeyError naming the quantities present if `quantity` was not recorded."""
-    per_pose = run.record["results"]["per_pose"]
+    per_pose = pose_output(run, "per_pose")
     present = sorted({q for qs in per_pose.values() for q in qs})
     if quantity not in per_pose.get(run.parent, {}):
         raise KeyError(f"{quantity!r} was not recorded for the parent; per-pose quantities present: {present}")
@@ -210,7 +221,7 @@ def _verified_bytes(run: Run, entry: dict, what: str) -> bytes:
 def pose_sdf(run: Run, candidate: str) -> str:
     """The candidate's pose SDF text (record i is pose i), after checking its sha256 against the record.
     ValueError naming the file if it is missing or changed; KeyError for a candidate with no poses."""
-    poses = run.record["results"]["poses"]
+    poses = pose_output(run, "poses")
     if candidate not in poses:
         raise KeyError(f"no poses recorded for {candidate!r}; candidates with poses: {sorted(poses)}")
     return _verified_bytes(run, poses[candidate], f"poses of {candidate!r}").decode()
@@ -218,7 +229,7 @@ def pose_sdf(run: Run, candidate: str) -> str:
 
 def receptor_pdb(run: Run) -> str | None:
     """The receptor PDB text, sha256-checked like `pose_sdf`, or None when the run has no receptor."""
-    entry = run.record["results"]["receptor"]
+    entry = pose_output(run, "receptor")
     if entry is None:
         return None
     return _verified_bytes(run, entry, "receptor").decode()

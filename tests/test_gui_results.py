@@ -74,15 +74,19 @@ def test_load_run_needs_exactly_one_record(tmp_path):
         load_run(empty)
 
 
-def test_load_run_names_a_missing_pose_key(tmp_path):
+def test_a_record_before_pose_output_loads_and_only_pose_views_refuse(tmp_path):
     out = make_run_dir(tmp_path)
     (path,) = out.glob("run-*.json")
     rec = json.loads(path.read_text())
     for k in ("per_pose", "units", "poses", "field", "receptor"):
         del rec["results"][k]
     path.write_text(json.dumps(rec))
-    with pytest.raises(ValueError, match=r"results\.per_pose.*predates pose output.*re-run"):
-        load_run(out)
+    run = load_run(out)
+    assert not run.has_pose_output
+    assert [r["candidate"] for r in ddE_table(run)] == ["4-F", "4-Cl", "4-Br"]
+    for view in (lambda: per_pose_table(run), lambda: pose_sdf(run, "4-F")):
+        with pytest.raises(ValueError, match=r"results\.\w+; it predates pose output.*re-run"):
+            view()
 
 
 def test_ddE_table_ranked(ranked):

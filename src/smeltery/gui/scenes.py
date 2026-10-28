@@ -22,7 +22,7 @@ from collections.abc import Callable
 import numpy as np
 from rdkit import Chem
 
-from .results import Run, _verified_bytes
+from .results import Run, _verified_bytes, pose_output
 
 #: Receptor residues with any atom this close (Angstrom) to the candidate's pose are drawn as ball-and-stick.
 NEAR_ANGSTROM = 5.0
@@ -102,7 +102,7 @@ def pose_scene(
 
     from molviewspec import ComponentExpression, create_builder
 
-    poses = run.record["results"]["poses"]
+    poses = pose_output(run, "poses")
     if candidate not in poses:
         raise KeyError(f"no poses recorded for {candidate!r}; candidates with poses: {sorted(poses)}")
 
@@ -114,7 +114,7 @@ def pose_scene(
     sdf, sdf_url = url(poses[candidate], f"poses of {candidate!r}")
     ligand_xyz = _pose_coords(sdf.decode(), pose, f"poses of {candidate!r}")
 
-    receptor = run.record["results"]["receptor"]
+    receptor = pose_output(run, "receptor")
     if receptor is not None:
         pdb, pdb_url = url(receptor, "receptor")
         rec = builder.download(url=pdb_url).parse(format="pdb").model_structure(ref="receptor")
@@ -141,7 +141,7 @@ def pose_scene(
     _color_by_element(comp.representation(type="ball_and_stick"), CANDIDATE_CARBON)
     comp.focus()
 
-    field = run.record["results"]["field"]
+    field = pose_output(run, "field")
     if field:
         prims = builder.primitives(opacity=0.7, ref="field")
         for q, x, y, z in field:
