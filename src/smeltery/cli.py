@@ -75,6 +75,23 @@ The structure stage writes `receptor.pdb` (first model, altloc blank/A, every HE
 (centre near the receptor; field covers the box faces; PDBQT atoms coincide with the PDB; no receptor atoms lost to
 Meeko inside the box; docked parent inside the box). A failed check is a stage error.
 
+Carrying earlier decisions into this run (`smeltery.decisions`; docs/gui-contract.md section 3):
+
+    [decisions]
+    file = "decisions.json"     # relative to the config's directory; read and validated before anything is posed
+
+Candidates with status `reject` are dropped before posing and listed in `results.decisions_in.excluded`; `keep` and
+`hold` run as usual. Each of these is a config error (exit 2): an invalid file, a decision naming a candidate the
+config does not list, a decision whose SMILES is not the config's molecule (compared canonically), rejecting the
+parent, and `[cut] keep` larger than the analogues left. The file's sha256 is an input (it changes the digest);
+configs without the section keep their digests.
+
+Outputs under `--out` (docs/gui-contract.md section 1): the run record `run-<digest12>.json`, whose `results` also
+carry `per_pose` (every per-pose quantity of every candidate, parent included) with `units`, `poses` (one SDF per
+candidate under `poses/`, with sha256), `field` ([q, x, y, z], Angstrom) and `receptor` (a .pdb in the poses'
+frame, or null). SDF atoms are the candidate's SMILES with explicit H, in that order; a pose whose elements differ
+from it, or two candidates whose sanitised file names collide, is a stage error.
+
 Funnel semantics (smallest sound form): every stage reports candidates in and out (`results.funnel`, and the table).
 Gate stages can only REJECT, loudly: parity, PoseBusters and MMFF strain when `[gates] max_strain_kcal` is set (an
 explicit kcal/mol threshold; absent = strain is recorded, nothing is rejected, and the stage says so) -- so a gate's
@@ -91,6 +108,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import re
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -99,6 +117,7 @@ from pathlib import Path
 import numpy as np
 from rdkit import Chem
 
+from .decisions import DecisionSet
 from .funnel import cut, paired_delta, tier_floor, unpaired_delta
 from .gates import PoseGateError, check_candidate_poses, require_passing_poses
 from .model import Candidate, PointCharge
@@ -118,7 +137,9 @@ TOP_KEYS = {
     "docking",
     "gates",
     "structure",
+    "decisions",
 }
+DECISIONS_KEYS = {"file"}
 STRUCTURE_KEYS = {"spec", "provider", "allow_network", "center", "reference_ligand", "pocket_cutoff", "chains"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
 POCKET_KEYS = {"site", "file"}
@@ -127,6 +148,7 @@ GATE_KEYS = {"posebusters", "forcefield", "xtb"}
 GATE_OPTION_KEYS = {"max_strain_kcal"}  # explicit rejection thresholds; absent = recorded only
 CUT_KEYS = {"keep", "z", "floor"}
 QUANTITY = "dE_int"
+POSES_DIR = "poses"
 
 
 class ConfigError(ValueError):
@@ -153,6 +175,8 @@ class Plan:
     after_poses: list = dataclasses.field(default_factory=list)  # recorded tiers between pairing and the SCFs
     extra_inputs: dict = dataclasses.field(default_factory=dict)  # file digests, box: what the stages read
     stage_log: list = dataclasses.field(default_factory=list)  # one dict per stage: its name and a summary line
+    receptor_pdb: Path | None = None  # a receptor .pdb in the poses' frame, when one exists
+    decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
 
     @property
     def inputs(self) -> dict:
@@ -169,6 +193,8 @@ class Plan:
             inputs["gates"]["max_strain_kcal"] = float(gates["max_strain_kcal"])
         if "pocket" not in self.extra_inputs:  # sites: the charges ARE the input; a file: its digest is
             inputs["field"] = [(c.q, c.xyz_ang) for c in self.field]
+        if self.decisions_in is not None:  # only when given, so configs without [decisions] keep their digests
+            inputs["decisions"] = {"sha256": self.decisions_in["sha256"]}
         return inputs
 
     @property
@@ -221,6 +247,7 @@ def validate_config(cfg: dict) -> dict:
     _validate_structure(cfg)
     _validate_docking(cfg, poses_cfg)
     _validate_gates(cfg)
+    _validate_decisions(cfg)
     cut_cfg = cfg["cut"]
     _check_keys("[cut]", cut_cfg, CUT_KEYS)
     n_analogues = len(cands) - 1
@@ -320,6 +347,61 @@ def _validate_docking(cfg: dict, poses_cfg: dict) -> None:
             f"[poses] {dead} have no effect when the parent is docked (the parent's poses are used as docked); "
             "set the pose count with [docking] n_poses"
         )
+
+
+def _validate_decisions(cfg: dict) -> None:
+    if "decisions" not in cfg:
+        return
+    d = cfg["decisions"]
+    if not isinstance(d, dict):
+        raise ConfigError("[decisions] must be a table")
+    _check_keys("[decisions]", d, DECISIONS_KEYS)
+    if not isinstance(d.get("file"), str) or not d["file"]:
+        raise ConfigError("[decisions] file is required: the path of a decisions JSON (smeltery.decisions)")
+
+
+def _canonical(smiles: str) -> str:
+    return Chem.MolToSmiles(Chem.MolFromSmiles(smiles))
+
+
+def _apply_decisions(cfg: dict) -> tuple[dict, dict | None]:
+    """Read `[decisions] file` and drop the rejected candidates. Returns the config to plan from (a copy whose
+    [candidates] omit them; the input is not modified) and `decisions_in` for the record, or (cfg, None) without
+    the section. Every refusal is a ConfigError (module docstring)."""
+    if "decisions" not in cfg:
+        return cfg, None
+    path = _resolve(cfg, cfg["decisions"]["file"])
+    if not path.is_file():
+        raise ConfigError(f"[decisions] file {str(path)!r} does not exist")
+    try:
+        ds = DecisionSet.load(path)
+    except ValueError as e:
+        raise ConfigError(f"[decisions] {e}") from e
+    cands = cfg["candidates"]
+    unknown = [d.candidate for d in ds.decisions if d.candidate not in cands]
+    if unknown:
+        raise ConfigError(f"[decisions] {path.name} decides on {unknown}, which [candidates] does not list")
+    for d in ds.decisions:
+        if _canonical(d.smiles) != _canonical(cands[d.candidate]):
+            raise ConfigError(
+                f"[decisions] {d.candidate!r} was decided on as {d.smiles!r}, but [candidates] has "
+                f"{cands[d.candidate]!r}: a different molecule under the same name"
+            )
+    excluded = ds.by_status("reject")
+    if cfg["parent"] in excluded:
+        raise ConfigError(
+            f"[decisions] rejects the parent {cfg['parent']!r}: every analogue is measured against it; "
+            "choose another parent or drop the reject"
+        )
+    kept = {n: s for n, s in cands.items() if n not in excluded}
+    n_left = len(kept) - 1
+    if n_left < 1 or cfg["cut"]["keep"] > n_left:
+        raise ConfigError(
+            f"[decisions] rejects {excluded}, leaving {n_left} analogue(s); [cut] keep = {cfg['cut']['keep']} "
+            "needs at least that many"
+        )
+    info = {"file": str(path.resolve()), "sha256": file_digest(path), "excluded": excluded}
+    return {**cfg, "candidates": kept}, info
 
 
 def _validate_gates(cfg: dict) -> None:
@@ -578,6 +660,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     `out_dir` is where `[structure]` writes its prepared receptor (required then). `fetch` replaces the
     network fetch of the structure providers (tests inject committed fixtures).
     """
+    cfg, decisions_in = _apply_decisions(cfg)
     cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
@@ -608,7 +691,10 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
         if "floor" not in cfg["cut"]:
             raise ConfigError(f"{e} Set [cut] floor explicitly to proceed, knowing it is not a measured floor.") from e
         floor, source = float(cfg["cut"]["floor"]), "config [cut] floor (explicit; the tier's own is unmeasured)"
-    return Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
+    receptor = pocket_path if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
+    plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
+    plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
+    return plan
 
 
 def funnel_counts(plan: Plan, res=None) -> list[dict]:
@@ -639,8 +725,39 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
     return rows
 
 
-def run_plan(plan: Plan) -> tuple[RunRecord, dict]:
-    _stage("field_interaction", lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
+def per_pose_results(plan: Plan) -> tuple[dict, dict]:
+    """`results.per_pose` and `results.units`: every per-pose quantity each candidate carries, parent included,
+    and its unit from the tiers that ran (`produces()`). A quantity no tier declares, or a list not aligned with
+    the candidate's poses, is a StageError: an unlabelled number is not recorded."""
+    declared: dict[str, str] = {}
+    for t in [*plan.before_poses, plan.poses, *plan.after_poses, plan.tier]:
+        declared.update(t.produces())
+    per_pose, units = {}, {}
+    for c in plan.candidates:
+        per_pose[c.name] = {}
+        for q, values in c.per_pose.items():
+            if q not in declared:
+                raise StageError(f"stage 'outputs' failed: {c.name} carries {q!r}, which no tier that ran declares")
+            if len(values) != len(c.poses):
+                raise StageError(
+                    f"stage 'outputs' failed: {c.name} has {len(values)} {q!r} value(s) for {len(c.poses)} pose(s)"
+                )
+            per_pose[c.name][q] = [float(x) for x in values]
+            units[q] = declared[q]
+    return per_pose, units
+
+
+def run_plan(plan: Plan, measure=None) -> tuple[RunRecord, dict]:
+    """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
+
+    `measure(plan)`, when given, fills `per_pose[QUANTITY]` on every candidate in place of running
+    `plan.tier` (the field-interaction SCFs); tests inject fixed numbers, so everything after the SCFs is checked
+    without ferric.
+    """
+    if measure is None:
+        _stage("field_interaction", lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
+    else:
+        _stage("field_interaction", lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
     paired = {c.name: paired_delta(plan.parent, c, QUANTITY) for c in analogues}
     unpaired = {c.name: unpaired_delta(plan.parent, c, QUANTITY) for c in analogues}
@@ -652,8 +769,111 @@ def run_plan(plan: Plan) -> tuple[RunRecord, dict]:
         "stages": plan.stage_log,
         "funnel": funnel_counts(plan, res),
     }
+    results["candidate_order"] = [c.name for c in plan.candidates]
+    results["per_pose"], results["units"] = per_pose_results(plan)
+    results["field"] = [[float(c.q), *(float(v) for v in c.xyz_ang)] for c in plan.field]
+    results["receptor"] = (
+        None
+        if plan.receptor_pdb is None
+        else {"file": str(Path(plan.receptor_pdb).resolve()), "sha256": file_digest(plan.receptor_pdb)}
+    )
+    if plan.decisions_in is not None:
+        results["decisions_in"] = dict(plan.decisions_in)
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
+
+
+def pose_file_name(candidate: str) -> str:
+    """The SDF file name for a candidate: every character outside [A-Za-z0-9._-] becomes '_'."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", candidate) + ".sdf"
+
+
+def _out_path(path: str | Path, out_dir: Path) -> str:
+    """A path as the record stores it: relative to OUT when inside it, else absolute."""
+    p = Path(path).resolve()
+    try:
+        return p.relative_to(out_dir.resolve()).as_posix()
+    except ValueError:
+        return str(p)
+
+
+def pose_mol(c: Candidate) -> Chem.Mol:
+    """The candidate as an RDKit mol with one conformer per pose: atoms and bonds from its SMILES with explicit
+    H (`Chem.AddHs(Chem.MolFromSmiles(smiles))`), coordinates from `Pose.coords_ang`. A pose whose elements are
+    not that atom order is a StageError: writing coordinates onto the wrong atoms would be silently wrong."""
+    mol = Chem.AddHs(Chem.MolFromSmiles(c.smiles))
+    symbols = tuple(a.GetSymbol() for a in mol.GetAtoms())
+    for i, pose in enumerate(c.poses):
+        if tuple(pose.symbols) != symbols:
+            raise StageError(
+                f"stage 'outputs' failed: {c.name} pose {i} atoms {''.join(pose.symbols)} are not its SMILES-with-H "
+                f"order {''.join(symbols)}; refusing to write coordinates onto the wrong atoms"
+            )
+        conf = Chem.Conformer(len(symbols))
+        for k, xyz in enumerate(np.asarray(pose.coords_ang, dtype=float)):
+            conf.SetAtomPosition(k, tuple(float(v) for v in xyz))
+        conf.Set3D(True)
+        mol.AddConformer(conf, assignId=True)
+    return mol
+
+
+def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
+    """One SDF per candidate under OUT/poses/ (docs/gui-contract.md section 1); returns `results.poses`.
+
+    Record i is pose i. Properties: smeltery_candidate, smeltery_pose_index, smeltery_parent ("1"/"0"), every
+    `results.per_pose` quantity of the candidate and, on analogues, paired_ddE, all numbers as %.10g. A file-name
+    collision after sanitising is a StageError, raised before anything is written.
+    """
+    names = {}
+    for c in plan.candidates:
+        f = pose_file_name(c.name)
+        if f in names:
+            raise StageError(
+                f"stage 'outputs' failed: candidates {names[f]!r} and {c.name!r} both sanitise to pose file {f!r}; "
+                "rename one"
+            )
+        names[f] = c.name
+    mols = {c.name: pose_mol(c) for c in plan.candidates}  # all checked before the first write
+    pose_dir = out_dir / POSES_DIR
+    pose_dir.mkdir(parents=True, exist_ok=True)
+    poses = {}
+    for c in plan.candidates:
+        path = pose_dir / pose_file_name(c.name)
+        values = results["per_pose"][c.name]
+        paired = None if c is plan.parent else results["paired_ddE"][c.name]["per_pose"]
+        mol = mols[c.name]
+        with Chem.SDWriter(str(path)) as w:
+            for i, conf in enumerate(mol.GetConformers()):
+                m = Chem.Mol(mol)
+                m.RemoveAllConformers()
+                m.AddConformer(Chem.Conformer(conf), assignId=True)
+                m.SetProp("_Name", f"{c.name} pose {i}")
+                m.SetProp("smeltery_candidate", c.name)
+                m.SetProp("smeltery_pose_index", str(i))
+                m.SetProp("smeltery_parent", "1" if c is plan.parent else "0")
+                for q, v in values.items():
+                    m.SetProp(q, f"{v[i]:.10g}")
+                if paired is not None:
+                    m.SetProp("paired_ddE", f"{paired[i]:.10g}")
+                w.write(m)
+        poses[c.name] = {"file": f"{POSES_DIR}/{path.name}", "sha256": file_digest(path), "n_poses": len(c.poses)}
+    return poses
+
+
+def write_outputs(plan: Plan, rec: RunRecord, out_dir: Path) -> Path:
+    """Write everything a run leaves under OUT and return the record's path: the pose SDFs (`results.poses`), the
+    receptor and decisions paths made relative to OUT when inside it, then OUT/run-<digest12>.json."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = rec.results
+    results["poses"] = write_pose_sdfs(plan, results, out_dir)
+    if results.get("receptor") is not None:
+        results["receptor"]["file"] = _out_path(results["receptor"]["file"], out_dir)
+    if "decisions_in" in results:
+        results["decisions_in"]["file"] = _out_path(results["decisions_in"]["file"], out_dir)
+    path = out_dir / f"run-{rec.input_digest[:12]}.json"
+    path.write_text(rec.to_json())
+    return path
 
 
 def format_table(plan: Plan, out: dict) -> str:
@@ -675,6 +895,9 @@ def format_table(plan: Plan, out: dict) -> str:
         lines.append(f"structure: {st['kind']}, {st['structure']['source']}")
         if st["kind"] == "PREDICTED":
             lines.append(f"  licence {st['structure']['license_id']}; {st['structure']['attribution']}")
+    if plan.decisions_in is not None:
+        excl = ", ".join(plan.decisions_in["excluded"]) or "none"
+        lines.append(f"decisions {Path(plan.decisions_in['file']).name}: rejected before the run: {excl}")
     lines.append(f"floor {plan.floor:g} kcal/mol, from {plan.floor_source}; z={res.z:g}")
     lines.append("tie groups (no order within a group): " + " | ".join(", ".join(g) for g in res.groups))
     if res.unranked_at_boundary:
@@ -695,9 +918,20 @@ def _describe_plan(plan: Plan, digest: str) -> str:
     )
 
 
+#: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.
+VIEWERS = {"gui": "smeltery.gui.app", "report": "smeltery.gui.report"}
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in VIEWERS:  # imported only when asked for: they need no tier, and gui needs the gui extra
+        import importlib
+
+        return importlib.import_module(VIEWERS[argv[0]]).main(argv[1:])
     ap = argparse.ArgumentParser(prog="smeltery", description="Tiered, measurement-disciplined funnel.")
     sub = ap.add_subparsers(dest="command", required=True)
+    sub.add_parser("gui", help="browse a finished run, record decisions (smeltery gui OUT --help)")
+    sub.add_parser("report", help="write a self-contained HTML report of a run (smeltery report OUT --help)")
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
     run.add_argument("--out", type=Path, default=Path("out"), help="directory for the run record")
@@ -709,6 +943,7 @@ def main(argv: list[str] | None = None) -> int:
             print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
             return 0
         rec, out = run_plan(plan)
+        path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 2
@@ -716,9 +951,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 3
     print(format_table(plan, out))
-    args.out.mkdir(parents=True, exist_ok=True)
-    path = args.out / f"run-{rec.input_digest[:12]}.json"
-    path.write_text(rec.to_json())
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
     return 0
 

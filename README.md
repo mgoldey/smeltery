@@ -51,6 +51,10 @@ are excluded: [docs/licensing.md](docs/licensing.md).
 Each tier has a page stating what it computes, its settings, its measured cost, its gates, its
 systematic floor and what it is not licensed to claim: [docs/tiers/index.md](docs/tiers/index.md).
 
+For a GUI, `smeltery.gui` presents the tiers as a hierarchy of methods and lets you assemble them into a pipeline that
+compiles to a `smeltery run` config: [docs/gui.md](docs/gui.md). A review of the tools for viewing results and choosing
+candidates, with a plan: [docs/gui-review.md](docs/gui-review.md).
+
 ## Example
 
 `examples/mwe_benzoic.py` places benzoic acid and two para-substituted
