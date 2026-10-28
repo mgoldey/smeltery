@@ -188,3 +188,22 @@ def test_sibling_runs_of_a_lone_directory_is_empty_not_an_error(tmp_path):
     from smeltery.gui.app import sibling_runs
 
     assert sibling_runs(make_run_dir(tmp_path / "only")) == []
+
+
+def test_the_floor_band_is_never_clipped_by_the_axis():
+    """Autoscaling to the markers hides the band exactly when every difference is inside it -- the
+    case the band exists to show. The axis must cover the whole floor, not just the data."""
+    pytest.importorskip("plotly")
+    from smeltery.gui.views.compare import compare_figure
+
+    # Every difference is tiny; the floor is wide.
+    tight = Comparison.from_values(
+        {"k1": [-10.05], "k2": [-10.1]},
+        {"k1": [-10.0], "k2": [-10.0]},
+        label_a="A",
+        label_b="B",
+        floor=4.7,
+    )
+    fig = compare_figure(tight)
+    lo, hi = fig.layout.xaxis.range
+    assert lo <= -4.7 and hi >= 4.7, f"axis {lo}..{hi} clips the ±4.7 floor band"

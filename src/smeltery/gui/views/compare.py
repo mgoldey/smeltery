@@ -52,9 +52,13 @@ def compare_figure(comparison, height: int = 420):
             line={"width": 0},
             layer="below",
         )
+        # Above the plot area, not inside it: in the plot it collides with the median line, which is
+        # drawn near zero whenever the difference is small -- again, the case that matters most.
         fig.add_annotation(
             x=0,
-            y=len(paired) - 0.5,
+            y=1.0,
+            xref="x",
+            yref="paper",
             text=f"± {comparison.floor:.2f} {unit} systematic floor: inside is NOT resolved",
             showarrow=False,
             font={"size": 11, "color": INK_MUTED},
@@ -132,6 +136,14 @@ def compare_figure(comparison, height: int = 420):
     fig.update_xaxes(
         title=f"difference in median {comparison.quantity} ({unit}) — negative favours {comparison.label_a}"
     )
+    # The floor band must be shown WHOLE. Left to autoscale, the axis fits the markers and clips the
+    # band wherever every difference is smaller than the floor -- which is exactly the case the band
+    # exists to make visible, so the reader would lose it precisely when it matters most.
+    span = [r.diff for r in paired]
+    if comparison.floor is not None and comparison.floor > 0:
+        span += [-comparison.floor, comparison.floor]
+    pad = 0.08 * (max(span) - min(span) or 1.0)
+    fig.update_xaxes(range=[min(span) - pad, max(span) + pad])
     return fig
 
 

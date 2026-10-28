@@ -10,3 +10,6 @@ out/
 
 # marimo writes session caches next to a notebook it runs (src/smeltery/gui/views/notebook.py)
 __marimo__/
+
+# Scratch output from the Playwright MCP browser tools (screenshots, page snapshots).
+.playwright-mcp/
