@@ -1105,6 +1105,160 @@ class Gfn2:
             ]
 
 
+# ---------------------------------------------------------------- designability
+
+
+class SaScoreUnavailableError(ImportError):
+    """RDKit's contrib `sascorer` is not importable."""
+
+
+def _sascorer():
+    """RDKit's bundled SA_Score contrib module, which is not on the import path by default."""
+    import os
+    import sys
+
+    from rdkit.Chem import RDConfig
+
+    path = os.path.join(RDConfig.RDContribDir, "SA_Score")
+    if path not in sys.path:
+        sys.path.append(path)
+    try:
+        import sascorer
+    except ImportError as e:  # pragma: no cover - a stripped RDKit install
+        raise SaScoreUnavailableError(
+            "RDKit's contrib SA_Score is not importable; it ships with the rdkit wheel under "
+            f"{path}. Install the full rdkit (extra 'rdkit') rather than rdkit-stubs."
+        ) from e
+    return sascorer
+
+
+@dataclass
+class Designability:
+    """Would a chemist make this? Properties, drift from the parent, and synthetic accessibility.
+
+    **Why this tier exists.** Every other tier here measures validity (does it parse, are the bonds
+    sane, does the scaffold hold) or energy. None asks whether the molecule is worth making, and that
+    gap biases the funnel in a specific direction: a fixed-geometry interaction energy gets more
+    negative as atoms are added, so a generator that invents large, greasy, hard-to-make substituents
+    scores BETTER on `dE_int` than a conservative one. Measured on the gen-compare set, the two
+    generators' grown mass differs by a median 7 vs 2 heavy atoms, so that bias is live, not
+    hypothetical.
+
+    **The parent is the reference, not a Lipinski box.** `ctx["parent"]` is a real drug-like molecule,
+    so what matters is the DRIFT a substituent causes: `d_mw`, `d_logp`, `d_sa`, `d_qed`. Absolute
+    values are dominated by the shared scaffold and say little about the generator. The parent's own
+    absolute values are recorded in `settings()` so a reader can reconstruct them.
+
+    **What each number is, and is not:**
+
+    * `sa_score` -- Ertl & Schuffenhauer synthetic accessibility, 1 (easy) to 10 (hard), from RDKit's
+      contrib `sascorer`. A fragment-contribution heuristic, NOT a retrosynthesis: it is a screen for
+      a tail of implausible chemistry, and a single value carries no verdict.
+    * `qed` -- a drug-likeness composite fitted to ORAL DRUGS. A scaffold-grown analogue of one
+      specific parent is not what it was fitted to, so `d_qed` is reported but should not be ranked on.
+    * `mw`, `logp`, `tpsa` -- RDKit descriptors (`MolWt`, `Crippen.MolLogP`, `TPSA`). `logp` is a
+      calculated estimate, not a measurement.
+
+    Structural alerts are deliberately NOT computed here: `smeltery.properties.RdkitAlertProvider`
+    already covers PAINS/Brenk/NIH with its own licence provenance, and duplicating it would give two
+    numbers that could disagree.
+
+    A descriptor tier, not a gate and not a ranker: no threshold is applied and no systematic floor
+    has been measured, so `systematic_floor` returns None for every quantity.
+    """
+
+    name: str = "designability"
+    #: Reported alongside each drift so a reader sees what regime the parent itself sits in.
+    parent_properties: dict | None = None
+
+    _KEYS = ("mw", "logp", "tpsa", "qed", "sa_score", "heavy_atoms")
+    _DRIFT = ("d_mw", "d_logp", "d_tpsa", "d_qed", "d_sa", "d_heavy")
+
+    def settings(self) -> dict:
+        import rdkit
+
+        return {
+            "properties": "RDKit MolWt, Crippen.MolLogP, TPSA, QED",
+            "sa_score": "Ertl & Schuffenhauer, RDKit contrib sascorer, 1 (easy) to 10 (hard)",
+            "reference": "ctx['parent']; drift is analogue minus parent",
+            "alerts": "not computed here; see smeltery.properties.RdkitAlertProvider (PAINS/Brenk/NIH)",
+            "rdkit": rdkit.__version__,
+            "parent_properties": self.parent_properties,
+        }
+
+    def produces(self) -> dict[str, str]:
+        units = {
+            "mw": "g/mol",
+            "logp": "log units (calculated)",
+            "tpsa": "A^2",
+            "qed": "0-1 (unitless)",
+            "sa_score": "1-10 (unitless)",
+            "heavy_atoms": "count",
+            "d_mw": "g/mol",
+            "d_logp": "log units (calculated)",
+            "d_tpsa": "A^2",
+            "d_qed": "0-1 (unitless)",
+            "d_sa": "1-10 (unitless)",
+            "d_heavy": "count",
+        }
+        return units
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity not in self.produces():
+            raise _unknown_quantity(self, quantity)
+        return None  # not measured; these are descriptors, not calibrated predictions
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": "unmeasured; RDKit descriptors on a SMILES are sub-millisecond and pose-independent",
+        }
+
+    @staticmethod
+    def _properties(smiles: str) -> dict:
+        from rdkit.Chem import QED, Crippen, Descriptors
+
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"unparseable SMILES: {smiles!r}")
+        return {
+            "mw": float(Descriptors.MolWt(mol)),
+            "logp": float(Crippen.MolLogP(mol)),
+            "tpsa": float(Descriptors.TPSA(mol)),
+            "qed": float(QED.qed(mol)),
+            "sa_score": float(_sascorer().calculateScore(mol)),
+            "heavy_atoms": int(mol.GetNumHeavyAtoms()),
+        }
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        parent: Candidate = ctx["parent"]
+        ref = self._properties(parent.smiles)
+        self.parent_properties = {k: round(v, 3) for k, v in ref.items()}
+        for cand in candidates:
+            p = self._properties(cand.smiles)
+            values = dict(p)
+            values.update(
+                {
+                    "d_mw": p["mw"] - ref["mw"],
+                    "d_logp": p["logp"] - ref["logp"],
+                    "d_tpsa": p["tpsa"] - ref["tpsa"],
+                    "d_qed": p["qed"] - ref["qed"],
+                    "d_sa": p["sa_score"] - ref["sa_score"],
+                    "d_heavy": p["heavy_atoms"] - ref["heavy_atoms"],
+                }
+            )
+            # Every quantity here is a function of the SMILES alone, so the value is CONSTANT across a
+            # candidate's poses. It is still written pose-major, once per pose, because `per_pose` is
+            # the only channel the Tier protocol and the run record have: a second channel would mean
+            # two places to look for a result. The repetition is therefore intentional and not a
+            # per-pose dependence -- averaging these across poses is a no-op, and their SEM is zero.
+            n = max(len(cand.poses), 1)
+            for key, value in values.items():
+                cand.per_pose[key] = [value] * n
+
+
 # ---------------------------------------------------------------- force field
 
 

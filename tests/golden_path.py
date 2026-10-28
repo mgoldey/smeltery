@@ -671,6 +671,9 @@ TIER_PLAN: dict[str, Reach] = {
     # The DFT counterpart of field_interaction. The CLI has no [dft] section to select a functional,
     # so it is reached from the library scenario on water rather than by the CLI trace.
     "field_dft_interaction": Reach("library", note="water in a two-charge field; PBE/STO-3G"),
+    # SMILES-only descriptors, so there is nothing to dock or embed: the library scenario pairs a
+    # molecule with itself and asserts the drift is exactly zero.
+    "designability": Reach("library", note="self-pair anchor: every drift is 0.0"),
     "forcefield": Reach("cli", note="the MMFF path; the openmm path is declared in OPENMM_REASON below"),
     "gfn2": Reach(
         "cli",
@@ -728,7 +731,7 @@ def run_library_tiers() -> None:
     import numpy as np
 
     from smeltery import Candidate, PointCharge, Pose, Rescoring, VinaScoreProvider
-    from smeltery.tiers import FieldDftInteraction, MmParameters, Qmmm, SurfaceEsp, run_checked
+    from smeltery.tiers import Designability, FieldDftInteraction, MmParameters, Qmmm, SurfaceEsp, run_checked
 
     cands = [Candidate("parent", "C", _poses()), Candidate("a", "C", _poses())]
     tier = Rescoring(VinaScoreProvider([-5.0, -6.0]))
@@ -746,6 +749,26 @@ def run_library_tiers() -> None:
         # E_d3 is geometry-only and must stay OUT of dE_int, so the two cannot be the same number.
         assert np.isfinite([c.per_pose["dE_int"], c.per_pose["E_d3"]]).all()
         assert c.per_pose["dE_int"][0] != c.per_pose["E_d3"][0]
+
+    if TIER_PLAN["designability"].needs() is None:
+        # Descriptors from the SMILES alone, so no pose tier is needed. Pairing a molecule with ITSELF
+        # is the anchor: every drift must be exactly 0.0, which catches a reference mixed up with a
+        # candidate -- the one way these numbers could be silently wrong.
+        ibuprofen = "CC(C)Cc1ccc(cc1)C(C)C(=O)O"
+        parent = Candidate("parent", ibuprofen, _poses())
+        same = Candidate("same", ibuprofen, _poses())
+        bigger = Candidate("bigger", "CC(C)Cc1ccc(cc1)C(C)C(=O)OCCCCCCCC", _poses())
+        tier = Designability()
+        run_checked(tier, [same, bigger], {"parent": parent})
+        assert set(same.per_pose) == set(tier.produces())
+        for q in ("d_mw", "d_logp", "d_tpsa", "d_qed", "d_sa", "d_heavy"):
+            assert same.per_pose[q] == [0.0] * len(same.poses), f"self-pair {q} must be exactly 0.0"
+        # A long greasy ester must read as heavier, greasier and no easier to make: the bias this tier
+        # exists to expose, since dE_int would reward exactly this molecule for its extra atoms.
+        assert bigger.per_pose["d_mw"][0] > 90.0
+        assert bigger.per_pose["d_logp"][0] > 2.0
+        assert bigger.per_pose["d_heavy"][0] == 8
+        assert abs(tier.settings()["parent_properties"]["mw"] - 206.28) < 0.1
 
     if TIER_PLAN["surface_esp"].needs() is None:
         water = Pose(("O", "H", "H"), np.array([[0.0, 0.0, 0.117], [0.0, 0.757, -0.469], [0.0, -0.757, -0.469]]))
