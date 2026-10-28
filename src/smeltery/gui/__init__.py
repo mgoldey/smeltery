@@ -7,9 +7,12 @@
 * `results`: a finished run read back (`load_run` -> `Run`) as tables: `ddE_table`, `resolved_matrix`,
   `per_pose_table`, `funnel_rows`, and the sha256-checked `pose_sdf` / `receptor_pdb`.
 * `scenes`: `pose_scene`, a pose with its parent, receptor and field charges as a MolViewSpec state.
+* `compare`: `Comparison`, several runs grouped by a shared key (cell, target, setting) and differenced per key
+  rather than pooled, with the systematic floor deciding what counts as resolved.
 """
 
 from .catalog import RUNGS, Method, Param, catalog, catalog_json, floor_status, hierarchy, method
+from .compare import Comparison, KeyRow
 from .pipeline import EXECUTION_ORDER, Issue, Pipeline, PipelineError, Stage
 from .results import (
     Run,
@@ -27,7 +30,9 @@ from .scenes import pose_scene
 __all__ = [
     "EXECUTION_ORDER",
     "RUNGS",
+    "Comparison",
     "Issue",
+    "KeyRow",
     "Method",
     "Param",
     "Pipeline",

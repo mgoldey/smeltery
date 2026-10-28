@@ -401,8 +401,14 @@ def _build() -> dict[str, Method]:
             provides=("dE_int",),
             tier="field_dft_interaction",
             wired=False,
-            why_unwired="a library tier; smeltery run's [field_interaction] section selects RHF, with no key for a functional",
-            summary="The same dE_int as field_interaction, from KS-DFT instead of RHF. D3(BJ) is reported separately and cancels in dE_int at fixed geometry.",
+            why_unwired=(
+                "a library tier; smeltery run's [field_interaction] section selects RHF, "
+                "with no key for a functional"
+            ),
+            summary=(
+                "The same dE_int as field_interaction, from KS-DFT instead of RHF. D3(BJ) is "
+                "reported separately and cancels in dE_int at fixed geometry."
+            ),
             exclusive=("field_interaction",),
         ),
         Method(
@@ -434,7 +440,10 @@ def _build() -> dict[str, Method]:
             tier="designability",
             wired=False,
             why_unwired="a library tier; smeltery run has no stage for it",
-            summary="Drift from the parent in MW, logP, TPSA, QED and synthetic accessibility. A counterweight to dE_int, which rewards added atoms; it gates nothing.",
+            summary=(
+                "Drift from the parent in MW, logP, TPSA, QED and synthetic accessibility. "
+                "A counterweight to dE_int, which rewards added atoms; it gates nothing."
+            ),
         ),
         Method(
             "cut",
