@@ -70,6 +70,8 @@ class Pipeline:
     parent: str
     candidates: dict[str, str]
     stages: list[Stage] = field(default_factory=list)
+    #: The config's `[decisions]` table, carried through unchanged (an input file, not a stage), or None.
+    decisions: dict | None = None
 
     # ------------------------------------------------------------------ building
 
@@ -269,6 +271,8 @@ class Pipeline:
                 cfg[m.section] = params
         if gates:
             cfg["gates"] = gates
+        if self.decisions is not None:
+            cfg["decisions"] = dict(self.decisions)
         return cfg
 
     def compile(self) -> dict:
@@ -291,6 +295,8 @@ class Pipeline:
         by_section = {m.section: m.key for m in catalog().values() if m.section}
         by_gate = {m.gate_key: m.key for m in catalog().values() if m.gate_key}
         p = cls(cfg.get("campaign", ""), cfg.get("parent", ""), dict(cfg.get("candidates", {})))
+        if "decisions" in cfg:
+            p.decisions = dict(cfg["decisions"])
         for section, key in by_section.items():
             if section in cfg or method(key).required or (key == "docking" and "structure" in cfg):
                 p.add(key, dict(cfg.get(section, {})))

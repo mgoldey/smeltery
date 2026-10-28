@@ -134,6 +134,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
                 },
             ],
             "per_pose": per_pose,
+            "candidate_order": list(CANDIDATES),
             "units": {"dE_int": "kcal/mol"},
             "poses": poses,
             "field": FIELD,
