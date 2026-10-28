@@ -111,3 +111,9 @@ from CDNs, so it needs network access to them.
 ![Grid with two within-tie decisions recorded](img/gui-grid-decisions.png)
 
 ![Pose view](img/gui-pose.png)
+
+![Compare: two generators per cell, most differences inside the floor](img/gui-compare.png)
+
+The Compare shot is the real gen-compare study: 9 of the 11 paired cells sit inside the ±4.70 kcal/mol floor band
+and are drawn hollow, so only `s17_k4` and `s9head_k` are resolved. The median difference is −1.21 while the pooled
+number is −3.24, which is why the caption carries both and labels the pooled one `CONFOUNDED`.
