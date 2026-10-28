@@ -46,6 +46,12 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",
     ],
     "aimnet2": ["import aimnet, torch", "from smeltery.providers.aimnet2 import Aimnet2"],
+    "gui": [
+        "import marimo, anywidget, mols2grid, molviewspec, plotly",
+        "from smeltery.gui.app import APP_FILE, main; assert APP_FILE.is_file()",
+        "from smeltery.gui.views import builder, forest, funnel, grid, matrix, per_pose, pose",
+    ],
+    "desktop": ["import webview, marimo", "from smeltery.gui.app import main"],
 }
 #: extras too heavy to install on every run: `check` only proves that pip can RESOLVE them unless `--full` is given
 #: (the release workflow gives it). The reason is stated so the next person can judge whether it still holds.
