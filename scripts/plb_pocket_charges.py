@@ -228,17 +228,21 @@ def prepare(
     ss_dist_ang: float = SS_DIST_ANG,
 ) -> dict:
     """Assign charges and write `out_pqr`; return the provenance dict (also written beside it)."""
-    try:
-        import openmm
-        from openmm import NonbondedForce, app, unit
-    except ImportError as e:
-        raise PrepError("OpenMM is needed: `pip install openmm==8.6.1` (an optional, one-off dependency)") from e
+    # Argument checks come BEFORE the import: they are about the request, not the environment, so a
+    # bad --ff must be refused the same way whether or not OpenMM happens to be installed. (Ordering
+    # them the other way made `test_prep_is_refused_for_charmm36` pass locally, where OpenMM is
+    # present, and fail in CI, where it is not -- the test was asserting the environment.)
     if ff not in FORCE_FIELDS:
         raise PrepError(f"unknown --ff {ff!r}; choose from {sorted(FORCE_FIELDS)}")
     if prep and ff != "amber14":
         raise PrepError(
             f"--prep assigns the AMBER cysteine templates CYX/CYS and is verified for amber14 only, not {ff!r}"
         )
+    try:
+        import openmm
+        from openmm import NonbondedForce, app, unit
+    except ImportError as e:
+        raise PrepError("OpenMM is needed: `pip install openmm==8.6.1` (an optional, one-off dependency)") from e
     if lj_path is not None and ff != "amber14":
         # OpenMM's charmm36.xml carries PLACEHOLDERS in its NonbondedForce (epsilon 0, sigma 1 nm for every
         # type) and puts the real Lennard-Jones in a separate <LennardJonesForce> block, which becomes a
