@@ -77,6 +77,11 @@ desktop = ["pywebview>=5", "marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", 
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
 # dependency: nothing under src/smeltery imports it; tests that need it skip without it.
 pocket-charges = ["openmm>=8.6.1"]
+# scripts/temporal_ddE.py only (durable orchestration of a tier over a study's cells, with retries,
+# timeouts and heartbeats on steps that run for hours). Needs a Temporal server to talk to, which is
+# NOT a Python dependency: `docker run temporalio/temporal:latest server start-dev`. One-off tool
+# dependency; nothing under src/smeltery imports it.
+temporal = ["temporalio>=1.35"]
 # scripts/plb_pocket_charges.py --prep only (repair an unprepped crystal pocket before typing: missing side-chain
 # heavy atoms, a missing chain-terminal atom, absent hydrogens). pdbfixer is from the OpenMM project, pure Python,
 # and needs only numpy and openmm, so this extra adds no new stack. openmm.app.Modeller cannot add missing HEAVY
