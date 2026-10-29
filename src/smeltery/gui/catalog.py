@@ -26,14 +26,77 @@ RUNGS: tuple[tuple[str, str], ...] = (
     ("semiempirical", "Tight-binding QM (GFN2-xTB)"),
     ("ab_initio", "ferric wavefunction and density-functional methods in the pocket field"),
     ("embedded_qm", "QM/MM with a covalent QM-MM boundary"),
-    # Not a step up the rigour ladder: a different question. The rungs above ask how strongly a pose
-    # interacts; this one asks whether a chemist would make the molecule at all. It is placed after them
-    # because an interaction energy is what makes the question worth asking, and before `decision`
-    # because the answer belongs in front of whoever reads the cut.
     ("designable", "Would a chemist make it? Properties and synthesizability, from the SMILES alone"),
     ("decision", "The paired cut: ties and UNRANKED are answers"),
 )
 RUNG_INDEX = {name: i for i, (name, _) in enumerate(RUNGS)}
+
+# ---------------------------------------------------------------------------- what a rung was conflating
+#
+# `rung` carries two orderings that are not the same thing, and the seam shows wherever a method is
+# not an interaction energy. PHASE is when a stage runs: a real total order over the pipeline, and
+# `input` is not "less rigorous" than `geometry`. RIGOUR orders methods by how good the physics is,
+# and it is only meaningful BETWEEN METHODS COMPUTING THE SAME QUANTITY -- GFN2 is a cheaper estimate
+# of the same dE_int as PBE, while a synthesizability heuristic is not a cheaper anything. Ranking
+# those two against each other is a category error, and before this decomposition the only thing
+# preventing it was a four-line comment apologising for where `designable` sat in the tuple.
+#
+# This matters beyond tidiness: the funnel's goal is candidates worth synthesising, which needs
+# affinity AND buildability AND safety. Those are different QUANTITIES. A single ladder forces them
+# into one order and invites "scores better" to mean "is better", which is exactly the confusion that
+# let an unnormalised dE_int reward a generator for adding greasy mass.
+
+#: When a stage runs. A real total order: a pipeline executes these in sequence.
+PHASES: tuple[tuple[str, str], ...] = (
+    ("input", "Where the target, receptor and field come from"),
+    ("geometry", "Poses: searched or built"),
+    ("check", "Hard refusals on what the next phase needs"),
+    ("score", "Everything that measures a candidate, by any method and of any quantity"),
+    ("decision", "The paired cut: ties and UNRANKED are answers"),
+)
+PHASE_INDEX = {name: i for i, (name, _) in enumerate(PHASES)}
+
+#: Rigour levels, cheapest first. ONLY comparable within one quantity: `rigour_rank` is defined
+#: between two methods when `quantity` matches, and undefined otherwise.
+RIGOUR: tuple[str, ...] = ("heuristic", "empirical", "semiempirical", "ab_initio", "embedded_qm")
+RIGOUR_INDEX = {name: i for i, name in enumerate(RIGOUR)}
+
+#: Which rung each (phase, rigour) pair presents as, so `rung` stays a view of the decomposition
+#: rather than a second source of truth.
+_RUNG_FROM = {
+    ("input", None): "input",
+    ("geometry", None): "geometry",
+    ("check", None): "check",
+    ("score", "empirical"): "empirical",
+    ("score", "semiempirical"): "semiempirical",
+    ("score", "ab_initio"): "ab_initio",
+    ("score", "embedded_qm"): "embedded_qm",
+    ("score", "heuristic"): "designable",
+    ("decision", None): "decision",
+}
+_PHASE_OF_RUNG = {rung: phase for (phase, _), rung in _RUNG_FROM.items()}
+_RIGOUR_OF_RUNG = {rung: rigour for (_, rigour), rung in _RUNG_FROM.items()}
+
+#: What each method measures. Methods sharing a value here are rigour-comparable; methods with
+#: different values are not, however convenient a single ranking would be. `None` (or absent) means
+#: the stage measures nothing -- it prepares, refuses or decides.
+#:
+#: The three entries that are not `dE_int` are the point: a funnel aiming at candidates worth
+#: synthesising needs affinity AND buildability AND safety, and those are different quantities that
+#: must not be collapsed into one order.
+_QUANTITY_OF: dict[str, str] = {
+    "forcefield": "dE_int",
+    "gfn2": "dE_int",
+    "field_interaction": "dE_int",
+    "field_dft_interaction": "dE_int",
+    "qmmm": "dE_int",
+    "surface_esp": "esp",
+    "docking": "docking_score",
+    "rescoring": "docking_score",
+    "designability": "designability",
+    "posebusters": "pose_validity",
+    "strain": "strain",
+}
 
 #: What a stage does to the candidate list. Matches the `kind` of `smeltery.cli` stage-log entries, plus
 #: `measure` (adds a quantity, removes no one) and `rank` (the one stage that removes candidates).
@@ -168,6 +231,41 @@ class Method:
     @property
     def rung_index(self) -> int:
         return RUNG_INDEX[self.rung]
+
+    @property
+    def phase(self) -> str:
+        """When this runs. A real total order over the pipeline; see `PHASES`."""
+        return _PHASE_OF_RUNG[self.rung]
+
+    @property
+    def rigour(self) -> str | None:
+        """How good the physics is, or None for a stage that is not a measurement.
+
+        Comparable ONLY against a method of the same `quantity`. See `comparable_rigour`.
+        """
+        return _RIGOUR_OF_RUNG[self.rung]
+
+    @property
+    def quantity(self) -> str | None:
+        """The quantity this method measures, or None when it measures nothing.
+
+        Two methods are rigour-comparable when and only when this matches. `dE_int` from GFN2 and
+        from PBE are the same quantity at different rigour; `designability` is a different question
+        and is not a cheaper or worse anything.
+        """
+        return _QUANTITY_OF.get(self.key)
+
+    def comparable_rigour(self, other: Method) -> bool:
+        """Can these two be ordered by rigour at all?
+
+        False when either measures nothing, or when they measure DIFFERENT quantities. Asking which
+        of `field_dft_interaction` and `designability` is more rigorous is a category error: one is
+        an interaction energy, the other a synthesizability heuristic, and a funnel aiming at
+        candidates worth making needs both rather than the better of them.
+        """
+        if self.rigour is None or other.rigour is None:
+            return False
+        return self.quantity is not None and self.quantity == other.quantity
 
     def param(self, name: str) -> Param:
         for p in self.params:

@@ -234,3 +234,61 @@ def test_toml_writer_round_trips_config_shapes():
         "box": {"size": [22.0, 16.0, 16.0], "seeds": [7]},
     }
     assert tomllib.loads(dumps(d)) == d
+
+
+# ---------------------------------------------------------------- phase / rigour / quantity
+
+
+def test_rung_decomposes_into_a_phase_and_a_rigour():
+    """`rung` carried two orderings. Phase is when a stage runs; rigour is how good the physics is,
+    and it only means anything between methods measuring the same quantity."""
+    from smeltery.gui.catalog import PHASE_INDEX, RIGOUR_INDEX
+
+    for m in catalog().values():
+        assert m.phase in PHASE_INDEX, m.key
+        assert m.rigour is None or m.rigour in RIGOUR_INDEX, m.key
+        # a measurement has a rigour; a prep/refusal/decision does not
+        assert (m.rigour is not None) == (m.phase == "score"), m.key
+
+
+def test_rigour_is_comparable_within_a_quantity_and_not_across_one():
+    """The category error the old single ladder could not refuse."""
+    by = catalog()
+    gfn2, pbe, rhf = by["gfn2"], by["field_dft_interaction"], by["field_interaction"]
+    design, esp = by["designability"], by["surface_esp"]
+
+    # same quantity, different rigour: a real ordering
+    assert gfn2.comparable_rigour(pbe) and pbe.comparable_rigour(rhf)
+    assert RIGOUR_ORDER(gfn2) < RIGOUR_ORDER(pbe), "GFN2 is a cheaper estimate of the same dE_int"
+
+    # different quantities: no ordering exists, whatever their rigour labels say
+    assert not pbe.comparable_rigour(design), "an energy and a synthesizability heuristic are not ranked"
+    assert not pbe.comparable_rigour(esp), "esp is ab_initio too, and still a different quantity"
+    assert not design.comparable_rigour(gfn2), "and the relation is symmetric"
+
+
+def RIGOUR_ORDER(m):
+    from smeltery.gui.catalog import RIGOUR_INDEX
+
+    return RIGOUR_INDEX[m.rigour]
+
+
+def test_the_three_goal_quantities_are_distinct_and_unranked():
+    """A candidate worth synthesising needs affinity AND buildability AND safety. Those are
+    different quantities; collapsing them into one order is what lets 'scores better' pass for
+    'is better', which is how an unnormalised dE_int rewards added greasy mass."""
+    by = catalog()
+    affinity = {k for k, m in by.items() if m.quantity == "dE_int"}
+    assert {"gfn2", "field_interaction", "field_dft_interaction"} <= affinity
+    assert by["designability"].quantity == "designability"
+    assert by["designability"].quantity not in {by[k].quantity for k in affinity}
+    for k in affinity:
+        assert not by[k].comparable_rigour(by["designability"])
+
+
+def test_rung_is_still_a_faithful_view_of_the_decomposition():
+    """`rung` stays, derived, so nothing that reads it breaks."""
+    from smeltery.gui.catalog import _RUNG_FROM
+
+    for m in catalog().values():
+        assert _RUNG_FROM[(m.phase, m.rigour)] == m.rung, m.key

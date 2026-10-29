@@ -9,9 +9,20 @@ A run is a pipeline of **stages**. Each stage is one **method** from the catalog
 
 - a **rung** on the method hierarchy, cheapest first: `input` → `geometry` → `check` → `empirical` →
   `semiempirical` → `ab_initio` → `embedded_qm` → `designable` → `decision`. `hierarchy()` returns the methods grouped
-  by rung, which gives the palette. The ladder up to `embedded_qm` is ordered by physical rigour; `designable` is not a
-  further step up it but a different question (would a chemist make this molecule?), placed last because an interaction
-  energy is what makes that question worth asking and because the answer belongs in front of whoever reads the cut.
+  by rung, which gives the palette.
+
+  A rung is a **view of two independent things**, and `Method` exposes both. `phase` (`PHASES`) is *when* a stage
+  runs — a real total order over the pipeline, in which `input` is not "less rigorous" than `geometry`. `rigour`
+  (`RIGOUR`) is *how good the physics is*, and it orders methods **only within one `quantity`**: GFN2 is a cheaper
+  estimate of the same `dE_int` as PBE, while a synthesizability heuristic is not a cheaper anything.
+  `m.comparable_rigour(other)` is the predicate, and it is False across quantities — asking whether
+  `field_dft_interaction` or `designability` is "more rigorous" is a category error. Note `surface_esp` is
+  `ab_initio` too and still not comparable to `field_interaction`, because it measures `esp`, not `dE_int`.
+
+  This is load-bearing for what the funnel is for. A candidate worth synthesising needs **affinity and buildability
+  and safety**, which are different quantities. A single ladder forces them into one order and invites "scores
+  better" to mean "is better" — which is how an unnormalised `dE_int`, a real but incomplete affinity proxy, comes
+  to reward a generator for adding greasy mass.
 - a **role** for the candidate list, using the same kinds `smeltery run` logs: `prep`, `search`, `pair`, `field`, `gate`,
   `recorded`, `measure`, `rank`. Only `rank` (the paired cut) removes candidates. A gate either passes everyone or
   stops the run.
