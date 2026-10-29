@@ -14,6 +14,8 @@ Three anchors, each a real event in this project:
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from smeltery.study import (
@@ -215,3 +217,100 @@ def test_the_dag_is_plain_data_for_a_viewer():
     assert [r["step"] for r in rows] == ["generate", "accept", "score"]
     assert rows[1]["upstream"] == ["generate"] and rows[2]["upstream"] == ["accept"]
     assert rows[0]["needs"] == [] and rows[0]["provides"] == "samples"
+
+
+# ---------------------------------------------------------------- parallel execution
+
+
+def test_a_parallel_run_returns_what_a_sequential_one_would(tmp_path):
+    """Results are ordered by condition, never by completion, so lanes do not change the answer."""
+    from smeltery.study import run_parallel
+
+    seq = Study("demo", _steps([]), grid(std=[0, 1, 2]))
+    want = [(r.step, r.condition, r.value) for r in seq.run(Cache(tmp_path / "a"), verbose=False)]
+
+    par = Study("demo", _steps([]), grid(std=[0, 1, 2]))
+    got = [(r.step, r.condition, r.value) for r in run_parallel(par, Cache(tmp_path / "b"), lanes=3, verbose=False)]
+    assert got == want
+
+
+def test_a_resource_is_leased_exclusively_for_a_whole_condition(tmp_path):
+    """Two GPUs means two conditions at once and never three; a condition keeps its device across
+    its steps, because handing it back mid-chain would only let another worker stall on it."""
+    import threading
+
+    from smeltery.study import ResourcePool, run_parallel
+
+    live: dict[str, int] = {}
+    seen_per_condition: dict[str, set] = {}
+    lock = threading.Lock()
+    peak = 0
+
+    def busy(inputs, cond, ctx):
+        nonlocal peak
+        res = ctx["resource"]
+        with lock:
+            live[res] = live.get(res, 0) + 1
+            peak = max(peak, sum(live.values()))
+            seen_per_condition.setdefault(cond.label(), set()).add(res)
+            assert live[res] == 1, f"{res} leased twice at once"
+        time.sleep(0.02)
+        with lock:
+            live[res] -= 1
+        return 1
+
+    steps = [
+        FunctionStep("a", "1", (), "x", busy),
+        FunctionStep("b", "1", ("x",), "y", busy),
+    ]
+    s = Study("gpu", steps, grid(cell=["c1", "c2", "c3", "c4"]))
+    run_parallel(s, Cache(tmp_path), resources=ResourcePool(["cuda:0", "cuda:1"]), verbose=False)
+    assert peak <= 2, "never more concurrent than the pool has resources"
+    for cond_label, used in seen_per_condition.items():
+        assert len(used) == 1, f"{cond_label} moved between devices mid-condition: {used}"
+
+
+def test_one_failing_condition_does_not_kill_the_others(tmp_path):
+    """179 good conditions must not be lost to one bad one; failures are collected and raised together."""
+    from smeltery.study import run_parallel
+
+    def flaky(inputs, cond, ctx):
+        if cond["std"] == "1":
+            raise RuntimeError("boom")
+        return float(cond["std"])
+
+    s = Study("flaky", [FunctionStep("gen", "1", (), "out", flaky)], grid(std=[0, 1, 2]))
+    with pytest.raises(StudyError, match="1 of 3 condition"):
+        run_parallel(s, Cache(tmp_path), lanes=3, verbose=False)
+    # the good ones still landed in the cache
+    assert Cache(tmp_path).stats()["entries"] == 2
+
+
+def test_workers_reaching_the_same_key_compute_it_once(tmp_path):
+    """A duplicated condition must not race two workers into computing and writing the same key."""
+    import threading
+
+    from smeltery.study import run_parallel
+
+    calls = []
+    lock = threading.Lock()
+
+    def counted(inputs, cond, ctx):
+        with lock:
+            calls.append(cond.label())
+        time.sleep(0.01)
+        return 1
+
+    s = Study("dup", [FunctionStep("gen", "1", (), "out", counted)], grid(x=[1]))
+    conds = s.conditions * 4  # the same condition four times
+    run_parallel(s, Cache(tmp_path), lanes=4, only=conds, verbose=False)
+    assert len(calls) == 1, f"computed {len(calls)} times; the key lock did not hold"
+
+
+def test_a_pool_refuses_a_degenerate_configuration():
+    from smeltery.study import ResourcePool
+
+    with pytest.raises(ValueError, match="at least one"):
+        ResourcePool([])
+    with pytest.raises(ValueError, match="unique"):
+        ResourcePool(["cuda:0", "cuda:0"])
