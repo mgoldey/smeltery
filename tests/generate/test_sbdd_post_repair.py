@@ -42,6 +42,30 @@ def test_build_scaffold_rejects_a_pose_in_another_atom_order():
         build_scaffold("CCO", [0, 1], _pose("OCC"))
 
 
+def test_build_scaffold_refuses_a_cut_through_an_aromatic_ring():
+    """A partial aromatic ring cannot be grown back, and nothing downstream says so usefully.
+
+    This cut was accepted before the guard existed, because `build_scaffold` kekulizes before
+    cutting and so the fragment sanitizes: the broken ring comes back reinterpreted as an open
+    chain. A full batch of molecules was generated on a GPU from such a scaffold and every one was
+    rejected `scaffold_lost` -- which reads as a generator failure, not a bad cell.
+    """
+    # Toluene, keeping the methyl and half the ring: severs two aromatic ring bonds.
+    with pytest.raises(ValueError, match="severs aromatic ring bonds"):
+        build_scaffold("Cc1ccccc1", [0, 1, 2, 3], _pose("Cc1ccccc1"))
+
+
+def test_build_scaffold_allows_cutting_a_bond_to_a_whole_ring():
+    """The guard must not refuse the ordinary case: an ACYCLIC cut that keeps every ring intact.
+
+    Every one of the study's 15 cells and all 6 ladder cells is such a cut; if this fails they all
+    break at once.
+    """
+    spec = build_scaffold("Cc1ccccc1", [1, 2, 3, 4, 5, 6], _pose("Cc1ccccc1"))
+    assert spec.scaffold.GetNumAtoms() == 6
+    assert all(a.GetIsAromatic() for a in spec.scaffold.GetAtoms())
+
+
 def test_build_scaffold_keeps_formal_charges():
     """Review focus 2."""
     spec = build_scaffold("CC[NH3+]", [1, 2], _pose("CC[NH3+]"))
