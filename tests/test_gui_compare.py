@@ -8,6 +8,7 @@ reason this module exists, so it is asserted on real figures rather than on a to
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -207,3 +208,73 @@ def test_the_floor_band_is_never_clipped_by_the_axis():
     fig = compare_figure(tight)
     lo, hi = fig.layout.xaxis.range
     assert lo <= -4.7 and hi >= 4.7, f"axis {lo}..{hi} clips the ±4.7 floor band"
+
+
+def test_a_comparison_refuses_an_absolute_floor():
+    """The GUI must not repeat the mistake either: an absolute floor is larger by ~sqrt(n), and
+    using it here declares real differences unresolved."""
+    from smeltery.floor import ABSOLUTE, DIFFERENCE, Floor, FloorKindError
+
+    absolute = Floor(4.7, "kcal/mol", ABSOLUTE, "two pocket preps, n=5")
+    comp = Comparison.from_values(A, B, label_a="A", label_b="B", floor=absolute)
+    with pytest.raises(FloorKindError, match="absolute floor"):
+        comp.rows()
+
+    ok = Floor(0.44, "kcal/mol", DIFFERENCE, "sensitivity sd scaled to the group sizes")
+    good = Comparison.from_values(A, B, label_a="A", label_b="B", floor=ok)
+    assert {r.key: r.resolved for r in good.rows()}["key1"] is True  # |-2.5| > 0.44
+    assert good.summary()["floor_source"] == "sensitivity sd scaled to the group sizes"
+
+
+def test_a_bare_float_floor_still_works_and_reports_no_source():
+    comp = Comparison.from_values(A, B, label_a="A", label_b="B", floor=5.0)
+    assert comp.summary()["floor"] == 5.0
+    assert comp.summary()["floor_source"] is None
+
+
+# ------------------------------------------------- the statistical half of the rule
+
+
+def test_a_one_molecule_arm_never_resolves_however_large_the_difference():
+    """The real defect. On the gen-compare study the headline -1.21 was the median of 11 per-cell
+    differences, and that median landed on the one cell where arm B contributed a SINGLE molecule.
+    A one-molecule median is a draw; no difference involving it is resolvable."""
+    comp = Comparison.from_values({"k": [-30.0] * 20}, {"k": [-10.0]}, label_a="A", label_b="B", floor=1.0)
+    row = comp.rows()[0]
+    assert row.diff == pytest.approx(-20.0)  # enormous
+    assert row.underpowered is True
+    assert row.resolved is False, "a single-molecule arm cannot resolve anything"
+    assert not math.isfinite(row.sem)
+
+
+def test_a_difference_inside_the_noise_is_not_resolved_even_above_the_floor():
+    """funnel.resolved needs BOTH halves. An earlier version of this module kept only the floor."""
+    noisy_a = [-20.0, -10.0, -30.0, -15.0, -25.0]  # mean -20, big spread
+    noisy_b = [-18.0, -8.0, -28.0, -13.0, -23.0]  # mean -18, same spread
+    comp = Comparison.from_values({"k": noisy_a}, {"k": noisy_b}, label_a="A", label_b="B", floor=0.01)
+    row = comp.rows()[0]
+    assert abs(row.diff) > 0.01, "the difference clears the floor"
+    assert math.isfinite(row.sem) and row.sem > 1.0
+    assert row.resolved is False, "but it is well inside the sampling noise"
+
+
+def test_a_clean_separation_still_resolves():
+    """The rule must not refuse everything: a real, well-sampled gap resolves."""
+    comp = Comparison.from_values(
+        {"k": [-30.0, -30.1, -29.9, -30.0, -30.1]},
+        {"k": [-10.0, -10.1, -9.9, -10.0, -10.1]},
+        label_a="A",
+        label_b="B",
+        floor=1.0,
+    )
+    row = comp.rows()[0]
+    assert row.resolved is True and row.underpowered is False
+
+
+def test_the_sem_is_the_unpaired_combination():
+    import statistics as _st
+
+    a, b = [-1.0, -2.0, -3.0, -4.0], [1.0, 2.0, 3.0]
+    comp = Comparison.from_values({"k": a}, {"k": b}, label_a="A", label_b="B", floor=0.0)
+    expect = math.sqrt(_st.variance(a) / len(a) + _st.variance(b) / len(b))
+    assert comp.rows()[0].sem == pytest.approx(expect)

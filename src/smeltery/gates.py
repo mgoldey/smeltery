@@ -63,6 +63,44 @@ class SensitivityReport:
     def n(self) -> int:
         return len(self.names)
 
+    @property
+    def common_mode(self) -> float:
+        """The mean shift: the part that CANCELS in any difference taken under one model.
+
+        Not a floor on anything. Subtracting it from individual values would be a correction this
+        measurement does not license, because the shift is candidate-dependent -- which is exactly
+        why `floor` is not zero.
+        """
+        return float(np.mean(list(self.deltas.values())))
+
+    @property
+    def shift_sd(self) -> float:
+        """Standard deviation of the per-candidate shifts: the part that does NOT cancel.
+
+        `floor` (the range) bounds how much swapping models can change the gap between any two
+        candidates, and is the right floor for RANKING them. This is the input to a floor on a
+        difference of AGGREGATES -- see `aggregate_difference_floor`, which is smaller again by
+        roughly sqrt(n). nan when fewer than two candidates.
+        """
+        d = list(self.deltas.values())
+        return float(np.std(d, ddof=1)) if len(d) > 1 else float("nan")
+
+    def aggregate_difference_floor(self, n_a: int, n_b: int) -> float:
+        """The floor on a difference of MEANS over `n_a` and `n_b` candidates: `shift_sd * sqrt(1/n_a + 1/n_b)`.
+
+        Comparing two groups scored under ONE model (two generators' medians, say), the shared part
+        of a model swap cancels and what remains averages down. Quoting `floor`, or even `shift_sd`,
+        as the limit on such a difference is too conservative by roughly sqrt(n) and makes group
+        comparisons unresolvable however good the data.
+
+        Assumes the per-candidate shifts are independent across candidates. They are not in general
+        -- candidates sharing a scaffold sit in the same part of the pocket and move together -- so
+        the honest reading is a LOWER bound, with `floor` as the upper one. Say which you used.
+        """
+        if n_a < 1 or n_b < 1:
+            raise ValueError(f"need at least one candidate per group, got n_a={n_a}, n_b={n_b}")
+        return float(self.shift_sd * np.sqrt(1.0 / n_a + 1.0 / n_b))
+
 
 def charge_sensitivity(
     candidates: Sequence[Candidate],

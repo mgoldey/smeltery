@@ -26,10 +26,27 @@ the floor can resolve; "unresolved" is an answer.
 
 from __future__ import annotations
 
+import math
 import statistics as st
 from dataclasses import dataclass, field
 
+from ..floor import DIFFERENCE, Floor
 from .results import Run, ddE_table
+
+#: Below this many molecules an arm's "median" is a draw, not a summary, and no difference involving
+#: it is resolvable. `funnel.resolved` takes the same position: a Measurement with n < 2 never resolves.
+MIN_PER_ARM = 3
+
+
+def _diff_sem(a: list[float], b: list[float]) -> float:
+    """SEM of the difference of two independent means, `sqrt(var_a/n_a + var_b/n_b)`.
+
+    nan when either side has n < 2, which is what makes such a key unresolvable rather than
+    accidentally significant. This is `funnel.unpaired_delta`'s combination, for unpaired ensembles.
+    """
+    if len(a) < 2 or len(b) < 2:
+        return float("nan")
+    return math.sqrt(st.variance(a) / len(a) + st.variance(b) / len(b))
 
 
 #: What a key's two arms produced, and the difference, for one comparison key (a cell, a target, a setting).
@@ -48,10 +65,22 @@ class KeyRow:
     b: float | None
     diff: float | None
     resolved: bool | None = None
+    #: Standard error of the difference, `sqrt(var_a/n_a + var_b/n_b)`, or nan when either arm has
+    #: n < 2. A key whose arms are one or two molecules has a "median" that is a draw, not a summary.
+    sem: float = float("nan")
 
     @property
     def unpaired(self) -> bool:
         return self.diff is None
+
+    @property
+    def underpowered(self) -> bool:
+        """True when either arm is too small for its median to be a summary of anything.
+
+        A one-molecule "median" is one sample. It carries no spread, so no difference involving it
+        can be resolved, however large that difference looks.
+        """
+        return self.diff is not None and min(self.n_a, self.n_b) < MIN_PER_ARM
 
     @property
     def leader(self) -> str | None:
@@ -76,7 +105,9 @@ class Comparison:
     label_b: str
     values_a: dict[str, list[float]]
     values_b: dict[str, list[float]]
-    floor: float | None = None
+    floor: Floor | float | None = None
+    #: Multiplier on the SEM, as in `funnel.cut`. 2.0 is the funnel's own default.
+    z: float = 2.0
     unit: str = "kcal/mol"
     quantity: str = "dE_int"
     notes: list[str] = field(default_factory=list)
@@ -89,7 +120,7 @@ class Comparison:
         *,
         label_a: str,
         label_b: str,
-        floor: float | None = None,
+        floor: Floor | float | None = None,
         quantity: str = "dE_int",
     ) -> Comparison:
         """Each arm is {key: Run}. Takes every analogue's paired mean from `ddE_table`, so the per-run
@@ -108,7 +139,7 @@ class Comparison:
         *,
         label_a: str,
         label_b: str,
-        floor: float | None = None,
+        floor: Floor | float | None = None,
         unit: str = "kcal/mol",
         quantity: str = "dE_int",
     ) -> Comparison:
@@ -127,9 +158,36 @@ class Comparison:
             ma = st.median(va) if va else None
             mb = st.median(vb) if vb else None
             diff = (ma - mb) if (ma is not None and mb is not None) else None
-            res = None if (diff is None or self.floor is None) else abs(diff) > self.floor
-            out.append(KeyRow(k, len(va), len(vb), ma, mb, diff, res))
+            sem = _diff_sem(va, vb)
+            out.append(KeyRow(k, len(va), len(vb), ma, mb, diff, self._resolve(diff, sem), sem))
         return out
+
+    def _resolve(self, diff: float | None, sem: float) -> bool | None:
+        """`funnel.resolved`'s rule, both halves: bigger than the noise AND bigger than the floor.
+
+        An earlier version of this module kept only the floor half while claiming to apply the same
+        rule. That let a difference between two one-molecule "medians" be reported as resolved, and
+        it is the reason a key's SEM is computed here at all.
+        """
+        floor = self._floor_value
+        if diff is None or floor is None:
+            return None
+        if not math.isfinite(sem):
+            return False  # n < 2 somewhere: no spread, so nothing is resolved (funnel.resolved:120)
+        return abs(diff) > self.z * sem and abs(diff) > floor
+
+    @property
+    def _floor_value(self) -> float | None:
+        """The floor as a number, refusing one measured for the wrong thing.
+
+        A `Floor` says what it applies to, and a comparison needs a DIFFERENCE floor: an absolute
+        floor bounds one value and is larger by roughly sqrt(n), so using it here declares real
+        differences unresolved. A bare float carries no kind and is taken at face value, which is
+        how that mistake was made before `smeltery.floor.Floor` existed.
+        """
+        if self.floor is None or isinstance(self.floor, (int, float)):
+            return self.floor
+        return self.floor.check(DIFFERENCE).value
 
     def summary(self) -> dict:
         """The aggregate, and the pooled value beside it so the confound is visible, never alone."""
@@ -153,10 +211,11 @@ class Comparison:
             "diff_range": (min(diffs), max(diffs)) if diffs else None,
             "keys_favouring_a": sum(1 for r in paired if r.leader == "a"),
             "keys_favouring_b": sum(1 for r in paired if r.leader == "b"),
-            "floor": self.floor,
-            "n_resolved": len(resolved) if self.floor is not None else None,
+            "floor": self._floor_value,
+            "floor_source": None if self.floor is None or isinstance(self.floor, (int, float)) else self.floor.source,
+            "n_resolved": len(resolved) if self._floor_value is not None else None,
             "aggregate_resolved": (
-                None if (self.floor is None or median_diff is None) else abs(median_diff) > self.floor
+                None if (self._floor_value is None or median_diff is None) else abs(median_diff) > self._floor_value
             ),
             "pooled_a_median": st.median(pooled_a) if pooled_a else None,
             "pooled_b_median": st.median(pooled_b) if pooled_b else None,
@@ -173,17 +232,18 @@ class Comparison:
         md, unit = s["median_per_key_diff"], self.unit
         lead = self.label_a if md < 0 else self.label_b
         counts = f"{s['keys_favouring_a']} of {s['n_paired']} keys favour {self.label_a}"
-        if self.floor is None:
+        floor = self._floor_value
+        if floor is None:
             return (
                 f"Median per-key difference {md:+.2f} {unit} ({counts}); no floor is measured, "
                 f"so whether that is resolvable is unknown."
             )
-        if abs(md) > self.floor:
+        if abs(md) > floor:
             return (
-                f"Median per-key difference {md:+.2f} {unit} favours {lead}, above the {self.floor:.2f} "
+                f"Median per-key difference {md:+.2f} {unit} favours {lead}, above the {floor:.2f} "
                 f"{unit} floor ({counts}; {s['n_resolved']} of {s['n_paired']} keys individually resolved)."
             )
         return (
-            f"NOT RESOLVED: median per-key difference {md:+.2f} {unit} is within the {self.floor:.2f} "
+            f"NOT RESOLVED: median per-key difference {md:+.2f} {unit} is within the {floor:.2f} "
             f"{unit} systematic floor ({counts}), so this comparison does not separate the arms."
         )
