@@ -24,6 +24,7 @@ from .reduction import (
     ReductionError,
     paired_difference,
     rate,
+    rate_per_arm,
 )
 from .step import FunctionStep, Step, StepResult, Study, StudyError
 
@@ -46,6 +47,7 @@ __all__ = [
     "grid",
     "paired_difference",
     "rate",
+    "rate_per_arm",
     "run_parallel",
     "step_key",
 ]
