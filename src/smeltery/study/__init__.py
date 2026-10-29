@@ -17,6 +17,14 @@ record uses -- so resume, provenance and incrementality are one mechanism and ne
 from .cache import Cache, CacheMismatchError, Entry, step_key
 from .condition import Condition, common_fields, grid
 from .parallel import ResourcePool, run_parallel
+from .reduction import (
+    Estimate,
+    Group,
+    Reduction,
+    ReductionError,
+    paired_difference,
+    rate,
+)
 from .step import FunctionStep, Step, StepResult, Study, StudyError
 
 __all__ = [
@@ -24,6 +32,10 @@ __all__ = [
     "CacheMismatchError",
     "Condition",
     "Entry",
+    "Estimate",
+    "Group",
+    "Reduction",
+    "ReductionError",
     "ResourcePool",
     "FunctionStep",
     "Step",
@@ -32,6 +44,8 @@ __all__ = [
     "StudyError",
     "common_fields",
     "grid",
+    "paired_difference",
+    "rate",
     "run_parallel",
     "step_key",
 ]

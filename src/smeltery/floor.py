@@ -60,8 +60,9 @@ class Floor:
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}, not {kind!r}")
         if self.applies_to != kind:
+            article = "an" if self.applies_to == ABSOLUTE else "a"
             raise FloorKindError(
-                f"this is a {self.applies_to} floor ({self.value:g} {self.unit}, from {self.source}) "
+                f"this is {article} {self.applies_to} floor ({self.value:g} {self.unit}, from {self.source}) "
                 f"but a {kind} floor is needed here. An absolute floor bounds one value; a difference "
                 f"floor bounds a difference taken under one condition, and is smaller because the "
                 f"shared part cancels. Measure the right one, or relabel it with as_kind() and say so."
