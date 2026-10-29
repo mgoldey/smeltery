@@ -55,7 +55,21 @@ def _with_coords(mol: Chem.Mol, xyz: np.ndarray) -> Chem.Mol:
 
 
 def build_scaffold(smiles: str, indices: Sequence[int], pose: Pose) -> ScaffoldSpec:
-    """Cut `indices` (heavy atoms of `smiles`, in SMILES order) out of the parent at its pose `pose`."""
+    """Cut `indices` (heavy atoms of `smiles`, in SMILES order) out of the parent at its pose `pose`.
+
+    `indices` are positions in `Chem.MolFromSmiles(smiles)`, i.e. **canonical SMILES order** -- NOT
+    the order of the SDF the parent may have been read from. The two differ, and indices taken from
+    an SDF silently describe a different set of atoms, which usually surfaces much later as every
+    sample being rejected rather than as an error here.
+
+    Refuses a cut that severs an **aromatic ring bond**. Such a cut leaves a partial ring that cannot
+    be grown back into the parent: the ring's remaining atoms are no longer aromatic, so a generated
+    molecule never matches the scaffold and every sample is rejected `scaffold_lost` far downstream.
+    The check has to be explicit because this function kekulizes before cutting, which clears the
+    aromatic flags and lets `SanitizeMol` accept the fragment -- a 12-atom cut through a benzimidazole
+    was accepted here and returned a scaffold with the broken ring reinterpreted as an open chain,
+    having generated a full batch of unusable molecules on a GPU first.
+    """
     parent = Chem.MolFromSmiles(smiles)
     if parent is None:
         raise ValueError(f"unparseable SMILES: {smiles!r}")
@@ -69,6 +83,19 @@ def build_scaffold(smiles: str, indices: Sequence[int], pose: Pose) -> ScaffoldS
         raise ValueError("scaffold covers every heavy atom; there is nothing to grow")
     if tuple(pose.symbols[:n]) != tuple(a.GetSymbol() for a in parent.GetAtoms()):
         raise ValueError("the parent pose does not start with the heavy atoms of the parent SMILES, in order")
+    kept = set(idx)
+    severed_aromatic = [
+        (b.GetBeginAtomIdx(), b.GetEndAtomIdx())
+        for b in parent.GetBonds()
+        if (b.GetBeginAtomIdx() in kept) != (b.GetEndAtomIdx() in kept) and b.GetIsAromatic() and b.IsInRing()
+    ]
+    if severed_aromatic:
+        raise ValueError(
+            "the cut severs aromatic ring bonds "
+            + ", ".join(f"{i}-{j}" for i, j in severed_aromatic)
+            + "; a partial aromatic ring cannot be grown back, so every sample would be rejected "
+            "scaffold_lost. Cut an acyclic bond, or keep the whole ring."
+        )
     parent = _with_coords(parent, np.asarray(pose.coords_ang[:n], dtype=float))
     kek_parent = Chem.Mol(parent)
     Chem.Kekulize(kek_parent, clearAromaticFlags=True)
