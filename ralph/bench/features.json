@@ -299,7 +299,7 @@
         "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "C7-layering",
