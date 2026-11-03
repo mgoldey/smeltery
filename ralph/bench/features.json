@@ -32,7 +32,7 @@
         "test_a_submitted_task_runs_and_reports_succeeded and test_a_failing_command_reports_failed_with_its_code pass 10 runs in a row (`for i in $(seq 10); do ...; done`)."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R3-queue-unknown-ids",
