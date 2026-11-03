@@ -55,6 +55,42 @@ For a GUI, `smeltery.gui` presents the tiers as a hierarchy of methods and lets 
 compiles to a `smeltery run` config: [docs/gui.md](docs/gui.md). A review of the tools for viewing results and choosing
 candidates, with a plan: [docs/gui-review.md](docs/gui-review.md).
 
+## The end-to-end path, and long work
+
+One command per step from a target to something shareable, for an end user or an ELN
+integration: [docs/golden-path.md](docs/golden-path.md).
+
+```bash
+smeltery golden init --out myrun.toml --parent lead --parent-smiles "..."
+smeltery run myrun.toml --plan          # poses, pocket, parity, digest; no SCF
+smeltery run myrun.toml --out out/myrun
+smeltery golden open out/myrun          # GUI + Avogadro 2 (--report, --no-gui, --no-avogadro)
+smeltery golden bundle out/myrun -o myrun-bundle.zip
+```
+
+For long work, Temporal is the system of record: smeltery keeps no private process table and no
+status store, so a task's status, timings and exit code outlive the worker that ran it and the
+dashboard reads them back after any restart. A task runs at most once (`maximum_attempts=1`): an
+arbitrary shell command is not safe to re-run on the orchestrator's initiative, so a task whose
+worker died is reported failed rather than retried, and resubmitting is a decision.
+
+Needs the `temporal` extra and a reachable Temporal server (`--temporal-host`, default
+`127.0.0.1:7233`). The server is not a Python dependency:
+`docker run temporalio/temporal:latest server start-dev`.
+
+```bash
+smeltery task-worker &                       # executes submitted tasks
+smeltery dashboard out/ --port 8123          # runs, task status, task submission
+```
+
+The dashboard serves one page and a small JSON API over the standard library, so the centralized
+view adds no GUI dependency. Run discovery reads the filesystem and the task panel reads Temporal,
+and the two fail independently: with Temporal down the task calls return 503 and the run list
+still works. A `run-*.json` that cannot be read becomes a row carrying its error rather than
+disappearing from the list. If Temporal is unreachable, task operations raise `TemporalUnavailable`
+instead of falling back to a private implementation -- tasks that appear to be managed while
+nothing durable recorded them would be worse than an error.
+
 ## Example
 
 `examples/mwe_benzoic.py` places benzoic acid and two para-substituted
@@ -144,6 +180,13 @@ energy, or passing charges in Å each makes a test fail.
 ## Status
 
 Measured limits, with sizes and sources: [docs/limits.md](docs/limits.md).
+
+The golden path, the dashboard and the Temporal task layer work end to end and are covered by
+`tests/test_dashboard_tasks.py`, whose checks were mutation-tested: silently dropping an unreadable
+run record, masking a dead task backend as zero tasks, and falling back silently when `temporalio`
+is absent each make a test fail. The dashboard shows and submits work; it does not schedule, set
+priorities or bound memory, and a tier's `memory_budget_gb` sizes predicted arrays rather than
+capping a worker's resident memory.
 
 This is an early working example. The tier protocol, the paired-ΔΔE funnel,
 the resolution-aware cut and the run record work end to end. Vina docking works with a
