@@ -111,7 +111,7 @@
         "Delete the stray /home/matt/qc/smeltery/.bench_comments.sqlite and .bench_projects.sqlite (artefacts of the old default)."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R8-gitignore",
