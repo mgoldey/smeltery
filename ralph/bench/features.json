@@ -401,7 +401,7 @@
         "Write the 11 numbers to NOTES.md. If they climb by more than 25% from first to last, this feature does not pass."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "M2-core-baseline",
