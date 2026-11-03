@@ -919,7 +919,14 @@ def _describe_plan(plan: Plan, digest: str) -> str:
 
 
 #: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.
-VIEWERS = {"gui": "smeltery.gui.app", "report": "smeltery.gui.report"}
+VIEWERS = {
+    "gui": "smeltery.gui.app",
+    "report": "smeltery.gui.report",
+    "dashboard": "smeltery.dashboard",
+    "central": "smeltery.dashboard",
+    "avogadro": "smeltery.avogadro",
+    "golden": "smeltery.golden",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -932,11 +939,54 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="command", required=True)
     sub.add_parser("gui", help="browse a finished run, record decisions (smeltery gui OUT --help)")
     sub.add_parser("report", help="write a self-contained HTML report of a run (smeltery report OUT --help)")
+    sub.add_parser("dashboard", help="centralized dashboard for runs and tasks (smeltery dashboard ROOT --help)")
+    sub.add_parser("central", help="alias for dashboard")
+    sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
+    sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
+    tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
+    tw.add_argument("--host", default="127.0.0.1:7233")
+    tw.add_argument("--namespace", default="default")
+    tw.add_argument("--task-queue", default="smeltery-tasks")
+    tw.add_argument("--concurrency", type=int, default=2, help="max concurrent activities")
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
     run.add_argument("--out", type=Path, default=Path("out"), help="directory for the run record")
     run.add_argument("--plan", action="store_true", help="stop before the SCFs: poses, pocket, parity, digest")
     args = ap.parse_args(argv)
+    if getattr(args, "command", None) == "golden":
+        from smeltery.golden import main as _golden_main
+
+        return _golden_main(argv[1:])
+    if getattr(args, "command", None) == "task-worker":
+        from smeltery.tasks import TEMPORAL_AVAILABLE, worker_activities, worker_workflows
+
+        if not TEMPORAL_AVAILABLE:
+            print("temporalio is not installed", file=sys.stderr)
+            return 2
+
+        async def _run_worker():
+            from temporalio.client import Client
+            from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+
+            client = await Client.connect(args.host, namespace=args.namespace)
+            async with Worker(
+                client,
+                task_queue=args.task_queue,
+                workflows=worker_workflows(),
+                activities=worker_activities(),
+                workflow_runner=UnsandboxedWorkflowRunner(),
+                max_concurrent_activities=args.concurrency,
+            ):
+                print(f"smeltery task worker up on {args.task_queue} (Ctrl+C stops)", flush=True)
+                await asyncio.Future()
+
+        import asyncio
+
+        try:
+            asyncio.run(_run_worker())
+        except KeyboardInterrupt:
+            return 0
+        return 0
     try:
         plan = build_plan(load_config(args.config), out_dir=args.out)
         if args.plan:
