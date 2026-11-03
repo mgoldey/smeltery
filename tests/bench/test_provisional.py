@@ -19,11 +19,10 @@ def test_atom_order_is_independent_of_the_embedding_seed():
 
 
 def test_provisional_order_equals_the_runs_pose_order(run_dir):
-    from io import StringIO
 
     from rdkit import Chem
 
-    from smeltery.gui.results import load_run, pose_sdf
+    from smeltery.gui.results import pose_sdf
 
     run = load_run(run_dir)
     for name, smiles in run.candidates.items():
@@ -48,6 +47,7 @@ def test_place_site_keeps_the_pipeline_the_only_state(pipeline):
 
 def test_place_site_refuses_two_identical_indices(pipeline):
     import pytest
+
     with pytest.raises(ValueError):
         place_site(pipeline, atom=3, from_atom=3)
 
@@ -55,6 +55,7 @@ def test_place_site_refuses_two_identical_indices(pipeline):
 @pytest.fixture
 def run_dir(tmp_path):
     from gui_fixture import make_run_dir
+
     return make_run_dir(tmp_path)
 
 

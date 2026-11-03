@@ -3,12 +3,14 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from smeltery.bench.app import create_app
 from bench.fakes import FakeArtifactStore, FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
+from smeltery.bench.app import create_app
 
 
 def fakes(run_dir=None, queue=None):
-    import tempfile, pathlib
+    import pathlib
+    import tempfile
+
     if run_dir is None:
         rd = pathlib.Path(tempfile.mkdtemp()) / "out"
         rd.mkdir(parents=True, exist_ok=True)
@@ -34,14 +36,16 @@ class BrokenTaskQueue:
 @pytest.fixture
 def run_dir(tmp_path):
     from gui_fixture import make_run_dir
+
     return make_run_dir(tmp_path)
 
 
 @pytest.fixture
 def incomplete_run_dir(tmp_path):
-    from gui_fixture import make_run_dir
     import json
-    from pathlib import Path
+
+    from gui_fixture import make_run_dir
+
     rd = make_run_dir(tmp_path)
     (p,) = rd.glob("run-*.json")
     rec = json.loads(p.read_text())
@@ -85,12 +89,11 @@ def test_unknown_paths_are_404():
 
 
 def test_local_stores_live_under_the_runs_root(tmp_path, monkeypatch):
-    import os
     cwd = tmp_path / "elsewhere"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     root = tmp_path / "root"
-    app = create_app(root=root)
+    create_app(root=root)
     # trigger store init by touching app state (already initialized)
     base = root / ".smeltery" / "bench"
     assert (base / "comments.sqlite").exists()

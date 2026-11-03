@@ -22,7 +22,10 @@ def test_an_entry_is_append_only(pstore):
     c = pstore.create_campaign(name="cdk2")
     e = pstore.add_entry(c.id, title="first", body="b", author="mg")
     with pytest.raises(ValueError):
-        pstore.edit_entry(e.id, body="changed") if hasattr(pstore, "edit_entry") else (_ for _ in ()).throw(ValueError("no edit"))
+        if hasattr(pstore, "edit_entry"):
+            pstore.edit_entry(e.id, body="changed")
+        else:
+            raise ValueError("no edit")
 
 
 def test_a_correction_is_a_new_entry_that_supersedes(pstore):

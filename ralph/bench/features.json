@@ -171,7 +171,7 @@
         "Do not add noqa to silence a real finding."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "M1-repairs-baseline",
