@@ -48,7 +48,7 @@
         "Make both adapters satisfy it."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R4-temporal-typed-init",

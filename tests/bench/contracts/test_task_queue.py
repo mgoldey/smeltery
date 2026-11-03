@@ -63,7 +63,8 @@ def test_an_unknown_task_id_is_handled_consistently(q):
     assert q.get("ghost") is None
     with pytest.raises(KeyError):
         q.tail_log("ghost")
-
+    with pytest.raises(KeyError):
+        q.cancel("ghost")
 
 def test_status_survives_a_new_adapter_instance(q_factory, bench_tmp):
     q1 = q_factory(bench_tmp)
