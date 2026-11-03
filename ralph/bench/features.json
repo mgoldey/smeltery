@@ -82,7 +82,7 @@
         "Mutation 2: delete OUT/poses/; confirm the test errors or fails, never passes; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R6-specific-exception",
