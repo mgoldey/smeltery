@@ -4,6 +4,7 @@ import pytest
 from bench.contracts.base import PortContract
 from smeltery.bench.adapters.task_queue import SubprocessTaskQueue, TemporalTaskQueue
 from smeltery.bench.ports import TaskQueue
+from smeltery.tasks import TemporalUnavailable
 
 
 def wait_until(pred, timeout=30):
@@ -15,7 +16,10 @@ def wait_until(pred, timeout=30):
     raise TimeoutError("wait_until timed out")
 
 
-_adapters = [("SubprocessTaskQueue", lambda tmp: SubprocessTaskQueue(tmp))]
+_adapters = [
+    ("SubprocessTaskQueue", lambda tmp: SubprocessTaskQueue(tmp)),
+    ("TemporalTaskQueue", lambda tmp: TemporalTaskQueue()),
+]
 
 
 class TaskQueueContract(PortContract):
@@ -28,7 +32,13 @@ class TaskQueueContract(PortContract):
 
 @pytest.fixture(params=TaskQueueContract.adapters(), ids=[n for n, _ in TaskQueueContract.adapters()])
 def q(request, bench_tmp):
-    return request.param[1](bench_tmp)
+    q = request.param[1](bench_tmp)
+    if isinstance(q, TemporalTaskQueue):
+        try:
+            q.list()
+        except TemporalUnavailable as e:
+            pytest.skip(str(e))
+    return q
 
 
 @pytest.fixture

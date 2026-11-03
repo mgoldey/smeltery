@@ -238,7 +238,7 @@ class TemporalTaskQueue:
         self._m = TemporalTaskManager(host=host, namespace=namespace, task_queue=task_queue)
 
     def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note=""):
-        return self._m.submit(
+        t = self._m.submit(
             name,
             list(command),
             cwd=str(cwd) if cwd else None,
@@ -246,6 +246,7 @@ class TemporalTaskQueue:
             log_dir=str(log_dir) if log_dir else None,
             note=note,
         )
+        return t.id if hasattr(t, "id") else str(t)
 
     def list(self, status=None):
         return self._m.list(status=status)

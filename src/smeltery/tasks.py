@@ -241,6 +241,8 @@ class TemporalTaskManager:
                 task.returncode = await handle.result()
             except Exception:
                 pass
+            if task.returncode is not None and task.returncode != 0:
+                task.status = "failed"
         return task
 
     def get(self, task_id):
@@ -286,6 +288,8 @@ class TemporalTaskManager:
                     task.returncode = await handle.result()
                 except Exception:
                     pass
+                if task.returncode is not None and task.returncode != 0:
+                    task.status = "failed"
             return task
         except Exception as e:  # noqa: BLE001
             return Task(id=wf.id, name=wf.id, command=[], cwd="", status=str(wf.status), note=str(e))

@@ -65,7 +65,7 @@
         "uvx ty@0.0.96 check reports nothing for adapters/task_queue.py."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R5-atom-order-anchor",
