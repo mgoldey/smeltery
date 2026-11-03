@@ -385,7 +385,7 @@
         "Run the cli.py row of the AGENTS.md table."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "K5-split-rss-flat",

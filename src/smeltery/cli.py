@@ -1062,7 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
             missing = [n for n in analogues if n not in names]
             if missing:
                 print("combine: missing partials for " + ", ".join(missing), file=sys.stderr)
-                raise SystemExit(2)
+                return 2
             plan = build_plan(cfg, out_dir=args.out)
             per_candidate_values = {}
             parent_values = None
