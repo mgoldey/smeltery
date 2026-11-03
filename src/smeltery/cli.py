@@ -1070,25 +1070,23 @@ def main(argv: list[str] | None = None) -> int:
                 recp = json.loads(p.read_text())
                 pp = recp["results"]["per_pose"]
                 name = p.name[len("partial-") : -len(".json")]
-                if name != cfg["parent"] and name in pp and "dE_int" in pp[name]:
-                    per_candidate_values[name] = pp[name]["dE_int"]
-                parent_ok = (
-                    parent_values is None
-                    and name == cfg["parent"]
-                    and cfg["parent"] in pp
-                    and "dE_int" in pp[cfg["parent"]]
-                )
-                if parent_ok:
-                    parent_values = pp[cfg["parent"]]["dE_int"]
+                if name in pp:
+                    per_candidate_values[name] = pp[name]
+                if name == cfg["parent"] and parent_values is None and cfg["parent"] in pp:
+                    parent_values = pp[cfg["parent"]]
             if parent_values is None:
-                raise SystemExit(2)
+                print("combine: missing partial for " + cfg["parent"], file=sys.stderr)
+                return 2
 
             def measure(plan):
                 for c in plan.candidates:
                     if c is plan.parent:
-                        c.per_pose["dE_int"] = list(parent_values)
+                        for q, vals in (parent_values or {}).items():
+                            c.per_pose[q] = list(vals)
                     else:
-                        c.per_pose["dE_int"] = list(per_candidate_values[c.name])
+                        vals = per_candidate_values.get(c.name, {})
+                        for q, v in vals.items():
+                            c.per_pose[q] = list(v)
 
             rec, out = run_plan(plan, measure=measure)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
