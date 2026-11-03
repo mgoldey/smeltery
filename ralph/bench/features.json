@@ -197,7 +197,7 @@
         "Record the pass/skip/fail counts in NOTES.md."
       ],
       "full_suite": true,
-      "passes": false
+      "passes": true
     },
     {
       "id": "C1-contract-runstore",

@@ -11,3 +11,4 @@ last. Not a diary: if it does not change what the next iteration does, leave it 
   use_cases/ copies are the only ones left; the U-features own their behaviour. Until R2 and R11
   pass, the bench gate fails on the SubprocessTaskQueue returncode test and ruff fails on
   tests/bench: those failures are pre-existing, not yours.
+- 2026-11-03 (M1): full suite 1723 passed, 45 skipped (baseline 1649 passed, 45 skipped).
