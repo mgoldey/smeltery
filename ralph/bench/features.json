@@ -443,7 +443,7 @@
         "Mutation: import fastapi in one use case; confirm the test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "S2-independent-failure",

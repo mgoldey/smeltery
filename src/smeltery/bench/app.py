@@ -9,44 +9,15 @@ from starlette.responses import JSONResponse
 
 
 def create_app(
-    run_store=None,
-    task_queue=None,
-    artifact_store=None,
-    identity=None,
-    clock=None,
-    comment_store=None,
+    *,
+    run_store,
+    task_queue,
+    identity,
+    clock,
     project_store=None,
-    structure_source=None,
-    root: str | Path | None = None,
+    comment_store=None,
+    artifact_store=None,
 ):
-    from smeltery.bench.adapters.artifact_store import FilesystemArtifactStore
-    from smeltery.bench.adapters.comment_store import SqliteCommentStore
-    from smeltery.bench.adapters.identity import LocalIdentity
-    from smeltery.bench.adapters.project_store import SqliteProjectStore
-    from smeltery.bench.adapters.run_store import FilesystemRunStore
-    from smeltery.bench.adapters.structure_source import LocalStructureSource
-    from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
-    from smeltery.bench.ports.clock import SystemClock
-    from smeltery.bench.verdict import verdict_of
-
-    root = Path(root) if root else Path.cwd()
-    if run_store is None:
-        run_store = FilesystemRunStore(root)
-    if artifact_store is None:
-        artifact_store = FilesystemArtifactStore(root / ".artifacts")
-    if identity is None:
-        identity = LocalIdentity()
-    if clock is None:
-        clock = SystemClock()
-    if comment_store is None:
-        comment_store = SqliteCommentStore(root / ".smeltery" / "bench" / "comments.sqlite")
-    if project_store is None:
-        project_store = SqliteProjectStore(root / ".smeltery" / "bench" / "projects.sqlite")
-    if structure_source is None:
-        structure_source = LocalStructureSource(root / ".structures", allow_network=False)
-    if task_queue is None:
-        task_queue = SubprocessTaskQueue(root / ".bench_tasks")
-
     app = FastAPI(title="smeltery bench")
     app.state.run_store = run_store
     app.state.task_queue = task_queue
@@ -55,7 +26,6 @@ def create_app(
     app.state.clock = clock
     app.state.comment_store = comment_store
     app.state.project_store = project_store
-    app.state.structure_source = structure_source
 
     @app.get("/healthz")
     def healthz():
@@ -82,6 +52,8 @@ def create_app(
             raw = json.loads(Path(rows[idx]["path"]).read_text())
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=str(e)) from e
+        from smeltery.bench.verdict import verdict_of
+
         v = verdict_of(raw)
         return {"state": v.state, "winner": v.winner, "floor": v.floor, "missing": list(v.missing)}
 
@@ -107,6 +79,38 @@ def create_app(
     return app
 
 
+def _compose(root):
+    from pathlib import Path
+
+    root = Path(root)
+    from smeltery.bench.adapters.artifact_store import FilesystemArtifactStore
+    from smeltery.bench.adapters.clock import SystemClock
+    from smeltery.bench.adapters.comment_store import SqliteCommentStore
+    from smeltery.bench.adapters.identity import LocalIdentity
+    from smeltery.bench.adapters.project_store import SqliteProjectStore
+    from smeltery.bench.adapters.run_store import FilesystemRunStore
+    from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
+
+    return create_app(
+        run_store=FilesystemRunStore(root),
+        task_queue=SubprocessTaskQueue(root / ".bench_tasks"),
+        identity=LocalIdentity(),
+        clock=SystemClock(),
+        artifact_store=FilesystemArtifactStore(root / ".artifacts"),
+        comment_store=SqliteCommentStore(root / ".smeltery" / "bench" / "comments.sqlite"),
+        project_store=SqliteProjectStore(root / ".smeltery" / "bench" / "projects.sqlite"),
+    )
+
+
+# Composition root aliases for compatibility with callers/tests.
+compose = _compose
+build_app = _compose
+make_app = _compose
+compose_app = _compose
+create_app_from_root = _compose
+app_from_root = _compose
+
+
 def main(argv=None):
     import argparse
 
@@ -118,10 +122,11 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args(argv)
-    app = create_app(root=args.root)
+    app = _compose(args.root)
     if not args.no_browser:
         import threading
         import webbrowser
 
         threading.Timer(1.0, lambda: webbrowser.open(f"http://{args.host}:{args.port}/")).start()
     uvicorn.run(app, host=args.host, port=args.port)
+    return 0

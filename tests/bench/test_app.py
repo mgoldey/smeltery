@@ -93,7 +93,9 @@ def test_local_stores_live_under_the_runs_root(tmp_path, monkeypatch):
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     root = tmp_path / "root"
-    create_app(root=root)
+    from smeltery.bench.app import compose
+
+    compose(root)
     # trigger store init by touching app state (already initialized)
     base = root / ".smeltery" / "bench"
     assert (base / "comments.sqlite").exists()
