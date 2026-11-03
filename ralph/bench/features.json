@@ -459,7 +459,7 @@
         "Mutation: let /api/runs call task_queue.list(); confirm a test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "S3-verdict-endpoint",
