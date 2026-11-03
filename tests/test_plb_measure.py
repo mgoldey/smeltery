@@ -84,6 +84,17 @@ def test_permutation_null_matches_brute_force_loop():
     )
 
 
+def test_permutation_null_is_identical_however_it_is_blocked(monkeypatch):
+    # blocking exists to bound memory at n ~ 200; it must not change a single value, including a ragged last block
+    rng = np.random.default_rng(3)
+    x, y = np.round(rng.normal(size=40), 1), rng.normal(size=40)  # rounded x: Kendall ties exercised
+    whole = pm.permutation_null(x, y, n_mc=1001, seed=5)
+    monkeypatch.setattr(pm, "NULL_BLOCK_ELEMENTS", 7 * 780)  # 7 permutations per block, 1001 = 143 * 7
+    assert pm.permutation_null(x, y, n_mc=1001, seed=5) == whole
+    monkeypatch.setattr(pm, "NULL_BLOCK_ELEMENTS", 1)  # one permutation per block
+    assert pm.permutation_null(x, y, n_mc=1001, seed=5) == whole
+
+
 def test_exact_critical_spearman_for_n9():
     # the textbook exact two-sided 5% critical value for n = 9 is 0.700
     null = pm.permutation_null(np.arange(9.0), np.arange(9.0))

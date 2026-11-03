@@ -31,7 +31,15 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdFMCS
 from rdkit.Chem.rdMolAlign import AlignMol
 
-from .cost import rhf_calibration, sto3g_basis_functions_strict
+from .cost import (
+    DftSize,
+    available_memory_gb,
+    dft_memory_gb,
+    pbe_seconds_per_pose,
+    rhf_calibration,
+    sto3g_basis_functions,
+    sto3g_basis_functions_strict,
+)
 from .gates import require_passing_poses
 from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, PointCharge, Pose
 
@@ -600,6 +608,245 @@ class FieldInteraction:
             cand.per_pose["dE_int"] = vals
 
 
+def _dft_energy(result) -> float:
+    """Total energy from a ferric `DftResult`, refusing to double-count dispersion.
+
+    `DftResult` exposes `total_energy` (not `energy`, which is `RhfResult`'s
+    name) plus `e_scf` and `e_dispersion`. A plain `functional="PBE"` applies
+    NO dispersion -- verified: `e_dispersion is None` and `total_energy ==
+    e_scf` -- and ferric rejects "PBE-D3"/"PBE-D3BJ"/"PBE+D3" as unknown libxc
+    names, so dispersion can only be added through `d3bj_energy`. Should a
+    future ferric apply it inside the SCF, `total_energy` would already include
+    it and the tier's separate D3 term would double-count, so this raises
+    instead of returning a quietly wrong number.
+    """
+    if getattr(result, "e_dispersion", None) is not None:
+        raise RuntimeError(
+            "this ferric applied dispersion inside run_dft "
+            f"(e_dispersion={result.e_dispersion}, model={getattr(result, 'dispersion_model', None)}); "
+            "FieldDftInteraction adds D3(BJ) separately and would double-count it. Drop the separate "
+            "d3bj_energy call, or ask for an XC name that carries no dispersion."
+        )
+    return result.total_energy
+
+
+class DftMemoryError(RuntimeError):
+    """The requested basis would spill ferric's RI tensor to disk; refused before the SCF starts.
+
+    Spilling is a performance cliff, not a gradual tradeoff: `DfK::build`
+    re-reads the ENTIRE spilled tensor on every SCF iteration. The message
+    names the terms and the two real options (a smaller basis, or a bigger
+    budget) rather than letting a run take hours of pure IO.
+    """
+
+
+@dataclass
+class FieldDftInteraction:
+    """ΔE_int = E_PBE(in point-charge field) − E_PBE(vacuum), per pose, in kcal/mol.
+
+    The DFT counterpart of `FieldInteraction`, and the tier to prefer: RHF has
+    no correlation at all, and the field polarizes a correlated density
+    differently from an uncorrelated one, so the difference does NOT cancel out
+    of ΔE_int.
+
+    Dispersion must be added by hand here: a plain `functional="PBE"` applies
+    none (`DftResult.e_dispersion is None`), and ferric rejects "PBE-D3",
+    "PBE-D3BJ" and "PBE+D3" as unknown libxc names. `_dft_energy` raises if a
+    future ferric starts applying it inside the SCF, rather than double-counting.
+
+    **D3(BJ) is computed and reported, but it does not enter `dE_int`.**
+    `ferric.d3bj_energy(mol, functional)` takes only the geometry -- no point
+    charges, no density -- so at a FIXED geometry it is identical on both legs
+    and cancels exactly in the difference (measured: -0.109504 Ha on both legs
+    of the same pose). It is recorded as `E_d3` because it is free (0.002-0.013
+    s) and it matters for total energies, for comparing different geometries,
+    and for any relaxation; it is NOT the reason to prefer this tier over RHF.
+    Anyone reading dispersion into a fixed-geometry ΔE_int is double-counting
+    nothing: the term is zero there.
+
+    Both energies are at the same geometry, so the difference is the field's
+    interaction energy including the electronic polarization it induces. Unlike
+    a total energy, it is comparable between molecules of different formula.
+
+    Memory is checked BEFORE the first SCF (`check_memory`, on by default): at
+    def2-SVP these ligands need ~23.5 GB resident and ferric spills the RI
+    tensor to disk, which costs roughly a minute per iteration in pure IO.
+    """
+
+    basis: str = "sto-3g"
+    functional: str = "PBE"
+    energy_conv: float = 1e-10
+    density_conv: float = 1e-8
+    max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
+    check_memory: bool = True
+    memory_budget_gb: float = 8.0  # ferric's own default [memory] budget; raise only if the box really has it
+    #: Refuse to start unless the machine has at least this much memory FREE (not merely within
+    #: `memory_budget_gb`, which is a fixed prediction and cannot see a loaded box). None disables it.
+    require_free_gb: float | None = None
+    name: str = "field_dft_interaction"
+    field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
+
+    def settings(self) -> dict:
+        return {
+            "method": f"KS-DFT {self.functional} + D3(BJ)",
+            "functional": self.functional,
+            "dispersion": "D3(BJ), reported as E_d3; cancels in dE_int at fixed geometry",
+            "basis": self.basis,
+            "energy_conv": self.energy_conv,
+            "density_conv": self.density_conv,
+            "max_iter": self.max_iter,
+            "memory_budget_gb": self.memory_budget_gb if self.check_memory else None,
+            "require_free_gb": self.require_free_gb if self.check_memory else None,
+            "engine": "ferric",
+            "field": self.field_provenance,
+        }
+
+    def produces(self) -> dict[str, str]:
+        return {"dE_int": "kcal/mol", "E_d3": "kcal/mol"}
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity not in self.produces():
+            raise _unknown_quantity(self, quantity)
+        # Not measured for this tier. STO-3G is a poor basis for ABSOLUTE energies; the argument that
+        # much of that error is common-mode and cancels in a PAIRED ddE (same scaffold atoms, same
+        # coordinates on both sides) is the design intent of PairedPoses, not something measured here.
+        # Returning a number would dress that expectation up as evidence.
+        return None
+
+    def _size(self, pose: Pose) -> DftSize:
+        """`DftSize` for one pose. nbf is exact for STO-3G; any other basis is refused, not guessed."""
+        if self.basis != "sto-3g":
+            raise ValueError(
+                f"basis {self.basis!r}: the cost/memory model counts basis functions from the STO-3G "
+                "table only. Get nbf from `ferric.shell_info(mol, basis_set)` for another basis."
+            )
+        return DftSize(n_atoms=len(pose.symbols), n_basis_functions=sto3g_basis_functions(list(pose.symbols)))
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        """Measured PBE reference scaled by `xc_fock_work` (see `smeltery.cost`); None outside it."""
+        quantity, unit = "wall_time", "s"
+
+        def none(why: str) -> dict:
+            return {"quantity": quantity, "unit": unit, "predicted": None, "basis": f"unmeasured: {why}"}
+
+        # Basis and functional are checked FIRST, and return None rather than raising: an estimator
+        # that throws cannot be used to decide whether a run is affordable, which is its whole job.
+        # `_size` raises for a non-STO-3G basis, so reaching it with one would turn this into an error.
+        if self.functional != "PBE":
+            return none(f"the reference is PBE, tier is {self.functional}")
+        if self.basis != "sto-3g":
+            return none(f"the reference is sto-3g, tier is {self.basis}")
+        if not candidates or any(not c.poses for c in candidates):
+            return none("poses not built yet, so the SCF count is unknown")
+        total = 0.0
+        for c in candidates:
+            # Unlike the RHF tier there is no element gate here: the XC grid depends on ATOM COUNT, and
+            # STO-3G, def2-SVP and D3(BJ) all cover every element in this set (P, S and Cl included) --
+            # which is exactly what FieldInteraction.estimate_cost refuses the whole batch over.
+            if sto3g_basis_functions_strict(list(c.poses[0].symbols)) is None:
+                return none(f"{c.name}: element outside the STO-3G table, so nbf cannot be counted")
+            total += sum(pbe_seconds_per_pose(self._size(p)) for p in c.poses)
+        n = sum(len(c.poses) for c in candidates)
+        return {
+            "quantity": quantity,
+            "unit": unit,
+            "predicted": total,
+            "basis": f"{n} poses x (vacuum + field {self.functional}) at {self.basis}; measured reference "
+            "74 atoms/246 bf, 71.1 s vacuum (16 iters) + 80.7 s in a 624-charge field (18 iters), scaled "
+            "by xc_fock_work = nbf^2 x npts; reference iteration count assumed, so a LOWER BOUND for a "
+            "slower-converging chemistry",
+        }
+
+    def estimate_memory(self, candidates: list[Candidate]) -> dict:
+        """Peak resident GB for the largest pose, and whether it fits `memory_budget_gb`.
+
+        `predicted: None` (never an exception) when nbf cannot be counted, so a
+        caller -- including `run`'s pre-check -- can tell "does not fit" apart
+        from "cannot say", and does not refuse a run over a model limitation.
+        """
+        if self.basis != "sto-3g":
+            return {
+                "predicted": None,
+                "basis": f"unmeasured: nbf is counted from the STO-3G table only, tier is {self.basis}; "
+                "get it from `ferric.shell_info(mol, basis_set)` to check this basis",
+            }
+        if any(sto3g_basis_functions_strict(list(p.symbols)) is None for c in candidates for p in c.poses):
+            return {"predicted": None, "basis": "unmeasured: a pose has an element outside the STO-3G table"}
+        sizes = [self._size(p) for c in candidates for p in c.poses]
+        if not sizes:
+            return {"predicted": None, "basis": "unmeasured: no poses"}
+        worst = max(sizes, key=lambda s: s.n_basis_functions)
+        # def2-universal-jkfit on these ligands, counted with ferric.shell_info: 3805 aux functions.
+        # It is the aux basis run_dft always uses for RI-J, and it does not depend on the orbital basis.
+        mem = dft_memory_gb(worst, 3805)
+        mem["fits_budget"] = mem["total_gb"] <= self.memory_budget_gb
+        mem["budget_gb"] = self.memory_budget_gb
+        mem["n_atoms"] = worst.n_atoms
+        mem["n_basis_functions"] = worst.n_basis_functions
+        return mem
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        for cand in candidates:
+            require_passing_poses(cand, ctx)
+        import ferric
+
+        if self.check_memory:
+            mem = self.estimate_memory(candidates)
+            # "cannot say" (predicted None, e.g. a basis the model cannot count) is NOT "does not fit":
+            # refusing to run over a gap in the cost model would block exactly the def2-SVP case someone
+            # with more memory legitimately wants. Only a computed overflow refuses.
+            if "fits_budget" in mem and not mem["fits_budget"]:
+                raise DftMemoryError(
+                    f"{self.basis}/{self.functional} on the largest pose ({mem['n_atoms']} atoms, "
+                    f"{mem['n_basis_functions']} bf) needs ~{mem['total_gb']:.1f} GB resident "
+                    f"(AO cache {mem['ao_cache_gb']:.1f} + RI tensor {mem['ri_tensor_gb']:.1f}), over the "
+                    f"{self.memory_budget_gb:.1f} GB budget. ferric would spill the RI tensor to disk and "
+                    "re-read it EVERY SCF iteration (~1 min/iteration at 150 MB/s), so this is a cliff, not "
+                    "a slowdown. Use a smaller basis, or raise memory_budget_gb (and FERRIC_MEM_BUDGET_GB) "
+                    "if the machine really has the memory. Pass check_memory=False to run anyway."
+                )
+            # The budget check above is against a FIXED number, so it passes on a machine that has no
+            # memory free right now -- which is how a 2 GB-predicted run thrashed on a box with 4 GB
+            # available, paging 5 GB off disk and taking 67 min on a molecule whose peers took 140 s.
+            # `require_free_gb` compares against what the machine actually has, so a run that would
+            # swap is refused up front instead of stalling. None (the default) keeps the old behaviour.
+            if self.require_free_gb is not None:
+                free_gb = available_memory_gb()
+                if free_gb is not None and free_gb < self.require_free_gb:
+                    raise DftMemoryError(
+                        f"{free_gb:.1f} GB available, below the {self.require_free_gb:.1f} GB this run "
+                        "requires. A DFT process that outgrows free memory does not slow down gracefully: "
+                        "it pages the RI tensor off disk every SCF iteration. Free memory and retry, or "
+                        "lower require_free_gb (set it to None to disable this check)."
+                    )
+
+        field: list[PointCharge] = ctx["field"]
+        self.field_provenance = getattr(field, "provenance", None)
+        charges = [c.as_ferric_bohr() for c in field]
+        bs = ferric.BasisSet.bundled(self.basis)
+        for cand in candidates:
+            vals: list[float] = []
+            d3s: list[float] = []
+            charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
+            for i, pose in enumerate(cand.poses):
+                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
+                kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
+                if self.max_iter is not None:
+                    kw["max_iter"] = self.max_iter
+                vac = ferric.run_dft(mol, bs, functional=self.functional, **kw)
+                fld = ferric.run_dft(mol, bs, functional=self.functional, point_charges=charges, **kw)
+                if not (vac.converged and fld.converged):
+                    raise RuntimeError(
+                        f"{cand.name} pose {i}: SCF did not converge (vacuum={vac.converged}, field={fld.converged})"
+                    )
+                vals.append((_dft_energy(fld) - _dft_energy(vac)) * HARTREE_TO_KCAL)
+                # Geometry-only, so it is the same for both legs and cancels in dE_int above. Computed
+                # once per pose and reported separately, never folded into dE_int.
+                d3s.append(ferric.d3bj_energy(mol, functional=self.functional) * HARTREE_TO_KCAL)
+            cand.per_pose["dE_int"] = vals
+            cand.per_pose["E_d3"] = d3s
+
+
 # ---------------------------------------------------------------- surface ESP
 
 
@@ -856,6 +1103,160 @@ class Gfn2:
             cand.per_pose["E_gfn2"] = [
                 xtb_singlepoint(p.symbols, p.coords_ang, q, charges) * HARTREE_TO_KCAL for p in cand.poses
             ]
+
+
+# ---------------------------------------------------------------- designability
+
+
+class SaScoreUnavailableError(ImportError):
+    """RDKit's contrib `sascorer` is not importable."""
+
+
+def _sascorer():
+    """RDKit's bundled SA_Score contrib module, which is not on the import path by default."""
+    import os
+    import sys
+
+    from rdkit.Chem import RDConfig
+
+    path = os.path.join(RDConfig.RDContribDir, "SA_Score")
+    if path not in sys.path:
+        sys.path.append(path)
+    try:
+        import sascorer
+    except ImportError as e:  # pragma: no cover - a stripped RDKit install
+        raise SaScoreUnavailableError(
+            "RDKit's contrib SA_Score is not importable; it ships with the rdkit wheel under "
+            f"{path}. Install the full rdkit (extra 'rdkit') rather than rdkit-stubs."
+        ) from e
+    return sascorer
+
+
+@dataclass
+class Designability:
+    """Would a chemist make this? Properties, drift from the parent, and synthetic accessibility.
+
+    **Why this tier exists.** Every other tier here measures validity (does it parse, are the bonds
+    sane, does the scaffold hold) or energy. None asks whether the molecule is worth making, and that
+    gap biases the funnel in a specific direction: a fixed-geometry interaction energy gets more
+    negative as atoms are added, so a generator that invents large, greasy, hard-to-make substituents
+    scores BETTER on `dE_int` than a conservative one. Measured on the gen-compare set, the two
+    generators' grown mass differs by a median 7 vs 2 heavy atoms, so that bias is live, not
+    hypothetical.
+
+    **The parent is the reference, not a Lipinski box.** `ctx["parent"]` is a real drug-like molecule,
+    so what matters is the DRIFT a substituent causes: `d_mw`, `d_logp`, `d_sa`, `d_qed`. Absolute
+    values are dominated by the shared scaffold and say little about the generator. The parent's own
+    absolute values are recorded in `settings()` so a reader can reconstruct them.
+
+    **What each number is, and is not:**
+
+    * `sa_score` -- Ertl & Schuffenhauer synthetic accessibility, 1 (easy) to 10 (hard), from RDKit's
+      contrib `sascorer`. A fragment-contribution heuristic, NOT a retrosynthesis: it is a screen for
+      a tail of implausible chemistry, and a single value carries no verdict.
+    * `qed` -- a drug-likeness composite fitted to ORAL DRUGS. A scaffold-grown analogue of one
+      specific parent is not what it was fitted to, so `d_qed` is reported but should not be ranked on.
+    * `mw`, `logp`, `tpsa` -- RDKit descriptors (`MolWt`, `Crippen.MolLogP`, `TPSA`). `logp` is a
+      calculated estimate, not a measurement.
+
+    Structural alerts are deliberately NOT computed here: `smeltery.properties.RdkitAlertProvider`
+    already covers PAINS/Brenk/NIH with its own licence provenance, and duplicating it would give two
+    numbers that could disagree.
+
+    A descriptor tier, not a gate and not a ranker: no threshold is applied and no systematic floor
+    has been measured, so `systematic_floor` returns None for every quantity.
+    """
+
+    name: str = "designability"
+    #: Reported alongside each drift so a reader sees what regime the parent itself sits in.
+    parent_properties: dict | None = None
+
+    _KEYS = ("mw", "logp", "tpsa", "qed", "sa_score", "heavy_atoms")
+    _DRIFT = ("d_mw", "d_logp", "d_tpsa", "d_qed", "d_sa", "d_heavy")
+
+    def settings(self) -> dict:
+        import rdkit
+
+        return {
+            "properties": "RDKit MolWt, Crippen.MolLogP, TPSA, QED",
+            "sa_score": "Ertl & Schuffenhauer, RDKit contrib sascorer, 1 (easy) to 10 (hard)",
+            "reference": "ctx['parent']; drift is analogue minus parent",
+            "alerts": "not computed here; see smeltery.properties.RdkitAlertProvider (PAINS/Brenk/NIH)",
+            "rdkit": rdkit.__version__,
+            "parent_properties": self.parent_properties,
+        }
+
+    def produces(self) -> dict[str, str]:
+        units = {
+            "mw": "g/mol",
+            "logp": "log units (calculated)",
+            "tpsa": "A^2",
+            "qed": "0-1 (unitless)",
+            "sa_score": "1-10 (unitless)",
+            "heavy_atoms": "count",
+            "d_mw": "g/mol",
+            "d_logp": "log units (calculated)",
+            "d_tpsa": "A^2",
+            "d_qed": "0-1 (unitless)",
+            "d_sa": "1-10 (unitless)",
+            "d_heavy": "count",
+        }
+        return units
+
+    def systematic_floor(self, quantity: str) -> float | None:
+        if quantity not in self.produces():
+            raise _unknown_quantity(self, quantity)
+        return None  # not measured; these are descriptors, not calibrated predictions
+
+    def estimate_cost(self, candidates: list[Candidate]) -> dict:
+        return {
+            "quantity": "wall_time",
+            "unit": "s",
+            "predicted": None,
+            "basis": "unmeasured; RDKit descriptors on a SMILES are sub-millisecond and pose-independent",
+        }
+
+    @staticmethod
+    def _properties(smiles: str) -> dict:
+        from rdkit.Chem import QED, Crippen, Descriptors
+
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"unparseable SMILES: {smiles!r}")
+        return {
+            "mw": float(Descriptors.MolWt(mol)),
+            "logp": float(Crippen.MolLogP(mol)),
+            "tpsa": float(Descriptors.TPSA(mol)),
+            "qed": float(QED.qed(mol)),
+            "sa_score": float(_sascorer().calculateScore(mol)),
+            "heavy_atoms": int(mol.GetNumHeavyAtoms()),
+        }
+
+    def run(self, candidates: list[Candidate], ctx: dict) -> None:
+        parent: Candidate = ctx["parent"]
+        ref = self._properties(parent.smiles)
+        self.parent_properties = {k: round(v, 3) for k, v in ref.items()}
+        for cand in candidates:
+            p = self._properties(cand.smiles)
+            values = dict(p)
+            values.update(
+                {
+                    "d_mw": p["mw"] - ref["mw"],
+                    "d_logp": p["logp"] - ref["logp"],
+                    "d_tpsa": p["tpsa"] - ref["tpsa"],
+                    "d_qed": p["qed"] - ref["qed"],
+                    "d_sa": p["sa_score"] - ref["sa_score"],
+                    "d_heavy": p["heavy_atoms"] - ref["heavy_atoms"],
+                }
+            )
+            # Every quantity here is a function of the SMILES alone, so the value is CONSTANT across a
+            # candidate's poses. It is still written pose-major, once per pose, because `per_pose` is
+            # the only channel the Tier protocol and the run record have: a second channel would mean
+            # two places to look for a result. The repetition is therefore intentional and not a
+            # per-pose dependence -- averaging these across poses is a no-op, and their SEM is zero.
+            n = max(len(cand.poses), 1)
+            for key, value in values.items():
+                cand.per_pose[key] = [value] * n
 
 
 # ---------------------------------------------------------------- force field

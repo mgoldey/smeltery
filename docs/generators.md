@@ -70,6 +70,24 @@ Repairs (all off by default, see "Repairing over-valent output") run before sani
 The default forbidden list holds one pattern, `peroxide`: `[OX2][OX2]`. Replace it through
 `FilterConfig(forbidden_smarts={...})`.
 
+### When every sample is `scaffold_lost`, suspect the cut
+
+A whole batch rejected `scaffold_lost` usually means the scaffold itself cannot be grown back, not that
+the generator failed. `build_scaffold` now refuses the common cause — a cut that severs an **aromatic
+ring bond**, leaving a partial ring whose atoms are no longer aromatic — but two things are worth
+knowing:
+
+* **`scaffold_indices` are positions in canonical SMILES order**, not the order of the SDF the parent
+  was read from. The two differ; indices taken from an SDF describe a different set of atoms and
+  typically surface as rejected samples rather than as an error.
+* **Prefer cutting one acyclic bond and keeping every ring whole.** A cut through a ring was accepted
+  before the guard existed, because `build_scaffold` kekulizes before cutting: the fragment sanitizes
+  and the broken ring comes back as an open chain. A full GPU batch was generated from such a scaffold
+  and every molecule was rejected.
+
+`docs/sbdd-size-std-retrospective.md` records the episode and the enumeration of which cuts a given
+parent actually admits.
+
 ## Repairing over-valent output
 
 The model assigns bonds from distances and never sees valences, so most of its output fails sanitization because one

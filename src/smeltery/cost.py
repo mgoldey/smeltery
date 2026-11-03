@@ -148,12 +148,25 @@ def sto3g_basis_functions(symbols: list[str]) -> int:
     return sum(_STO3G_NBF.get(s, 5) for s in symbols)
 
 
-def ri_tensor_gb(n_basis_functions: int, n_aux_functions: int) -> float:
-    """Resident RI three-index `(P|mn)` tensor: naux x nbf^2 x 8 bytes.
+def ri_tensor_gb(n_basis_functions: int, n_aux_functions: int, *, packed: bool = True) -> float:
+    """Resident RI three-index `(P|mn)` tensor, in GB.
+
+    `packed=True` (the default) is what ferric actually allocates: the `mn`
+    pair index is SYMMETRIC, so it stores the triangle,
+    `naux x nbf(nbf+1)/2 x 8` bytes. `packed=False` gives the dense
+    `naux x nbf^2 x 8` form.
+
+    **The dense form was this function's original return value and it
+    overestimates by 2nbf/(nbf+1), i.e. ~2x at any real size.** Verified
+    against ferric's own spill warning
+    on a 74-atom ligand from the gen-compare set at def2-SVP (nbf=757,
+    naux=3805, def2-universal-jkfit): ferric reported **8.73 GB**; the packed
+    formula gives 8.73 GB (ratio 1.00) and the dense one 17.44 GB (ratio
+    2.00). Nothing called this function, so no past number needed revising.
 
     `run_dft` always enables RI-J with `def2-universal-jkfit`. Measured on
     danuglipron that is **3,635 aux functions against 235 orbital functions
-    (15x)**, for a 1.61 GB tensor -- a sixth of the run's ~9.75 GB peak.
+    (15x)**, for a 1.61 GB tensor (dense) -- a sixth of the run's ~9.75 GB peak.
 
     Counted from `crates/ferric-core/src/basis/bundled/def2-universal-jkfit.json`,
     not estimated: a first guess of "naux ~700-950" was low by ~4x and left
@@ -167,7 +180,8 @@ def ri_tensor_gb(n_basis_functions: int, n_aux_functions: int) -> float:
     fixing it would mean ADDING a small-basis JK set, not selecting one. The
     number is here so the term is accounted for, not as a tuning knob.
     """
-    return n_aux_functions * n_basis_functions * n_basis_functions * 8 / 1e9
+    pairs = n_basis_functions * (n_basis_functions + 1) / 2 if packed else n_basis_functions**2
+    return n_aux_functions * pairs * 8 / 1e9
 
 
 def fits_in_budget(size: DftSize, budget_gb: float) -> bool:
@@ -245,3 +259,93 @@ def sto3g_basis_functions_strict(symbols: list[str]) -> int | None:
     if any(s not in _STO3G_NBF for s in symbols):
         return None
     return sto3g_basis_functions(symbols)
+
+
+# ---------------------------------------------------------------------------
+# PBE+D3 tier (smeltery's own; measured, not structural)
+# ---------------------------------------------------------------------------
+#
+# `FieldDftInteraction` runs ferric KS-DFT, which DOES have an XC grid, so
+# unlike the RHF tier its cost scales with `DftSize.xc_fock_work` (nbf^2 x
+# npts) -- the term that is paid EVERY SCF iteration. That is the model used
+# here, anchored on a measured reference rather than on a fitted power law in
+# nbf alone, which is what made the RHF estimate wrong by ~100x when
+# extrapolated past its calibration ceiling.
+#
+# Reference: a 74-atom ligand from the gen-compare PocketXMol set, PBE/STO-3G,
+# ferric b22183b (release, CPU; `gpu_status()` reports compiled=False), one
+# worker on 2 cores with OPENBLAS/OMP threads pinned to 1:
+#
+#     vacuum              71.1 s, 16 SCF iterations, converged
+#     624 point charges   80.7 s, 18 SCF iterations, converged
+#
+# The field leg costs 13% more, and that is the two extra ITERATIONS, not a
+# larger per-iteration cost: point charges add a one-body term, not new
+# two-electron work. Both legs are therefore given their own reference rather
+# than assuming the field leg matches vacuum.
+#
+# Limits, stated so the number is not over-read:
+# * it assumes the target converges in the reference's iteration count. For
+#   DFT this is the documented weak point: the ferric alkanes all took exactly
+#   10 iterations but danuglipron took 18, so a slow-converging chemistry is
+#   UNDERESTIMATED in proportion. `DftSize.xc_fock_work`'s docstring says the
+#   same thing;
+# * it is single-worker wall time on the machine above; and
+# * it says nothing about memory. Ask `dft_memory_gb` separately -- at
+#   def2-SVP these same molecules spill the RI tensor to disk, which is a
+#   performance cliff the time model does not see.
+
+#: PBE/STO-3G reference, measured 2026-10-26 (see the comment block above).
+PBE_REFERENCE = DftSize(n_atoms=74, n_basis_functions=246)
+PBE_REFERENCE_VACUUM_SECONDS = 71.1
+PBE_REFERENCE_FIELD_SECONDS = 80.7
+PBE_REFERENCE_VACUUM_ITERATIONS = 16
+PBE_REFERENCE_FIELD_ITERATIONS = 18
+PBE_REFERENCE_MACHINE = "2 cores (taskset 0,1), OPENBLAS/OMP threads=1, ferric b22183b release CPU"
+
+
+def pbe_seconds_per_pose(size: DftSize) -> float:
+    """Wall seconds for ONE pose's vacuum + field PBE pair, at the reference's iteration count.
+
+    Scales `xc_fock_work` from the measured reference, each leg from its own
+    measurement. A LOWER BOUND for a chemistry that converges more slowly than
+    the reference -- see the limits above.
+    """
+    return size.predicted_seconds(PBE_REFERENCE, PBE_REFERENCE_VACUUM_SECONDS) + size.predicted_seconds(
+        PBE_REFERENCE, PBE_REFERENCE_FIELD_SECONDS
+    )
+
+
+def dft_memory_gb(size: DftSize, n_aux_functions: int) -> dict[str, float]:
+    """The two resident terms that decide whether a KS-DFT run stays in core.
+
+    `ao_cache` is chi + grad-chi over the grid; `ri_tensor` is the packed
+    three-index `(P|mn)`. ferric spills the RI tensor to disk when it exceeds
+    the memory budget and then RE-READS IT EVERY ITERATION, so exceeding the
+    budget is a cliff, not a gradual tradeoff.
+    """
+    ri = ri_tensor_gb(size.n_basis_functions, n_aux_functions)
+    return {"ao_cache_gb": size.ao_cache_gb, "ri_tensor_gb": ri, "total_gb": size.ao_cache_gb + ri}
+
+
+def available_memory_gb() -> float | None:
+    """Memory the machine can hand out right now, in GB, or None if it cannot be read.
+
+    `MemAvailable` from /proc/meminfo: the kernel's own estimate of what a new allocation can get
+    without swapping, which is the question that matters here. `MemFree` is the wrong field (it
+    excludes reclaimable page cache) and psutil is not a dependency of this package.
+
+    **This is a different question from `dft_memory_gb`**, which predicts what ONE calculation needs.
+    A long-lived run was measured holding ~11 GB resident while its per-calculation prediction was
+    ~2 GB, so a prediction that fits a budget says nothing about whether the machine has the room.
+    Returns None rather than raising on a platform without /proc, so a caller can tell "no headroom"
+    from "cannot tell" the way `estimate_memory` already does.
+    """
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 / 1024  # kB -> GB
+    except (OSError, ValueError, IndexError):
+        return None
+    return None

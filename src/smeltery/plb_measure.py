@@ -330,6 +330,45 @@ def permutation_matrix(n: int, *, max_exact: int = 9, n_mc: int = 200_000, seed:
     return np.array([rng.permutation(n) for _ in range(n_mc)], dtype=np.int16), False
 
 
+#: Elements of the widest per-block temporary in `_null_stats` (8 bytes each, so ~128 MB). Kendall's pair-sign
+#: array is (permutations, n(n-1)/2): at n ~ 200 and 200k permutations it is ~31 GB if built whole.
+NULL_BLOCK_ELEMENTS = 1 << 24
+
+
+def _null_stats(x: np.ndarray, y: np.ndarray, perms: np.ndarray) -> dict[str, np.ndarray]:
+    """Each null statistic, one value per row of `perms`, computed in row blocks to bound memory.
+
+    Every statistic is row-wise, so blocking changes no value: the result is identical for any block size.
+    """
+    n = len(x)
+    iu = np.triu_indices(n, 1)
+    sy = np.sign(y[:, None] - y[None, :])[iu]
+    n0 = len(sy)
+    n0_y = n0 - (sy == 0).sum()
+    rank_x, ry = _avg_ranks(x), _avg_ranks(y)
+    xc = x - x.mean()
+
+    def corr(a, b):  # row-wise Pearson of a (N, n) with b (n,)
+        ac, bc = a - a.mean(1, keepdims=True), b - b.mean()
+        den = np.sqrt((ac**2).sum(1) * (bc**2).sum())
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return (ac * bc).sum(1) / den
+
+    block = max(1, NULL_BLOCK_ELEMENTS // max(n0, n))
+    parts: dict[str, list[np.ndarray]] = {k: [] for k in ("spearman", "kendall", "pearson", "slope", "n_sign_agree")}
+    for start in range(0, len(perms), block):
+        p = perms[start : start + block]
+        xp = x[p]  # (B, n)
+        sxp = np.sign(xp[:, iu[0]] - xp[:, iu[1]])  # (B, pairs)
+        den_k = np.sqrt((n0 - (sxp == 0).sum(1)) * n0_y)
+        parts["spearman"].append(corr(rank_x[p], ry))
+        parts["kendall"].append(np.where(den_k > 0, (sxp * sy).sum(1) / np.where(den_k > 0, den_k, 1), np.nan))
+        parts["pearson"].append(corr(xp, y))
+        parts["slope"].append(((xp - xp.mean(1, keepdims=True)) * (y - y.mean())).sum(1) / (xc**2).sum())
+        parts["n_sign_agree"].append((np.sign(xp) == np.sign(y)).sum(1).astype(float))
+    return {k: np.concatenate(v) for k, v in parts.items()}
+
+
 def permutation_null(x, y, *, max_exact: int = 9, n_mc: int = 200_000, seed: int = 0) -> dict[str, Any]:
     """Null distribution of spearman, kendall, pearson, slope and sign-agreement count under label shuffling.
 
@@ -341,28 +380,7 @@ def permutation_null(x, y, *, max_exact: int = 9, n_mc: int = 200_000, seed: int
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     n = len(x)
     perms, exact = permutation_matrix(n, max_exact=max_exact, n_mc=n_mc, seed=seed)
-    xp = x[perms]  # (N, n)
-    rx, ry = _avg_ranks(x)[perms], _avg_ranks(y)
-    iu = np.triu_indices(n, 1)
-    sy = np.sign(y[:, None] - y[None, :])[iu]
-    sxp = np.sign(xp[:, iu[0]] - xp[:, iu[1]])  # (N, pairs)
-    n0 = len(sy)
-    den_k = np.sqrt((n0 - (sxp == 0).sum(1)) * (n0 - (sy == 0).sum()))
-
-    def corr(a, b):  # row-wise Pearson of a (N, n) with b (n,)
-        ac, bc = a - a.mean(1, keepdims=True), b - b.mean()
-        den = np.sqrt((ac**2).sum(1) * (bc**2).sum())
-        with np.errstate(invalid="ignore", divide="ignore"):
-            return (ac * bc).sum(1) / den
-
-    xc = x - x.mean()
-    stats = {
-        "spearman": corr(rx, ry),
-        "kendall": np.where(den_k > 0, (sxp * sy).sum(1) / np.where(den_k > 0, den_k, 1), np.nan),
-        "pearson": corr(xp, y),
-        "slope": ((xp - xp.mean(1, keepdims=True)) * (y - y.mean())).sum(1) / (xc**2).sum(),
-        "n_sign_agree": (np.sign(xp) == np.sign(y)).sum(1).astype(float),
-    }
+    stats = _null_stats(x, y, perms)
     obs = point_stats(x, y)
     out: dict[str, Any] = {"exact": exact, "n_permutations": int(len(perms))}
     for k, v in stats.items():
