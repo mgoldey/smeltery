@@ -2,6 +2,10 @@
 
 **Status: design, approved for planning (2026-11-03).**
 
+**For implementation, `ralph/bench/specs/` and `ralph/bench/features.json` now win.** This
+document keeps the reasons. If the two disagree, the disagreement is a bug: record it in
+`ralph/bench/NOTES.md`.
+
 One application a computational chemist drives from a workstation: open a structure, assemble a
 pipeline by clicking, run it, look at the poses, read the ΔΔE with its floor, decide, and hand a
 bench chemist something they can read and answer. ELN discipline, Avogadro's directness, IQmol's
