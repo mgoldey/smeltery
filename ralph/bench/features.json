@@ -152,7 +152,7 @@
         "Give `bench` its own comment line above it naming smeltery.bench as the importer."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R11-lint-clean",

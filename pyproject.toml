@@ -72,6 +72,8 @@ experiments = ["psutil>=5.9", "scipy>=1.11"]
 # The GUI (smeltery.gui.app, docs/gui.md): the Marimo app and its views. Only smeltery.gui.views imports these, and
 # only inside functions, so `import smeltery.gui` works without the extra. mols2grid needs pandas and pulls it in.
 gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
+# smeltery.bench (the `smeltery bench` web app) imports these.
+bench = ["fastapi>=0.120", "uvicorn>=0.38", "jinja2>=3.1"]
 # `smeltery gui OUT --desktop`: the same app in a pywebview window instead of a browser tab.
 desktop = ["pywebview>=5", "marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
