@@ -124,7 +124,7 @@
         "Append the three entries to .gitignore."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R9-docs-bench-true",
