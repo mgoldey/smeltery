@@ -315,7 +315,7 @@
         "Mutation: add `import sqlite3` to a file in use_cases/; confirm a test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "K1-verdict",
