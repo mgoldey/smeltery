@@ -96,7 +96,7 @@
         "If the adapter has no edit method, assert instead that no public method name starts with edit or update."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R7-stores-under-root",
