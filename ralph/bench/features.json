@@ -332,7 +332,7 @@
         "Mutation: make an unranked cut return its first group as winner; confirm a test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "K2-plan-cells",
