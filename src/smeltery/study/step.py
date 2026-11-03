@@ -111,6 +111,20 @@ class StepResult:
 
 
 @dataclass
+class PlanCells(dict):
+    """A per-cell plan: ``{Condition: {step_name: "cached"|"to_run"}}``.
+
+    Also accepts a ``(Condition, step_name)`` tuple key for convenience.
+    """
+
+    def __getitem__(self, key):
+        if isinstance(key, tuple) and len(key) == 2:
+            cond, step = key
+            return super().__getitem__(cond)[step]
+        return super().__getitem__(key)
+
+
+@dataclass
 class Study:
     """Steps, and the conditions to run them at.
 
@@ -216,16 +230,9 @@ class Study:
 
     def plan(self, cache: Cache) -> dict:
         """What running would do, without doing it: how many steps are cached and how many would run."""
-        cached = to_run = 0
-        for cond in self.conditions:
-            keys: dict[str, str] = {}
-            for s in self.order():
-                key = step_key(s.name, s.version, s.params(cond), {n: keys[n] for n in s.needs()})
-                keys[s.provides()] = key
-                if cache.has(key):
-                    cached += 1
-                else:
-                    to_run += 1
+        cells = self.plan_cells(cache)
+        cached = sum(1 for c in cells if c["state"] == "cached")
+        to_run = sum(1 for c in cells if c["state"] == "to_run")
         return {
             "study": self.name,
             "conditions": len(self.conditions),
@@ -233,6 +240,24 @@ class Study:
             "cached": cached,
             "to_run": to_run,
         }
+
+    def plan_cells(self, cache: Cache) -> list[dict]:
+        """Per-cell breakdown: one row per (condition, step) with keys condition, step, state, key."""
+        out = []
+        for cond in self.conditions:
+            keys: dict[str, str] = {}
+            for st in self.order():
+                key = step_key(st.name, st.version, st.params(cond), {n: keys[n] for n in st.needs()})
+                keys[st.provides()] = key
+                out.append(
+                    {
+                        "condition": cond,
+                        "step": st.name,
+                        "state": "cached" if cache.has(key) else "to_run",
+                        "key": key,
+                    }
+                )
+        return out
 
     def dag(self) -> list[dict]:
         """The DAG as plain data, for a viewer: one row per step with its edges and order."""

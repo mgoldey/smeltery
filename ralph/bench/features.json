@@ -348,7 +348,7 @@
         "Mutation: change plan_cells' key derivation (e.g. drop upstream keys); confirm a test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "K3-split-parent-once",
