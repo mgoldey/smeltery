@@ -366,7 +366,7 @@
         "Data source: the partial JSON files on disk and the counted measure calls."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "K4-split-combine-identical",

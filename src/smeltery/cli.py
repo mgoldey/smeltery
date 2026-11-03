@@ -108,6 +108,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import re
 import sys
 import tomllib
@@ -747,7 +748,7 @@ def per_pose_results(plan: Plan) -> tuple[dict, dict]:
     return per_pose, units
 
 
-def run_plan(plan: Plan, measure=None) -> tuple[RunRecord, dict]:
+def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
     `measure(plan)`, when given, fills `per_pose[QUANTITY]` on every candidate in place of running
@@ -759,16 +760,26 @@ def run_plan(plan: Plan, measure=None) -> tuple[RunRecord, dict]:
     else:
         _stage("field_interaction", lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
-    paired = {c.name: paired_delta(plan.parent, c, QUANTITY) for c in analogues}
-    unpaired = {c.name: unpaired_delta(plan.parent, c, QUANTITY) for c in analogues}
-    res = cut(paired, keep=plan.cfg["cut"]["keep"], z=plan.cfg["cut"].get("z", 2.0), floor=plan.floor)
-    results = {
-        "paired_ddE": {k: {"mean": v.mean, "sem": v.sem, "n": v.n, "per_pose": v.per_pose} for k, v in paired.items()},
-        "unpaired_sem": {k: v.sem for k, v in unpaired.items()},
-        "cut": {"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary},
-        "stages": plan.stage_log,
-        "funnel": funnel_counts(plan, res),
-    }
+    if partial:
+        paired = {}
+        unpaired = {}
+        res = None
+        results: dict[str, object] = {
+            "stages": plan.stage_log,
+        }
+    else:
+        paired = {c.name: paired_delta(plan.parent, c, QUANTITY) for c in analogues}
+        unpaired = {c.name: unpaired_delta(plan.parent, c, QUANTITY) for c in analogues}
+        res = cut(paired, keep=plan.cfg["cut"]["keep"], z=plan.cfg["cut"].get("z", 2.0), floor=plan.floor)
+        results: dict[str, object] = {
+            "paired_ddE": {
+                k: {"mean": v.mean, "sem": v.sem, "n": v.n, "per_pose": v.per_pose} for k, v in paired.items()
+            },
+            "unpaired_sem": {k: v.sem for k, v in unpaired.items()},
+            "cut": {"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary},
+            "stages": plan.stage_log,
+            "funnel": funnel_counts(plan, res),
+        }
     results["candidate_order"] = [c.name for c in plan.candidates]
     results["per_pose"], results["units"] = per_pose_results(plan)
     results["field"] = [[float(c.q), *(float(v) for v in c.xyz_ang)] for c in plan.field]
@@ -840,7 +851,11 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
     for c in plan.candidates:
         path = pose_dir / pose_file_name(c.name)
         values = results["per_pose"][c.name]
-        paired = None if c is plan.parent else results["paired_ddE"][c.name]["per_pose"]
+        paired = None
+        if c is not plan.parent:
+            paired_ddE = results.get("paired_ddE", {})
+            if c.name in paired_ddE and isinstance(paired_ddE[c.name], dict):
+                paired = paired_ddE[c.name].get("per_pose")
         mol = mols[c.name]
         with Chem.SDWriter(str(path)) as w:
             for i, conf in enumerate(mol.GetConformers()):
@@ -926,6 +941,7 @@ VIEWERS = {
     "central": "smeltery.dashboard",
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
+    "bench": "smeltery.bench.app",
 }
 
 
@@ -943,6 +959,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("central", help="alias for dashboard")
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
+    sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     tw.add_argument("--host", default="127.0.0.1:7233")
     tw.add_argument("--namespace", default="default")
@@ -952,6 +969,13 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("config", type=Path)
     run.add_argument("--out", type=Path, default=Path("out"), help="directory for the run record")
     run.add_argument("--plan", action="store_true", help="stop before the SCFs: poses, pocket, parity, digest")
+    run.add_argument(
+        "--only-candidate",
+        dest="only_candidate",
+        default=None,
+        help="measure one candidate only, writing a partial result",
+    )  # noqa: E501
+    run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     args = ap.parse_args(argv)
     if getattr(args, "command", None) == "golden":
         from smeltery.golden import main as _golden_main
@@ -965,8 +989,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         async def _run_worker():
-            from temporalio.client import Client
-            from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+            Client = __import__("temporalio.client", fromlist=["Client"]).Client  # noqa: E501
+            UnsandboxedWorkflowRunner = __import__(
+                "temporalio.worker", fromlist=["UnsandboxedWorkflowRunner"]
+            ).UnsandboxedWorkflowRunner  # noqa: E501
+            Worker = __import__("temporalio.worker", fromlist=["Worker"]).Worker
 
             client = await Client.connect(args.host, namespace=args.namespace)
             async with Worker(
@@ -988,7 +1015,87 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return 0
     try:
-        plan = build_plan(load_config(args.config), out_dir=args.out)
+        cfg = load_config(args.config)
+        if args.only_candidate is not None:
+            if args.only_candidate not in cfg["candidates"]:
+                print(f"config error: unknown candidate {args.only_candidate!r}", file=sys.stderr)
+                return 2
+            parent = cfg["parent"]
+            if args.only_candidate == parent:
+                filtered = {parent: cfg["candidates"][parent]}
+            else:
+                filtered = {
+                    parent: cfg["candidates"][parent],
+                    args.only_candidate: cfg["candidates"][args.only_candidate],
+                }
+            cfg2 = {**cfg, "candidates": filtered}
+            plan = build_plan(cfg2, out_dir=args.out)
+            if args.plan:
+                print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
+                return 0
+            target_name = args.only_candidate
+
+            def measure_one(p):
+                target = next(c for c in p.candidates if c.name == target_name)
+                p.tier.run([target], {"field": p.field})
+
+            rec, out = run_plan(plan, measure=measure_one, partial=True)
+            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+            # rename to partial-<name>.json and drop cut
+            p = Path(path)
+            new_path = p.parent / f"partial-{args.only_candidate}.json"
+            data = json.loads(p.read_text())
+            data.get("results", {}).pop("cut", None)
+            data.get("results", {}).pop("paired_ddE", None)
+            new_path.write_text(json.dumps(data, indent=2, sort_keys=True, default=str))
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            print(f"\npartial record: {new_path}\ninput_digest {rec.input_digest}")
+            return 0
+        if args.combine:
+            out_dir = Path(args.out)
+            partials = sorted(out_dir.glob("partial-*.json"))
+            names = {p.name[len("partial-") : -len(".json")] for p in partials}
+            analogues = [n for n in cfg["candidates"] if n != cfg["parent"]]
+            missing = [n for n in analogues if n not in names]
+            if missing:
+                print("combine: missing partials for " + ", ".join(missing), file=sys.stderr)
+                raise SystemExit(2)
+            plan = build_plan(cfg, out_dir=args.out)
+            per_candidate_values = {}
+            parent_values = None
+            for p in partials:
+                recp = json.loads(p.read_text())
+                pp = recp["results"]["per_pose"]
+                name = p.name[len("partial-") : -len(".json")]
+                if name != cfg["parent"] and name in pp and "dE_int" in pp[name]:
+                    per_candidate_values[name] = pp[name]["dE_int"]
+                parent_ok = (
+                    parent_values is None
+                    and name == cfg["parent"]
+                    and cfg["parent"] in pp
+                    and "dE_int" in pp[cfg["parent"]]
+                )
+                if parent_ok:
+                    parent_values = pp[cfg["parent"]]["dE_int"]
+            if parent_values is None:
+                raise SystemExit(2)
+
+            def measure(plan):
+                for c in plan.candidates:
+                    if c is plan.parent:
+                        c.per_pose["dE_int"] = list(parent_values)
+                    else:
+                        c.per_pose["dE_int"] = list(per_candidate_values[c.name])
+
+            rec, out = run_plan(plan, measure=measure)
+            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+            print(format_table(plan, out))
+            print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+            return 0
+        plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
             print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
             return 0
