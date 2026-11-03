@@ -426,7 +426,7 @@
         "Record the counts in NOTES.md."
       ],
       "full_suite": true,
-      "passes": false
+      "passes": true
     },
     {
       "id": "S1-injected-app",
