@@ -6,3 +6,8 @@ last. Not a diary: if it does not change what the next iteration does, leave it 
 - 2026-11-03: features.json was written after a review of the first implementation pass. That pass
   left a circular atom-order test, a queue race reporting exit-0 tasks as failed, and a duplicate
   `bench/application/` package. The R-features repair those first.
+- 2026-11-03 (R1): `bench/application/` was already deleted (untracked, so no history) before R1
+  ran; its diverged edit_pipeline/launch_run/read_run/propose_candidate could not be diffed. The
+  use_cases/ copies are the only ones left; the U-features own their behaviour. Until R2 and R11
+  pass, the bench gate fails on the SubprocessTaskQueue returncode test and ruff fails on
+  tests/bench: those failures are pre-existing, not yours.
