@@ -132,3 +132,19 @@ target-version = "py311"
 select = ["E", "F", "I", "B"]
 # B905 (zip strict=) would change runtime behaviour at 35 sites; not a style fix.
 ignore = ["B905"]
+
+# `ty` (Astral), same toolchain as ruff and uv. Run with `uvx ty@0.0.96 check` -- pinned, because ty is pre-1.0
+# and a bump must be a decision rather than a surprise. It is NOT a runtime or dev dependency: nothing imports it.
+#
+# Scope is deliberate. `src/smeltery/bench/` is checked as a required gate, because a ports-and-adapters layer is
+# only worth building if its signatures are enforced; an unchecked contract is a comment. The rest of the repo is
+# checked advisory-only (a non-blocking CI job), so drift stays visible without a pre-1.0 tool being able to break
+# main. Widen `include` when ty reaches 1.0 or the advisory job is near-clean.
+#
+# It paid for itself on arrival: of 11 diagnostics across the GUI and task modules, two were real bugs in
+# `tasks.py` -- a return annotation that resolved to a shadowing method instead of `list`, and an import guard
+# assigning None over a function. Both are fixed.
+[tool.ty]
+
+[tool.ty.src]
+include = ["src/smeltery/bench"]
