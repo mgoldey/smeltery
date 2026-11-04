@@ -23,9 +23,8 @@ REPO = HERE.parent.parent
 sys.path.insert(0, str(REPO / "tests"))
 sys.path.insert(0, str(REPO / "src"))
 
-from gui_fixture import make_run_dir  # noqa: E402
-
 import gui_fixture  # noqa: E402
+from gui_fixture import make_run_dir  # noqa: E402
 
 #: (name, make_run_dir kwargs, delete the cut?, floor). d_floor has a non-zero floor, so its forest plot draws the
 #: +/- floor band that the others (floor 0) correctly do not.
@@ -55,7 +54,13 @@ def build(root: Path) -> list[dict]:
                 rec["results"].pop(k, None)
             rec_path.write_text(json.dumps(rec))
         out.append(
-            {"name": name, "path": str(rec_path), "out_dir": str(d), "campaign": rec["campaign"], "digest": rec["input_digest"]}
+            {
+                "name": name,
+                "path": str(rec_path),
+                "out_dir": str(d),
+                "campaign": rec["campaign"],
+                "digest": rec["input_digest"],
+            }
         )
     gui_fixture.FLOOR = 0.0
     return sorted(out, key=lambda r: r["path"])
