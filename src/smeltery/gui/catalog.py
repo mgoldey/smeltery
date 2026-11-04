@@ -196,7 +196,8 @@ class Method:
     `section` is the config table its knobs live in (None: no knobs of its own); `gate_key` is its switch under
     `[gates]` for the gates that are switched on there. `tier` is the registered tier name behind it, if any.
     `implicit` stages always run in `smeltery run` (they are shown, not placed); `exclusive` names methods that
-    cannot share a pipeline with this one.
+    cannot share a pipeline with this one. A `required` method is satisfied by a placed method it is exclusive
+    with: that one is its alternative (RHF or KS-DFT for dE_int), so `smeltery run` gets exactly one of them.
     """
 
     key: str
@@ -351,7 +352,7 @@ def floor_status(method: Method) -> str:
 
 
 def _build() -> dict[str, Method]:
-    from ..tiers import FieldInteraction, PairedPoses
+    from ..tiers import FieldDftInteraction, FieldInteraction, PairedPoses
 
     methods = [
         Method(
@@ -489,6 +490,8 @@ def _build() -> dict[str, Method]:
             required=True,
             summary="dE_int = E(in field) - E(vacuum) per pose: a difference, so it compares across formulas.",
             params=params_from_dataclass(FieldInteraction, {"basis": "ferric basis set name"}),
+            # Required, but satisfied by its alternative: a pipeline measures dE_int with RHF or with KS-DFT.
+            exclusive=("field_dft_interaction",),
         ),
         Method(
             "field_dft_interaction",
@@ -497,10 +500,16 @@ def _build() -> dict[str, Method]:
             "measure",
             needs=("poses", "field"),
             provides=("dE_int",),
+            section="field_dft_interaction",
             tier="field_dft_interaction",
-            wired=False,
-            why_unwired=(
-                "a library tier; smeltery run's [field_interaction] section selects RHF, with no key for a functional"
+            params=params_from_dataclass(
+                FieldDftInteraction,
+                {
+                    "basis": "ferric basis set name; the memory check counts basis functions for STO-3G only",
+                    "functional": "libxc name ferric accepts; D3(BJ) is added separately, not by a -D3 suffix",
+                    "memory_budget_gb": "refuse before the first SCF if the largest pose is predicted not to fit",
+                    "require_free_gb": "refuse unless this much memory is actually free (unset: no check)",
+                },
             ),
             summary=(
                 "The same dE_int as field_interaction, from KS-DFT instead of RHF. D3(BJ) is "

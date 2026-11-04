@@ -7,13 +7,15 @@ One honest path, not a framework. Stages, in order, each a loud failure when it 
    MCS gate refuses a pair with no common core.
 2. pocket: point charges placed from the parent's pose 0 (see `[[pocket.site]]`).
 3. parity: every candidate must have an even electron count at its formal charge,
-   because the tier is closed-shell RHF. An odd count is a stage error, never a
-   silent zero-survivor run.
-4. `FieldInteraction`: dE_int = E(field) - E(vacuum) per pose (ferric RHF).
+   because both measurement tiers are closed-shell (RHF, or restricted KS-DFT). An odd
+   count is a stage error, never a silent zero-survivor run.
+4. the measurement: dE_int = E(field) - E(vacuum) per pose. `FieldInteraction` (ferric
+   RHF) by default; `[field_dft_interaction]` selects `FieldDftInteraction` (ferric PBE,
+   D3(BJ) recorded separately) instead.
 5. paired ddE against the parent, then `cut`.
 
 The cut's floor is the tier's own systematic floor. While that is unmeasured
-(`FieldInteraction` today) the config must state `[cut] floor` explicitly, and the record
+(both tiers today) the config must state `[cut] floor` explicitly, and the record
 says the floor came from the config. Candidates the cut cannot separate are printed as
 tie groups; a run where nothing can be ordered prints UNRANKED and still exits 0.
 
@@ -31,7 +33,7 @@ Config (TOML; unknown keys are an error, not ignored):
     atom = 1
     from_atom = 2
     distance = 3.0
-    [field_interaction]     # optional: FieldInteraction knobs
+    [field_interaction]     # optional: FieldInteraction (RHF) knobs
     basis = "sto-3g"
     [cut]
     keep = 1
@@ -56,6 +58,14 @@ Optional sections (absent = the stages above only):
     forcefield = true       # MMFF94 energy and strain per pose, recorded
     max_strain_kcal = 25.0  # optional, needs forcefield: reject (stage error) any pose with more strain; no default
     xtb = true              # GFN2 energy per pose in the pocket field, recorded (a gate, not a ranker)
+
+Choosing the measurement (one of the two; absent = RHF with default knobs):
+
+    [field_dft_interaction] # KS-DFT instead of RHF: FieldDftInteraction knobs
+    functional = "PBE"      # a libxc name ferric accepts; D3(BJ) is computed separately and cancels in dE_int
+    basis = "sto-3g"        # the memory check counts basis functions for STO-3G only (check_memory = false otherwise)
+    memory_budget_gb = 8.0  # refuse before the first SCF if the largest pose is predicted not to fit
+    require_free_gb = 12.0  # optional: refuse unless this much memory is actually free
 
 Starting from a target (replaces [docking] receptor/box_center and [pocket]; see `smeltery.prep`):
 
@@ -125,7 +135,7 @@ from .model import Candidate, PointCharge
 from .pocket import load_pocket
 from .pocket.loader import file_digest
 from .record import RunRecord
-from .tiers import FieldInteraction, ForceField, Gfn2, PairedPoses, _net_charge
+from .tiers import FieldDftInteraction, FieldInteraction, ForceField, Gfn2, PairedPoses, _net_charge
 
 TOP_KEYS = {
     "campaign",
@@ -134,6 +144,7 @@ TOP_KEYS = {
     "poses",
     "pocket",
     "field_interaction",
+    "field_dft_interaction",
     "cut",
     "docking",
     "gates",
@@ -169,7 +180,7 @@ class Plan:
     parent: Candidate
     field: list[PointCharge]
     poses: PairedPoses
-    tier: FieldInteraction
+    tier: FieldInteraction | FieldDftInteraction
     floor: float
     floor_source: str
     before_poses: list = dataclasses.field(default_factory=list)  # tiers that ran before pairing (docking)
@@ -245,6 +256,12 @@ def validate_config(cfg: dict) -> dict:
             raise ConfigError(f"candidate {name!r}: unparseable SMILES {smi!r}")
     poses_cfg = _knobs(cfg, "poses", PairedPoses)
     _knobs(cfg, "field_interaction", FieldInteraction)
+    _knobs(cfg, "field_dft_interaction", FieldDftInteraction)
+    if "field_interaction" in cfg and "field_dft_interaction" in cfg:
+        raise ConfigError(
+            "[field_interaction] (RHF) and [field_dft_interaction] (KS-DFT) both choose how dE_int is measured; "
+            "keep one"
+        )
     _validate_structure(cfg)
     _validate_docking(cfg, poses_cfg)
     _validate_gates(cfg)
@@ -684,7 +701,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared))
     _stage("parity", lambda: _check_parity(cands))
     after = _run_gates(cfg, cands, field, pocket_path, log)
-    tier = FieldInteraction(**cfg.get("field_interaction", {}))
+    tier = measurement_tier(cfg)
     tier.field_provenance = getattr(field, "provenance", None)  # what run() will record, so plan and run digests agree
     try:
         floor, source = tier_floor(tier, QUANTITY), f"tier {tier.name} systematic_floor"
@@ -696,6 +713,13 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
     return plan
+
+
+def measurement_tier(cfg: dict) -> FieldInteraction | FieldDftInteraction:
+    """The tier that measures dE_int: `[field_dft_interaction]` selects KS-DFT, otherwise RHF (the default)."""
+    if "field_dft_interaction" in cfg:
+        return FieldDftInteraction(**cfg["field_dft_interaction"])
+    return FieldInteraction(**cfg.get("field_interaction", {}))
 
 
 def funnel_counts(plan: Plan, res=None) -> list[dict]:
@@ -713,7 +737,7 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
         if e["stage"] == "pocket":  # parity runs right after the pocket, before the recorded gates
             rows.append({"stage": "parity", "kind": "gate", "candidates_in": n, "candidates_out": n})
     if res is not None:
-        rows.append({"stage": "field_interaction", "kind": "measure", "candidates_in": n, "candidates_out": n})
+        rows.append({"stage": plan.tier.name, "kind": "measure", "candidates_in": n, "candidates_out": n})
         rows.append(
             {
                 "stage": "cut",
@@ -756,9 +780,9 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
     without ferric.
     """
     if measure is None:
-        _stage("field_interaction", lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
+        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
     else:
-        _stage("field_interaction", lambda: measure(plan))
+        _stage(plan.tier.name, lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
     if partial:
         paired = {}
@@ -899,12 +923,14 @@ def format_table(plan: Plan, out: dict) -> str:
             continue
         m = out["paired"][c.name]
         lines.append(f"{c.name:12} {c.formula:10} {m.mean:+12.4f} ± {m.sem:.4f} {out['unpaired'][c.name].sem:13.4f}")
-    lines.append("\nstages: " + " -> ".join(e["summary"] for e in plan.stage_log) + " -> field_interaction")
+    lines.append("\nstages: " + " -> ".join(e["summary"] for e in plan.stage_log) + f" -> {plan.tier.name}")
     lines.append("candidates in -> out per stage (a gate rejects loudly or passes everyone; only the cut ranks):")
-    for r in funnel_counts(plan, res):
+    rows = funnel_counts(plan, res)
+    w = max(18, *(len(r["stage"]) for r in rows))  # field_dft_interaction is wider than the old fixed 18
+    for r in rows:
         cin = "-" if r["candidates_in"] is None else r["candidates_in"]
         cout = "unranked" if r.get("unranked") else ("-" if r["candidates_out"] is None else r["candidates_out"])
-        lines.append(f"  {r['stage']:18} {r['kind']:9} {cin!s:>3} -> {cout!s}")
+        lines.append(f"  {r['stage']:{w}} {r['kind']:9} {cin!s:>3} -> {cout!s}")
     st = plan.extra_inputs.get("structure")
     if st:
         lines.append(f"structure: {st['kind']}, {st['structure']['source']}")

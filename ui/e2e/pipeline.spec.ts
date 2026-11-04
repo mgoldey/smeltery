@@ -114,3 +114,24 @@ test("editing the TOML updates the stages, and every issue is listed at once", a
   await expect(errors.filter({ hasText: "keep" })).toHaveCount(1);
   await expect(errors.filter({ hasText: "n_poses" })).toHaveCount(1);
 });
+
+test("switching the measurement from RHF to KS-DFT: remove RHF, add PBE, and the TOML follows", async ({ page }) => {
+  const cat = await catalog(page); // data source: the labels the catalog gives the two tiers
+  const rhf = cat.methods["field_interaction"]!.label;
+  const pbe = cat.methods["field_dft_interaction"]!.label;
+  await openEditor(page);
+  const stages = page.getByRole("region", { name: "Stages" });
+  const toml = page.getByTestId("toml-pane");
+  await expect(page.getByRole("button", { name: `Add ${pbe}` })).toBeDisabled(); // not while RHF is placed
+  await page.getByRole("button", { name: `Remove ${rhf}` }).click();
+  await expect(stages.locator('[data-stage="field_interaction"]')).toHaveCount(0);
+  // with no measurement, the issue names both choices
+  await expect(page.getByRole("region", { name: "Issues" })).toContainText("'field_dft_interaction'");
+  await page.getByRole("button", { name: `Add ${pbe}` }).click();
+  await expect(stages.locator('[data-stage="field_dft_interaction"]')).toHaveCount(1);
+  await expect(toml).toContainText("[field_dft_interaction]");
+  await expect(toml).not.toContainText("[field_interaction]");
+  // the PBE knobs are editable like any stage's
+  await page.getByRole("button", { name: `Edit ${pbe} knobs` }).click();
+  await expect(page.getByLabel("functional", { exact: false }).first()).toBeVisible();
+});

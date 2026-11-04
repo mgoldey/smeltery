@@ -119,6 +119,11 @@ uv run smeltery run examples/mwe_benzoic.toml --plan   # poses, pocket, parity, 
 OPENBLAS_NUM_THREADS=1 uv run smeltery run examples/mwe_benzoic.toml
 ```
 
+To measure with KS-DFT instead of RHF, add a `[field_dft_interaction]` table (for example
+`functional = "PBE"`; the knobs are on [its tier page](docs/tiers/field_dft_interaction.md)). A config
+selects one of the two, never both. D3(BJ) is recorded per pose as `E_d3` and does not enter ΔE_int,
+because at a fixed geometry it is the same in and out of the field.
+
 It prints the same numbers as the script above, lists tie groups, prints `UNRANKED`
 (exit 0) when nothing can be ordered, and writes a run record under `out/`. A bad
 config exits 2; a failed stage (no common core, odd electron count, SCF not

@@ -668,8 +668,9 @@ def _qmmm_engine_gap() -> str | None:
 TIER_PLAN: dict[str, Reach] = {
     "paired_poses": Reach("cli"),
     "field_interaction": Reach("cli"),
-    # The DFT counterpart of field_interaction. The CLI has no [dft] section to select a functional,
-    # so it is reached from the library scenario on water rather than by the CLI trace.
+    # The DFT counterpart of field_interaction. `smeltery run` selects it with [field_dft_interaction]
+    # (tests/test_cli.py runs it end to end); the golden CLI trace runs RHF, so here it is reached from the
+    # library scenario on water.
     "field_dft_interaction": Reach("library", note="water in a two-charge field; PBE/STO-3G"),
     # SMILES-only descriptors, so there is nothing to dock or embed: the library scenario pairs a
     # molecule with itself and asserts the drift is exactly zero.

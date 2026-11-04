@@ -29,11 +29,17 @@ EXECUTION_ORDER: tuple[str, ...] = (
     "forcefield",
     "gfn2",
     "field_interaction",
+    "field_dft_interaction",
     "cut",
 )
 
 #: Measured quantity the cut ranks (`smeltery.cli.QUANTITY`).
 QUANTITY = "dE_int"
+
+
+def _alternative_placed(m: Method, placed: list[str]) -> bool:
+    """A required method is satisfied by a placed method it is exclusive with (its alternative)."""
+    return any(o in placed for o in m.exclusive)
 
 
 class PipelineError(ValueError):
@@ -158,8 +164,9 @@ class Pipeline:
                 if other in known and keys.index(other) > keys.index(k):
                     issues.append(Issue("error", k, f"cannot be combined with {other!r}"))
         for k, m in catalog().items():
-            if m.required and k not in known:
-                issues.append(Issue("error", None, f"add {k!r} ({m.label}): every pipeline needs it"))
+            if m.required and k not in known and not _alternative_placed(m, known):
+                alts = "".join(f" or {o!r} ({method(o).label})" for o in m.exclusive if method(o).wired)
+                issues.append(Issue("error", None, f"add {k!r} ({m.label}){alts}: every pipeline needs it"))
         if "structure" in known and "docking" not in known:
             issues.append(Issue("error", "structure", "a structure is docked into: add 'docking' after it"))
         if "pocket" not in known and "structure" not in known:
@@ -237,9 +244,11 @@ class Pipeline:
         return out
 
     def _tier_floor(self) -> float | None:
-        from ..tiers import FieldInteraction
+        """The systematic floor of whichever tier this pipeline measures dE_int with."""
+        from ..tiers import FieldDftInteraction, FieldInteraction
 
-        return FieldInteraction().systematic_floor(QUANTITY)
+        tier = FieldDftInteraction() if "field_dft_interaction" in self.keys() else FieldInteraction()
+        return tier.systematic_floor(QUANTITY)
 
     def _validator(self) -> list[Issue]:
         from ..cli import ConfigError, validate_config
@@ -302,7 +311,9 @@ class Pipeline:
         if "decisions" in cfg:
             p.decisions = dict(cfg["decisions"])
         for section, key in by_section.items():
-            if section in cfg or method(key).required or (key == "docking" and "structure" in cfg):
+            m = method(key)
+            alternative = any(method(o).section in cfg for o in m.exclusive)
+            if section in cfg or (m.required and not alternative) or (key == "docking" and "structure" in cfg):
                 p.add(key, dict(cfg.get(section, {})))
         for gate, key in by_gate.items():
             if gates.pop(gate, False):

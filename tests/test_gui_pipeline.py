@@ -307,3 +307,64 @@ def _toml_dumps(cfg):
     from smeltery.gui._toml import dumps
 
     return dumps(cfg)
+
+
+# ---- RHF or KS-DFT: one measurement, either tier -------------------------------------------------------------
+
+
+def _pbe() -> Pipeline:
+    p = runnable()
+    p.remove("field_interaction")
+    p.add("field_dft_interaction", {"functional": "PBE"})
+    return p
+
+
+def test_removing_rhf_asks_for_rhf_or_ks_dft_and_offers_ks_dft():
+    p = runnable()
+    assert "field_dft_interaction" not in p.addable(), "an alternative is not offered while RHF is placed"
+    p.remove("field_interaction")
+    (msg,) = [m for s, m in errors(p) if s is None and "every pipeline needs it" in m]
+    assert "'field_interaction'" in msg and "'field_dft_interaction'" in msg
+    assert "field_dft_interaction" in p.addable()
+
+
+def test_a_ks_dft_pipeline_is_runnable_and_compiles_to_the_cli_section():
+    p = _pbe()
+    assert errors(p) == []
+    cfg = p.compile()
+    assert cfg["field_dft_interaction"] == {"functional": "PBE"} and "field_interaction" not in cfg
+    assert type(cli.build_plan(cli.validate_config(cfg)).tier).__name__ == "FieldDftInteraction"
+
+
+def test_a_ks_dft_config_reads_back_as_ks_dft_only_and_round_trips():
+    """The required RHF stage must not be re-added beside its alternative when the config is read."""
+    text = _pbe().to_toml()
+    back = Pipeline.from_toml(text)
+    assert "field_dft_interaction" in back.keys() and "field_interaction" not in back.keys()
+    assert back.to_toml() == text
+    # a config with neither section still reads as RHF, as `smeltery run` would run it
+    plain = Pipeline.from_toml(runnable().to_toml())
+    assert "field_interaction" in plain.keys() and "field_dft_interaction" not in plain.keys()
+
+
+def test_rhf_and_ks_dft_together_is_refused_whichever_was_placed_first():
+    for first, second in (
+        ("field_interaction", "field_dft_interaction"),
+        ("field_dft_interaction", "field_interaction"),
+    ):
+        p = runnable()
+        if first == "field_dft_interaction":
+            p.remove("field_interaction")
+            p.add(first)
+        p.add(second)
+        assert any("cannot be combined" in m for _, m in errors(p)), (first, second)
+
+
+def test_an_empty_ks_dft_stage_survives_the_toml_round_trip():
+    """Placing the alternative is the decision even with default knobs; dropping its empty section would silently
+    turn the pipeline back into RHF."""
+    p = runnable()
+    p.remove("field_interaction")
+    p.add("field_dft_interaction")
+    back = Pipeline.from_toml(p.to_toml())
+    assert "field_dft_interaction" in back.keys() and "field_interaction" not in back.keys()

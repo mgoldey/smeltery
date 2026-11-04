@@ -15,6 +15,11 @@ export function Pipeline() {
   const { state, origin, error, pending, edit, check, placeSite } = usePipeline(idx);
   const [selected, setSelected] = useState<string | null>(null);
   const cat = catalog.data;
+  // A required stage can be removed only when the catalog has a wired alternative to it (RHF or KS-DFT for
+  // dE_int): removing it then lists 'add one of these' as an issue, and the palette offers the alternative.
+  const removable = (k: string): boolean =>
+    !cat?.methods[k]?.required ||
+    (cat?.methods[k]?.exclusive ?? []).some((o) => cat?.methods[o]?.wired);
   const label = (k: string) => cat?.methods[k]?.label ?? k;
   const selectedMethod = selected ? cat?.methods[selected] : undefined;
   const errors = state?.issues.filter((i) => i.level === "error").length ?? 0;
@@ -55,7 +60,8 @@ export function Pipeline() {
                         </button>
                         <button
                           type="button"
-                          disabled={pending || cat.methods[k]?.required}
+                          disabled={pending || !removable(k)}
+                          title={removable(k) ? undefined : "Every pipeline needs this stage"}
                           onClick={() => {
                             if (selected === k) setSelected(null);
                             void edit("remove", k);

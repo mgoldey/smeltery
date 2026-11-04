@@ -347,3 +347,83 @@ def test_a_pocket_file_that_does_not_exist_is_a_config_error(tmp_path, capsys):
     p.write_text(cfg_text.replace("[cut]", '[pocket]\nfile = "missing.pdb"\n\n[cut]'))
     assert main(["run", str(p), "--plan"]) == 2
     assert "does not exist" in capsys.readouterr().err
+
+
+# ---- choosing the measurement: [field_dft_interaction] selects KS-DFT instead of RHF -----------------------------
+
+PBE = SMALL.format(floor=0.0) + '\n[field_dft_interaction]\nfunctional = "PBE"\n'
+
+
+def test_a_field_dft_interaction_section_measures_with_ks_dft_and_says_so_in_the_record():
+    from smeltery.tiers import FieldDftInteraction, FieldInteraction
+
+    rhf = build_plan(validate_config(tomllib.loads(SMALL.format(floor=0.0))))
+    pbe = build_plan(validate_config(tomllib.loads(PBE)))
+    assert type(rhf.tier) is FieldInteraction and type(pbe.tier) is FieldDftInteraction
+    (rec,) = [t for t in pbe.tiers if t["name"] == "field_dft_interaction"]
+    assert rec["method"] == "KS-DFT PBE + D3(BJ)" and rec["functional"] == "PBE"
+    assert "field_interaction" not in [t["name"] for t in pbe.tiers]
+    assert digest(validate_config(tomllib.loads(PBE))) != digest(
+        validate_config(tomllib.loads(SMALL.format(floor=0.0)))
+    )
+
+
+def test_rhf_and_ks_dft_together_is_a_config_error_not_a_silent_choice():
+    both = PBE + '\n[field_interaction]\nbasis = "sto-3g"\n'
+    with pytest.raises(ConfigError, match="keep one"):
+        validate_config(tomllib.loads(both))
+
+
+def test_an_unknown_ks_dft_knob_is_a_config_error():
+    with pytest.raises(ConfigError, match=r"\[field_dft_interaction\]"):
+        validate_config(tomllib.loads(PBE + "xc = 'PBE0'\n"))
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("functional", "B3LYP"), ("basis", "3-21g"), ("energy_conv", 1e-9), ("memory_budget_gb", 16.0)],
+)
+def test_changing_any_ks_dft_knob_changes_the_digest(key, value):
+    base = validate_config(tomllib.loads(PBE))
+    changed = copy.deepcopy(base)
+    changed["field_dft_interaction"][key] = value
+    assert digest(changed) != digest(base), f"[field_dft_interaction] {key} is accepted but not in the digest"
+
+
+def test_the_funnel_and_the_stage_errors_name_the_tier_that_measured():
+    plan = build_plan(validate_config(tomllib.loads(PBE)))
+    plan.tier = _KnownValues(
+        plan.tier, {"ethanol": [0.0, 0.0, 0.0], "propanol": [1.0, 1.1, 0.9], "butanol": [3.0, 3.1, 2.9]}
+    )
+    rec, out = run_plan(plan)
+    measure = [f for f in rec.results["funnel"] if f["kind"] == "measure"]
+    assert [f["stage"] for f in measure] == ["field_dft_interaction"]
+    text = format_table(plan, out)
+    assert "-> field_dft_interaction" in text
+    # the per-stage table stays a table: every row's kind starts in the same column
+    rows = [ln for ln in text.splitlines() if ln.startswith("  ") and " -> " in ln]
+    kinds = {ln.index(f" {k} ") for ln in rows for k in ("pair", "field", "gate", "measure", "rank") if f" {k} " in ln}
+    assert len(rows) >= 4 and len(kinds) == 1, rows
+
+
+@pytest.mark.needs_ferric
+def test_a_pbe_run_through_the_cli_equals_the_pbe_tier_called_by_hand(tmp_path):
+    """Data source: FieldDftInteraction run directly on the same poses and field, outside the CLI."""
+    from smeltery import Candidate, PointCharge, paired_delta
+    from smeltery.tiers import FieldDftInteraction, PairedPoses
+
+    cfg = validate_config(tomllib.loads(PBE))
+    plan = build_plan(cfg)
+    rec, out = run_plan(plan)
+    assert set(rec.results["units"]) >= {"dE_int", "E_d3"}  # D3(BJ) is recorded per pose, beside dE_int
+
+    cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
+    parent = cands[0]
+    PairedPoses(n_poses=3, relax_unmapped=True).run(cands, {"parent": parent})
+    xyz = parent.poses[0].coords_ang
+    u = xyz[2] - xyz[1]
+    field = [PointCharge(1.0, tuple(float(v) for v in xyz[2] + 3.0 * u / (u @ u) ** 0.5))]
+    FieldDftInteraction(functional="PBE").run(cands, {"field": field})
+    for c in cands[1:]:
+        by_hand = paired_delta(parent, c, "dE_int")
+        assert out["paired"][c.name].mean == pytest.approx(by_hand.mean, abs=1e-9)
