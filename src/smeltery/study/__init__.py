@@ -26,7 +26,7 @@ from .reduction import (
     rate,
     rate_per_arm,
 )
-from .step import FunctionStep, Step, StepResult, Study, StudyError
+from .step import FunctionStep, PlanCells, Step, StepResult, Study, StudyError
 
 __all__ = [
     "Cache",
@@ -39,6 +39,7 @@ __all__ = [
     "ReductionError",
     "ResourcePool",
     "FunctionStep",
+    "PlanCells",
     "Step",
     "StepResult",
     "Study",
