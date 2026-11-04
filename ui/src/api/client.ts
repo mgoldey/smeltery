@@ -1,25 +1,32 @@
-import { ApiError, reasonOf } from "./http";
+/**
+ * The only way the app talks to the Bench API. Request and response types come from schema.d.ts, which is
+ * generated from the API's pydantic models (`npm run gen:api`); nothing here hand-writes a response shape.
+ */
+import createClient from "openapi-fetch";
+import { ApiError } from "./http";
+import type { components, paths } from "./schema";
 
-export async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
-  return (await res.json()) as T;
+export const api = createClient<paths>({ baseUrl: "" });
+
+export type Schemas = components["schemas"];
+export type Verdict = Schemas["Verdict"];
+export type RunSummary = Schemas["RunSummary"];
+
+function reasonFrom(error: unknown, response: Response): string {
+  if (error && typeof error === "object") {
+    const e = error as { detail?: unknown; reason?: unknown };
+    const r = e.detail ?? e.reason;
+    if (typeof r === "string") return r;
+    if (r !== undefined) return JSON.stringify(r);
+  }
+  return `${response.status} ${response.statusText}`;
 }
 
-export interface Verdict {
-  state: "RESOLVED" | "UNRANKED" | "INCOMPLETE";
-  winner: string | null;
-  floor: number | null;
-  missing: string[];
-}
-
-export interface RunSummary {
-  idx: number;
-  path: string;
-  campaign: string | null;
-  parent: string | null;
-  digest: string | null;
-  n_candidates: number | null;
-  verdict: Verdict | null;
-  error: string | null;
+/** Unwrap an openapi-fetch result: the data, or an ApiError carrying the API's own reason. */
+export async function unwrap<T>(
+  pending: Promise<{ data?: T; error?: unknown; response: Response }>,
+): Promise<T> {
+  const { data, error, response } = await pending;
+  if (!response.ok || data === undefined) throw new ApiError(response.status, reasonFrom(error, response));
+  return data;
 }

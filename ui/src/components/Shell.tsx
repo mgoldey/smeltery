@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { NavLink, useMatch } from "react-router-dom";
-import { getJSON, type RunSummary } from "../api/client";
+import { api, unwrap } from "../api/client";
 
 function useCurrentRun() {
   const runMatch = useMatch("/run/:idx/*");
@@ -9,7 +9,7 @@ function useCurrentRun() {
   const idx = runMatch?.params.idx ?? reportMatch?.params.idx;
   const q = useQuery({
     queryKey: ["runs"],
-    queryFn: () => getJSON<RunSummary[]>("/api/runs"),
+    queryFn: () => unwrap(api.GET("/api/runs")),
     enabled: idx !== undefined,
   });
   return idx === undefined ? undefined : q.data?.find((r) => String(r.idx) === idx);
@@ -37,7 +37,7 @@ export function ContextBar({ tabs }: { tabs?: ReactNode }) {
 }
 
 export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNode }) {
-  const who = useQuery({ queryKey: ["whoami"], queryFn: () => getJSON<{ user: string; root: string }>("/api/whoami") });
+  const who = useQuery({ queryKey: ["whoami"], queryFn: () => unwrap(api.GET("/api/whoami")) });
   const runMatch = useMatch("/run/:idx/*");
   const reportMatch = useMatch("/report/:idx");
   const idx = runMatch?.params.idx ?? reportMatch?.params.idx;

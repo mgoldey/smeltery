@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { getJSON, type RunSummary } from "../api/client";
+import { api, unwrap } from "../api/client";
 import { Shell } from "../components/Shell";
 
 export function BenchHome() {
-  const runs = useQuery({ queryKey: ["runs"], queryFn: () => getJSON<RunSummary[]>("/api/runs") });
+  const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
   return (
     <Shell>
       <div className="body">

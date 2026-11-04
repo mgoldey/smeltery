@@ -610,7 +610,7 @@
         "Mutation: rename a field in one API response model, regenerate, confirm `npm run typecheck` fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI3-e2e-harness",
