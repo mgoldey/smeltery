@@ -1,48 +1,38 @@
-import pathlib
+"""The studies API behind the campaign panel. Studies are configured module paths, never discovered."""
 
-import pytest
-from fastapi.testclient import TestClient
-
-from bench.fakes import FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
-from smeltery.bench.app import create_app
+STUDY = "bench.study_fixture"
 
 
-@pytest.fixture
-def run_dir(tmp_path):
-    from gui_fixture import make_run_dir
-
-    return make_run_dir(tmp_path)
-
-
-def fakes():
-    rd = pathlib.Path("/tmp") / "cp"
-    rd.mkdir(parents=True, exist_ok=True)
-    return dict(
-        run_store=FakeRunStore(rd),
-        task_queue=FakeTaskQueue(),
-        identity=FakeIdentity("mg"),
-        clock=FixedClock(),
-    )
+def test_dag_rows_are_in_order(client_for):
+    c, _ = client_for(studies=[STUDY])
+    rows = c.get(f"/api/studies/{STUDY}/dag").json()
+    assert [r["order"] for r in rows] == sorted(r["order"] for r in rows) and rows[0]["step"] == "parent"
 
 
-def test_dag_rows_are_in_order():
-    c = TestClient(create_app(**fakes()))
-    r = c.get("/api/studies/bench.study_fixture/dag")
-    assert r.status_code == 200
-    rows = r.json()
-    assert [x["order"] for x in rows] == sorted(x["order"] for x in rows)
+def test_cells_cover_every_condition_and_step_and_start_to_run(client_for):
+    """Data source: the fixture study has one step over x in {1, 2} and an empty cache, so two cells, both to run."""
+    c, _ = client_for(studies=[STUDY])
+    cells = c.get(f"/api/studies/{STUDY}/cells").json()
+    assert sorted((x["label"], x["step"], x["state"]) for x in cells) == [
+        ("x=1", "parent", "to_run"),
+        ("x=2", "parent", "to_run"),
+    ]
 
 
-def test_cells_report_cached_or_to_run():
-    c = TestClient(create_app(**fakes()))
-    r = c.get("/api/studies/bench.study_fixture/cells")
-    assert r.status_code == 200
-    cells = r.json()
-    assert all(c["state"] in ("cached", "to_run") for c in cells)
+def test_a_cached_cell_is_reported_cached(client_for):
+    """Run the study into the configured cache, then the cells must say cached: the cache is real, not a fresh one."""
+    import importlib
+
+    from smeltery.study.cache import Cache
+
+    c, ports = client_for(studies=[STUDY])
+    study = importlib.import_module(STUDY).study
+    study.run(Cache(ports["settings"].cache_dir))
+    assert {x["state"] for x in c.get(f"/api/studies/{STUDY}/cells").json()} == {"cached"}
 
 
-def test_an_unimportable_study_path_is_404_naming_it():
-    c = TestClient(create_app(**fakes()))
-    r = c.get("/api/studies/nope.module/dag")
-    assert r.status_code == 404
-    assert "nope.module" in r.text
+def test_an_unconfigured_or_unimportable_study_is_404_naming_it(client_for):
+    c, _ = client_for(studies=["nope.nothing"])
+    r = c.get("/api/studies/nope.nothing/dag")
+    assert r.status_code == 404 and "nope.nothing" in r.json()["detail"]
+    assert c.get(f"/api/studies/{STUDY}/dag").status_code == 404

@@ -1,78 +1,104 @@
-import pathlib
+"""The pipeline API: the editor's only state is TOML, and every edit returns every issue Pipeline.check() finds."""
 
-import pytest
-from fastapi.testclient import TestClient
+import tomllib
+from pathlib import Path
 
-from bench.fakes import FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
-from smeltery.bench.app import create_app
-from smeltery.gui.catalog import RUNGS
+from bench.fakes import FakeTaskQueue
+from smeltery.gui.catalog import RUNGS, catalog
+from smeltery.gui.pipeline import Pipeline
 
-
-@pytest.fixture
-def run_dir(tmp_path):
-    from gui_fixture import make_run_dir
-
-    return make_run_dir(tmp_path)
+CANDS = {"benzoic": "OC(=O)c1ccccc1", "4-F": "OC(=O)c1ccc(F)cc1"}
 
 
-def fakes():
-    rd = pathlib.Path("/tmp") / "pe"
-    rd.mkdir(parents=True, exist_ok=True)
-    return dict(
-        run_store=FakeRunStore(rd),
-        task_queue=FakeTaskQueue(),
-        identity=FakeIdentity("mg"),
-        clock=FixedClock(),
+def minimal_toml():
+    """A pipeline the CLI accepts: the minimal one plus the two things it cannot default (keep, and an explicit
+    floor, because the field tier's own floor is unmeasured)."""
+    p = Pipeline.minimal("t", "benzoic", dict(CANDS))
+    p.set("cut", keep=1, floor=0.0)
+    p.set("pocket", site=[{"q": 1.0, "atom": 1, "from_atom": 2, "distance": 3.0}])
+    return p.to_toml()
+
+
+def test_the_catalog_is_catalog_json_plus_quantity_phase_and_rigour(client_for):
+    c, _ = client_for()
+    cat = c.get("/api/catalog").json()
+    assert [r["name"] for r in cat["rungs"]] == [name for name, _ in RUNGS]
+    for key, m in catalog().items():
+        assert cat["methods"][key]["quantity"] == m.quantity and cat["methods"][key]["rigour"] == m.rigour, key
+
+
+def test_an_unwired_tier_is_listed_with_a_reason_but_not_addable(client_for):
+    c, _ = client_for()
+    cat = c.get("/api/catalog").json()
+    assert cat["methods"]["qmmm"]["wired"] is False and cat["methods"]["qmmm"]["why_unwired"]
+    state = c.post("/api/pipeline/check", json={"toml": minimal_toml()}).json()
+    assert "qmmm" not in state["addable"]
+
+
+def test_every_issue_is_returned_not_just_the_first(client_for):
+    """Two independent errors in two stages: both are reported in one response."""
+    c, _ = client_for()
+    cfg = tomllib.loads(minimal_toml())
+    cfg["cut"]["keep"] = "many"
+    cfg["poses"] = {"n_poses": "lots"}
+    from smeltery.gui._toml import dumps
+
+    state = c.post("/api/pipeline/check", json={"toml": dumps(cfg)}).json()
+    assert state["ok"] is False
+    assert len([i for i in state["issues"] if i["level"] == "error"]) >= 2, state["issues"]
+
+
+def test_edits_round_trip_through_toml(client_for):
+    c, _ = client_for()
+    s1 = c.post("/api/pipeline/check", json={"toml": minimal_toml()}).json()
+    add = s1["addable"][0]
+    s2 = c.post("/api/pipeline/edit", json={"toml": s1["toml"], "op": "add", "key": add}).json()
+    assert add in Pipeline.from_toml(s2["toml"]).keys()
+    s3 = c.post("/api/pipeline/edit", json={"toml": s2["toml"], "op": "remove", "key": add}).json()
+    assert Pipeline.from_toml(s3["toml"]).keys() == Pipeline.from_toml(s1["toml"]).keys()
+
+
+def test_unknown_knob_and_bad_toml_are_400(client_for):
+    c, _ = client_for()
+    r = c.post("/api/pipeline/edit", json={"toml": minimal_toml(), "op": "set", "key": "cut", "params": {"nope": 1}})
+    assert r.status_code == 400
+    assert c.post("/api/pipeline/check", json={"toml": "this is [not toml"}).status_code == 400
+
+
+def test_clicking_two_atoms_writes_one_pocket_site(client_for):
+    c, _ = client_for()
+    r = c.post(
+        "/api/pipeline/site", json={"toml": minimal_toml(), "atom": 3, "from_atom": 4, "q": 1.0, "distance": 3.0}
     )
-
-
-def test_every_issue_is_returned():
-    # build a broken toml with two issues
-    toml = 'campaign = "c"\nparent = "p"\ncandidates = {a = "C"}\n'
-    c = TestClient(create_app(**fakes()))
-    r = c.post("/api/pipeline/check", json={"toml": toml})
     assert r.status_code == 200
-    issues = r.json()
-    assert len([i for i in issues if i["level"] == "error"]) >= 2
+    sites = tomllib.loads(r.json()["toml"])["pocket"]["site"]
+    assert sites[-1] == {"q": 1.0, "atom": 3, "from_atom": 4, "distance": 3.0}
+    assert c.post("/api/pipeline/site", json={"toml": minimal_toml(), "atom": 3, "from_atom": 3}).status_code == 400
 
 
-def test_the_palette_groups_methods_by_rung():
-    c = TestClient(create_app(**fakes()))
-    pal = c.get("/api/catalog").json()
-    assert set(pal.keys()) == {r[0] for r in RUNGS}
-    assert "ab_initio" in pal
+def test_the_provisional_conformer_is_in_AddHs_order(client_for):
+    from rdkit import Chem
+
+    c, _ = client_for()
+    p = c.get("/api/provisional", params={"smiles": CANDS["4-F"]}).json()
+    expect = [a.GetSymbol() for a in Chem.AddHs(Chem.MolFromSmiles(CANDS["4-F"])).GetAtoms()]
+    assert p["symbols"] == expect
+    mb = Chem.MolFromMolBlock(p["molblock"], removeHs=False)
+    assert [a.GetSymbol() for a in mb.GetAtoms()] == expect
 
 
-def test_an_unwired_tier_is_listed_with_a_reason_but_not_addable():
-    c = TestClient(create_app(**fakes()))
-    pal = c.get("/api/catalog").json()
-    unwired = [m for rung in pal.values() for m in rung if not m["wired"]]
-    assert unwired and all(m["reason"] for m in unwired)
-    addable = c.get("/api/pipeline/addable").json()
-    assert "qmmm" not in addable
+def test_launch_is_refused_with_errors_and_stages_inputs_into_out_when_clean(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, ports = client_for(queue=q)
+    cfg = tomllib.loads(minimal_toml())
+    cfg["parent"] = "nobody"
+    from smeltery.gui._toml import dumps
 
-
-def test_rigour_placeholder():
-    c = TestClient(create_app(**fakes()))
-    pal = c.get("/api/catalog").json()
-    quantities = {m["key"]: m.get("quantity") for rung in pal.values() for m in rung}
-    assert quantities.get("designability") != quantities.get("field_dft_interaction")
-
-
-def test_site_clicking_two_atoms_writes_one_pocket_site():
-    toml = open("examples/mwe_benzoic.toml").read()
-    c = TestClient(create_app(**fakes()))
-    r = c.post("/api/pipeline/site", json={"toml": toml, "atom": 3, "from_atom": 4, "q": 1.0, "distance": 3.0})
-    assert r.status_code == 200
-    assert "[[pocket.site]]" in r.json()["toml"]
-    assert "atom = 3" in r.json()["toml"]
-
-
-def test_the_returned_toml_checks_clean():
-    toml = open("examples/mwe_benzoic.toml").read()
-    c = TestClient(create_app(**fakes()))
-    once = c.post(
-        "/api/pipeline/site", json={"toml": toml, "atom": 3, "from_atom": 4, "q": 1.0, "distance": 3.0}
-    ).json()["toml"]
-    twice = c.post("/api/pipeline/check", json={"toml": once}).json()
-    assert not [i for i in twice if i["level"] == "error"]
+    assert c.post("/api/pipeline/launch", json={"toml": dumps(cfg)}).status_code == 409
+    assert q.submitted == []
+    out = tmp_path / "launched"
+    r = c.post("/api/pipeline/launch", json={"toml": minimal_toml(), "out": str(out)})
+    assert r.status_code == 201, r.json()
+    (name, argv, _cwd, _note) = q.submitted[0]
+    assert argv == ["smeltery", "run", str(out / "config.toml"), "--out", str(out)]
+    assert Path(out / "config.toml").is_file()

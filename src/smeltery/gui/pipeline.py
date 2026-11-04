@@ -267,7 +267,11 @@ class Pipeline:
             if m.gate_key:
                 gates[m.gate_key] = True
                 gates.update(params)  # max_strain_kcal lives under [gates]
-            elif m.section and (params or m.key in ("pocket", "cut")):  # those two are required tables
+            elif m.section and (params or m.key in ("pocket", "cut") or not m.required):
+                # An optional stage is written even with no knobs set: placing it is itself the decision, and
+                # `from_config` reads it back from its section's presence. Dropping its empty section made a stage
+                # added with default knobs vanish on the TOML round trip a GUI depends on. A required stage is
+                # re-added by `from_config` regardless, so its empty section is still omitted.
                 cfg[m.section] = params
         if gates:
             cfg["gates"] = gates

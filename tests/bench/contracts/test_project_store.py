@@ -34,3 +34,28 @@ def test_a_correction_is_a_new_entry_that_supersedes(pstore):
     e2 = pstore.add_entry(c.id, title="correction", body="b2", author="mg", supersedes=e1.id)
     assert [x.id for x in pstore.entries(c.id)] == [e1.id, e2.id]
     assert e2.supersedes == e1.id
+
+
+def test_a_proposal_round_trips_and_filters_by_run(pstore):
+    from smeltery.project import Proposal
+
+    a = Proposal(
+        id="p1", run="r1", smiles="Cc1ccccc1", reason="synthesis", author="mg", created_at="2026-11-04T00:00:00Z"
+    )
+    b = Proposal(id="p2", run="r2", smiles="Oc1ccccc1", reason="analog", author="mg", created_at="2026-11-04T00:00:01Z")
+    pstore.add_proposal(a)
+    pstore.add_proposal(b)
+    assert [p.id for p in pstore.list_proposals()] == ["p1", "p2"]
+    got = pstore.list_proposals("r1")
+    assert [(p.id, p.smiles, p.reason, p.author) for p in got] == [("p1", "Cc1ccccc1", "synthesis", "mg")]
+
+
+def test_an_invalid_proposal_is_refused_and_not_stored(pstore):
+    import pytest
+
+    from smeltery.project import Proposal
+
+    bad = Proposal(id="p3", run="r1", smiles="not a smiles", reason="synthesis", created_at="2026-11-04T00:00:00Z")
+    with pytest.raises(ValueError):
+        pstore.add_proposal(bad)
+    assert pstore.list_proposals() == []

@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-from smeltery.project import Campaign, NotebookEntry
+from smeltery.project import Campaign, NotebookEntry, Proposal
 
 
 class SqliteProjectStore:
@@ -30,7 +30,56 @@ class SqliteProjectStore:
                     id TEXT PRIMARY KEY, campaign_id TEXT, title TEXT, body TEXT, author TEXT,
                     created_at TEXT, artefacts TEXT, supersedes TEXT)"""
             )
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS proposals (
+                    id TEXT PRIMARY KEY, run TEXT, smiles TEXT, reason TEXT, note TEXT, candidate TEXT,
+                    author TEXT, created_at TEXT, status TEXT)"""
+            )
             con.commit()
+
+    def add_proposal(self, proposal: Proposal) -> Proposal:
+        """Store a proposal for the computational chemist's review. Validated first; never launches anything."""
+        proposal.validate()
+        with self._conn() as con:
+            con.execute(
+                "INSERT INTO proposals (id,run,smiles,reason,note,candidate,author,created_at,status) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    proposal.id,
+                    proposal.run,
+                    proposal.smiles,
+                    proposal.reason,
+                    proposal.note,
+                    proposal.candidate,
+                    proposal.author,
+                    proposal.created_at,
+                    proposal.status,
+                ),
+            )
+            con.commit()
+        return proposal
+
+    def list_proposals(self, run: str | None = None) -> list[Proposal]:
+        q = "SELECT id,run,smiles,reason,note,candidate,author,created_at,status FROM proposals"
+        args: tuple = ()
+        if run is not None:
+            q, args = q + " WHERE run=?", (run,)
+        with self._conn() as con:
+            got = con.execute(q + " ORDER BY created_at, id", args).fetchall()
+        return [
+            Proposal(
+                id=r[0],
+                run=r[1],
+                smiles=r[2],
+                reason=r[3],
+                note=r[4],
+                candidate=r[5],
+                author=r[6],
+                created_at=r[7],
+                status=r[8],
+            )
+            for r in got
+        ]
 
     def create_campaign(self, name, *, description=""):
         cid = uuid.uuid4().hex[:12]

@@ -1,136 +1,76 @@
+"""The app shell: health, the run list, independent failure, verdicts, composition, and the built UI."""
+
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from bench.fakes import FakeArtifactStore, FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
-from smeltery.bench.app import create_app
-
-
-def fakes(run_dir=None, queue=None):
-    import pathlib
-    import tempfile
-
-    if run_dir is None:
-        rd = pathlib.Path(tempfile.mkdtemp()) / "out"
-        rd.mkdir(parents=True, exist_ok=True)
-    else:
-        rd = run_dir
-    return dict(
-        run_store=FakeRunStore(rd if run_dir else rd.parent if False else rd),
-        task_queue=queue if queue is not None else FakeTaskQueue(),
-        identity=FakeIdentity("mg"),
-        clock=FixedClock(),
-        artifact_store=FakeArtifactStore(pathlib.Path(tempfile.mkdtemp()) / ".art"),
-    )
+from smeltery.bench.app import BUILD_HINT, Settings, build_app, create_app, main
 
 
 class BrokenTaskQueue:
-    def list(self):
+    def list(self, status=None):
         raise RuntimeError("temporal down")
 
     def cancel(self, tid):
         raise RuntimeError("temporal down")
 
 
-@pytest.fixture
-def run_dir(tmp_path):
-    from gui_fixture import make_run_dir
-
-    return make_run_dir(tmp_path)
-
-
-@pytest.fixture
-def unranked_run_dir(tmp_path):
-    from gui_fixture import make_run_dir
-
-    return make_run_dir(tmp_path, unranked=True)
-
-
-@pytest.fixture
-def incomplete_run_dir(tmp_path):
-    import json
-
-    from gui_fixture import make_run_dir
-
-    rd = make_run_dir(tmp_path)
-    (p,) = rd.glob("run-*.json")
-    rec = json.loads(p.read_text())
-    del rec["results"]["cut"]
-    p.write_text(json.dumps(rec))
-    return rd
-
-
-def test_healthz_answers_200():
-    c = TestClient(create_app(**fakes()))
+def test_healthz_answers_200(client_for):
+    c, _ = client_for()
     assert c.get("/healthz").status_code == 200
 
 
-def test_runs_list_is_served_from_the_run_store(run_dir):
-    c = TestClient(create_app(**fakes(run_dir=run_dir)))
-    r = c.get("/api/runs")
-    assert r.status_code == 200 and r.json()[0]["parent"] == "benzoic"
+def test_runs_list_is_served_from_the_run_store(client_for, run_dir):
+    c, _ = client_for(run_dir)
+    (row,) = c.get("/api/runs").json()
+    assert row["idx"] == 0 and row["parent"] == "benzoic" and row["verdict"]["state"] == "RESOLVED"
+    assert len(row["digest"]) == 64
 
 
-def test_a_dead_task_backend_is_503_while_runs_still_answer(run_dir):
-    c = TestClient(create_app(**fakes(run_dir=run_dir, queue=BrokenTaskQueue())))
-    assert c.get("/api/tasks").status_code == 503
-    assert "reason" in c.get("/api/tasks").json() or c.get("/api/tasks").json().get("error")
+def test_a_dead_task_backend_is_503_while_runs_still_answer(client_for, run_dir):
+    c, _ = client_for(run_dir, queue=BrokenTaskQueue())
+    r = c.get("/api/tasks")
+    assert r.status_code == 503 and "temporal down" in r.json()["reason"]
     assert c.get("/api/runs").status_code == 200
 
 
-def test_the_task_failure_is_fast_not_a_hang(run_dir):
-    c = TestClient(create_app(**fakes(run_dir=run_dir, queue=BrokenTaskQueue())))
+def test_the_task_failure_is_fast_not_a_hang(client_for, run_dir):
+    c, _ = client_for(run_dir, queue=BrokenTaskQueue())
     t0 = time.monotonic()
     c.get("/api/tasks")
     assert time.monotonic() - t0 < 2.0
 
 
-def test_an_incomplete_record_is_served_as_INCOMPLETE(incomplete_run_dir):
-    c = TestClient(create_app(**fakes(run_dir=incomplete_run_dir)))
-    assert c.get("/api/runs/0/verdict").json()["state"] == "INCOMPLETE"
+@pytest.mark.parametrize(
+    ("fixture", "state", "winner", "missing"),
+    [
+        ("run_dir", "RESOLVED", "4-F", []),
+        ("unranked_run_dir", "UNRANKED", None, []),
+        ("incomplete_run_dir", "INCOMPLETE", None, ["cut"]),
+    ],
+)
+def test_verdict_endpoint_for_each_state(request, client_for, fixture, state, winner, missing):
+    c, _ = client_for(request.getfixturevalue(fixture))
+    v = c.get("/api/runs/0/verdict").json()
+    assert (v["state"], v["winner"], v["missing"]) == (state, winner, missing)
 
 
-def test_a_resolved_run_returns_a_RESOLVED_verdict(run_dir):
-    c = TestClient(create_app(**fakes(run_dir=run_dir)))
-    r = c.get("/api/runs/0/verdict")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["state"] == "RESOLVED"
-    assert body["winner"] == "4-F"
-    assert body["floor"] == 0.0
-    assert body["missing"] == []
+def test_an_incomplete_run_is_409_naming_what_it_lacks(client_for, incomplete_run_dir):
+    c, _ = client_for(incomplete_run_dir)
+    r = c.get("/api/runs/0/ddE")
+    assert r.status_code == 409 and "cut" in r.json()["detail"]
 
 
-def test_an_unranked_run_returns_an_UNRANKED_verdict(unranked_run_dir):
-    c = TestClient(create_app(**fakes(run_dir=unranked_run_dir)))
-    r = c.get("/api/runs/0/verdict")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["state"] == "UNRANKED"
-    assert body["winner"] is None
-    assert body["floor"] == 0.0
-    assert body["missing"] == []
+def test_unknown_paths_are_404(client_for):
+    c, _ = client_for()
+    assert c.get("/nope").status_code == 404
+    assert c.get("/api/nope").status_code == 404
 
 
-def test_an_incomplete_run_returns_an_INCOMPLETE_verdict(incomplete_run_dir):
-    c = TestClient(create_app(**fakes(run_dir=incomplete_run_dir)))
-    r = c.get("/api/runs/0/verdict")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["state"] == "INCOMPLETE"
-    assert body["winner"] is None
-    assert "cut" in body["missing"]
-
-
-def test_unknown_paths_are_404():
-    assert TestClient(create_app(**fakes())).get("/nope").status_code == 404
-
-
-def test_identity_a_user_field_in_the_request_is_ignored():
-    c = TestClient(create_app(**fakes()))
-    r = c.post("/api/tasks", json={"user": "evil", "author": "evil"})
-    assert r.status_code in (200, 201, 204)
+def test_whoami_is_identity_current(client_for):
+    c, _ = client_for(identity="alice")
+    assert c.get("/api/whoami").json()["user"] == "alice"
 
 
 def test_local_stores_live_under_the_runs_root(tmp_path, monkeypatch):
@@ -138,12 +78,40 @@ def test_local_stores_live_under_the_runs_root(tmp_path, monkeypatch):
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     root = tmp_path / "root"
-    from smeltery.bench.app import compose
-
-    compose(root)
-    # trigger store init by touching app state (already initialized)
+    root.mkdir()
+    build_app(root)
     base = root / ".smeltery" / "bench"
-    assert (base / "comments.sqlite").exists()
-    assert (base / "projects.sqlite").exists()
-    # none in cwd
-    assert not any(p.name.endswith(".sqlite") for p in cwd.iterdir()) if cwd.exists() else True
+    assert (base / "comments.sqlite").exists() and (base / "projects.sqlite").exists()
+    assert not list(cwd.iterdir())
+
+
+def test_web_index_is_served_with_spa_fallback(tmp_path, run_dir):
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("<!doctype html><div id=root></div>")
+    (web / "assets" / "app.js").write_text("console.log(1)")
+    from bench.fakes import FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
+
+    app = create_app(
+        run_store=FakeRunStore(run_dir),
+        task_queue=FakeTaskQueue(),
+        identity=FakeIdentity(),
+        clock=FixedClock(),
+        settings=Settings(root=tmp_path / "r", web_dir=web),
+    )
+    c = TestClient(app)
+    for path in ("/", "/run/0/results", "/report/0"):
+        r = c.get(path)
+        assert r.status_code == 200 and "id=root" in r.text, path
+    assert c.get("/assets/app.js").text == "console.log(1)"
+    assert c.get("/api/nope").status_code == 404
+    assert c.get("/api/runs").status_code == 200
+
+
+def test_bench_refuses_without_a_built_ui(monkeypatch, tmp_path, capsys):
+    import smeltery.bench.app as appmod
+
+    monkeypatch.setattr(appmod, "WEB_DIR", tmp_path / "absent")
+    assert main([str(tmp_path)]) == 2
+    assert "npm run build" in capsys.readouterr().err
+    assert "npm run build" in BUILD_HINT

@@ -292,3 +292,18 @@ def test_rung_is_still_a_faithful_view_of_the_decomposition():
 
     for m in catalog().values():
         assert _RUNG_FROM[(m.phase, m.rigour)] == m.rung, m.key
+
+
+def test_an_optional_stage_with_default_knobs_survives_the_round_trip():
+    """Adding a stage without setting any knob is a decision. It used to vanish on to_config -> from_config, because
+    empty sections were not written, so a GUI holding the pipeline as TOML could not add one."""
+    p = Pipeline.minimal("t", "benzoic", {"benzoic": "OC(=O)c1ccccc1", "4-F": "OC(=O)c1ccc(F)cc1"})
+    p.add("docking")
+    assert "docking" in Pipeline.from_config(p.to_config()).keys()
+    assert "docking" in Pipeline.from_toml(_toml_dumps(p.to_config())).keys()
+
+
+def _toml_dumps(cfg):
+    from smeltery.gui._toml import dumps
+
+    return dumps(cfg)

@@ -1,71 +1,52 @@
-import pathlib
+"""The task API behind the work panel: list, submit, log, cancel, over the TaskQueue port."""
 
-import pytest
-from fastapi.testclient import TestClient
-
-from bench.fakes import FakeTaskQueue, _task
-from smeltery.bench.app import create_app
+from bench.fakes import FakeTaskQueue
 
 
-@pytest.fixture
-def run_dir(tmp_path):
-    from gui_fixture import make_run_dir
-
-    return make_run_dir(tmp_path)
-
-
-def fakes(queue=None):
-    rd = pathlib.Path("/tmp") / "w"
-    rd.mkdir(parents=True, exist_ok=True)
-    from bench.fakes import FakeIdentity, FakeRunStore, FixedClock
-
-    return dict(
-        run_store=FakeRunStore(rd),
-        task_queue=queue if queue is not None else FakeTaskQueue(),
-        identity=FakeIdentity("mg"),
-        clock=FixedClock(),
-    )
-
-
-def test_a_tasks_lifecycle_renders():
-    q = FakeTaskQueue(tasks=[_task("a", "succeeded"), _task("b", "running")])
-    c = TestClient(create_app(**fakes(q)))
-    r = c.get("/work")
-    assert r.status_code == 200
-    assert "succeeded" in r.text and "running" in r.text
-    assert "at most once" in r.text
-
-
-def test_cancel_cancels():
-    q = FakeTaskQueue(tasks=[_task("a", "running")])
-    c = TestClient(create_app(**fakes(q)))
-    r = c.post("/api/tasks/a/cancel")
-    assert r.status_code in (200, 204)
-
-
-def test_cancelling_an_unknown_task_is_404():
+def test_submit_splits_a_command_string_into_argv(client_for):
     q = FakeTaskQueue()
-    c = TestClient(create_app(**fakes(q)))
-    r = c.post("/api/tasks/ghost/cancel")
-    assert r.status_code == 404
+    c, _ = client_for(queue=q)
+    r = c.post("/api/tasks", json={"name": "run", "command": "smeltery run cfg.toml", "cwd": "/tmp"})
+    assert r.status_code == 201 and r.json()["status"] == "queued"
+    assert q.submitted == [("run", ["smeltery", "run", "cfg.toml"], "/tmp", "")]
 
 
-def test_the_panel_states_tasks_run_at_most_once():
+def test_submit_refuses_an_empty_or_unparseable_command(client_for):
+    c, _ = client_for()
+    assert c.post("/api/tasks", json={"command": []}).status_code == 400
+    assert c.post("/api/tasks", json={"command": ""}).status_code == 400
+    r = c.post("/api/tasks", json={"command": "echo 'unbalanced"})
+    assert r.status_code == 400 and "invalid command" in r.json()["detail"]
+
+
+def test_list_log_and_cancel(client_for):
     q = FakeTaskQueue()
-    c = TestClient(create_app(**fakes(q)))
-    r = c.get("/work")
-    assert "at most once" in r.text
+    c, _ = client_for(queue=q)
+    tid = c.post("/api/tasks", json={"command": ["sleep", "60"]}).json()["id"]
+    q.logs[tid] = "<b>bold</b>\n"
+    assert [t["id"] for t in c.get("/api/tasks").json()] == [tid]
+    assert c.get(f"/api/tasks/{tid}/log").json()["log"] == "<b>bold</b>\n"
+    assert c.post(f"/api/tasks/{tid}/cancel").json()["status"] == "cancelled"
 
 
-def test_an_unreachable_queue_is_reported_and_the_page_still_loads():
-    class Broken:
-        def list(self):
-            raise RuntimeError("down")
+def test_unknown_task_ids_are_404(client_for):
+    c, _ = client_for()
+    assert c.get("/api/tasks/ghost/log").status_code == 404
+    assert c.post("/api/tasks/ghost/cancel").status_code == 404
 
-        def cancel(self, tid):
-            raise RuntimeError("down")
 
-    c = TestClient(create_app(**fakes(Broken())))
-    r = c.get("/work")
-    assert r.status_code == 200
-    assert "down" in r.text or "unreachable" in r.text
+def test_a_real_subprocess_queue_runs_and_reports_the_exit_code(client_for, tmp_path):
+    import time
+
+    from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
+
+    c, _ = client_for(queue=SubprocessTaskQueue(tmp_path / "q"))
+    tid = c.post("/api/tasks", json={"command": ["bash", "-c", "echo hi; exit 3"]}).json()["id"]
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        t = next(x for x in c.get("/api/tasks").json() if x["id"] == tid)
+        if t["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.1)
+    assert (t["status"], t["returncode"]) == ("failed", 3)
+    assert "hi" in c.get(f"/api/tasks/{tid}/log").json()["log"]

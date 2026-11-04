@@ -1,64 +1,53 @@
-import pathlib
-import tempfile
+"""The notebook API: campaigns, append-only entries, artefacts by hash, authorship from Identity."""
 
-import pytest
-from fastapi.testclient import TestClient
+import hashlib
 
-from bench.fakes import FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
-from smeltery.bench.app import create_app
+from bench.conftest import record_path
 
 
-@pytest.fixture
-def run_dir(tmp_path):
-    from gui_fixture import make_run_dir
-
-    return make_run_dir(tmp_path)
+def _campaign(c):
+    return c.post("/api/campaigns", json={"name": "cdk2"}).json()["id"]
 
 
-def fakes(run_dir):
-    import smeltery.bench.adapters.artifact_store as ar
-    import smeltery.bench.adapters.project_store as ps
-
-    return dict(
-        run_store=FakeRunStore(run_dir),
-        task_queue=FakeTaskQueue(),
-        identity=FakeIdentity("mg"),
-        clock=FixedClock(),
-        project_store=ps.SqliteProjectStore(pathlib.Path(tempfile.mkdtemp()) / "p.sqlite"),
-        artifact_store=ar.FilesystemArtifactStore(pathlib.Path("/tmp") / "art"),
-    )
+def test_an_entry_records_attached_runs_by_sha256(client_for, run_dir):
+    c, _ = client_for(run_dir)
+    cid = _campaign(c)
+    r = c.post(f"/api/campaigns/{cid}/entries", json={"title": "first pass", "body": "ran it", "runs": [0]})
+    assert r.status_code == 201
+    assert r.json()["artefacts"] == [hashlib.sha256(record_path(run_dir).read_bytes()).hexdigest()]
 
 
-def test_an_entry_records_artefacts_by_sha256(run_dir):
-    c = TestClient(create_app(**fakes(run_dir)))
-    r = c.post("/api/campaigns/c1/entries", json={"title": "t", "body": "b", "runs": [0]})
-    assert r.status_code == 200
-    entries = c.get("/api/campaigns/c1/entries").json()
-    assert entries
-    # artefacts should be list of sha256 hex
-    _ = entries[0].get("artefacts") if isinstance(entries[0], dict) else None
-    # entries may be dataclass converted to dict? check
-    assert True
+def test_there_is_no_route_that_edits_an_entry(client_for):
+    c, _ = client_for()
+    cid = _campaign(c)
+    eid = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "body": "b"}).json()["id"]
+    assert c.put(f"/api/campaigns/{cid}/entries/{eid}", json={"body": "x"}).status_code in (404, 405)
+    assert c.patch(f"/api/campaigns/{cid}/entries/{eid}", json={"body": "x"}).status_code in (404, 405)
 
 
-def test_there_is_no_route_that_edits_an_entry(run_dir):
-    c = TestClient(create_app(**fakes(run_dir)))
-    assert c.put("/api/campaigns/c1/entries/x").status_code in (404, 405)
-    assert c.patch("/api/campaigns/c1/entries/x").status_code in (404, 405)
+def test_a_correction_supersedes_and_the_old_entry_stays_readable(client_for):
+    c, _ = client_for()
+    cid = _campaign(c)
+    old = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "body": "b"}).json()["id"]
+    new = c.post(f"/api/campaigns/{cid}/entries", json={"title": "fix", "body": "b2", "supersedes": old}).json()
+    assert new["supersedes"] == old
+    got = c.get(f"/api/campaigns/{cid}/entries/{old}").json()
+    assert got["superseded_by"] == new["id"] and got["body"] == "b"
 
 
-def test_a_correction_supersedes_and_the_old_entry_stays_readable(run_dir):
-    c = TestClient(create_app(**fakes(run_dir)))
-    r1 = c.post("/api/campaigns/c1/entries", json={"title": "t1", "body": "b1"})
-    id1 = r1.json()["id"]
-    r2 = c.post("/api/campaigns/c1/entries", json={"title": "t2", "body": "b2", "supersedes": id1})
-    assert r2.status_code == 200
-    entries = c.get("/api/campaigns/c1/entries").json()
-    assert len(entries) == 2
+def test_superseding_an_unknown_entry_is_400(client_for):
+    c, _ = client_for()
+    cid = _campaign(c)
+    assert c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "supersedes": "ghost"}).status_code == 400
 
 
-def test_the_author_comes_from_identity(run_dir):
-    c = TestClient(create_app(**fakes(run_dir)))
-    c.post("/api/campaigns/c1/entries", json={"title": "t", "body": "b"})
-    entries = c.get("/api/campaigns/c1/entries").json()
-    assert entries[0].get("author") == "mg" if isinstance(entries[0], dict) else True
+def test_the_author_comes_from_identity(client_for):
+    c, _ = client_for(identity="alice")
+    cid = _campaign(c)
+    r = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "body": "b", "author": "forged"})
+    assert r.json()["author"] == "alice"
+
+
+def test_an_unknown_campaign_is_404(client_for):
+    c, _ = client_for()
+    assert c.get("/api/campaigns/nope/entries").status_code == 404

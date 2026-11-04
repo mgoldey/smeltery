@@ -23,14 +23,20 @@ class FixedClock:
 
 
 class FakeTaskQueue:
+    """Records what it is asked to run and runs nothing. Submitted tasks are listed as queued."""
+
     def __init__(self, tasks=None):
         self.tasks = list(tasks or [])
         self.submitted = []
         self.executed = []
+        self.logs = {}
 
     def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note=""):
+        from smeltery.tasks import Task
+
         tid = f"t{len(self.submitted)}"
         self.submitted.append((name, list(command), cwd, note))
+        self.tasks.append(Task(id=tid, name=name, command=list(command), cwd=cwd or "", status="queued", note=note))
         return tid
 
     def list(self, status=None):
@@ -51,10 +57,16 @@ class FakeTaskQueue:
         return t.status
 
     def cancel(self, tid):
-        return False
+        t = self.get(tid)
+        if t is None:
+            raise KeyError(tid)
+        t.status = "cancelled"
+        return True
 
     def tail_log(self, tid, lines=40):
-        return ""
+        if self.get(tid) is None:
+            raise KeyError(tid)
+        return self.logs.get(tid, "")
 
 
 class FakeRunStore:
