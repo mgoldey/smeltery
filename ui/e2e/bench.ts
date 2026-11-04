@@ -24,6 +24,10 @@ export function fixture(): Fixture {
   return JSON.parse(readFileSync(resolve(here, ".fixture.json"), "utf8")) as Fixture;
 }
 
+/** Run indices, fixed by construction: serve_fixture.py lists runs in path order, and the names sort a < b < c.
+ * Usable when tests are collected, before the server has written .fixture.json; shell.spec.ts checks them. */
+export const IDX = { a_resolved: 0, b_unranked: 1, c_incomplete: 2 } as const;
+
 export function run(name: "a_resolved" | "b_unranked" | "c_incomplete"): FixtureRun {
   const r = fixture().runs.find((x) => x.name === name);
   if (!r) throw new Error(`no fixture run ${name}`);

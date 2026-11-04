@@ -1,4 +1,4 @@
-import { expect, fixture, run, test } from "./bench";
+import { expect, fixture, IDX, run, test } from "./bench";
 
 test("the bench lists every fixture run with its digest", async ({ page }) => {
   await page.goto("/bench");
@@ -28,4 +28,8 @@ test("an incomplete run says what it is missing instead of rendering blank", asy
 test("an unknown address is a page that says so", async ({ page }) => {
   await page.goto("/no/such/place");
   await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
+});
+
+test("the fixture indices used at collection time match what the server built", () => {
+  for (const r of fixture().runs) expect(IDX[r.name as keyof typeof IDX]).toBe(r.idx);
 });

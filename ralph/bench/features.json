@@ -648,7 +648,7 @@
         "Mutation: hard-code a colour in one component; confirm the check fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI5-verdict-banner",
