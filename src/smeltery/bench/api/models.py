@@ -174,6 +174,11 @@ class StructureRequest(BaseModel):
     allow_network: bool = False
 
 
+class StructureText(BaseModel):
+    name: str
+    text: str
+
+
 class StructureInfo(BaseModel):
     source: str
     sha256: str

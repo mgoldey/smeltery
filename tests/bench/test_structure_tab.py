@@ -56,3 +56,24 @@ def test_a_missing_file_is_400_naming_it(tmp_path):
     r = c.post("/api/structure", json={"source": missing})
     assert r.status_code == 400
     assert missing in r.text
+
+
+def test_a_dropped_file_is_described_by_its_text(client_for):
+    """Data source: the committed e2e PDB, which has an EXPDTA record, a ligand (LIG) and two waters (HOH)."""
+    import hashlib
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[2] / "ui" / "e2e" / "data" / "site.pdb").read_text()
+    c, _ = client_for()
+    r = c.post("/api/structure/text", json={"name": "site.pdb", "text": text})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sha256"] == hashlib.sha256(text.encode()).hexdigest()
+    assert body["origin"] == "EXPERIMENTAL" and body["dropped"] == ["LIG", "HOH"]
+    assert c.get(body["file_url"]).text == text
+
+
+def test_text_that_is_not_a_pdb_is_400(client_for):
+    c, _ = client_for()
+    r = c.post("/api/structure/text", json={"name": "notes.txt", "text": "hello"})
+    assert r.status_code == 400 and "PDB" in r.json()["detail"]

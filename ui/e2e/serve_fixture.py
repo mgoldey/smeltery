@@ -93,7 +93,7 @@ def main() -> int:
     runs = build(root)
     for i, r in enumerate(runs):
         r["idx"] = i
-    pdb = REPO / "tests" / "data" / "pocket_pep5.pdb"
+    pdb = HERE / "data" / "site.pdb"
     (HERE / ".fixture.json").write_text(
         json.dumps({"root": str(root), "runs": runs, "study": "bench.study_fixture", "pdb": str(pdb)}, indent=1)
     )

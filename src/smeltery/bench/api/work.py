@@ -222,22 +222,8 @@ def _origin(text: str, provider_kind: str | None) -> str:
     return "UNKNOWN (no EXPDTA record and no provider metadata)"
 
 
-@router.post("/structure", response_model=M.StructureInfo)
-def open_structure(request: Request, body: M.StructureRequest) -> M.StructureInfo:
-    st = ports(request)
-    src = st.structure_source
-    looks_like_path = "/" in body.source or body.source.lower().endswith((".pdb", ".ent", ".cif"))
-    if looks_like_path and not Path(body.source).is_file():
-        raise HTTPException(status_code=400, detail=f"no such file: {body.source}")
-    try:
-        res = src.fetch_result(body.source, allow_network=body.allow_network)
-    except PermissionError as e:
-        raise HTTPException(status_code=400, detail=f"{body.source}: needs network access, which is off ({e})") from e
-    except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=f"{body.source}: {e}") from e
-    if res is None:
-        raise HTTPException(status_code=400, detail=f"{body.source}: no such file, and not a fetchable id")
-    text = res.text
+def _describe(request: Request, source: str, text: str, res: Any = None) -> M.StructureInfo:
+    """Hash, origin and HETATM residues of a structure, remembered so its file can be served to the viewer."""
     data = text.encode()
     sha = hashlib.sha256(data).hexdigest()
     dropped: list[str] = []
@@ -249,9 +235,11 @@ def open_structure(request: Request, body: M.StructureRequest) -> M.StructureInf
             name = line[17:21].strip()
             if name and name not in dropped:
                 dropped.append(name)
-    st.structures[sha] = text
+    if n_atoms == 0:
+        raise HTTPException(status_code=400, detail=f"{source}: no ATOM or HETATM records; is this a PDB file?")
+    ports(request).structures[sha] = text
     return M.StructureInfo(
-        source=body.source,
+        source=source,
         sha256=sha,
         origin=_origin(text, getattr(res, "kind", None)),
         license=getattr(res, "license_id", None),
@@ -261,6 +249,30 @@ def open_structure(request: Request, body: M.StructureRequest) -> M.StructureInf
         n_atoms=n_atoms,
         file_url=f"/api/structure/{sha}.pdb",
     )
+
+
+@router.post("/structure", response_model=M.StructureInfo)
+def open_structure(request: Request, body: M.StructureRequest) -> M.StructureInfo:
+    """Open a local .pdb path, a PDB id or a UniProt accession. Network sources need allow_network."""
+    src = ports(request).structure_source
+    looks_like_path = "/" in body.source or body.source.lower().endswith((".pdb", ".ent", ".cif"))
+    if looks_like_path and not Path(body.source).is_file():
+        raise HTTPException(status_code=400, detail=f"no such file: {body.source}")
+    try:
+        res = src.fetch_result(body.source, allow_network=body.allow_network)
+    except PermissionError as e:
+        raise HTTPException(status_code=400, detail=f"{body.source}: needs network access, which is off ({e})") from e
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"{body.source}: {e}") from e
+    if res is None:
+        raise HTTPException(status_code=400, detail=f"{body.source}: no such file, and not a fetchable id")
+    return _describe(request, body.source, res.text, res)
+
+
+@router.post("/structure/text", response_model=M.StructureInfo)
+def open_structure_text(request: Request, body: M.StructureText) -> M.StructureInfo:
+    """A structure dropped into the browser: it has a name and contents, but no path the server can read."""
+    return _describe(request, body.name, body.text)
 
 
 @router.get("/structure/{sha}.pdb")

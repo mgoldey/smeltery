@@ -547,8 +547,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Open Structure */
+        /**
+         * Open Structure
+         * @description Open a local .pdb path, a PDB id or a UniProt accession. Network sources need allow_network.
+         */
         post: operations["open_structure_api_structure_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/structure/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Structure Text
+         * @description A structure dropped into the browser: it has a name and contents, but no path the server can read.
+         */
+        post: operations["open_structure_text_api_structure_text_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1174,6 +1197,13 @@ export interface components {
             allow_network: boolean;
             /** Source */
             source: string;
+        };
+        /** StructureText */
+        StructureText: {
+            /** Name */
+            name: string;
+            /** Text */
+            text: string;
         };
         /** StudyCell */
         StudyCell: {
@@ -2321,6 +2351,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["StructureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StructureInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_structure_text_api_structure_text_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StructureText"];
             };
         };
         responses: {

@@ -10,6 +10,7 @@ export function routes(): string[] {
     ...Object.values(IDX).map((i) => `/run/${i}/results`),
     `/run/${IDX.a_resolved}/poses`,
     `/run/${IDX.e_noposes}/poses`,
+    `/run/${IDX.a_resolved}/structure`,
     "/no/such/page",
   ];
 }

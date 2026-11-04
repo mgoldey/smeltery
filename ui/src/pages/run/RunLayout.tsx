@@ -5,6 +5,7 @@ import { Shell } from "../../components/Shell";
 export const RUN_TABS: { to: string; label: string }[] = [
   { to: "results", label: "Results" },
   { to: "poses", label: "Poses" },
+  { to: "structure", label: "Structure" },
   { to: "overview", label: "Overview" },
 ];
 

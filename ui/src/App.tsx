@@ -4,6 +4,7 @@ import { NotFound } from "./pages/NotFound";
 import { Overview } from "./pages/run/Overview";
 import { Poses } from "./pages/run/Poses";
 import { Results } from "./pages/run/Results";
+import { Structure } from "./pages/run/Structure";
 import { RunLayout } from "./pages/run/RunLayout";
 
 export function App() {
@@ -15,6 +16,7 @@ export function App() {
         <Route index element={<Navigate to="results" replace />} />
         <Route path="results" element={<Results />} />
         <Route path="poses" element={<Poses />} />
+        <Route path="structure" element={<Structure />} />
         <Route path="overview" element={<Overview />} />
       </Route>
       <Route path="*" element={<NotFound />} />
