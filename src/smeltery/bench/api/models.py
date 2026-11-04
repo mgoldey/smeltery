@@ -128,8 +128,14 @@ class PipelineState(BaseModel):
     toml: str
     ok: bool
     issues: list[Issue]
-    stages: list[dict[str, Any]]
+    stages: list[dict[str, Any]] = Field(description="Pipeline.view(): stages as smeltery run executes them")
+    placed: list[str] = Field(description="the stages the user placed, in their order")
+    params: dict[str, dict[str, Any]] = Field(description="knobs the user set, per placed stage")
     addable: list[str]
+    campaign: str
+    parent: str
+    candidates: dict[str, str]
+    notes: list[str] = []
 
 
 class PipelineCheck(BaseModel):
@@ -299,3 +305,61 @@ class Comparison(BaseModel):
     figure: dict[str, Any]
     caption: str
     summary: dict[str, Any]
+
+
+class ParamOut(BaseModel):
+    name: str
+    kind: str
+    default: Any = None
+    required: bool = False
+    help: str = ""
+    choices: list[Any] = []
+    optional: bool = False
+
+
+class MethodOut(BaseModel):
+    key: str
+    label: str
+    rung: str
+    role: str
+    needs: list[str]
+    provides: list[str]
+    section: str | None
+    gate_key: str | None
+    tier: str | None
+    required: bool
+    implicit: bool
+    wired: bool
+    why_unwired: str
+    extras: list[str]
+    exclusive: list[str]
+    summary: str
+    rung_index: int
+    produces: dict[str, str]
+    floors: dict[str, float | None]
+    is_delta_g: bool | None = Field(description="None for stages that are not measurement tiers")
+    floor_status: str
+    params: list[ParamOut]
+    quantity: str | None = Field(description="the quantity this method measures; rigour compares only within one")
+    phase: str
+    rigour: str | None
+
+
+class RungOut(BaseModel):
+    name: str
+    description: str
+    methods: list[str]
+
+
+class SiteField(BaseModel):
+    name: str
+    kind: str
+
+
+class CatalogOut(BaseModel):
+    rungs: list[RungOut]
+    roles: list[str]
+    artefacts: dict[str, str]
+    kinds: list[str]
+    site_fields: list[SiteField]
+    methods: dict[str, MethodOut]

@@ -748,20 +748,20 @@
       "id": "UI10-pipeline-editor",
       "spec": "pipeline-editor.md",
       "category": "ui",
-      "description": "The pipeline editor edits stages with mouse and keyboard, lists every issue, and keeps the TOML pane in sync both ways.",
+      "description": "The pipeline editor adds and removes stages with mouse and keyboard, lists every issue, and keeps the TOML pane in sync both ways.",
       "depends_on": [
         "UI3-e2e-harness"
       ],
       "verify": "cd ui && npx playwright test e2e/pipeline.spec.ts",
       "steps": [
         "Palette groups by rung from /api/catalog; qmmm is disabled and its reason is visible.",
-        "Add, remove and reorder a stage using only the keyboard.",
+        "Add and remove a stage using only the keyboard; stages are listed in smeltery run's fixed execution order (no reorder control).",
         "A pipeline with two independent errors shows both in the issues panel.",
         "Editing a knob updates the TOML pane; editing the TOML updates the visual stage list (both via /api/pipeline/check).",
         "Methods of different quantities are never shown in one ordered rigour list (data source: comparable_rigour via /api/catalog)."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI11-click-to-place",

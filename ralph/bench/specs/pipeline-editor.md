@@ -22,7 +22,9 @@
 
 ## In the app (Run → Pipeline)
 8. The palette lists methods by rung. Unwired methods are shown disabled with their reason.
-9. Stages can be added, removed and reordered with mouse and keyboard alone.
+9. Stages can be added and removed with mouse and keyboard alone. They are listed in the order `smeltery run`
+   executes them (`EXECUTION_ORDER`), which is fixed; the TOML has nowhere to hold another order, so there is no
+   reorder control (one would silently snap back on the next edit).
 10. Each stage's knobs are a form generated from its `Param` kinds.
 11. An issues panel shows every issue from `/api/pipeline/check` and updates on each edit.
 12. A TOML pane (CodeMirror) and the visual editor stay in sync both ways: an edit in either

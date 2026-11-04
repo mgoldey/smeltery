@@ -193,8 +193,10 @@ export interface paths {
         put?: never;
         /**
          * Pipeline From Run
-         * @description A starting pipeline for the next round: the run's own config when it recorded one, else the minimal pipeline
-         *     over its campaign, parent and candidates.
+         * @description A starting pipeline for the next round, rebuilt from what the run record holds: its candidates and parent,
+         *     the cut's keep and z, a floor that came from the config, and the gates that ran. The record stores the field's
+         *     charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
+         *     notes say so, and click-to-place puts them back.
          */
         post: operations["pipeline_from_run_api_pipeline_from_run_post"];
         delete?: never;
@@ -767,6 +769,25 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** CatalogOut */
+        CatalogOut: {
+            /** Artefacts */
+            artefacts: {
+                [key: string]: string;
+            };
+            /** Kinds */
+            kinds: string[];
+            /** Methods */
+            methods: {
+                [key: string]: components["schemas"]["MethodOut"];
+            };
+            /** Roles */
+            roles: string[];
+            /** Rungs */
+            rungs: components["schemas"]["RungOut"][];
+            /** Site Fields */
+            site_fields: components["schemas"]["SiteField"][];
+        };
         /** CommentIn */
         CommentIn: {
             /**
@@ -935,6 +956,98 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** MethodOut */
+        MethodOut: {
+            /** Exclusive */
+            exclusive: string[];
+            /** Extras */
+            extras: string[];
+            /** Floor Status */
+            floor_status: string;
+            /** Floors */
+            floors: {
+                [key: string]: number | null;
+            };
+            /** Gate Key */
+            gate_key: string | null;
+            /** Implicit */
+            implicit: boolean;
+            /**
+             * Is Delta G
+             * @description None for stages that are not measurement tiers
+             */
+            is_delta_g: boolean | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Needs */
+            needs: string[];
+            /** Params */
+            params: components["schemas"]["ParamOut"][];
+            /** Phase */
+            phase: string;
+            /** Produces */
+            produces: {
+                [key: string]: string;
+            };
+            /** Provides */
+            provides: string[];
+            /**
+             * Quantity
+             * @description the quantity this method measures; rigour compares only within one
+             */
+            quantity: string | null;
+            /** Required */
+            required: boolean;
+            /** Rigour */
+            rigour: string | null;
+            /** Role */
+            role: string;
+            /** Rung */
+            rung: string;
+            /** Rung Index */
+            rung_index: number;
+            /** Section */
+            section: string | null;
+            /** Summary */
+            summary: string;
+            /** Tier */
+            tier: string | null;
+            /** Why Unwired */
+            why_unwired: string;
+            /** Wired */
+            wired: boolean;
+        };
+        /** ParamOut */
+        ParamOut: {
+            /**
+             * Choices
+             * @default []
+             */
+            choices: unknown[];
+            /** Default */
+            default?: unknown;
+            /**
+             * Help
+             * @default
+             */
+            help: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /**
+             * Optional
+             * @default false
+             */
+            optional: boolean;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+        };
         /** PerPoseRow */
         PerPoseRow: {
             /** Candidate */
@@ -982,11 +1095,41 @@ export interface components {
         PipelineState: {
             /** Addable */
             addable: string[];
+            /** Campaign */
+            campaign: string;
+            /** Candidates */
+            candidates: {
+                [key: string]: string;
+            };
             /** Issues */
             issues: components["schemas"]["Issue"][];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
             /** Ok */
             ok: boolean;
-            /** Stages */
+            /**
+             * Params
+             * @description knobs the user set, per placed stage
+             */
+            params: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /** Parent */
+            parent: string;
+            /**
+             * Placed
+             * @description the stages the user placed, in their order
+             */
+            placed: string[];
+            /**
+             * Stages
+             * @description Pipeline.view(): stages as smeltery run executes them
+             */
             stages: {
                 [key: string]: unknown;
             }[];
@@ -1135,6 +1278,22 @@ export interface components {
             /** Path */
             path: string;
             verdict?: components["schemas"]["Verdict"] | null;
+        };
+        /** RungOut */
+        RungOut: {
+            /** Description */
+            description: string;
+            /** Methods */
+            methods: string[];
+            /** Name */
+            name: string;
+        };
+        /** SiteField */
+        SiteField: {
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
         };
         /** SiteRequest */
         SiteRequest: {
@@ -1515,9 +1674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CatalogOut"];
                 };
             };
         };

@@ -102,3 +102,33 @@ def test_launch_is_refused_with_errors_and_stages_inputs_into_out_when_clean(cli
     (name, argv, _cwd, _note) = q.submitted[0]
     assert argv == ["smeltery", "run", str(out / "config.toml"), "--out", str(out)]
     assert Path(out / "config.toml").is_file()
+
+
+def test_from_run_restores_the_cut_and_says_what_it_cannot_restore(client_for, run_dir):
+    """Data source: the run record's inputs (keep, z, and a floor whose source is the config)."""
+    import json
+
+    from bench.conftest import record_path
+
+    rec = json.loads(record_path(run_dir).read_text())
+    c, _ = client_for(run_dir)
+    state = c.post("/api/pipeline/from_run", json={"run": 0}).json()
+    cut = tomllib.loads(state["toml"])["cut"]
+    assert cut["keep"] == rec["inputs"]["cut"]["keep"] and cut["z"] == rec["inputs"]["cut"]["z"]
+    assert cut["floor"] == rec["inputs"]["floor"]["value"]
+    assert any("pocket charges" in n for n in state["notes"])
+
+
+def test_from_run_carries_forward_every_gate_that_ran(client_for, run_dir):
+    """Data source: the record's inputs.gates, with xtb switched on; the TOML gate name xtb is the gfn2 stage."""
+    import json
+
+    from bench.conftest import record_path
+
+    rp = record_path(run_dir)
+    rec = json.loads(rp.read_text())
+    rec["inputs"]["gates"]["xtb"] = True
+    rp.write_text(json.dumps(rec))
+    c, _ = client_for(run_dir)
+    state = c.post("/api/pipeline/from_run", json={"run": 0}).json()
+    assert "gfn2" in state["placed"] and tomllib.loads(state["toml"])["gates"]["xtb"] is True

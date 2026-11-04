@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { BenchHome } from "./pages/BenchHome";
 import { NotFound } from "./pages/NotFound";
 import { Overview } from "./pages/run/Overview";
+import { Pipeline } from "./pages/run/Pipeline";
 import { Poses } from "./pages/run/Poses";
 import { Results } from "./pages/run/Results";
 import { Structure } from "./pages/run/Structure";
@@ -17,6 +18,7 @@ export function App() {
         <Route path="results" element={<Results />} />
         <Route path="poses" element={<Poses />} />
         <Route path="structure" element={<Structure />} />
+        <Route path="pipeline" element={<Pipeline />} />
         <Route path="overview" element={<Overview />} />
       </Route>
       <Route path="*" element={<NotFound />} />

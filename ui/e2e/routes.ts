@@ -11,6 +11,7 @@ export function routes(): string[] {
     `/run/${IDX.a_resolved}/poses`,
     `/run/${IDX.e_noposes}/poses`,
     `/run/${IDX.a_resolved}/structure`,
+    `/run/${IDX.a_resolved}/pipeline`,
     "/no/such/page",
   ];
 }

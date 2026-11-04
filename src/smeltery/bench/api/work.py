@@ -87,7 +87,7 @@ def cancel_task(request: Request, task_id: str) -> M.Task:
 # ---------------------------------------------------------------------------------------------------- catalog
 
 
-@router.get("/catalog")
+@router.get("/catalog", response_model=M.CatalogOut)
 def get_catalog() -> dict[str, Any]:
     """`catalog_json()` plus, per method, the quantity it measures, its phase and rigour. Rigour orders methods only
     within one quantity (`Method.comparable_rigour`), so the palette groups by quantity and never draws one ladder."""
@@ -115,7 +115,12 @@ def _state(p: Pipeline) -> M.PipelineState:
         ok=not any(i.level == "error" for i in issues),
         issues=issues,
         stages=p.view(),
+        placed=p.keys(),
+        params={st.method: {k: v for k, v in st.params.items() if v is not None} for st in p.stages},
         addable=p.addable(),
+        campaign=p.campaign,
+        parent=p.parent,
+        candidates=dict(p.candidates),
     )
 
 
@@ -126,13 +131,32 @@ def pipeline_check(body: M.PipelineCheck) -> M.PipelineState:
 
 @router.post("/pipeline/from_run", response_model=M.PipelineState)
 def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineState:
-    """A starting pipeline for the next round: the run's own config when it recorded one, else the minimal pipeline
-    over its campaign, parent and candidates."""
+    """A starting pipeline for the next round, rebuilt from what the run record holds: its candidates and parent,
+    the cut's keep and z, a floor that came from the config, and the gates that ran. The record stores the field's
+    charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
+    notes say so, and click-to-place puts them back."""
     r = run(request, body.run)
-    cfg = r.record.get("inputs", {}).get("config")
-    if isinstance(cfg, dict):
-        return _state(Pipeline.from_config(cfg))
-    return _state(Pipeline.minimal(r.campaign, r.parent, dict(r.candidates)))
+    inputs = r.record.get("inputs", {})
+    p = Pipeline.minimal(r.campaign, r.parent, dict(r.candidates))
+    notes = []
+    cut = {k: v for k, v in inputs.get("cut", {}).items() if k in ("keep", "z")}
+    floor = inputs.get("floor", {})
+    if str(floor.get("source", "")).startswith("config"):
+        cut["floor"] = floor.get("value")
+    p.set("cut", **cut)
+    by_gate = {m.gate_key: k for k, m in catalog().items() if m.gate_key}  # the TOML's gate names -> stage keys
+    for gate, on in inputs.get("gates", {}).items():
+        key = by_gate.get(gate)
+        if on is True and key and key in p.addable():
+            p.add(key)
+    if inputs.get("field"):
+        notes.append(
+            f"This run's {len(inputs['field'])} pocket charges are recorded as positions, not as the atom sites that "
+            "placed them, so they are not carried over: place the sites again by clicking atoms."
+        )
+    state = _state(p)
+    state.notes = notes
+    return state
 
 
 @router.post("/pipeline/edit", response_model=M.PipelineState)

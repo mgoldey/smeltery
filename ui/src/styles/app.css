@@ -80,3 +80,33 @@ label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0
 .controls { display: flex; gap: 18px; align-items: end; flex-wrap: wrap; margin: 4px 0 4px; }
 .controls label { margin-top: 0; }
 .pairing { margin: 8px 0 0; }
+
+/* Pipeline editor */
+.pipeline-grid { display: grid; grid-template-columns: 300px 1fr; gap: 28px; align-items: start; }
+.palette { border-right: 1px solid var(--hairline); padding-right: 18px; }
+.palette .rung h3 { font-size: 12px; font-weight: 600; text-transform: none; color: var(--ink-muted); margin: 16px 0 4px; }
+.palette ul { list-style: none; margin: 0 0 6px; padding: 0; }
+.palette .quantity-label { font-size: 12px; color: var(--ink-muted); padding: 2px 0; }
+.palette .method { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: baseline; padding: 3px 0; }
+.palette .method button { padding: 2px 6px; font-size: 12px; }
+.palette .unwired { grid-column: 2; font-size: 12px; color: var(--ink-muted); }
+.stages { list-style: decimal; padding-left: 22px; margin: 0; }
+.stage { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hairline); }
+.stage.selected { background: var(--sunken); }
+.stage-rung { color: var(--ink-muted); font-size: 12px; }
+.stage-actions { display: flex; gap: 4px; }
+.stage-actions button { padding: 2px 8px; font-size: 12px; }
+.issues { list-style: none; padding: 0; margin: 0; }
+.issue { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--hairline); }
+.issue-level { font-weight: 600; min-width: 56px; }
+.issue[data-level="error"] .issue-level { color: var(--bad); }
+.issue[data-level="warning"] .issue-level { color: var(--pending); }
+.issue[data-level="note"] .issue-level { color: var(--ink-muted); }
+.toml-editor { border: 1px solid var(--hairline); background: var(--panel); min-height: 220px; font-size: 12.5px; }
+.toml-editor .cm-editor { min-height: 220px; }
+.knobs > div { margin-bottom: 6px; }
+.knobs input { width: 100%; }
+.palette .unwired-mark { font-size: 12px; color: var(--ink-muted); text-align: center; }
+.toml-editor .cm-scroller { font-family: "IBM Plex Mono", ui-monospace, monospace; line-height: 1.5; }
+.toml-editor .cm-gutters { background: var(--sunken); color: var(--ink-muted); border-right: 1px solid var(--hairline); }
+.banner.note { border-left-color: var(--accent); }
