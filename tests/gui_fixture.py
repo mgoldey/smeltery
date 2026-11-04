@@ -126,7 +126,13 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
                 {"stage": "poses", "kind": "pair", "candidates_in": n, "candidates_out": n},
                 {"stage": "pocket", "kind": "field", "candidates_in": n, "candidates_out": n},
                 {"stage": "parity", "kind": "gate", "candidates_in": n, "candidates_out": n},
-                {"stage": "field_interaction", "kind": "measure", "candidates_in": n, "candidates_out": n},
+                {
+                    "stage": "field_interaction",
+                    "kind": "measure",
+                    "candidates_in": n,
+                    "candidates_out": n,
+                    "seconds": 1.5,
+                },
                 {
                     "stage": "cut",
                     "kind": "rank",

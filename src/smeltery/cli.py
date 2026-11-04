@@ -476,7 +476,8 @@ def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | Non
         "kind": kind,
         "candidates_in": n_in,
         "candidates_out": n_out,
-        "seconds": float(_STAGE_SECONDS.get(stage, 0.0)),  # wall time of that stage's `_stage` call(s)
+        # wall time of that stage's `_stage` call(s); None when it was never timed (not "took 0 s")
+        "seconds": _STAGE_SECONDS.get(stage),
     }
     log.append({**entry, **extra})
 
@@ -762,7 +763,15 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
         if e["stage"] == "pocket":  # parity runs right after the pocket, before the recorded gates
             rows.append({"stage": "parity", "kind": "gate", "candidates_in": n, "candidates_out": n})
     if res is not None:
-        rows.append({"stage": plan.tier.name, "kind": "measure", "candidates_in": n, "candidates_out": n})
+        rows.append(
+            {
+                "stage": plan.tier.name,
+                "kind": "measure",
+                "candidates_in": n,
+                "candidates_out": n,
+                "seconds": _STAGE_SECONDS.get(plan.tier.name),  # wall time of the measurement `_stage` call
+            }
+        )
         rows.append(
             {
                 "stage": "cut",
@@ -924,7 +933,29 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
     return poses
 
 
-def write_outputs(plan: Plan, rec: RunRecord, out_dir: Path) -> Path:
+def calc_file_name(candidate: str) -> str:
+    """The calc log of a `--only-candidate` partial run: calcs-<candidate>.jsonl, sanitised like the pose SDFs."""
+    return "calcs-" + pose_file_name(candidate)[: -len(".sdf")] + ".jsonl"
+
+
+def merged_partial_calcs(out_dir: Path, partials: list[Path]) -> list[dict]:
+    """Every SCF line of the partial runs being combined, read from the calc logs their records name."""
+    rows: list[dict] = []
+    for p in partials:
+        calcs = (json.loads(p.read_text()).get("results") or {}).get("calcs")
+        f = Path(out_dir) / calcs["file"] if calcs else None
+        if f is not None and f.is_file():
+            rows += [json.loads(x) for x in f.read_text().splitlines() if x.strip()]
+    return rows
+
+
+def write_outputs(
+    plan: Plan,
+    rec: RunRecord,
+    out_dir: Path,
+    calc_file: str = "calcs.jsonl",
+    calc_rows: list[dict] | None = None,
+) -> Path:
     """Write everything a run leaves under OUT and return the record's path: the pose SDFs (`results.poses`), the
     receptor and decisions paths made relative to OUT when inside it, then OUT/run-<digest12>.json."""
     out_dir = Path(out_dir)
@@ -935,18 +966,21 @@ def write_outputs(plan: Plan, rec: RunRecord, out_dir: Path) -> Path:
         results["receptor"]["file"] = _out_path(results["receptor"]["file"], out_dir)
     if "decisions_in" in results:
         results["decisions_in"]["file"] = _out_path(results["decisions_in"]["file"], out_dir)
-    results["calcs"] = {"file": "calcs.jsonl", "n": write_calc_log(plan, out_dir)}
+    if calc_rows is not None and not calc_rows:
+        results["calcs"] = None  # a combine of partials with no calc logs: no SCF count is known, never "0"
+    else:
+        results["calcs"] = {"file": calc_file, "n": write_calc_log(plan, out_dir, calc_file, calc_rows)}
     path = out_dir / f"run-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     return path
 
 
-def write_calc_log(plan: Plan, out_dir: Path) -> int:
-    """Write OUT/calcs.jsonl (one line per SCF the tier ran) and return how many lines it has."""
-    calc_log = list(getattr(plan.tier, "calc_log", None) or [])
+def write_calc_log(plan: Plan, out_dir: Path, name: str = "calcs.jsonl", rows: list[dict] | None = None) -> int:
+    """Write OUT/<name> (one line per SCF: `rows`, else the ones the tier ran) and return how many lines it has."""
+    calc_log = list(rows) if rows is not None else list(getattr(plan.tier, "calc_log", None) or [])
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "calcs.jsonl").write_text("".join(json.dumps(e) + "\n" for e in calc_log))
+    (out_dir / name).write_text("".join(json.dumps(e) + "\n" for e in calc_log))
     return len(calc_log)
 
 
@@ -1147,6 +1181,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     explicit_out = args.out is not None
     plan = None
+    calc_file = "calcs.jsonl"
     if args.out is None:
         args.out = Path("out")
     try:
@@ -1172,6 +1207,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
                 return 0
             target_name = args.only_candidate
+            calc_file = calc_file_name(target_name)
 
             def measure_one(p):
                 target = next(c for c in p.candidates if c.name == target_name)
@@ -1180,7 +1216,7 @@ def main(argv: list[str] | None = None) -> int:
             rec, out = run_plan(plan, measure=measure_one, partial=True)
             if config_info is not None:
                 rec.results["config"] = config_info
-            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_file))
             # rename to partial-<name>.json and drop cut
             p = Path(path)
             new_path = p.parent / f"partial-{args.only_candidate}.json"
@@ -1229,7 +1265,8 @@ def main(argv: list[str] | None = None) -> int:
                             c.per_pose[q] = list(v)
 
             rec, out = run_plan(plan, measure=measure)
-            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+            merged = merged_partial_calcs(out_dir, partials)
+            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
             return 0
@@ -1247,7 +1284,10 @@ def main(argv: list[str] | None = None) -> int:
     except StageError as e:
         print(f"error: {e}", file=sys.stderr)
         if explicit_out and plan is not None:  # a failed SCF still leaves the SCFs it ran
-            write_calc_log(plan, args.out)
+            try:
+                write_calc_log(plan, args.out, calc_file)
+            except OSError as oe:  # the log is a courtesy: never mask the exit code of the failure itself
+                print(f"warning: could not write {calc_file}: {oe}", file=sys.stderr)
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
