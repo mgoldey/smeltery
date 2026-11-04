@@ -201,7 +201,7 @@
         "Mutation: move one step of an existing job into ty-repo-wide -> verify fails -> revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "M1-repairs-baseline",

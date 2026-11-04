@@ -58,6 +58,9 @@ jobs:
       - name: Frozen campaign record (experiments/)
         run: uv run --no-sync pytest -q experiments
 
+      - name: Example (benzoic acid)
+        run: uv run --no-sync python examples/mwe_benzoic.py
+
   ty:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -75,10 +78,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Type check (repo-wide, non-blocking)
-        run: uvx ty@0.0.96 check
-
-      - name: Example (benzoic acid)
-        run: uv run --no-sync python examples/mwe_benzoic.py
+        # Explicit paths, so this does not inherit [tool.ty.src] include (src/smeltery/bench only).
+        run: uvx ty@0.0.96 check src tests
 
   # Real Vina + Meeko docking. The `test` job above has no `docking` extra, so
   # every test that needs vina/meeko skips there; this job installs the extra
