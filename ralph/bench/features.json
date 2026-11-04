@@ -474,7 +474,7 @@
         "Cover all three states over HTTP, using make_run_dir, make_run_dir(unranked=True), and a record with results.cut deleted."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "S4-identity-server-side",
@@ -489,7 +489,7 @@
         "Add test_a_user_field_in_the_request_is_ignored for every POST route that records an author or user."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "S5-cli-bench",
@@ -506,7 +506,7 @@
         "Run the cli.py row of the AGENTS.md table."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "U1-vendored-offline",
@@ -523,7 +523,7 @@
         "test_static_files_are_served: GET /static/app.css is 200."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "U2-tokens",
@@ -541,7 +541,7 @@
         "test_reduced_motion_is_respected: app.css has a prefers-reduced-motion block; test_focus_is_visible: it has a :focus-visible rule."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "U3-context-bar",
@@ -556,7 +556,7 @@
         "test_every_run_page_shows_campaign_and_digest: for each run route, the HTML contains the run's campaign and input_digest[:12]."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V1-work-panel",
@@ -574,7 +574,7 @@
         "test_an_unreachable_queue_is_reported_and_the_page_still_loads."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V2-campaign-panel",
@@ -590,7 +590,7 @@
         "test_dag_rows_are_in_order (compare the `order` field), test_cells_report_cached_or_to_run, test_an_unimportable_study_path_is_404_naming_it."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V3-structure-tab",
@@ -608,7 +608,7 @@
         "test_network_source_without_permission_is_400; test_a_missing_file_is_400_naming_it."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V4-pipeline-check",
@@ -625,7 +625,7 @@
         "test_an_unwired_tier_is_listed_with_a_reason_but_not_addable (qmmm)."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V5-rigour-by-quantity",
@@ -641,7 +641,7 @@
         "Data source: Method.comparable_rigour from smeltery.gui.catalog."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V6-site-roundtrip",
@@ -657,7 +657,7 @@
         "test_the_returned_toml_checks_clean: POST it back to /api/pipeline/check; no errors."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V7-launch-staging",
@@ -674,7 +674,7 @@
         "Data source: OUT/config.toml as written, parsed with tomllib."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V8-pose-viewer",
@@ -691,7 +691,7 @@
         "test_a_record_without_pose_output_is_409; test_an_out_of_range_pose_is_400."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V9-results-endpoints",
@@ -708,7 +708,7 @@
         "test_no_composite_score_column."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V10-honesty-anchors",
@@ -728,7 +728,7 @@
         "Record in NOTES.md that all four mutations failed their tests."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V11-decisions-grid",
@@ -746,7 +746,7 @@
         "Mutation: add a surface-side check that duplicates a DecisionSet rule with a different message; confirm the message test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V12-served-report",
@@ -763,7 +763,7 @@
         "test_the_report_surface_cannot_change_the_method: POST to any pipeline/config route under /report or /api/runs/{idx}/pipeline is 404 or 405."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V13-frozen-snapshot",
@@ -780,7 +780,7 @@
         "Data source: the frozen HTML file written by smeltery.gui.report.write_report."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V14-proposals",
@@ -797,7 +797,7 @@
         "Mutation: make the proposal route call LaunchRun; confirm the test fails; revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "V15-notebook",
@@ -815,7 +815,7 @@
         "test_the_author_comes_from_identity."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "G1-ty-in-ci",
@@ -830,7 +830,7 @@
         "Add the two jobs to .github/workflows/test.yml; the repo-wide one has continue-on-error: true."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "M3-final",
@@ -895,7 +895,7 @@
         "Record the counts in NOTES.md."
       ],
       "full_suite": true,
-      "passes": false
+      "passes": true
     }
   ]
 }

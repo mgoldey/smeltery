@@ -11,6 +11,26 @@ arrays and is not a process ceiling.
 - INCOMPLETE: a required result key is missing (e.g. a run whose task died mid-SCF). Never
   rendered as a blank or as a winner.
 
+## Routes
+
+- `/healthz` - health check.
+- `/run` - run page (context bar, verdict).
+- `/run/poses` - pose viewer.
+- `/run/results` - results view (ddE, resolved, per-pose).
+- `/report/{idx}` - served report.
+- `/work` - work panel.
+- `/api/runs`, `/api/runs/{idx}/verdict`, `/api/runs/{idx}/scene`, `/api/runs/{idx}/ddE`,
+  `/api/runs/{idx}/resolved`, `/api/runs/{idx}/per_pose` - run data endpoints.
+- `/api/runs/{idx}/decisions`, `/api/runs/{idx}/comments`, `/api/runs/{idx}/snapshot`,
+  `/api/runs/{idx}/proposals` - decisions, comments, snapshot, proposals.
+- `/api/tasks`, `/api/tasks/cancel/{task_id}`, `/api/tasks/{task_id}/cancel` - work panel.
+- `/api/campaigns/{campaign_id}/entries` - notebook entries.
+- `/api/studies/{module_path}/dag`, `/api/studies/{module_path}/cells` - campaign panel.
+- `/api/structure` - structure tab.
+- `/api/catalog`, `/api/pipeline/addable`, `/api/pipeline/check`, `/api/pipeline/site`,
+  `/api/pipeline/toml` - pipeline editor.
+- `/static` - vendored frontend assets.
+
 ## Ports and local adapters
 
 1. RunStore - `FilesystemRunStore` (SQLite index cache over run-*.json; records win over index)
