@@ -8,6 +8,8 @@ export function routes(): string[] {
     `/run/${IDX.a_resolved}/overview`,
     `/run/${IDX.c_incomplete}/overview`,
     ...Object.values(IDX).map((i) => `/run/${i}/results`),
+    `/run/${IDX.a_resolved}/poses`,
+    `/run/${IDX.e_noposes}/poses`,
     "/no/such/page",
   ];
 }

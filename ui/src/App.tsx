@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { BenchHome } from "./pages/BenchHome";
 import { NotFound } from "./pages/NotFound";
 import { Overview } from "./pages/run/Overview";
+import { Poses } from "./pages/run/Poses";
 import { Results } from "./pages/run/Results";
 import { RunLayout } from "./pages/run/RunLayout";
 
@@ -13,6 +14,7 @@ export function App() {
       <Route path="/run/:idx" element={<RunLayout />}>
         <Route index element={<Navigate to="results" replace />} />
         <Route path="results" element={<Results />} />
+        <Route path="poses" element={<Poses />} />
         <Route path="overview" element={<Overview />} />
       </Route>
       <Route path="*" element={<NotFound />} />

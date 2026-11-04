@@ -34,7 +34,10 @@ RUNS = (
     ("b_unranked", {"unranked": True}, False, 0.0),
     ("c_incomplete", {}, True, 0.0),
     ("d_floor", {}, False, 1.0),
+    ("e_noposes", {}, False, 0.0),
 )
+#: Result keys a record written before pose output lacks (docs/gui-contract.md section 1).
+POSE_KEYS = ("per_pose", "units", "poses", "field", "receptor")
 
 
 def build(root: Path) -> list[dict]:
@@ -46,6 +49,10 @@ def build(root: Path) -> list[dict]:
         rec = json.loads(rec_path.read_text())
         if incomplete:
             del rec["results"]["cut"]
+            rec_path.write_text(json.dumps(rec))
+        if name == "e_noposes":
+            for k in POSE_KEYS:
+                rec["results"].pop(k, None)
             rec_path.write_text(json.dumps(rec))
         out.append(
             {"name": name, "path": str(rec_path), "out_dir": str(d), "campaign": rec["campaign"], "digest": rec["input_digest"]}

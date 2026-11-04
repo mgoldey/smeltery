@@ -4,6 +4,7 @@ import { Shell } from "../../components/Shell";
 /** The Run area's tabs. A tab is listed here only once its page exists. */
 export const RUN_TABS: { to: string; label: string }[] = [
   { to: "results", label: "Results" },
+  { to: "poses", label: "Poses" },
   { to: "overview", label: "Overview" },
 ];
 

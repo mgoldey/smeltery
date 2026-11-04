@@ -724,7 +724,7 @@
         "For a run whose pose output was removed, the panel shows the API's 409 reason, not an empty canvas."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI9-structure",
