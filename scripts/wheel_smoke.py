@@ -57,6 +57,7 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "from smeltery.gui.views import builder, forest, funnel, grid, matrix, per_pose, pose",
     ],
     "desktop": ["import webview, marimo", "from smeltery.gui.app import main"],
+    "bench": ["import fastapi, uvicorn, jinja2", "from smeltery.bench.app import create_app"],
 }
 #: extras too heavy to install on every run: `check` only proves that pip can RESOLVE them unless `--full` is given
 #: (the release workflow gives it). The reason is stated so the next person can judge whether it still holds.

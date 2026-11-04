@@ -224,6 +224,14 @@ class Comparison:
             "n_molecules_b": len(pooled_b),
         }
 
+    @property
+    def per_key_median(self):
+        return self.summary()["median_per_key_diff"]
+
+    @property
+    def pooled_is_confounded(self) -> bool:
+        return True
+
     def verdict(self) -> str:
         """One sentence a reader can quote, which says 'not resolved' whenever that is the honest answer."""
         s = self.summary()

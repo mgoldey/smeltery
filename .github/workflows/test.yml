@@ -58,6 +58,25 @@ jobs:
       - name: Frozen campaign record (experiments/)
         run: uv run --no-sync pytest -q experiments
 
+  ty:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Type check (required)
+        run: uvx ty@0.0.96 check
+
+  ty-repo-wide:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Type check (repo-wide, non-blocking)
+        run: uvx ty@0.0.96 check
+
       - name: Example (benzoic acid)
         run: uv run --no-sync python examples/mwe_benzoic.py
 
