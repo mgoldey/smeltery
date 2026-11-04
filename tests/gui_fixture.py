@@ -142,6 +142,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
         },
         "smeltery_version": "0.0.0+fixture",
         "ferric": {"provenance": "UNKNOWN (fixture: no tier ran)"},
+        "smeltery": {"provenance": "UNKNOWN (fixture: no tier ran)"},
         "host": {"node": "fixture", "python": "3"},
         "started_utc": "2026-10-28T00:00:00Z",
     }
