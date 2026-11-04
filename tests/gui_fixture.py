@@ -111,6 +111,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
                     "kind": "pair",
                     "candidates_in": n,
                     "candidates_out": n,
+                    "seconds": 0.5,
                 },
                 {
                     "stage": "pocket",
@@ -118,6 +119,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
                     "kind": "field",
                     "candidates_in": n,
                     "candidates_out": n,
+                    "seconds": 0.01,
                 },
             ],
             "funnel": [
@@ -139,6 +141,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
             "poses": poses,
             "field": FIELD,
             "receptor": None,
+            "calcs": {"file": "calcs.jsonl", "n": 0},
         },
         "smeltery_version": "0.0.0+fixture",
         "ferric": {"provenance": "UNKNOWN (fixture: no tier ran)"},
@@ -150,5 +153,6 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
         json.dumps({"inputs": record["inputs"], "tiers": record["tiers"]}, sort_keys=True, default=str).encode()
     ).hexdigest()
     record["input_digest"] = digest
+    (out / "calcs.jsonl").write_text("")  # no SCF ran in a fixture; the file `results.calcs` names still exists
     (out / f"run-{digest[:12]}.json").write_text(json.dumps(record, indent=2, sort_keys=True, default=str))
     return out

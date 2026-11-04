@@ -122,6 +122,7 @@ import hashlib
 import json
 import re
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -440,13 +441,27 @@ def _validate_gates(cfg: dict) -> None:
             raise ConfigError("[gates] max_strain_kcal needs forcefield = true: it thresholds the MMFF94 strain")
 
 
-def _stage(name: str, fn):
+_STAGE_SECONDS: dict[str, float] = {}  # wall time per stage name, summed over its `_stage` calls; reset per plan
+
+
+def _stage(name: str, fn, log: list | None = None):
+    """Run one stage, converting an unexpected failure to a StageError and timing it.
+
+    The seconds go to every `stage_log` entry of that stage: those already in `log` (a stage that logs from
+    inside `fn`) now, and those `_log` writes after the call returns.
+    """
+    t0 = time.perf_counter()
     try:
         return fn()
     except (ConfigError, StageError):
         raise
     except Exception as e:
         raise StageError(f"stage {name!r} failed: {type(e).__name__}: {e}") from e
+    finally:
+        _STAGE_SECONDS[name] = _STAGE_SECONDS.get(name, 0.0) + (time.perf_counter() - t0)
+        for e in log or []:
+            if e["stage"] == name:
+                e["seconds"] = _STAGE_SECONDS[name]
 
 
 def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | None, kind: str, **extra) -> None:
@@ -455,7 +470,14 @@ def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | Non
     `kind`: prep (no candidates yet), search (parent only), pair, field, gate (rejects loudly, so a run that
     reaches the next stage has n_out == n_in), recorded (measured and kept, no rejection threshold).
     """
-    entry = {"stage": stage, "summary": summary, "kind": kind, "candidates_in": n_in, "candidates_out": n_out}
+    entry = {
+        "stage": stage,
+        "summary": summary,
+        "kind": kind,
+        "candidates_in": n_in,
+        "candidates_out": n_out,
+        "seconds": float(_STAGE_SECONDS.get(stage, 0.0)),  # wall time of that stage's `_stage` call(s)
+    }
     log.append({**entry, **extra})
 
 
@@ -685,11 +707,12 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
     extra: dict = {}
+    _STAGE_SECONDS.clear()
     before = []
     docked = "docking" in cfg or "structure" in cfg
     prepared = _prepare_structure(cfg, out_dir, fetch, log, extra) if "structure" in cfg else None
     if docked:
-        before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra, prepared)))
+        before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra, prepared), log))
     poses = PairedPoses(parent_poses_given=docked, **cfg.get("poses", {}))
     _stage("poses", lambda: poses.run(cands, {"parent": parent}))
     _log(
@@ -700,7 +723,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
         len(cands),
         "pair",
     )
-    field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared))
+    field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared), log)
     _stage("parity", lambda: _check_parity(cands))
     after = _run_gates(cfg, cands, field, pocket_path, log)
     tier = measurement_tier(cfg)
@@ -912,9 +935,19 @@ def write_outputs(plan: Plan, rec: RunRecord, out_dir: Path) -> Path:
         results["receptor"]["file"] = _out_path(results["receptor"]["file"], out_dir)
     if "decisions_in" in results:
         results["decisions_in"]["file"] = _out_path(results["decisions_in"]["file"], out_dir)
+    results["calcs"] = {"file": "calcs.jsonl", "n": write_calc_log(plan, out_dir)}
     path = out_dir / f"run-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     return path
+
+
+def write_calc_log(plan: Plan, out_dir: Path) -> int:
+    """Write OUT/calcs.jsonl (one line per SCF the tier ran) and return how many lines it has."""
+    calc_log = list(getattr(plan.tier, "calc_log", None) or [])
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "calcs.jsonl").write_text("".join(json.dumps(e) + "\n" for e in calc_log))
+    return len(calc_log)
 
 
 def format_table(plan: Plan, out: dict) -> str:
@@ -1113,6 +1146,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return 0
     explicit_out = args.out is not None
+    plan = None
     if args.out is None:
         args.out = Path("out")
     try:
@@ -1212,6 +1246,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except StageError as e:
         print(f"error: {e}", file=sys.stderr)
+        if explicit_out and plan is not None:  # a failed SCF still leaves the SCFs it ran
+            write_calc_log(plan, args.out)
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")

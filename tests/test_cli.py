@@ -227,6 +227,9 @@ def test_an_unranked_run_exits_zero_and_a_rerun_reproduces_the_digest_and_the_de
         records.append(json.loads(path.read_text()))
     a, b = records
     assert a["input_digest"] == b["input_digest"]
+    for r in (a, b):  # wall time is the one thing two runs of the same inputs do not share
+        for entry in r["results"]["stages"]:
+            entry.pop("seconds")
     assert a["results"] == b["results"]  # same ranking decision AND the same numbers
     assert a["results"]["cut"]["unranked"] is True and a["results"]["cut"]["survivors"] is None
 
@@ -478,3 +481,14 @@ def test_plan_compares_free_memory_with_require_free_gb(tmp_path, capsys, monkey
 def test_an_rhf_plan_says_it_has_no_memory_model_rather_than_printing_nothing(tmp_path, capsys):
     out = _plan_text(BASE, tmp_path, capsys)
     assert "memory: field_interaction has no memory model; nothing is checked before its SCFs" in out
+
+
+def test_each_stage_records_its_seconds():
+    cfg = validate_config(tomllib.loads(SMALL.format(floor=0.0)))
+    plan = build_plan(cfg)
+    assert plan.stage_log
+    plan.tier = _KnownValues(
+        plan.tier, {"ethanol": [0.0, 0.0, 0.0], "propanol": [1.0, 1.1, 0.9], "butanol": [3.0, 3.1, 2.9]}
+    )
+    run_plan(plan)
+    assert all(isinstance(e["seconds"], float) and e["seconds"] >= 0 for e in plan.stage_log)

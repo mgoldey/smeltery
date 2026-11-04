@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -519,6 +520,19 @@ class PairedPoses:
         return out
 
 
+def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seconds: float) -> dict:
+    """One `calc_log` line: a single SCF, logged whether or not it converged."""
+    return {
+        "candidate": candidate,
+        "pose": pose,
+        "leg": leg,
+        "converged": bool(result.converged),
+        "iterations": int(result.iterations),
+        "energy_hartree": float(energy),
+        "seconds": float(seconds),
+    }
+
+
 @dataclass
 class FieldInteraction:
     """ΔE_int = E_RHF(in point-charge field) − E_RHF(vacuum), per pose, in kcal/mol.
@@ -534,6 +548,8 @@ class FieldInteraction:
     max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
     name: str = "field_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
+    #: One dict per SCF of the last `run` (candidate, pose, leg, converged, iterations, energy_hartree, seconds).
+    calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def settings(self) -> dict:
         return {
@@ -592,6 +608,7 @@ class FieldInteraction:
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
+        self.calc_log = []
         for cand in candidates:
             vals = []
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
@@ -600,8 +617,13 @@ class FieldInteraction:
                 kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
                 if self.max_iter is not None:
                     kw["max_iter"] = self.max_iter
+                t0 = time.perf_counter()
                 vac = ferric.run_rhf(mol, bs, **kw)
+                t1 = time.perf_counter()
                 fld = ferric.run_rhf(mol, bs, point_charges=charges, **kw)
+                t2 = time.perf_counter()
+                for leg, res, secs in (("vacuum", vac, t1 - t0), ("field", fld, t2 - t1)):
+                    self.calc_log.append(_calc_entry(cand.name, i, leg, res, res.energy, secs))
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
@@ -685,6 +707,8 @@ class FieldDftInteraction:
     require_free_gb: float | None = None
     name: str = "field_dft_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
+    #: One dict per SCF of the last `run` (candidate, pose, leg, converged, iterations, energy_hartree, seconds).
+    calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def settings(self) -> dict:
         return {
@@ -824,6 +848,7 @@ class FieldDftInteraction:
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
+        self.calc_log = []
         for cand in candidates:
             vals: list[float] = []
             d3s: list[float] = []
@@ -833,8 +858,14 @@ class FieldDftInteraction:
                 kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
                 if self.max_iter is not None:
                     kw["max_iter"] = self.max_iter
+                t0 = time.perf_counter()
                 vac = ferric.run_dft(mol, bs, functional=self.functional, **kw)
+                t1 = time.perf_counter()
                 fld = ferric.run_dft(mol, bs, functional=self.functional, point_charges=charges, **kw)
+                t2 = time.perf_counter()
+                for leg, res, secs in (("vacuum", vac, t1 - t0), ("field", fld, t2 - t1)):
+                    # a non-converged energy is logged as-is: `_dft_energy` only refuses double-counted dispersion
+                    self.calc_log.append(_calc_entry(cand.name, i, leg, res, _dft_energy(res), secs))
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(
                         f"{cand.name} pose {i}: SCF did not converge (vacuum={vac.converged}, field={fld.converged})"
