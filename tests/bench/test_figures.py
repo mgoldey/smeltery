@@ -90,3 +90,38 @@ def test_the_default_theme_is_light_and_an_unknown_one_is_refused(client_for, ru
     c, _ = client_for(run_dir)
     assert c.get("/api/runs/0/figures/forest").json() == c.get("/api/runs/0/figures/forest?theme=light").json()
     assert c.get("/api/runs/0/figures/forest?theme=sepia").status_code == 422
+
+
+def _colours(x, path=""):
+    import re
+
+    if isinstance(x, dict):
+        for k, v in x.items():
+            yield from _colours(v, f"{path}.{k}")
+    elif isinstance(x, list):
+        for i, v in enumerate(x):
+            yield from _colours(v, f"{path}[{i}]")
+    elif isinstance(x, str) and re.fullmatch(r"#[0-9a-fA-F]{3,8}|white|black|rgba?\(.*\)", x):
+        yield path, x.lower()
+
+
+#: Parts of plotly_white's template for plot types no view draws: their colours never reach the page.
+UNDRAWN = (".template.data", ".geo", ".polar", ".ternary", ".scene", ".colorscale", ".coloraxis", ".colorway")
+
+
+@pytest.mark.parametrize("url", ["runs/0/figures/forest", "runs/0/figures/matrix", "runs/0/figures/per_pose"])
+def test_every_colour_the_dark_figure_keeps_from_the_light_one_is_a_data_colour(client_for, run_dir, url):
+    """Independent of the DARK map: walk both figures together. A colour that did not change between themes is
+    either data (it means the same in both) or a light-theme colour the map forgot, like plotly_white's zero line."""
+    from smeltery.gui.views import _style
+
+    c, _ = client_for(run_dir)
+    light = dict(_colours(c.get(f"/api/{url}").json()))
+    dark = dict(_colours(c.get(f"/api/{url}", params={"theme": "dark"}).json()))
+    assert light.keys() == dark.keys()
+    data = {v.lower() for v in (_style.KEPT, _style.NOT_KEPT, _style.UNRANKED, *_style.DECISION.values())}
+    data |= {"rgba(0,0,0,0)", "transparent"}  # no colour at all reads the same in both themes
+    kept = sorted(
+        (p, v) for p, v in light.items() if dark[p] == v and v not in data and not any(u in p for u in UNDRAWN)
+    )
+    assert kept == [], kept

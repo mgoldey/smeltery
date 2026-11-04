@@ -47,6 +47,11 @@ DARK = {
     GRID: "#2f3437",
     "white": "#1b1e20",
     "#2a3f5f": "#eef0f1",
+    # plotly_white's own greys: its zero lines (#EBF0F8) and the grids of plot types the views do not draw yet
+    "#ebf0f8": "#2f3437",
+    "#dfe8f3": "#2f3437",
+    "#c8d4e3": "#2f3437",
+    "#a2b1c6": "#5b6368",
 }
 THEMES = ("light", "dark")
 
