@@ -927,7 +927,7 @@
         "Choosing the same run for both arms shows the refusal message and no figure."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI20-ci-and-wheel",

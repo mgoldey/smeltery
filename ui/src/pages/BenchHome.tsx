@@ -25,7 +25,9 @@ export function BenchHome() {
       <div className="body">
         <main className="work">
           <h1>Bench</h1>
-          <p className="lede">Runs under this root, newest record first by path. Open one to see its result.</p>
+          <p className="lede">
+            Runs under this root. Open one to see its result, or <Link to="/compare">compare two runs</Link>.
+          </p>
           <section aria-labelledby="runs-h">
             <h2 id="runs-h">Runs</h2>
             {runs.isError ? (
