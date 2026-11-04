@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { Shell } from "../components/Shell";
+import { TaskInspector, WorkPanel } from "../components/WorkPanel";
 
 export function BenchHome() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+  const [task, setTask] = useState<string | null>(null);
   return (
     <Shell>
       <div className="body">
@@ -51,7 +54,9 @@ export function BenchHome() {
               </table>
             )}
           </section>
+          <WorkPanel selected={task} onSelect={setTask} />
         </main>
+        {task ? <TaskInspector id={task} onClose={() => setTask(null)} /> : null}
       </div>
     </Shell>
   );

@@ -800,7 +800,7 @@
         "With serve_fixture started with a broken queue (env flag), a banner shows the reason and /run/0/results still renders."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI13-launch",

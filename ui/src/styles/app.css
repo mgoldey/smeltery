@@ -124,3 +124,6 @@ label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0
 .picker .atom:focus { outline: none; }
 .site-grid { display: grid; grid-template-columns: minmax(320px, 560px) 1fr; gap: 20px; align-items: start; }
 .picker .atom.picked .pick-label { fill: var(--accent); }
+
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+pre.log { background: var(--sunken); border: 1px solid var(--hairline); padding: 10px; max-height: 360px; overflow: auto; white-space: pre-wrap; }
