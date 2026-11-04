@@ -81,6 +81,47 @@ jobs:
         # Explicit paths, so this does not inherit [tool.ty.src] include (src/smeltery/bench only).
         run: uvx ty@0.0.96 check src tests
 
+  # The Bench UI (ui/): typecheck, unit tests, generated API types up to date, and every page in a real browser
+  # against the real API over fixture runs. Offline: the e2e fixture fails any request to a non-local host.
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install (dev + bench extras, ferric from PyPI)
+        run: uv sync --extra dev --extra bench --no-sources
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+      - name: Typecheck (app, tests and e2e)
+        run: npm run typecheck --prefix ui
+      - name: Unit tests
+        run: npm run test --prefix ui
+      - name: Generated API types match the API
+        env:
+          BENCH_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: |
+          npm run gen:api --prefix ui
+          git diff --exit-code ui/src/api/schema.d.ts
+      - name: Browser
+        run: npx --prefix ui playwright install --with-deps chromium
+      - name: Every page in a real browser
+        env:
+          BENCH_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        working-directory: ui
+        run: npx playwright test
+
   # Real Vina + Meeko docking. The `test` job above has no `docking` extra, so
   # every test that needs vina/meeko skips there; this job installs the extra
   # and fails if any docking test still skips for a missing module. Vina ships
@@ -152,6 +193,15 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build the Bench UI (shipped in the wheel; src/smeltery/bench/web is gitignored build output)
+        run: |
+          npm ci --prefix ui
+          npm run build --prefix ui
       - name: Build the wheel
         run: |
           python -m pip install --upgrade build
