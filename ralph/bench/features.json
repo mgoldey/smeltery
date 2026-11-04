@@ -781,7 +781,7 @@
         "Mutation: depict without explicit hydrogens (indices shift) -> the anchor assertion fails -> revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI12-work-panel",

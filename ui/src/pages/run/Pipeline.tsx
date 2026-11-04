@@ -4,13 +4,14 @@ import { api, unwrap } from "../../api/client";
 import { TomlEditor } from "../../components/TomlEditor";
 import { KnobForm } from "./pipeline/KnobForm";
 import { Palette } from "./pipeline/Palette";
+import { SitePlacer } from "./pipeline/SitePlacer";
 import { usePipeline } from "./pipeline/usePipeline";
 import { useRunIdx } from "./RunLayout";
 
 export function Pipeline() {
   const idx = useRunIdx();
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => unwrap(api.GET("/api/catalog")) });
-  const { state, origin, error, pending, edit, check } = usePipeline(idx);
+  const { state, origin, error, pending, edit, check, placeSite } = usePipeline(idx);
   const [selected, setSelected] = useState<string | null>(null);
   const cat = catalog.data;
   const label = (k: string) => cat?.methods[k]?.label ?? k;
@@ -86,6 +87,9 @@ export function Pipeline() {
               </section>
             </div>
           </div>
+        ) : null}
+        {state && state.placed.includes("pocket") && state.candidates[state.parent] ? (
+          <SitePlacer parent={state.parent} smiles={state.candidates[state.parent]!} disabled={pending} onPlace={placeSite} />
         ) : null}
         {state ? (
           <section aria-label="Pipeline TOML">

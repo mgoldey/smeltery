@@ -42,3 +42,44 @@ export function receptorScene(url: string) {
     },
   ]);
 }
+
+function token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** The provisional parent conformer (molblock, AddHs order), with the chosen atoms coloured. */
+export function provisionalScene(molblock: string, highlight: number[]) {
+  const url = `data:text/plain;base64,${btoa(molblock)}`;
+  const accent = token("--accent");
+  return state([
+    {
+      kind: "download",
+      params: { url },
+      children: [
+        {
+          kind: "parse",
+          params: { format: "mol" },
+          children: [
+            {
+              kind: "structure",
+              params: { type: "model" },
+              children: [
+                {
+                  kind: "component",
+                  params: { selector: "all" },
+                  children: [
+                    {
+                      kind: "representation",
+                      params: { type: "ball_and_stick" },
+                      children: highlight.map((i) => ({ kind: "color", params: { color: accent, selector: { atom_index: i } } })),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+}

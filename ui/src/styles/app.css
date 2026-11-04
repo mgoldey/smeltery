@@ -110,3 +110,17 @@ label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0
 .toml-editor .cm-scroller { font-family: "IBM Plex Mono", ui-monospace, monospace; line-height: 1.5; }
 .toml-editor .cm-gutters { background: var(--sunken); color: var(--ink-muted); border-right: 1px solid var(--hairline); }
 .banner.note { border-left-color: var(--accent); }
+
+/* Atom picker */
+.picker { width: 100%; max-width: 560px; height: 360px; display: block; background: var(--panel); border: 1px solid var(--hairline); }
+.picker .bond line { stroke: var(--ink-muted); stroke-width: 2; }
+.picker .atom circle { fill: var(--panel); stroke: var(--ink); stroke-width: 1.5; cursor: pointer; }
+.picker .atom.hydrogen circle { stroke: var(--ink-muted); }
+.picker .atom text { font-size: 13px; text-anchor: middle; fill: var(--ink); pointer-events: none; font-family: "IBM Plex Sans", sans-serif; }
+.picker .atom .pick-label { font-size: 12px; text-anchor: start; fill: var(--accent); font-weight: 600; }
+.picker .atom.picked circle { fill: var(--accent); stroke: var(--accent); }
+.picker .atom.picked text { fill: var(--accent-ink); }
+.picker .atom:focus-visible circle { stroke: var(--accent); stroke-width: 3; }
+.picker .atom:focus { outline: none; }
+.site-grid { display: grid; grid-template-columns: minmax(320px, 560px) 1fr; gap: 20px; align-items: start; }
+.picker .atom.picked .pick-label { fill: var(--accent); }
