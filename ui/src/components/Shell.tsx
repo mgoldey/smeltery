@@ -51,7 +51,7 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
           <NavLink to="/bench">Bench</NavLink>
           {idx !== undefined ? (
             <>
-              <NavLink to={`/run/${idx}/results`} className={() => (runMatch ? "active" : "")}>
+              <NavLink to={`/run/${idx}`} className={() => (runMatch ? "active" : "")}>
                 Run
               </NavLink>
               <NavLink to={`/report/${idx}`}>Report</NavLink>

@@ -34,7 +34,7 @@ export function BenchHome() {
                   {(runs.data ?? []).map((r) => (
                     <tr key={r.idx}>
                       <td>
-                        <Link to={`/run/${r.idx}/results`}>{r.campaign ?? r.path}</Link>
+                        <Link to={`/run/${r.idx}`}>{r.campaign ?? r.path}</Link>
                         {r.error ? <div className="field-error">{r.error}</div> : null}
                       </td>
                       <td>{r.parent}</td>

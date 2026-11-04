@@ -629,7 +629,7 @@
         "If Chromium is missing: `npx playwright install chromium`."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI4-tokens-a11y",
