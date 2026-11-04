@@ -217,8 +217,8 @@ def pipeline_launch(request: Request, body: M.LaunchRequest) -> Any:
     out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
     if not out.is_absolute():
         out = root / out
-    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock).run(
-        p, out_dir=out, config_dir=root
+    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
+        p, out_dir=out
     )
     t = st.task_queue.get(tid)
     if t is None:

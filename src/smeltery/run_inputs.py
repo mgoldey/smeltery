@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import tomllib
 from pathlib import Path
@@ -25,11 +26,26 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+MANIFEST = "inputs/manifest.json"
+
+
+def _manifest(out_dir: Path) -> dict[str, dict]:
+    try:
+        return json.loads((Path(out_dir) / MANIFEST).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[str, dict]]:
     """Copy each `INPUT_PATHS` value that names an existing file (relative paths resolve against `config_dir`, as
     `smeltery run` does) to `out_dir/inputs/<sha256><suffix>` and return the config text with that value rewritten
     to the relative path `inputs/<sha256><suffix>`, plus `{"pocket.file": {"source", "sha256", "copy"}, ...}`.
-    A value that is not a file (a PDB id for `structure.spec`) is left alone and not listed."""
+    A value that is not a file (a PDB id for `structure.spec`) is left alone and not listed.
+
+    `out_dir/inputs/manifest.json` maps each copy to the source it was first staged from. A value that already names
+    a copy inside `out_dir` (a config staged earlier, e.g. by Bench's Launch and then again by `smeltery run`) keeps
+    that recorded source instead of becoming "inputs/<sha>", so the manifest is the one source of truth."""
+    known = _manifest(out_dir)
     cfg = tomllib.loads(text)
     staged: dict[str, dict] = {}
     for table, key in INPUT_PATHS:
@@ -41,13 +57,17 @@ def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[
         if not src.is_file():
             continue
         digest = _sha256(src)
+        source = known.get(value, {}).get("source", value) if value == f"inputs/{digest}{src.suffix}" else value
         rel = f"inputs/{digest}{src.suffix}"
         dest = Path(out_dir) / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         if not dest.exists():
             shutil.copyfile(src, dest)
         text = set_value(text, f"{table}.{key}", rel)
-        staged[f"{table}.{key}"] = {"source": value, "sha256": digest, "copy": rel}
+        staged[f"{table}.{key}"] = {"source": source, "sha256": digest, "copy": rel}
+        known[rel] = {"source": source, "sha256": digest}
+    if staged:
+        (Path(out_dir) / MANIFEST).write_text(json.dumps(known, indent=2, sort_keys=True))
     check = tomllib.loads(text)  # set_value does not re-read its output
     for dotted, info in staged.items():
         table, key = dotted.split(".")

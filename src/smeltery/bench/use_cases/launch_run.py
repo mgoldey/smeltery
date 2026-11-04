@@ -15,7 +15,8 @@ def smeltery_command() -> list[str]:
 
 
 class LaunchRun:
-    def __init__(self, task_queue, run_store, artifact_store, identity, clock):
+    def __init__(self, task_queue, run_store, artifact_store, identity, clock, root: Path | str | None = None):
+        self.root = Path(root) if root is not None else Path.cwd()  # the Bench root: where relative paths start
         self.task_queue = task_queue
         self.run_store = run_store
         self.artifact_store = artifact_store
@@ -36,8 +37,8 @@ class LaunchRun:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         # relative paths resolve against `config_dir` (the folder the config lives in, as `smeltery run` does);
-        # the route passes the Bench root, a bare call falls back to the process's cwd
-        base = Path(config_dir) if config_dir is not None else Path.cwd()
+        # None means the Bench root
+        base = Path(config_dir) if config_dir is not None else self.root
         text, _ = stage_inputs(pipeline.to_toml(), base, out_dir)
         (out_dir / "config.toml").write_text(text)
         if command is None:
