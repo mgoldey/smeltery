@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
@@ -9,6 +9,17 @@ export function BenchHome() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
   const [task, setTask] = useState<string | null>(null);
   const studies = useQuery({ queryKey: ["studies"], queryFn: () => unwrap(api.GET("/api/studies")) });
+  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: () => unwrap(api.GET("/api/campaigns")) });
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const create = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/campaigns", { body: { name, description: "" } })),
+    onSuccess: (c) => {
+      void qc.invalidateQueries({ queryKey: ["campaigns"] });
+      navigate(`/campaigns/${c.id}`);
+    },
+  });
   return (
     <Shell>
       <div className="body">
@@ -56,6 +67,35 @@ export function BenchHome() {
             )}
           </section>
           <WorkPanel selected={task} onSelect={setTask} />
+          <section aria-labelledby="campaigns-h">
+            <h2 id="campaigns-h">Notebooks</h2>
+            {campaigns.data && campaigns.data.length ? (
+              <ul>
+                {campaigns.data.map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/campaigns/${c.id}`}>{c.name}</Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">No notebooks yet. Start one for a campaign below.</p>
+            )}
+            <form
+              className="controls"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (name.trim()) create.mutate();
+              }}
+            >
+              <div>
+                <label htmlFor="campaign-name">Campaign name</label>
+                <input id="campaign-name" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <button type="submit" disabled={create.isPending || !name.trim()}>
+                Start notebook
+              </button>
+            </form>
+          </section>
           <section aria-labelledby="studies-h">
             <h2 id="studies-h">Studies</h2>
             {studies.data && studies.data.length ? (

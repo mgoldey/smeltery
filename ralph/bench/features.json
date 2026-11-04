@@ -910,7 +910,7 @@
         "No entry has an edit control (no button or menu item whose name includes edit)."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI19-compare",

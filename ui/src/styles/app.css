@@ -150,3 +150,14 @@ pre.log { background: var(--sunken); border: 1px solid var(--hairline); padding:
 .propose { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 24px; align-items: start; }
 .propose input, .propose textarea { width: 100%; }
 .propose-preview { margin-top: 8px; min-height: 120px; }
+
+/* Notebook */
+.entries { list-style: none; padding: 0; margin: 0; }
+.entry { border-bottom: 1px solid var(--hairline); padding: 12px 0; }
+.entry h3 { margin: 0 0 2px; font-size: 15px; }
+.entry.superseded { opacity: 0.72; }
+.entry.superseded h3 { text-decoration: line-through; text-decoration-color: var(--ink-muted); }
+.entry-body { white-space: pre-wrap; max-width: 72ch; }
+.artefacts { padding-left: 18px; color: var(--ink-muted); }
+fieldset.attach { border: 1px solid var(--hairline); margin: 10px 0; padding: 8px 12px; max-width: 64ch; }
+label.check { display: block; color: var(--ink); font-size: 14px; margin: 4px 0; }
