@@ -46,7 +46,8 @@ Issues = "https://github.com/mgoldey/smeltery/issues"
 [project.optional-dependencies]
 # ruff is pinned EXACTLY, and must equal the pin in .github/workflows/test.yml
 # (tests/test_ruff_pin.py enforces it): a drifting linter moves the baseline.
-dev = ["pytest>=8", "ruff==0.16.10"]
+# httpx2: starlette's TestClient, which the Bench API tests use (httpx is deprecated there).
+dev = ["pytest>=8", "ruff==0.16.10", "httpx2>=2.13"]
 # Optional readers for smeltery.structure. A missing one raises MissingBackend
 # naming the extra. gemmi is currently also pulled in by ferric itself; rdkit is
 # also a core dependency while smeltery.tiers imports it at module level.
