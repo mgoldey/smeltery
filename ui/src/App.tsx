@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { BenchHome } from "./pages/BenchHome";
 import { NotFound } from "./pages/NotFound";
+import { Study } from "./pages/Study";
 import { Overview } from "./pages/run/Overview";
 import { Pipeline } from "./pages/run/Pipeline";
 import { Poses } from "./pages/run/Poses";
@@ -13,6 +14,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/bench" replace />} />
       <Route path="/bench" element={<BenchHome />} />
+      <Route path="/studies/:module" element={<Study />} />
       <Route path="/run/:idx" element={<RunLayout />}>
         <Route index element={<Navigate to="results" replace />} />
         <Route path="results" element={<Results />} />

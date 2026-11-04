@@ -837,7 +837,7 @@
         "An unimportable path shows the API's message inline."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI15-decisions",

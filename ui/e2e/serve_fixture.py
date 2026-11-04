@@ -95,9 +95,9 @@ def main() -> int:
         r["idx"] = i
     pdb = HERE / "data" / "site.pdb"
     (HERE / ".fixture.json").write_text(
-        json.dumps({"root": str(root), "runs": runs, "study": "bench.study_fixture", "pdb": str(pdb)}, indent=1)
+        json.dumps({"root": str(root), "runs": runs, "study": "bench.study_dag_fixture", "pdb": str(pdb)}, indent=1)
     )
-    app = build_app(root, studies=("bench.study_fixture",))
+    app = build_app(root, studies=("bench.study_dag_fixture", "bench.study_fixture"))
     if os.environ.get("BENCH_E2E_BROKEN_QUEUE"):
         app.state.task_queue = BrokenQueue()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

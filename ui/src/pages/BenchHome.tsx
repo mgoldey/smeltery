@@ -8,6 +8,7 @@ import { TaskInspector, WorkPanel } from "../components/WorkPanel";
 export function BenchHome() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
   const [task, setTask] = useState<string | null>(null);
+  const studies = useQuery({ queryKey: ["studies"], queryFn: () => unwrap(api.GET("/api/studies")) });
   return (
     <Shell>
       <div className="body">
@@ -55,6 +56,24 @@ export function BenchHome() {
             )}
           </section>
           <WorkPanel selected={task} onSelect={setTask} />
+          <section aria-labelledby="studies-h">
+            <h2 id="studies-h">Studies</h2>
+            {studies.data && studies.data.length ? (
+              <ul>
+                {studies.data.map((m) => (
+                  <li key={m}>
+                    <Link className="mono" to={`/studies/${encodeURIComponent(m)}`}>
+                      {m}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">
+                No studies configured. Start Bench with <code>--study module.path</code> to show one.
+              </p>
+            )}
+          </section>
         </main>
         {task ? <TaskInspector id={task} onClose={() => setTask(null)} /> : null}
       </div>
