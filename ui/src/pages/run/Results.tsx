@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { api, unwrap } from "../../api/client";
+import { LineageInspector } from "../../components/LineageInspector";
 import { PlotlyFigure } from "../../components/PlotlyFigure";
 import { VerdictBanner } from "../../components/VerdictBanner";
 import { useScheme } from "../../styles/scheme";
@@ -21,6 +23,7 @@ function groupLabel(group: number, size: number): string {
 
 export function Results() {
   const idx = useRunIdx();
+  const [traced, setTraced] = useState<string | null>(null);
   const verdict = useQuery({
     queryKey: ["verdict", idx],
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
@@ -64,7 +67,17 @@ export function Results() {
               <tbody>
                 {table.data.rows.map((r) => (
                   <tr key={r.candidate}>
-                    <td>{r.candidate}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="link"
+                        aria-label={`Trace ${r.candidate}`}
+                        aria-pressed={traced === r.candidate}
+                        onClick={() => setTraced(r.candidate)}
+                      >
+                        {r.candidate}
+                      </button>
+                    </td>
                     <td className="num">{r.mean.toFixed(2)}</td>
                     <td className="num">{r.sem.toFixed(2)}</td>
                     <td className="num">
@@ -87,6 +100,7 @@ export function Results() {
           </>
         ) : null}
       </main>
+      {traced !== null ? <LineageInspector idx={idx} candidate={traced} onClose={() => setTraced(null)} /> : null}
     </div>
   );
 }

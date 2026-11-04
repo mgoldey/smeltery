@@ -161,3 +161,4 @@ pre.log { background: var(--sunken); border: 1px solid var(--hairline); padding:
 .artefacts { padding-left: 18px; color: var(--ink-muted); }
 fieldset.attach { border: 1px solid var(--hairline); margin: 10px 0; padding: 8px 12px; max-width: 64ch; }
 label.check { display: block; color: var(--ink); font-size: 14px; margin: 4px 0; }
+.absent { color: var(--ink-muted); font-style: italic; }

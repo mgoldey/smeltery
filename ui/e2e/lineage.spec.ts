@@ -1,0 +1,55 @@
+import type { Page } from "@playwright/test";
+import { expect, IDX, test } from "./bench";
+
+type Lineage = {
+  candidate: string;
+  parent: string;
+  poses: { pose: number; value: number; parent_value: number; difference: number }[];
+  steps: { stage: string; kind: string; seconds: number | null }[];
+  missing: string[];
+  digest: string;
+};
+
+async function get<T>(page: Page, path: string): Promise<T> {
+  return (await (await page.request.get(path)).json()) as T;
+}
+
+test("tracing a candidate shows the API's per-pose values and what made them", async ({ page }) => {
+  const table = await get<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+  const name = table.rows[0]!.candidate;
+  const want = await get<Lineage>(page, `/api/runs/${IDX.a_resolved}/lineage?candidate=${encodeURIComponent(name)}`);
+  expect(want.poses.length).toBeGreaterThan(0);
+
+  await page.goto(`/run/${IDX.a_resolved}/results`);
+  await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
+
+  const panel = page.getByRole("complementary", { name: "Lineage" });
+  await expect(panel).toBeVisible();
+  const rows = panel.getByRole("table", { name: "Per-pose values" }).locator("tbody tr");
+  await expect(rows).toHaveCount(want.poses.length);
+  for (const [i, p] of want.poses.entries()) {
+    const cells = rows.nth(i).locator("td");
+    await expect(cells.nth(0)).toHaveText(String(p.pose));
+    await expect(cells.nth(1)).toHaveText(p.value.toFixed(2));
+    await expect(cells.nth(2)).toHaveText(p.parent_value.toFixed(2));
+    await expect(cells.nth(3)).toHaveText(p.difference.toFixed(2));
+  }
+
+  const made = panel.getByRole("region", { name: "Made by" });
+  for (const s of want.steps) await expect(made).toContainText(s.stage);
+  await expect(made).toContainText(want.digest.slice(0, 12));
+  // The fixture runs record no config: it is named as absent, not left blank.
+  expect(want.missing).toContain("config");
+  await expect(made.getByTestId("made-config")).toContainText("not recorded for this run");
+
+  await panel.getByRole("button", { name: "Close" }).click();
+  await expect(panel).toHaveCount(0);
+});
+
+test("tracing another candidate switches the panel to it", async ({ page }) => {
+  const table = await get<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+  const name = table.rows[1]!.candidate;
+  await page.goto(`/run/${IDX.a_resolved}/results`);
+  await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Lineage" })).toContainText(name);
+});

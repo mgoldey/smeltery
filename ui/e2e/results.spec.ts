@@ -19,7 +19,7 @@ test("the forest plot has one marker per analogue, from the API's table", async 
   await page.goto(`/run/${IDX.a_resolved}/results`);
   await rendered(page, "forest");
   await expect(page.locator('[data-figure="forest"] .scatterlayer .point')).toHaveCount(table.rows.length);
-  for (const r of table.rows) await expect(page.getByRole("cell", { name: r.candidate, exact: true })).toBeVisible();
+  for (const r of table.rows) await expect(page.getByRole("button", { name: `Trace ${r.candidate}`, exact: true })).toBeVisible();
 });
 
 test("a non-zero floor draws its band around each group boundary", async ({ page }) => {
