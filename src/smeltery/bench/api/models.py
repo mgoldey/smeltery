@@ -363,3 +363,54 @@ class CatalogOut(BaseModel):
     kinds: list[str]
     site_fields: list[SiteField]
     methods: dict[str, MethodOut]
+
+
+class LineagePose(BaseModel):
+    pose: int
+    value: float
+    parent_value: float
+    difference: float
+
+
+class LineageStep(BaseModel):
+    stage: str
+    kind: str
+    seconds: float | None
+    settings: dict[str, Any]
+
+
+class LineageField(BaseModel):
+    n_charges: int
+    provenance: dict[str, Any] | None
+
+
+class LineageConfig(BaseModel):
+    file: str
+    sha256: str
+    inputs: Any
+
+
+class LineageCalcs(BaseModel):
+    file: str
+    n: int | None = None
+
+
+class Lineage(BaseModel):
+    """What made one candidate's paired ΔΔE: its poses, the steps that ran, and what the run recorded about itself."""
+
+    candidate: str
+    quantity: str
+    parent: str
+    mean: float
+    sem: float
+    n: int
+    poses: list[LineagePose]
+    steps: list[LineageStep]
+    field: LineageField
+    engine: dict[str, Any]
+    smeltery: dict[str, Any] | None
+    digest: str
+    started_utc: str | None
+    config: LineageConfig | None
+    calcs: LineageCalcs | None
+    missing: list[str] = Field(description="items above this run did not record (an older run, or no --out)")

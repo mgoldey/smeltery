@@ -411,6 +411,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Lineage */
+        get: operations["run_lineage_api_runs__idx__lineage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/per_pose": {
         parameters: {
             query?: never;
@@ -956,6 +973,97 @@ export interface components {
             out?: string | null;
             /** Toml */
             toml: string;
+        };
+        /**
+         * Lineage
+         * @description What made one candidate's paired ΔΔE: its poses, the steps that ran, and what the run recorded about itself.
+         */
+        Lineage: {
+            calcs: components["schemas"]["LineageCalcs"] | null;
+            /** Candidate */
+            candidate: string;
+            config: components["schemas"]["LineageConfig"] | null;
+            /** Digest */
+            digest: string;
+            /** Engine */
+            engine: {
+                [key: string]: unknown;
+            };
+            field: components["schemas"]["LineageField"];
+            /** Mean */
+            mean: number;
+            /**
+             * Missing
+             * @description items above this run did not record (an older run, or no --out)
+             */
+            missing: string[];
+            /** N */
+            n: number;
+            /** Parent */
+            parent: string;
+            /** Poses */
+            poses: components["schemas"]["LineagePose"][];
+            /** Quantity */
+            quantity: string;
+            /** Sem */
+            sem: number;
+            /** Smeltery */
+            smeltery: {
+                [key: string]: unknown;
+            } | null;
+            /** Started Utc */
+            started_utc: string | null;
+            /** Steps */
+            steps: components["schemas"]["LineageStep"][];
+        };
+        /** LineageCalcs */
+        LineageCalcs: {
+            /** File */
+            file: string;
+            /** N */
+            n?: number | null;
+        };
+        /** LineageConfig */
+        LineageConfig: {
+            /** File */
+            file: string;
+            /** Inputs */
+            inputs: unknown;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** LineageField */
+        LineageField: {
+            /** N Charges */
+            n_charges: number;
+            /** Provenance */
+            provenance: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** LineagePose */
+        LineagePose: {
+            /** Difference */
+            difference: number;
+            /** Parent Value */
+            parent_value: number;
+            /** Pose */
+            pose: number;
+            /** Value */
+            value: number;
+        };
+        /** LineageStep */
+        LineageStep: {
+            /** Kind */
+            kind: string;
+            /** Seconds */
+            seconds: number | null;
+            /** Settings */
+            settings: {
+                [key: string]: unknown;
+            };
+            /** Stage */
+            stage: string;
         };
         /** MethodOut */
         MethodOut: {
@@ -2259,6 +2367,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_lineage_api_runs__idx__lineage_get: {
+        parameters: {
+            query: {
+                candidate: string;
+            };
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lineage"];
                 };
             };
             /** @description Validation Error */
