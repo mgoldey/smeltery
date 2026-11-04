@@ -1,3 +1,4 @@
+import json
 import pathlib
 import re
 
@@ -66,15 +67,38 @@ def test_edit_pipeline_returns_every_issue_not_just_the_first(pipeline):
     assert isinstance(issues, list)
 
 
-def test_compare_arms_reports_per_cell_not_pooled(two_run_dirs):
-    pass
+def test_compare_arms_differences_each_key_a_minus_b(two_run_dirs):
+    """Arm b's record has every paired mean shifted by +1.0, so every per-key difference is exactly -1.0.
+
+    Data source: the shift written into arm b's run record, not anything `Comparison` computes. Swapping the arms
+    inside `CompareArms` flips the sign and fails this test.
+    """
+    from smeltery.bench.adapters import FilesystemRunStore
+    from smeltery.bench.use_cases.compare_arms import CompareArms
+
+    a, b = two_run_dirs
+    store = FilesystemRunStore(a.parent.parent)
+    cmp = CompareArms(store).run({"cell": str(_record(a))}, {"cell": str(_record(b))}, label_a="a", label_b="b")
+    s = cmp.summary()
+    assert s["n_paired"] == 1
+    assert s["median_per_key_diff"] == pytest.approx(-1.0)
+    assert s["keys_favouring_a"] == 1
 
 
 @pytest.fixture
 def two_run_dirs(tmp_path):
     d1 = make_run_dir(tmp_path / "a")
     d2 = make_run_dir(tmp_path / "b")
+    rec = _record(d2)
+    data = json.loads(rec.read_text())
+    for m in data["results"]["paired_ddE"].values():
+        m["mean"] += 1.0
+    rec.write_text(json.dumps(data))
     return d1, d2
+
+
+def _record(out_dir):
+    return next(pathlib.Path(out_dir).glob("run-*.json"))
 
 
 def test_no_use_case_imports_a_web_framework():

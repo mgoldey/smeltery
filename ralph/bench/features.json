@@ -186,7 +186,7 @@
         "Mutation: make it return True again -> the test fails -> revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "R13-ci-jobs-intact",
