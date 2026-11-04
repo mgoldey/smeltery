@@ -668,7 +668,7 @@
         "Mutation 1: render UNRANKED with a winner name -> a test fails -> revert. Mutation 2: render INCOMPLETE as an empty banner -> a test fails -> revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI6-figures-api",

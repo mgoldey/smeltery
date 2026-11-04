@@ -13,7 +13,7 @@ test("the bench lists every fixture run with its digest", async ({ page }) => {
 test("the context bar shows the run's campaign and input digest", async ({ page }) => {
   const r = run("a_resolved"); // data source: the record serve_fixture.py wrote, via .fixture.json
   await page.goto(`/run/${r.idx}`);
-  await expect(page).toHaveURL(new RegExp(`/run/${r.idx}/overview$`));
+  await expect(page).toHaveURL(new RegExp(`/run/${r.idx}/results$`));
   await expect(page.getByTestId("context-campaign")).toHaveText(r.campaign);
   await expect(page.getByTestId("context-digest")).toHaveText(r.digest.slice(0, 12));
 });

@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const SRC = join(__dirname, "..");
+const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWED = new Set(["styles/tokens.css", "api/schema.d.ts"]);
 // A colour literal: #rgb[a] / #rrggbb[aa], or rgb()/hsl() with numbers.
 const COLOUR = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(\s*\d/;

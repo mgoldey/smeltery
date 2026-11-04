@@ -2,7 +2,10 @@ import { NavLink, Outlet, useParams } from "react-router-dom";
 import { Shell } from "../../components/Shell";
 
 /** The Run area's tabs. A tab is listed here only once its page exists. */
-export const RUN_TABS: { to: string; label: string }[] = [{ to: "overview", label: "Overview" }];
+export const RUN_TABS: { to: string; label: string }[] = [
+  { to: "results", label: "Results" },
+  { to: "overview", label: "Overview" },
+];
 
 export function useRunIdx(): number {
   const { idx } = useParams();

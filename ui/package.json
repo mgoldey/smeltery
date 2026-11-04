@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "e2e": "playwright test",
     "gen:api": "node scripts/gen-api.mjs"
@@ -37,6 +37,7 @@
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.20.5",
     "@types/plotly.js-dist-min": "^2.3.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
