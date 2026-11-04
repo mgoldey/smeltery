@@ -55,3 +55,38 @@ def test_an_incomplete_run_has_no_figures_409(client_for, incomplete_run_dir):
     c, _ = client_for(incomplete_run_dir)
     r = c.get("/api/runs/0/figures/forest")
     assert r.status_code == 409 and "cut" in r.json()["detail"]
+
+
+def _strings(x):
+    if isinstance(x, dict):
+        for v in x.values():
+            yield from _strings(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from _strings(v)
+    elif isinstance(x, str):
+        yield x.lower()
+
+
+@pytest.mark.parametrize("name", ["forest", "matrix", "per_pose"])
+def test_a_dark_figure_has_no_light_chrome_and_keeps_its_data_colours(client_for, run_dir, name):
+    """Data source: the palette in smeltery.gui.views._style, which owns both themes."""
+    from smeltery.gui.views import _style
+
+    c, _ = client_for(run_dir)
+    light = c.get(f"/api/runs/0/figures/{name}").json()
+    dark = c.get(f"/api/runs/0/figures/{name}", params={"theme": "dark"}).json()
+    seen_light, seen_dark = set(_strings(light)), set(_strings(dark))
+    chrome = {k.lower() for k in _style.DARK}
+    assert seen_light & chrome, "the light figure uses the light chrome, or this test checks nothing"
+    assert not (seen_dark & chrome), sorted(seen_dark & chrome)
+    data = {v.lower() for v in (_style.KEPT, _style.NOT_KEPT, _style.UNRANKED)}
+    assert seen_light & data == seen_dark & data
+    # only colours change: the traces' numbers are the same figure
+    assert [t.get("x") for t in dark["data"]] == [t.get("x") for t in light["data"]]
+
+
+def test_the_default_theme_is_light_and_an_unknown_one_is_refused(client_for, run_dir):
+    c, _ = client_for(run_dir)
+    assert c.get("/api/runs/0/figures/forest").json() == c.get("/api/runs/0/figures/forest?theme=light").json()
+    assert c.get("/api/runs/0/figures/forest?theme=sepia").status_code == 422

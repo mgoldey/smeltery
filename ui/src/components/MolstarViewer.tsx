@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useScheme } from "../styles/scheme";
 
 /** Live viewers by label, so a test (or a curious user in the console) can ask Mol* what it actually loaded. */
 function registry(): Record<string, unknown> {
@@ -11,6 +12,12 @@ function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+/** The viewer's background is the panel token, so the canvas sits in the page in either scheme. */
+async function paintBackground(p: import("molstar/lib/mol-plugin/context").PluginContext): Promise<void> {
+  const { Color } = await import("molstar/lib/mol-util/color");
+  p.canvas3d?.setProps({ renderer: { backgroundColor: Color.fromHexStyle(token("--panel")) } });
+}
+
 /**
  * A Mol* canvas showing one MolViewSpec state. The state is built by the API (smeltery.gui.scenes.pose_scene) or,
  * for previews, by the caller; this component only draws it. Mol* is loaded on first use.
@@ -21,6 +28,7 @@ export function MolstarViewer({ state, label, height = 520 }: { state: unknown; 
   const plugin = useRef<import("molstar/lib/mol-plugin/context").PluginContext | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const scheme = useScheme();
 
   // Create the plugin once per mount.
   useEffect(() => {
@@ -67,9 +75,15 @@ export function MolstarViewer({ state, label, height = 520 }: { state: unknown; 
       // The scenes carry no camera, so frame what was loaded; otherwise Mol* keeps its empty default view.
       p.canvas3d?.requestResize();
       p.managers.camera.reset();
+      await paintBackground(p); // loadMVS resets the canvas to Mol*'s own white
       host.current?.setAttribute("data-loaded", String(p.managers.structure.hierarchy.current.structures.length));
     })().catch((e: unknown) => setError(String(e)));
   }, [ready, state]);
+
+  // Follow the page's colour scheme without reloading the structure.
+  useEffect(() => {
+    if (ready && plugin.current) paintBackground(plugin.current).catch((e: unknown) => setError(String(e)));
+  }, [ready, scheme]);
 
   return (
     <div className="viewer" style={{ height }}>

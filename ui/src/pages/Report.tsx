@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
+import { useScheme } from "../styles/scheme";
 import { PoseExplorer } from "../components/PoseExplorer";
 import { ProposeForm } from "../components/ProposeForm";
 import { Shell } from "../components/Shell";
@@ -30,9 +31,11 @@ export function Report() {
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/ddE", { params: { path: { idx } } })),
     enabled: ok,
   });
+  const theme = useScheme();
   const forest = useQuery({
-    queryKey: ["figure", idx, "forest"],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name: "forest" } } })),
+    queryKey: ["figure", idx, "forest", theme],
+    queryFn: () =>
+      unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name: "forest" }, query: { theme } } })),
     enabled: ok,
   });
   const snapshot = useMutation({

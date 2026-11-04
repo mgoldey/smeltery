@@ -81,3 +81,17 @@ def test_compare_differences_two_runs_and_refuses_one_run_in_both_arms(client_fo
     assert body["figure"]["data"] and body["caption"]
     same = c.get("/api/compare", params={"a": 0, "b": 0})
     assert same.status_code == 400 and "both arms" in same.json()["detail"]
+
+
+def test_two_runs_of_one_campaign_are_named_apart_in_the_comparison(client_for, tmp_path):
+    """The usual comparison is two runs of one campaign; even with the same input digest, the arms must not read the
+    same, or the caption says a run favours itself."""
+    from gui_fixture import make_run_dir
+
+    make_run_dir(tmp_path / "a")
+    make_run_dir(tmp_path / "b")  # data source: the same fixture twice, so campaign and digest are both equal
+    c, _ = client_for(tmp_path)
+    body = c.get("/api/compare", params={"a": 0, "b": 1}).json()
+    title = body["figure"]["layout"]["title"]["text"]
+    assert "A (" in title and "B (" in title, title
+    assert "A (" in body["caption"] or "B (" in body["caption"], body["caption"]

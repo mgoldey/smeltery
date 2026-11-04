@@ -32,3 +32,40 @@ def layout(fig, *, title: str, height: int = 360) -> None:
     )
     fig.update_xaxes(gridcolor=GRID, linecolor=GRID, tickfont={"color": INK_MUTED})
     fig.update_yaxes(gridcolor=GRID, linecolor=GRID, tickfont={"color": INK_MUTED})
+
+
+#: Each light colour above that is chrome (ink, bands, grid, surfaces) mapped to its dark-mode counterpart, matching
+#: Bench's dark tokens (ui/src/styles/tokens.css). Data colours (KEPT, NOT_KEPT, UNRANKED, DECISION) keep their
+#: meaning in both themes and are not remapped. "white" and #2a3f5f are what template="plotly_white" sets.
+DARK = {
+    INK: "#eef0f1",
+    INK_MUTED: "#a3abb0",
+    NEUTRAL: "#c3c9cc",
+    BAND: "#262a2d",
+    BAND_ALT: "#1b1e20",
+    SURFACE: "#1b1e20",
+    GRID: "#2f3437",
+    "white": "#1b1e20",
+    "#2a3f5f": "#eef0f1",
+}
+THEMES = ("light", "dark")
+
+
+def themed(figure: dict, theme: str) -> dict:
+    """The same figure, its chrome colours swapped for `theme`'s. Nothing but colour strings changes."""
+    if theme not in THEMES:
+        raise ValueError(f"unknown theme {theme!r}; themes are {', '.join(THEMES)}")
+    if theme == "light":
+        return figure
+    swap = {k.lower(): v for k, v in DARK.items()}
+
+    def walk(x):
+        if isinstance(x, dict):
+            return {k: walk(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [walk(v) for v in x]
+        if isinstance(x, str):
+            return swap.get(x.lower(), x)
+        return x
+
+    return walk(figure)

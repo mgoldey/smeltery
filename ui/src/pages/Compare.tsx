@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap } from "../api/client";
 import { PlotlyFigure } from "../components/PlotlyFigure";
+import { useScheme } from "../styles/scheme";
 import { Shell } from "../components/Shell";
 
 /** Two runs as arms, differenced per key. Arms are chosen, never inferred: guessing is how a comparison becomes a
@@ -10,9 +11,10 @@ export function Compare() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
   const [a, setA] = useState<number | null>(null);
   const [b, setB] = useState<number | null>(null);
+  const theme = useScheme();
   const cmp = useQuery({
-    queryKey: ["compare", a, b],
-    queryFn: () => unwrap(api.GET("/api/compare", { params: { query: { a: a!, b: b! } } })),
+    queryKey: ["compare", a, b, theme],
+    queryFn: () => unwrap(api.GET("/api/compare", { params: { query: { a: a!, b: b!, theme } } })),
     enabled: a !== null && b !== null,
   });
   const usable = (runs.data ?? []).filter((r) => r.verdict && r.verdict.state !== "INCOMPLETE");

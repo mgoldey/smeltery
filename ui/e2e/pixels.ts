@@ -11,3 +11,10 @@ export async function distinctColours(el: Locator): Promise<number> {
   }
   return seen.size;
 }
+
+/** The colour of the pixel `inset` px in from the top-left of `el`, as [r, g, b]. */
+export async function cornerColour(el: Locator, inset = 6): Promise<[number, number, number]> {
+  const png = PNG.sync.read(await el.screenshot());
+  const i = (inset * png.width + inset) * 4;
+  return [png.data[i]!, png.data[i + 1]!, png.data[i + 2]!];
+}

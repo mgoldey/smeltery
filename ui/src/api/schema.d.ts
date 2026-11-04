@@ -399,7 +399,8 @@ export interface paths {
         };
         /**
          * Run Figure
-         * @description The figure `smeltery.gui.views` builds, as Plotly JSON. The browser draws it; it never re-derives it.
+         * @description The figure `smeltery.gui.views` builds, as Plotly JSON, coloured for `theme`. The browser draws it; it never
+         *     re-derives or recolours it.
          */
         get: operations["run_figure_api_runs__idx__figures__name__get"];
         put?: never;
@@ -1684,6 +1685,7 @@ export interface operations {
             query: {
                 a: number;
                 b: number;
+                theme?: "light" | "dark";
             };
             header?: never;
             path?: never;
@@ -2236,7 +2238,9 @@ export interface operations {
     };
     run_figure_api_runs__idx__figures__name__get: {
         parameters: {
-            query?: never;
+            query?: {
+                theme?: "light" | "dark";
+            };
             header?: never;
             path: {
                 idx: number;

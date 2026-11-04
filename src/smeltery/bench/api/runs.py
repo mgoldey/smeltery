@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from rdkit import Chem
@@ -18,6 +18,7 @@ from smeltery.gui import results as R
 from smeltery.gui.compare import Comparison as Cmp
 from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, write_report
 from smeltery.gui.scenes import pose_scene
+from smeltery.gui.views._style import themed
 from smeltery.gui.views.compare import compare_figure, comparison_caption
 from smeltery.gui.views.forest import forest_figure
 from smeltery.gui.views.matrix import matrix_figure
@@ -138,11 +139,18 @@ def run_per_pose(request: Request, idx: int, quantity: str = QUANTITY) -> list[M
 
 
 FIGURES = ("forest", "matrix", "per_pose")
+#: The colour scheme a figure is drawn for. Python owns the palette for both (smeltery.gui.views._style).
+Theme = Literal["light", "dark"]
 
 
 @router.get("/runs/{idx}/figures/{name}")
-def run_figure(request: Request, idx: int, name: str) -> dict[str, Any]:
-    """The figure `smeltery.gui.views` builds, as Plotly JSON. The browser draws it; it never re-derives it."""
+def run_figure(request: Request, idx: int, name: str, theme: Theme = "light") -> dict[str, Any]:
+    """The figure `smeltery.gui.views` builds, as Plotly JSON, coloured for `theme`. The browser draws it; it never
+    re-derives or recolours it."""
+    return themed(_figure(request, idx, name), theme)
+
+
+def _figure(request: Request, idx: int, name: str) -> dict[str, Any]:
     if name not in FIGURES:
         raise HTTPException(status_code=404, detail=f"no figure {name!r}; figures are {', '.join(FIGURES)}")
     r = run(request, idx)
@@ -338,15 +346,27 @@ def snapshot(request: Request, idx: int) -> M.Snapshot:
 # ---------------------------------------------------------------------------------------------------- compare
 
 
+def _arm_labels(ra: R.Run, rb: R.Run) -> tuple[str, str]:
+    """Each arm's campaign. When both arms share one (two runs of one campaign, the usual comparison), the arm letter
+    the page chose it as and its digest are added, so the caption never says a run favours itself."""
+    if ra.campaign != rb.campaign:
+        return ra.campaign, rb.campaign
+    return (
+        f"A ({ra.campaign} {ra.record['input_digest'][:8]})",
+        f"B ({rb.campaign} {rb.record['input_digest'][:8]})",
+    )
+
+
 @router.get("/compare", response_model=M.Comparison)
-def compare(request: Request, a: int, b: int) -> M.Comparison:
+def compare(request: Request, a: int, b: int, theme: Theme = "light") -> M.Comparison:
     """Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn."""
     if a == b:
         raise HTTPException(
             status_code=400, detail="a run is in both arms; an arm compared with itself is not a comparison"
         )
     ra, rb = run(request, a), run(request, b)
-    cmp = Cmp.from_runs(
-        {"run": ra}, {"run": rb}, label_a=ra.campaign, label_b=rb.campaign, floor=max(ra.floor, rb.floor)
+    label_a, label_b = _arm_labels(ra, rb)
+    cmp = Cmp.from_runs({"run": ra}, {"run": rb}, label_a=label_a, label_b=label_b, floor=max(ra.floor, rb.floor))
+    return M.Comparison(
+        figure=themed(_plain(compare_figure(cmp)), theme), caption=comparison_caption(cmp), summary=cmp.summary()
     )
-    return M.Comparison(figure=_plain(compare_figure(cmp)), caption=comparison_caption(cmp), summary=cmp.summary())

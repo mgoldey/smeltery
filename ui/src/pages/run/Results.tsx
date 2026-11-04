@@ -2,12 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "../../api/client";
 import { PlotlyFigure } from "../../components/PlotlyFigure";
 import { VerdictBanner } from "../../components/VerdictBanner";
+import { useScheme } from "../../styles/scheme";
 import { useRunIdx } from "./RunLayout";
 
 function useFigure(idx: number, name: "forest" | "matrix" | "per_pose", enabled: boolean) {
+  const theme = useScheme();
   return useQuery({
-    queryKey: ["figure", idx, name],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name } } })),
+    queryKey: ["figure", idx, name, theme],
+    queryFn: () =>
+      unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name }, query: { theme } } })),
     enabled,
   });
 }
