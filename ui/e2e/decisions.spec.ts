@@ -9,10 +9,11 @@ test("the reason list is exactly the core's vocabulary", async ({ page }) => {
   const vocab = await get<{ reasons: string[]; statuses: string[] }>(page, "/api/decisions/vocabulary");
   await page.goto(`/run/${IDX.a_resolved}/decisions`);
   const row = page.locator("[data-candidate]").first();
-  const reasons = await row.getByLabel("Reason").locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
-  expect(reasons).toEqual(vocab.reasons);
-  const statuses = await row.getByLabel("Status").locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
-  expect(statuses).toEqual(vocab.statuses);
+  // the options arrive with the vocabulary query, so poll rather than read the select once
+  const values = (label: string) => () =>
+    row.getByLabel(label).locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+  await expect.poll(values("Reason")).toEqual(vocab.reasons);
+  await expect.poll(values("Status")).toEqual(vocab.statuses);
 });
 
 test("a tie choice without a note is refused with the core's message, and nothing is written", async ({ page }) => {

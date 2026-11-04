@@ -970,7 +970,7 @@
         "Record the counts in NOTES.md in one line."
       ],
       "full_suite": true,
-      "passes": false
+      "passes": true
     }
   ]
 }

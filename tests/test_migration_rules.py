@@ -92,7 +92,8 @@ def campaign_names_in_code(src: str) -> list[tuple[int, str]]:
 def find_symlinks(root: pathlib.Path) -> list[str]:
     found = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in (".git", ".venv", ".claude")]
+        # untracked install output: npm puts its own symlinks in ui/node_modules/.bin
+        dirnames[:] = [d for d in dirnames if d not in (".git", ".venv", ".claude", "node_modules")]
         for name in dirnames + filenames:
             p = pathlib.Path(dirpath) / name
             if p.is_symlink():
@@ -174,7 +175,10 @@ def test_symlink_detector_can_fail(tmp_path):
     (tmp_path / "dirlink").symlink_to(tmp_path / "sub")
     (tmp_path / ".venv").mkdir()
     (tmp_path / ".venv" / "ignored").symlink_to(tmp_path / "real.txt")
-    assert find_symlinks(tmp_path) == ["dirlink", "sub/link.txt"]
+    (tmp_path / "ui" / "node_modules" / ".bin").mkdir(parents=True)
+    (tmp_path / "ui" / "node_modules" / ".bin" / "tool").symlink_to(tmp_path / "real.txt")
+    (tmp_path / "ui" / "linked").symlink_to(tmp_path / "real.txt")  # beside node_modules, still found
+    assert find_symlinks(tmp_path) == ["dirlink", "sub/link.txt", "ui/linked"]
 
 
 # ---- acceptance 3: docs/migration.md ------------------------------------------

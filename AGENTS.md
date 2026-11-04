@@ -14,7 +14,7 @@ and `ralph/bench/NOTES.md`, never here.
 The full suite takes ~30 minutes. **Do not run it unless a feature's `"full_suite": true` says so.**
 
 1. While working: the feature's own `verify` command.
-2. Before committing, the **bench gate** (~30 s):
+2. Before committing, the **bench gate** (~3 min):
    `.venv/bin/python -m pytest tests/bench tests/test_study_plan_cells.py -q -p no:randomly`
 3. Plus the tests for any core file you touched:
 
