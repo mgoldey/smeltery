@@ -217,7 +217,9 @@ def pipeline_launch(request: Request, body: M.LaunchRequest) -> Any:
     out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
     if not out.is_absolute():
         out = root / out
-    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock).run(p, out_dir=out)
+    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock).run(
+        p, out_dir=out, config_dir=root
+    )
     t = st.task_queue.get(tid)
     if t is None:
         raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")

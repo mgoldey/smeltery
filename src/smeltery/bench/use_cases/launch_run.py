@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
 from smeltery.gui.pipeline import Pipeline
+from smeltery.run_inputs import stage_inputs
 
 
 def smeltery_command() -> list[str]:
@@ -22,17 +22,6 @@ class LaunchRun:
         self.identity = identity
         self.clock = clock
 
-    def _stage(self, pipeline: Pipeline, out_dir: Path) -> None:
-        for stage in pipeline.stages:
-            for key, value in list(stage.params.items()):
-                if isinstance(value, str) and Path(value).is_file():
-                    src = Path(value)
-                    digest = self.artifact_store.put(src)
-                    staged = out_dir / digest
-                    if not staged.exists():
-                        shutil.copyfile(src, staged)
-                    stage.params[key] = str(staged)
-
     def run(
         self,
         pipeline: Pipeline,
@@ -40,13 +29,17 @@ class LaunchRun:
         out_dir: str | Path | None = None,
         *,
         command: list[str] | None = None,
+        config_dir: Path | None = None,
     ):  # noqa: E501
         if out_dir is None:
             out_dir = out if out is not None else Path("out")
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        self._stage(pipeline, out_dir)
-        (out_dir / "config.toml").write_text(pipeline.to_toml())
+        # relative paths resolve against `config_dir` (the folder the config lives in, as `smeltery run` does);
+        # the route passes the Bench root, a bare call falls back to the process's cwd
+        base = Path(config_dir) if config_dir is not None else Path.cwd()
+        text, _ = stage_inputs(pipeline.to_toml(), base, out_dir)
+        (out_dir / "config.toml").write_text(text)
         if command is None:
             command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
         task_id = self.task_queue.submit(

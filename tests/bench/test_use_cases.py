@@ -110,3 +110,22 @@ def test_no_use_case_imports_a_web_framework():
         if re.search(r"^\s*(from|import)\s+(fastapi|starlette|uvicorn)\b", p.read_text(), re.M):
             bad.append(p.name)
     assert bad == []
+
+
+def test_launch_stages_a_pocket_file_relative_to_the_configs_directory_not_the_cwd(tmp_path, pipeline, monkeypatch):
+    """The pipeline names `data/p.pqr`, which exists only beside the config; the server's cwd is elsewhere."""
+    import tomllib
+
+    proj = tmp_path / "proj"
+    (proj / "data").mkdir(parents=True)
+    (proj / "data" / "p.pqr").write_text("pocket")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    pipeline.stage("pocket").params.pop("site")
+    pipeline.stage("pocket").params["file"] = "data/p.pqr"
+    LaunchRun(
+        FakeTaskQueue(), FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock()
+    ).execute(pipeline, out=tmp_path / "out", config_dir=proj)
+    staged = tomllib.loads((tmp_path / "out" / "config.toml").read_text())["pocket"]["file"]
+    assert staged.startswith("inputs/") and (tmp_path / "out" / staged).read_text() == "pocket"

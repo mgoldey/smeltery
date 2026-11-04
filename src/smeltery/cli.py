@@ -118,6 +118,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import re
 import sys
@@ -1015,6 +1016,28 @@ VIEWERS = {
 }
 
 
+def _stage_config(config: Path, out_dir: Path) -> tuple[Path, dict]:
+    """Write OUT/config.toml with every input file copied under OUT/inputs/, and return its path and the record's
+    `results.config` entry; the run then reads only from OUT."""
+    from .run_inputs import stage_inputs
+
+    config = Path(config)
+    try:
+        text = config.read_text()
+    except OSError as e:
+        raise ConfigError(f"cannot read {config}: {e}") from e
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"cannot read {config}: {e}") from e
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    staged, inputs = stage_inputs(text, config.resolve().parent, out_dir)
+    dest = out_dir / "config.toml"
+    dest.write_text(staged)
+    return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] in VIEWERS:  # imported only when asked for: they need no tier, and gui needs the gui extra
@@ -1037,7 +1060,12 @@ def main(argv: list[str] | None = None) -> int:
     tw.add_argument("--concurrency", type=int, default=2, help="max concurrent activities")
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
-    run.add_argument("--out", type=Path, default=Path("out"), help="directory for the run record")
+    run.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="directory for the run record (default out); when given it also receives config.toml and inputs/",
+    )
     run.add_argument("--plan", action="store_true", help="stop before the SCFs: poses, pocket, parity, digest")
     run.add_argument(
         "--only-candidate",
@@ -1084,7 +1112,13 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             return 0
         return 0
+    explicit_out = args.out is not None
+    if args.out is None:
+        args.out = Path("out")
     try:
+        config_info = None
+        if explicit_out and not args.combine:
+            args.config, config_info = _stage_config(args.config, args.out)
         cfg = load_config(args.config)
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
@@ -1110,6 +1144,8 @@ def main(argv: list[str] | None = None) -> int:
                 p.tier.run([target], {"field": p.field})
 
             rec, out = run_plan(plan, measure=measure_one, partial=True)
+            if config_info is not None:
+                rec.results["config"] = config_info
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
             # rename to partial-<name>.json and drop cut
             p = Path(path)
@@ -1168,6 +1204,8 @@ def main(argv: list[str] | None = None) -> int:
             print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
             return 0
         rec, out = run_plan(plan)
+        if config_info is not None:
+            rec.results["config"] = config_info
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
