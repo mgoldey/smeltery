@@ -551,7 +551,7 @@
         "Add the two jobs to .github/workflows/test.yml; the repo-wide one has continue-on-error: true."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI0-retire-string-ui",
