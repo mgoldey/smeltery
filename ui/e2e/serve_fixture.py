@@ -25,12 +25,22 @@ sys.path.insert(0, str(REPO / "src"))
 
 from gui_fixture import make_run_dir  # noqa: E402
 
-RUNS = (("a_resolved", {}, False), ("b_unranked", {"unranked": True}, False), ("c_incomplete", {}, True))
+import gui_fixture  # noqa: E402
+
+#: (name, make_run_dir kwargs, delete the cut?, floor). d_floor has a non-zero floor, so its forest plot draws the
+#: +/- floor band that the others (floor 0) correctly do not.
+RUNS = (
+    ("a_resolved", {}, False, 0.0),
+    ("b_unranked", {"unranked": True}, False, 0.0),
+    ("c_incomplete", {}, True, 0.0),
+    ("d_floor", {}, False, 1.0),
+)
 
 
 def build(root: Path) -> list[dict]:
     out = []
-    for name, kw, incomplete in RUNS:
+    for name, kw, incomplete, floor in RUNS:
+        gui_fixture.FLOOR = floor
         d = make_run_dir(root / name, **kw)
         rec_path = next(d.glob("run-*.json"))
         rec = json.loads(rec_path.read_text())
@@ -40,6 +50,7 @@ def build(root: Path) -> list[dict]:
         out.append(
             {"name": name, "path": str(rec_path), "out_dir": str(d), "campaign": rec["campaign"], "digest": rec["input_digest"]}
         )
+    gui_fixture.FLOOR = 0.0
     return sorted(out, key=lambda r: r["path"])
 
 

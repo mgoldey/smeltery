@@ -706,7 +706,7 @@
         "Mutation: remove the floor band in gui.views.forest_figure -> this test fails -> revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI8-pose-viewer",
