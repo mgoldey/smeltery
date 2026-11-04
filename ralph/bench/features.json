@@ -819,7 +819,7 @@
         "Cancel the task at the end of the test."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI14-campaign",

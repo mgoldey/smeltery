@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 from smeltery.gui.pipeline import Pipeline
+
+
+def smeltery_command() -> list[str]:
+    """`smeltery` from this interpreter's own install: the bench server's PATH need not include its venv, and a task
+    that runs a different smeltery than the one that checked the pipeline would not be the run the user asked for."""
+    script = Path(sys.executable).parent / "smeltery"
+    return [str(script)] if script.is_file() else [sys.executable, "-m", "smeltery.cli"]
 
 
 class LaunchRun:
@@ -40,7 +48,7 @@ class LaunchRun:
         self._stage(pipeline, out_dir)
         (out_dir / "config.toml").write_text(pipeline.to_toml())
         if command is None:
-            command = ["smeltery", "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
+            command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
         task_id = self.task_queue.submit(
             f"run {pipeline.campaign}",
             list(command),

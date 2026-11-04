@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, unwrap } from "../../api/client";
 import { TomlEditor } from "../../components/TomlEditor";
 import { KnobForm } from "./pipeline/KnobForm";
+import { Launch } from "./pipeline/Launch";
 import { Palette } from "./pipeline/Palette";
 import { SitePlacer } from "./pipeline/SitePlacer";
 import { usePipeline } from "./pipeline/usePipeline";
@@ -91,6 +92,7 @@ export function Pipeline() {
         {state && state.placed.includes("pocket") && state.candidates[state.parent] ? (
           <SitePlacer parent={state.parent} smiles={state.candidates[state.parent]!} disabled={pending} onPlace={placeSite} />
         ) : null}
+        {state ? <Launch toml={state.toml} ok={state.ok} blocking={errors} /> : null}
         {state ? (
           <section aria-label="Pipeline TOML">
             <h2>TOML</h2>

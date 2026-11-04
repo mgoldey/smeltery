@@ -1,5 +1,6 @@
 """The pipeline API: the editor's only state is TOML, and every edit returns every issue Pipeline.check() finds."""
 
+import sys
 import tomllib
 from pathlib import Path
 
@@ -100,7 +101,11 @@ def test_launch_is_refused_with_errors_and_stages_inputs_into_out_when_clean(cli
     r = c.post("/api/pipeline/launch", json={"toml": minimal_toml(), "out": str(out)})
     assert r.status_code == 201, r.json()
     (name, argv, _cwd, _note) = q.submitted[0]
-    assert argv == ["smeltery", "run", str(out / "config.toml"), "--out", str(out)]
+    from smeltery.bench.use_cases.launch_run import smeltery_command
+
+    assert argv == [*smeltery_command(), "run", str(out / "config.toml"), "--out", str(out)]
+    # The venv's own smeltery (or this interpreter running the module), never whatever `smeltery` PATH finds.
+    assert Path(argv[0]).parent == Path(sys.executable).parent
     assert Path(out / "config.toml").is_file()
 
 
