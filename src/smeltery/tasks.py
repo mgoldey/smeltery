@@ -22,6 +22,10 @@ from pathlib import Path
 TASK_QUEUE = "smeltery-tasks"
 WORKFLOW_TYPE = "ShellTaskWorkflow"
 
+#: `TemporalTaskManager` defines a `list` method, so the builtin is unreachable by name inside that class
+#: body. Bound here, where `list` still means the builtin, so return annotations can say what they mean.
+_TaskList = list["Task"]
+
 
 class TemporalUnavailable(RuntimeError):
     """Raised when the Temporal server cannot be reached."""
@@ -116,9 +120,12 @@ try:  # temporalio is an optional runtime dependency for environments without it
 
     TEMPORAL_AVAILABLE = True
 except Exception:  # pragma: no cover - import guard
+    # Deliberate: without temporalio there is no activity or workflow to register, and `worker_activities()` /
+    # `worker_workflows()` return empty lists rather than these names. Annotated so a type checker reads the
+    # shadowing as intended instead of as an incompatible assignment.
     TEMPORAL_AVAILABLE = False
-    run_shell_activity = None
-    ShellTaskWorkflow = None
+    run_shell_activity: object = None
+    ShellTaskWorkflow: object = None
 
 
 def worker_activities():
@@ -204,9 +211,12 @@ class TemporalTaskManager:
     def submit(self, name, command, **kw):
         return self._run(self.submit_async(name, command, **kw))
 
-    async def list_async(self, status: str | None = None) -> list[Task]:
+    # `list[Task]` and not `list[Task]` spelled bare: this class defines a `list` method, which shadows the
+    # builtin inside the class body. It works at runtime only because annotations are deferred (PEP 563), and a
+    # type checker resolves it to the method. `_TaskList` is the builtin, bound before the shadowing name exists.
+    async def list_async(self, status: str | None = None) -> _TaskList:
         client = await self._client_or_connect()
-        tasks: list[Task] = []
+        tasks: _TaskList = []
         async for wf in client.list_workflows(f'WorkflowType = "{WORKFLOW_TYPE}"'):
             t = await self._to_task(client, wf)
             if status and t.status != status:
@@ -231,6 +241,8 @@ class TemporalTaskManager:
                 task.returncode = await handle.result()
             except Exception:
                 pass
+            if task.returncode is not None and task.returncode != 0:
+                task.status = "failed"
         return task
 
     def get(self, task_id):
@@ -276,6 +288,8 @@ class TemporalTaskManager:
                     task.returncode = await handle.result()
                 except Exception:
                     pass
+                if task.returncode is not None and task.returncode != 0:
+                    task.status = "failed"
             return task
         except Exception as e:  # noqa: BLE001
             return Task(id=wf.id, name=wf.id, command=[], cwd="", status=str(wf.status), note=str(e))

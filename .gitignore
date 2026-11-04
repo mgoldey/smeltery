@@ -13,3 +13,10 @@ __marimo__/
 
 # Scratch output from the Playwright MCP browser tools (screenshots, page snapshots).
 .playwright-mcp/
+
+.ralph/
+.opencode/
+.smeltery/
+
+# Bench UI build output (npm run build in ui/)
+src/smeltery/bench/web/

@@ -46,7 +46,8 @@ Issues = "https://github.com/mgoldey/smeltery/issues"
 [project.optional-dependencies]
 # ruff is pinned EXACTLY, and must equal the pin in .github/workflows/test.yml
 # (tests/test_ruff_pin.py enforces it): a drifting linter moves the baseline.
-dev = ["pytest>=8", "ruff==0.16.10"]
+# httpx2: starlette's TestClient, which the Bench API tests use (httpx is deprecated there).
+dev = ["pytest>=8", "ruff==0.16.10", "httpx2>=2.13"]
 # Optional readers for smeltery.structure. A missing one raises MissingBackend
 # naming the extra. gemmi is currently also pulled in by ferric itself; rdkit is
 # also a core dependency while smeltery.tiers imports it at module level.
@@ -72,6 +73,11 @@ experiments = ["psutil>=5.9", "scipy>=1.11"]
 # The GUI (smeltery.gui.app, docs/gui.md): the Marimo app and its views. Only smeltery.gui.views imports these, and
 # only inside functions, so `import smeltery.gui` works without the extra. mols2grid needs pandas and pulls it in.
 gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
+# `smeltery bench` (smeltery.bench): the API and the built React app (ui/, built into src/smeltery/bench/web/ and
+# shipped in the wheel). plotly and molviewspec are here, not only in `gui`, because the API serves the figures
+# and pose scenes smeltery.gui builds, and those import them lazily: without them the app starts and then fails
+# on the first plot.
+bench = ["fastapi>=0.120", "uvicorn>=0.38", "plotly>=6", "molviewspec>=1.8"]
 # `smeltery gui OUT --desktop`: the same app in a pywebview window instead of a browser tab.
 desktop = ["pywebview>=5", "marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
@@ -107,6 +113,9 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/smeltery"]
+# The built Bench UI is gitignored (it is build output), and hatch leaves ignored files out by default; `artifacts`
+# puts it back. CI and release run `npm run build` in ui/ before building the wheel.
+artifacts = ["src/smeltery/bench/web/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -132,3 +141,19 @@ target-version = "py311"
 select = ["E", "F", "I", "B"]
 # B905 (zip strict=) would change runtime behaviour at 35 sites; not a style fix.
 ignore = ["B905"]
+
+# `ty` (Astral), same toolchain as ruff and uv. Run with `uvx ty@0.0.96 check` -- pinned, because ty is pre-1.0
+# and a bump must be a decision rather than a surprise. It is NOT a runtime or dev dependency: nothing imports it.
+#
+# Scope is deliberate. `src/smeltery/bench/` is checked as a required gate, because a ports-and-adapters layer is
+# only worth building if its signatures are enforced; an unchecked contract is a comment. The rest of the repo is
+# checked advisory-only (a non-blocking CI job), so drift stays visible without a pre-1.0 tool being able to break
+# main. Widen `include` when ty reaches 1.0 or the advisory job is near-clean.
+#
+# It paid for itself on arrival: of 11 diagnostics across the GUI and task modules, two were real bugs in
+# `tasks.py` -- a return annotation that resolved to a shadowing method instead of `list`, and an import guard
+# assigning None over a function. Both are fixed.
+[tool.ty]
+
+[tool.ty.src]
+include = ["src/smeltery/bench"]

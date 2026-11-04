@@ -1,0 +1,976 @@
+{
+  "about": "One entry per acceptance check for Bench. Change only `passes`, and only for the one feature you finished. See ralph/bench/PROMPT.md.",
+  "features": [
+    {
+      "id": "R1-one-home",
+      "spec": "README.md",
+      "category": "repair",
+      "description": "Each use case has exactly one home: src/smeltery/bench/use_cases/. The diverged copy in bench/application/ is gone.",
+      "depends_on": [],
+      "verify": "test ! -e src/smeltery/bench/application && ! rg -n 'bench\\.application' src tests",
+      "steps": [
+        "Diff application/ against use_cases/; port any behaviour that exists only in application/ into use_cases/.",
+        "Delete src/smeltery/bench/application/ and fix every import.",
+        "Run the bench gate."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R2-queue-no-false-failure",
+      "spec": "task-queue.md",
+      "category": "repair",
+      "description": "SubprocessTaskQueue never reports an exit-0 task as failed, even transiently, and the exit code is present when the status first becomes terminal.",
+      "depends_on": [],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_task_queue.py",
+      "steps": [
+        "Add test_a_successful_task_is_never_observed_as_failed: submit `bash -c 'echo hi'`, call status() in a tight loop recording every value until terminal; assert 'failed' never appears and the final value is 'succeeded'.",
+        "Add test_returncode_is_set_when_status_first_turns_terminal: for `bash -c 'exit 3'`, at the first poll where status() is terminal, get(id).returncode == 3.",
+        "Data source: the real exit status of the bash process.",
+        "Fix the adapter so status and returncode are written together by whichever code path observes the exit.",
+        "Mutation: make _refresh mark a dead pid 'failed' without its exit code; confirm both new tests fail; revert.",
+        "test_a_submitted_task_runs_and_reports_succeeded and test_a_failing_command_reports_failed_with_its_code pass 10 runs in a row (`for i in $(seq 10); do ...; done`)."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R3-queue-unknown-ids",
+      "spec": "task-queue.md",
+      "category": "repair",
+      "description": "Unknown task ids behave the same in both queue adapters: get -> None, tail_log -> KeyError, cancel -> KeyError.",
+      "depends_on": [
+        "R2-queue-no-false-failure"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_task_queue.py -k unknown",
+      "steps": [
+        "Extend test_an_unknown_task_id_is_handled_consistently to assert cancel('ghost') raises KeyError.",
+        "Make both adapters satisfy it."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R4-temporal-typed-init",
+      "spec": "task-queue.md",
+      "category": "repair",
+      "description": "TemporalTaskQueue has the typed constructor from task-queue.md, and its contract run is skipped with a reason when no server answers.",
+      "depends_on": [
+        "R3-queue-unknown-ids"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_task_queue.py",
+      "steps": [
+        "Replace `__init__(self, *a, **kw)` with the exact signature in task-queue.md requirement 7.",
+        "Register TemporalTaskQueue in the contract; skip (pytest.skip with the connection error) when 127.0.0.1:7233 does not answer.",
+        "uvx ty@0.0.96 check reports nothing for adapters/task_queue.py."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R5-atom-order-anchor",
+      "spec": "click-to-place.md",
+      "category": "repair",
+      "description": "The atom-order anchor compares the provisional order with the order read from the run's pose SDF files, and is proven live by mutation.",
+      "depends_on": [],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_provisional.py",
+      "steps": [
+        "Delete pose_symbols from src/smeltery/bench/provisional.py if it derives order from SMILES; production code does not need it.",
+        "Rewrite test_provisional_order_equals_the_runs_pose_order: for each candidate, parse smeltery.gui.results.pose_sdf(run, name) with RDKit (removeHs=False) and compare its atom symbols to provisional_pose(smiles)[0].",
+        "Data source: OUT/poses/<candidate>.sdf through pose_sdf. Not the SMILES.",
+        "Mutation 1: in a copy of the fixture, swap two differently-element atoms in one pose SDF (and update the record's sha256 for that file); confirm the test fails; revert.",
+        "Mutation 2: delete OUT/poses/; confirm the test errors or fails, never passes; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R6-specific-exception",
+      "spec": "ports.md",
+      "category": "repair",
+      "description": "The append-only ProjectStore test asserts the specific exception an edit raises, not bare Exception.",
+      "depends_on": [],
+      "verify": ".venv/bin/python -m ruff check tests/bench --select B017 && .venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_project_store.py",
+      "steps": [
+        "Replace pytest.raises(Exception) in test_an_entry_is_append_only with the adapter's specific exception type.",
+        "If the adapter has no edit method, assert instead that no public method name starts with edit or update."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R7-stores-under-root",
+      "spec": "ports.md",
+      "category": "repair",
+      "description": "The app keeps comment and project stores under <root>/.smeltery/bench/, never in the current directory.",
+      "depends_on": [],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py",
+      "steps": [
+        "Add test_local_stores_live_under_the_runs_root: build the app from smeltery.bench.app's composition root with root=tmp_path, cwd elsewhere; assert both sqlite files are under tmp_path/.smeltery/bench/ and none was created in the cwd.",
+        "Change app.py's defaults accordingly.",
+        "Delete the stray /home/matt/qc/smeltery/.bench_comments.sqlite and .bench_projects.sqlite (artefacts of the old default)."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R8-gitignore",
+      "spec": "layering.md",
+      "category": "repair",
+      "description": ".gitignore covers .ralph/, .opencode/ and .smeltery/.",
+      "depends_on": [],
+      "verify": "git check-ignore -q .ralph && git check-ignore -q .opencode && git check-ignore -q .smeltery",
+      "steps": [
+        "Append the three entries to .gitignore."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R9-docs-bench-true",
+      "spec": "layering.md",
+      "category": "repair",
+      "description": "docs/bench.md says only true things about layering and the task queue.",
+      "depends_on": [],
+      "verify": "rg -q 'tasks.py' docs/bench.md && rg -qi 'at most once' docs/bench.md",
+      "steps": [
+        "Correct the layering paragraph: temporalio also appears in src/smeltery/tasks.py, the one named exception.",
+        "State that a task runs at most once and a dead worker's task is reported failed, not retried."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R10-pyproject-comments",
+      "spec": "layering.md",
+      "category": "repair",
+      "description": "The bench extra sits under its own comment, and the desktop extra is back under its comment.",
+      "depends_on": [],
+      "verify": "python3 -c \"import tomllib;tomllib.load(open('pyproject.toml','rb'))\"",
+      "steps": [
+        "Move `bench = [...]` so that the `smeltery gui OUT --desktop` comment is directly above `desktop = [...]`.",
+        "Give `bench` its own comment line above it naming smeltery.bench as the importer."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R11-lint-clean",
+      "spec": "layering.md",
+      "category": "repair",
+      "description": "ruff check and ruff format --check are clean across src and tests.",
+      "depends_on": [
+        "R1-one-home",
+        "R2-queue-no-false-failure",
+        "R5-atom-order-anchor",
+        "R6-specific-exception"
+      ],
+      "verify": ".venv/bin/python -m ruff check src tests && .venv/bin/python -m ruff format --check src tests",
+      "steps": [
+        "Run `ruff check --fix` and `ruff format` on the bench files, then fix the remainder by hand.",
+        "Do not add noqa to silence a real finding."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R12-no-hollow-compare",
+      "spec": "README.md",
+      "category": "repair",
+      "description": "Comparison has no property that ignores its data: pooled_is_confounded is removed or derived from the arms.",
+      "depends_on": [],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/test_gui_compare.py tests/bench/test_use_cases.py",
+      "steps": [
+        "src/smeltery/gui/compare.py: delete `pooled_is_confounded` (it returns True unconditionally) and `per_key_median` unless something uses them; if a test needs them, derive them from summary().",
+        "If kept, data source for its test: two arms with identical per-cell composition, where pooled and per-cell differences agree, must give False.",
+        "Mutation: make it return True again -> the test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "R13-ci-jobs-intact",
+      "spec": "layering.md",
+      "category": "repair",
+      "description": "The ty CI jobs are separate jobs: every existing job keeps all its original steps in order (steps may be added), and the repo-wide job really checks the whole repo.",
+      "depends_on": [],
+      "verify": ".venv/bin/python - <<'EOF'\nimport yaml,subprocess\nnew=yaml.safe_load(open('.github/workflows/test.yml'))['jobs']\nold=yaml.safe_load(subprocess.run(['git','show','42486f9:.github/workflows/test.yml'],capture_output=True,text=True).stdout)['jobs']\ndef subseq(a,b):\n    it=iter(b)\n    return all(x in it for x in a)\nfor name,job in old.items():\n    o=[s.get('name') or s.get('uses') for s in job.get('steps',[])]\n    n=[s.get('name') or s.get('uses') for s in new[name].get('steps',[])]\n    assert subseq(o,n), (name,o,n)  # every original step still in its job, in order; steps may be added\nassert 'ty' in new and 'ty-repo-wide' in new\nprint('ok')\nEOF",
+      "steps": [
+        "Move the ty and ty-repo-wide jobs so no existing job loses steps (data source: the workflow at 42486f9, compared job by job in the verify command).",
+        "ty-repo-wide checks the whole repo: pass explicit paths (e.g. `uvx ty@0.0.96 check src tests`) so it does not inherit [tool.ty.src] include; keep continue-on-error: true.",
+        "Mutation: move one step of an existing job into ty-repo-wide -> verify fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "M1-repairs-baseline",
+      "spec": "README.md",
+      "category": "milestone",
+      "description": "After the repairs, the full suite is no worse than baseline.",
+      "depends_on": [
+        "R1-one-home",
+        "R2-queue-no-false-failure",
+        "R3-queue-unknown-ids",
+        "R4-temporal-typed-init",
+        "R5-atom-order-anchor",
+        "R6-specific-exception",
+        "R7-stores-under-root",
+        "R8-gitignore",
+        "R9-docs-bench-true",
+        "R10-pyproject-comments",
+        "R11-lint-clean"
+      ],
+      "verify": "see AGENTS.md: full suite",
+      "steps": [
+        "Run the full suite once.",
+        "Record the pass/skip/fail counts in NOTES.md."
+      ],
+      "full_suite": true,
+      "passes": true
+    },
+    {
+      "id": "C1-contract-runstore",
+      "spec": "ports.md",
+      "category": "contract",
+      "description": "The RunStore contract suite passes for every registered adapter and checks the requirements in ports.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_run_store.py",
+      "steps": [
+        "Read ports.md and confirm each RunStore requirement has an assertion; add any that are missing.",
+        "Every adapter used is registered through PortContract.adapters(); none is constructed ad hoc in a test.",
+        "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "C2-contract-artifactstore",
+      "spec": "ports.md",
+      "category": "contract",
+      "description": "The ArtifactStore contract suite passes for every registered adapter and checks the requirements in ports.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_artifact_store.py",
+      "steps": [
+        "Read ports.md and confirm each ArtifactStore requirement has an assertion; add any that are missing.",
+        "Every adapter used is registered through PortContract.adapters(); none is constructed ad hoc in a test.",
+        "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "C3-contract-commentstore",
+      "spec": "ports.md",
+      "category": "contract",
+      "description": "The CommentStore contract suite passes for every registered adapter and checks the requirements in ports.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_comment_store.py",
+      "steps": [
+        "Read ports.md and confirm each CommentStore requirement has an assertion; add any that are missing.",
+        "Every adapter used is registered through PortContract.adapters(); none is constructed ad hoc in a test.",
+        "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "C4-contract-projectstore",
+      "spec": "ports.md",
+      "category": "contract",
+      "description": "The ProjectStore contract suite passes for every registered adapter and checks the requirements in ports.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_project_store.py",
+      "steps": [
+        "Read ports.md and confirm each ProjectStore requirement has an assertion; add any that are missing.",
+        "Every adapter used is registered through PortContract.adapters(); none is constructed ad hoc in a test.",
+        "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "C5-contract-structuresource",
+      "spec": "ports.md",
+      "category": "contract",
+      "description": "The StructureSource contract suite passes for every registered adapter and checks the requirements in ports.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_structure_source.py",
+      "steps": [
+        "Read ports.md and confirm each StructureSource requirement has an assertion; add any that are missing.",
+        "Every adapter used is registered through PortContract.adapters(); none is constructed ad hoc in a test.",
+        "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "C6-contract-identity",
+      "spec": "ports.md",
+      "category": "contract",
+      "description": "The Identity and Clock contract suite passes for every registered adapter and checks the requirements in ports.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/contracts/test_identity.py tests/bench/contracts/test_clock.py",
+      "steps": [
+        "Read ports.md and confirm each Identity and Clock requirement has an assertion; add any that are missing.",
+        "Every adapter used is registered through PortContract.adapters(); none is constructed ad hoc in a test.",
+        "Mutation: break one asserted behaviour in the adapter (e.g. return [] instead of an error row, skip the sha256 check); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "C7-layering",
+      "spec": "layering.md",
+      "category": "contract",
+      "description": "tests/bench/test_layering.py asserts layering.md requirements 1-4.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_layering.py",
+      "steps": [
+        "Confirm each of requirements 1-4 has a test; add any missing (decisions must not import project).",
+        "Mutation: add `import sqlite3` to a file in use_cases/; confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "K1-verdict",
+      "spec": "verdict.md",
+      "category": "core",
+      "description": "verdict_of maps every record to exactly one state, per verdict.md.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_verdict.py",
+      "steps": [
+        "Confirm tests cover RESOLVED, UNRANKED, INCOMPLETE, the precedence of INCOMPLETE, and an empty results block.",
+        "Confirm verdict_of does not call gui.results.load_run (rg in src/smeltery/bench/verdict.py).",
+        "Mutation: make an unranked cut return its first group as winner; confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "K2-plan-cells",
+      "spec": "campaign-panel.md",
+      "category": "core",
+      "description": "Study.plan_cells returns one row per (condition, step), sharing plan()'s key derivation.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/test_study.py tests/test_study_plan_cells.py",
+      "steps": [
+        "Confirm the counts test compares against Study.plan(), not against a recount inside the test.",
+        "Mutation: change plan_cells' key derivation (e.g. drop upstream keys); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "K3-split-parent-once",
+      "spec": "run-split.md",
+      "category": "core",
+      "description": "--only-candidate measures only the named candidate; the parent is measured once, in its own partial.",
+      "depends_on": [
+        "M1-repairs-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/test_run_split.py -k parent",
+      "steps": [
+        "Create tests/test_run_split.py using a fixture config on the cheapest tier.",
+        "test_only_candidate_writes_a_partial_and_no_cut: partial-<name>.json exists and has no results.cut; no run-*.json is left.",
+        "test_an_analogue_partial_does_not_remeasure_the_parent: count tier calls (monkeypatch the measure function); an analogue invocation measures exactly one candidate.",
+        "Data source: the partial JSON files on disk and the counted measure calls."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "K4-split-combine-identical",
+      "spec": "run-split.md",
+      "category": "core",
+      "description": "--combine produces the same record as a single-process run, carrying every per-pose quantity.",
+      "depends_on": [
+        "K3-split-parent-once"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/test_run_split.py",
+      "steps": [
+        "test_split_then_combine_gives_the_same_record_as_one_process: compare the two run-*.json files field by field, excluding only timing fields named in the test.",
+        "test_combine_carries_every_per_pose_quantity: with a gate that records E_mmff, the combined record has it.",
+        "test_combine_without_every_partial_refuses_naming_the_missing_ones: stderr names each missing candidate; exit code 2.",
+        "test_an_unknown_candidate_name_is_a_config_error_with_a_message.",
+        "Run the cli.py row of the AGENTS.md table."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "K5-split-rss-flat",
+      "spec": "run-split.md",
+      "category": "core",
+      "description": "Resident memory per process stays roughly flat across a 10-candidate split run.",
+      "depends_on": [
+        "K4-split-combine-identical"
+      ],
+      "verify": "see steps",
+      "steps": [
+        "Run a 10-candidate config split per candidate, recording peak RSS of each process with /usr/bin/time -v.",
+        "Write the 11 numbers to NOTES.md. If they climb by more than 25% from first to last, this feature does not pass."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "M2-core-baseline",
+      "spec": "README.md",
+      "category": "milestone",
+      "description": "After the core changes (which touch cli.py), the full suite is no worse than baseline.",
+      "depends_on": [
+        "C1-contract-runstore",
+        "C2-contract-artifactstore",
+        "C3-contract-commentstore",
+        "C4-contract-projectstore",
+        "C5-contract-structuresource",
+        "C6-contract-identity",
+        "C7-layering",
+        "K1-verdict",
+        "K2-plan-cells",
+        "K5-split-rss-flat"
+      ],
+      "verify": "see AGENTS.md: full suite",
+      "steps": [
+        "Run the full suite once.",
+        "Record the counts in NOTES.md."
+      ],
+      "full_suite": true,
+      "passes": true
+    },
+    {
+      "id": "S1-injected-app",
+      "spec": "app-shell.md",
+      "category": "shell",
+      "description": "create_app takes its ports as keyword arguments; use cases import no web framework.",
+      "depends_on": [
+        "M2-core-baseline"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py tests/bench/test_use_cases.py",
+      "steps": [
+        "Confirm create_app's signature matches app-shell.md requirement 1.",
+        "Add test_no_use_case_imports_a_web_framework reading the files in use_cases/.",
+        "Mutation: import fastapi in one use case; confirm the test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "S2-independent-failure",
+      "spec": "app-shell.md",
+      "category": "shell",
+      "description": "A failing task queue gives 503 with a reason in under 2 s while /api/runs answers 200.",
+      "depends_on": [
+        "S1-injected-app"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py -k 'dead or fast'",
+      "steps": [
+        "Confirm both existing tests assert the JSON error field and the 2 s bound.",
+        "Mutation: let /api/runs call task_queue.list(); confirm a test fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "S3-verdict-endpoint",
+      "spec": "app-shell.md",
+      "category": "shell",
+      "description": "GET /api/runs/{idx}/verdict returns the Verdict for RESOLVED, UNRANKED and INCOMPLETE records.",
+      "depends_on": [
+        "S1-injected-app"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py -k verdict",
+      "steps": [
+        "Cover all three states over HTTP, using make_run_dir, make_run_dir(unranked=True), and a record with results.cut deleted."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "S4-identity-server-side",
+      "spec": "app-shell.md",
+      "category": "shell",
+      "description": "No endpoint takes the acting user from the request body.",
+      "depends_on": [
+        "S1-injected-app"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py -k identity",
+      "steps": [
+        "Add test_a_user_field_in_the_request_is_ignored for every POST route that records an author or user."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "S5-cli-bench",
+      "spec": "app-shell.md",
+      "category": "shell",
+      "description": "`smeltery bench [ROOT] [--port N] [--open]` starts the app; adapters are wired only there.",
+      "depends_on": [
+        "S1-injected-app"
+      ],
+      "verify": ".venv/bin/python -m smeltery.cli bench --help",
+      "steps": [
+        "Register bench in cli.VIEWERS following the dashboard pattern.",
+        "Start it on a free port in the background, curl /healthz for 200, kill it by PID.",
+        "Run the cli.py row of the AGENTS.md table."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "G1-ty-in-ci",
+      "spec": "layering.md",
+      "category": "gate",
+      "description": "CI runs `uvx ty@0.0.96 check` as a required job and repo-wide as a non-blocking job.",
+      "depends_on": [
+        "M2-core-baseline"
+      ],
+      "verify": "rg -q 'ty@0.0.96' .github/workflows/test.yml",
+      "steps": [
+        "Add the two jobs to .github/workflows/test.yml; the repo-wide one has continue-on-error: true."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI0-retire-string-ui",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "The string-built HTML pages and the unused vendored assets are gone; the Python side serves JSON only (until UI1 adds the built app).",
+      "depends_on": [
+        "R11-lint-clean",
+        "M2-core-baseline",
+        "R12-no-hollow-compare",
+        "R13-ci-jobs-intact"
+      ],
+      "verify": "! rg -n 'HTMLResponse' src/smeltery/bench && test ! -e src/smeltery/bench/static && test ! -e src/smeltery/bench/templates && test ! -e scripts/vendor_bench_assets.py && .venv/bin/python -m pytest -q -p no:randomly tests/bench",
+      "steps": [
+        "Delete the HTML routes /run, /work, /run/poses, /run/results and the HTML form of /report/{idx} from app.py. Keep every /api route.",
+        "Delete src/smeltery/bench/static/ (including the 12.8 MB vendor/ directory), templates/, and scripts/vendor_bench_assets.py.",
+        "Delete or convert tests that asserted on those HTML pages (test_static.py; HTML assertions in test_work_panel.py, test_results_view.py, test_honesty_anchors.py, test_report.py). API assertions stay.",
+        "Run the bench gate."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI1-scaffold",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "ui/ is a Vite + React + strict TypeScript app with the app shell; its build is served by `smeltery bench` with a single-page fallback.",
+      "depends_on": [
+        "UI0-retire-string-ui"
+      ],
+      "verify": "cd ui && npm ci && npm run typecheck && npm run build && cd .. && test -f src/smeltery/bench/web/index.html && .venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py -k web",
+      "steps": [
+        "Create ui/ with package.json scripts: dev, build (outDir ../src/smeltery/bench/web, emptyOutDir), typecheck (tsc --noEmit), test (vitest run), e2e (playwright test), gen:api.",
+        "tsconfig strict: true, noUncheckedIndexedAccess: true.",
+        "App shell: left rail (Bench, Run, Report), context bar, work column, inspector slot; React Router routes /bench, /run/:idx/*, /report/:idx, /campaigns/:id.",
+        "app.py serves web/index.html at / and every non-/api path, and web/assets at /assets.",
+        "Add tests/bench/test_app.py::test_web_index_is_served_with_spa_fallback and ::test_bench_refuses_without_a_built_ui (exit 2, message names `npm run build`).",
+        "Add src/smeltery/bench/web/ to .gitignore."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI2-api-types",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "TypeScript API types are generated from FastAPI's OpenAPI schema, and a stale schema file fails CI.",
+      "depends_on": [
+        "UI1-scaffold"
+      ],
+      "verify": "cd ui && npm run gen:api && git diff --exit-code src/api/schema.d.ts && npm run typecheck",
+      "steps": [
+        "Add src/smeltery/bench/openapi.py: `python -m smeltery.bench.openapi` prints create_app(...).openapi() as JSON (fake ports are fine; only the schema matters).",
+        "gen:api runs it and openapi-typescript into ui/src/api/schema.d.ts; commit that file.",
+        "All fetch calls in ui/src go through a typed client built on schema.d.ts; no hand-written response interfaces.",
+        "Mutation: rename a field in one API response model, regenerate, confirm `npm run typecheck` fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI3-e2e-harness",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "Playwright runs against the real API serving fixture runs, offline, and the shell renders the fixture's campaign and digest.",
+      "depends_on": [
+        "UI2-api-types"
+      ],
+      "verify": "cd ui && npx playwright test e2e/shell.spec.ts",
+      "steps": [
+        "ui/e2e/serve_fixture.py builds three run dirs with tests/gui_fixture.make_run_dir (RESOLVED; unranked=True; INCOMPLETE with results.cut deleted) under one temp root, and serves `smeltery bench` on BENCH_E2E_PORT.",
+        "playwright.config.ts uses webServer to start it; Chromium only.",
+        "A shared fixture aborts every request whose host is not 127.0.0.1/localhost and fails the test if any was attempted.",
+        "shell.spec.ts: the context bar shows the campaign and input_digest[:12]. Data source: read them from the fixture's run-*.json (serve_fixture.py writes the paths to e2e/.fixture.json).",
+        "If Chromium is missing: `npx playwright install chromium`."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI4-tokens-a11y",
+      "spec": "frontend.md",
+      "category": "ui",
+      "description": "Tokens, dark mode, tabular figures and accessibility hold on every page.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/a11y.spec.ts",
+      "steps": [
+        "For each route: @axe-core/playwright reports no serious or critical violations.",
+        "Dark mode: with page.emulateMedia({colorScheme:'dark'}) the computed --ground differs from light and matches the spec's dark value.",
+        "Every element with the numeric-cell class has computed font-variant-numeric containing tabular-nums.",
+        "rg finds no hex colour literal in ui/src outside the tokens file (a vitest or a lint check).",
+        "Mutation: hard-code a colour in one component; confirm the check fails; revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI5-verdict-banner",
+      "spec": "verdict.md",
+      "category": "ui",
+      "description": "The verdict banner renders RESOLVED, UNRANKED and INCOMPLETE correctly and is the largest text on run pages.",
+      "depends_on": [
+        "UI4-tokens-a11y"
+      ],
+      "verify": "cd ui && npx playwright test e2e/verdict.spec.ts",
+      "steps": [
+        "For each of the three fixture runs, open /run/:idx/results.",
+        "Data source: GET /api/runs/{idx}/verdict for the expected state, winner and floor.",
+        "UNRANKED: banner contains 'does not resolve' and the floor value; the page contains no 'winner'.",
+        "INCOMPLETE: banner lists each missing key from the verdict's `missing`.",
+        "The banner's computed font-size is the maximum on the page.",
+        "Mutation 1: render UNRANKED with a winner name -> a test fails -> revert. Mutation 2: render INCOMPLETE as an empty banner -> a test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI6-figures-api",
+      "spec": "results-view.md",
+      "category": "api",
+      "description": "The API serves the Python-built forest, matrix and per-pose figures as Plotly JSON.",
+      "depends_on": [
+        "UI0-retire-string-ui"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_figures.py",
+      "steps": [
+        "Add GET /api/runs/{idx}/figures/{name} for forest, matrix and per_pose, returning fig.to_plotly_json() from gui.views.forest_figure, matrix_figure and per_pose_figure.",
+        "test_figures.py: each response equals the builder's output for load_run(fixture) (data source: the builders called directly in the test).",
+        "Unknown figure name is 404; an INCOMPLETE run is 409 with the reason."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI7-results-view",
+      "spec": "results-view.md",
+      "category": "ui",
+      "description": "The results page draws the figures in Plotly, unchanged, with tie-group labels and the floor band.",
+      "depends_on": [
+        "UI5-verdict-banner",
+        "UI6-figures-api"
+      ],
+      "verify": "cd ui && npx playwright test e2e/results.spec.ts",
+      "steps": [
+        "Data source: /api/runs/0/figures/forest and /api/runs/0/ddE.",
+        "The forest plot has one marker per analogue (count Plotly points in the DOM; compare with ddE rows).",
+        "The floor band is present: the figure's layout.shapes reaches the page (check Plotly's rendered shape elements).",
+        "Each tie group's label text is visible.",
+        "The resolved matrix cells equal /api/runs/0/resolved.",
+        "Mutation: remove the floor band in gui.views.forest_figure -> this test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI8-pose-viewer",
+      "spec": "pose-viewer.md",
+      "category": "ui",
+      "description": "Mol* renders the API's scene, and selectors change it.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/poses.spec.ts",
+      "steps": [
+        "Open /run/0/poses. A Mol* canvas renders; a screenshot of it is not a single uniform colour.",
+        "Changing candidate and pose issues GET /api/runs/0/scene with those query values (assert on the request).",
+        "The page states 'pose i of <candidate> is paired to pose i of <parent>' for the selection.",
+        "For a run whose pose output was removed, the panel shows the API's 409 reason, not an empty canvas."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI9-structure",
+      "spec": "structure-tab.md",
+      "category": "ui",
+      "description": "Opening a structure shows hashes, origin and dropped residues, and draws the receptor.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/structure.spec.ts",
+      "steps": [
+        "Use a small committed .pdb with a HOH and a ligand HETATM under ui/e2e/data/.",
+        "Typing its path and opening shows a 64-hex sha256 matching the API response, the origin, and HOH in the dropped list.",
+        "The receptor renders in Mol* (non-uniform canvas).",
+        "A missing path shows the API's message inline."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI10-pipeline-editor",
+      "spec": "pipeline-editor.md",
+      "category": "ui",
+      "description": "The pipeline editor adds and removes stages with mouse and keyboard, lists every issue, and keeps the TOML pane in sync both ways.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/pipeline.spec.ts",
+      "steps": [
+        "Palette groups by rung from /api/catalog; qmmm is disabled and its reason is visible.",
+        "Add and remove a stage using only the keyboard; stages are listed in smeltery run's fixed execution order (no reorder control).",
+        "A pipeline with two independent errors shows both in the issues panel.",
+        "Editing a knob updates the TOML pane; editing the TOML updates the visual stage list (both via /api/pipeline/check).",
+        "Methods of different quantities are never shown in one ordered rigour list (data source: comparable_rigour via /api/catalog)."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI11-click-to-place",
+      "spec": "click-to-place.md",
+      "category": "ui",
+      "description": "Clicking two atoms in the parent's 2D depiction writes one [[pocket.site]] on the atoms the run uses.",
+      "depends_on": [
+        "UI10-pipeline-editor"
+      ],
+      "verify": "cd ui && npx playwright test e2e/click_to_place.spec.ts",
+      "steps": [
+        "Add GET /api/runs/{idx}/pose_atoms?candidate= returning the atom symbols parsed from pose_sdf(run, candidate) (RDKit, removeHs=False). It reads the SDF, not the SMILES.",
+        "The 2D depiction uses RDKit.js with explicit hydrogens; each atom carries data-atom-index from RDKit's atom-N class.",
+        "Click atom 3 then atom 4, confirm with q and distance; the TOML pane shows [[pocket.site]] with atom = 3 and from_atom = 4.",
+        "Data source for the anchor: for every index in the depiction, the element shown equals pose_atoms[index] from the API.",
+        "The provisional 3D view is labelled 'provisional geometry' and highlights the same two atoms.",
+        "Mutation: depict without explicit hydrogens (indices shift) -> the anchor assertion fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI12-work-panel",
+      "spec": "work-panel.md",
+      "category": "ui",
+      "description": "The work panel is live, escapes task output, cancels, and degrades when the queue is down.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/work.spec.ts",
+      "steps": [
+        "Submit a task via POST /api/tasks that prints '<b>bold</b>' then sleeps 30 s.",
+        "Without reloading, its row appears as running; elapsed increases between two reads.",
+        "Its log in the inspector shows the literal characters '<b>bold</b>' (no <b> element is created).",
+        "Cancel moves it to cancelled.",
+        "With serve_fixture started with a broken queue (env flag), a banner shows the reason and /run/0/results still renders."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI13-launch",
+      "spec": "pipeline-editor.md",
+      "category": "ui",
+      "description": "Run pipeline is disabled with errors, and launching stages inputs into OUT and shows the task.",
+      "depends_on": [
+        "UI10-pipeline-editor",
+        "UI12-work-panel"
+      ],
+      "verify": "cd ui && npx playwright test e2e/launch.spec.ts",
+      "steps": [
+        "With an error-level issue present, the Run pipeline button is disabled.",
+        "With a clean pipeline, clicking it shows 'Pipeline running' and a new task appears in the work panel whose command is smeltery run <OUT>/config.toml --out <OUT>.",
+        "Data source: the task's command from GET /api/tasks, and OUT/config.toml on disk.",
+        "Cancel the task at the end of the test."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI14-campaign",
+      "spec": "campaign-panel.md",
+      "category": "ui",
+      "description": "The campaign page draws a study's DAG and per-cell grid.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/campaign.spec.ts",
+      "steps": [
+        "Use the study module under tests/bench/ that test_campaign_panel.py already uses.",
+        "One node per step and one edge per upstream link (data source: /api/studies/<path>/dag).",
+        "Every grid cell shows 'cached' or 'to run' as text (data source: /cells).",
+        "An unimportable path shows the API's message inline."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI15-decisions",
+      "spec": "decisions-grid.md",
+      "category": "ui",
+      "description": "The decisions grid records keep/reject/hold through the API, shows core refusals, and works by keyboard.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/decisions.spec.ts",
+      "steps": [
+        "Add GET /api/decisions/vocabulary returning STATUSES and REASONS from smeltery.decisions.",
+        "The reason select's options equal the vocabulary (data source: that endpoint).",
+        "within_tie_choice with no note shows the core's message beside the row; GET of the decisions file is unchanged.",
+        "Keep 4-F with cut_survivor using only the keyboard; OUT/decisions-<digest12>.json then holds it with user from Identity."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI16-report",
+      "spec": "report.md",
+      "category": "ui",
+      "description": "The served report is read-only, verdict-first, with anchored comment threads.",
+      "depends_on": [
+        "UI7-results-view",
+        "UI8-pose-viewer"
+      ],
+      "verify": "cd ui && npx playwright test e2e/report.spec.ts",
+      "steps": [
+        "Open /report/0: the verdict precedes the forest plot, which precedes the candidates (DOM order).",
+        "Add a comment on candidate 4-F; it appears in that thread with the Identity author, and GET /api/runs/0/comments includes it with anchor candidate:4-F.",
+        "No element on the page posts to /api/pipeline/*, /api/tasks or any launch route (intercept and assert none fired after exercising every control).",
+        "Archive snapshot shows a path and sha256; the file at that path contains every mean shown on the page (formatted as displayed), and its only http(s):// references are the pinned library URLs the API lists in the snapshot's `external`."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI17-proposals",
+      "spec": "proposals.md",
+      "category": "ui",
+      "description": "A proposal from the report reaches the review queue and starts no work.",
+      "depends_on": [
+        "UI16-report"
+      ],
+      "verify": "cd ui && npx playwright test e2e/proposals.spec.ts",
+      "steps": [
+        "Count tasks via GET /api/tasks.",
+        "Propose Cc1ccccc1 with reason synthesis from /report/0; the 2D preview renders before submitting.",
+        "It appears in the Run area's review queue.",
+        "The task count is unchanged and no request hit /api/tasks with POST.",
+        "Mutation: make the proposal handler call LaunchRun -> this test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI18-notebook",
+      "spec": "notebook.md",
+      "category": "ui",
+      "description": "The campaign notebook appends entries, shows supersession, and offers no editing.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/notebook.spec.ts",
+      "steps": [
+        "Create an entry attaching run 0; it shows the run's sha256 (data source: the API response).",
+        "Supersede it; the old entry is marked superseded and still opens.",
+        "No entry has an edit control (no button or menu item whose name includes edit)."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI19-compare",
+      "spec": "results-view.md",
+      "category": "ui",
+      "description": "The compare view draws compare_figure for two chosen arms and refuses an arm compared with itself.",
+      "depends_on": [
+        "UI7-results-view"
+      ],
+      "verify": "cd ui && npx playwright test e2e/compare.spec.ts",
+      "steps": [
+        "Add GET /api/compare?a=..&b=.. returning gui.views.compare_figure JSON and comparison_caption.",
+        "Choosing two different fixture runs renders the figure and the caption text from the API.",
+        "Choosing the same run for both arms shows the refusal message and no figure."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "UI20-ci-and-wheel",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "CI builds and tests the UI, and the wheel contains the built app.",
+      "depends_on": [
+        "UI19-compare",
+        "UI18-notebook",
+        "UI17-proposals",
+        "UI15-decisions",
+        "UI14-campaign",
+        "UI13-launch",
+        "UI11-click-to-place",
+        "UI9-structure",
+        "G1-ty-in-ci"
+      ],
+      "verify": "rg -q 'playwright' .github/workflows/test.yml && rg -q 'npm run build' .github/workflows/test.yml",
+      "steps": [
+        "Add a CI job: npm ci, typecheck, vitest, gen:api diff check, build, playwright install chromium, e2e.",
+        "The wheel build runs npm run build first; scripts/wheel_smoke.py (bench extra) asserts smeltery/bench/web/index.html is inside the wheel.",
+        "Run the wheel smoke locally for the bench extra."
+      ],
+      "full_suite": false,
+      "passes": true
+    },
+    {
+      "id": "M4-final",
+      "spec": "README.md",
+      "category": "milestone",
+      "description": "The full Python suite, the full browser suite and the validator all pass.",
+      "depends_on": [
+        "UI20-ci-and-wheel"
+      ],
+      "verify": "see AGENTS.md: full suite; and cd ui && npx playwright test",
+      "steps": [
+        "Run the full Python suite once and the full Playwright suite once.",
+        "Run python3 ~/.claude/skills/ralph-prompts/scripts/validate_features.py ralph/bench/features.json.",
+        "Update docs/bench.md: how to start it, the three areas, and what each page shows.",
+        "Record the counts in NOTES.md in one line."
+      ],
+      "full_suite": true,
+      "passes": true
+    }
+  ]
+}

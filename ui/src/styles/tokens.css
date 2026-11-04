@@ -1,0 +1,41 @@
+/* Bench's only colour literals. Components use these tokens; nothing else names a colour. */
+:root {
+  color-scheme: light;
+  --ground: #f7f8f8;
+  --panel: #fbfcfc;
+  --sunken: #eef0f1;
+  --hairline: #d8dcde;
+  --ink: #15181a;
+  --ink-muted: #5b6368;
+  --accent: #1b5e8c;
+  --accent-ink: #ffffff;
+  --ok: #2f6b3f;
+  --bad: #9a2b1f;
+  --pending: #7a6420;
+  /* Data colours, copied from smeltery.gui.scenes. Used only for data, never for decoration. */
+  --charge-positive: #2166ac;
+  --charge-negative: #b2182b;
+  --candidate: #33a02c;
+  --band: rgba(27, 94, 140, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --ground: #15181a;
+    --panel: #1b1e20;
+    --sunken: #101213;
+    --hairline: #2f3437;
+    --ink: #eef0f1;
+    --ink-muted: #a3abb0;
+    --accent: #6aa8d6;
+    --accent-ink: #0d1114;
+    --ok: #79b98a;
+    --bad: #e08a7e;
+    --pending: #d1b56a;
+    --charge-positive: #2166ac;
+    --charge-negative: #b2182b;
+    --candidate: #33a02c;
+    --band: rgba(106, 168, 214, 0.12);
+  }
+}

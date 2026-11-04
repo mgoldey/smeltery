@@ -1,0 +1,153 @@
+"""Campaigns, their append-only notebook, and studies.
+
+A notebook entry is never edited: there is no PUT or PATCH here, and a correction is a new entry that supersedes the
+old one, which stays readable. Studies are named by Python module path in settings and imported; there is no study
+file format to scan for (`Study` has no serialisation).
+"""
+
+from __future__ import annotations
+
+import importlib
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request
+
+from smeltery.project import NotebookEntry
+from smeltery.study.cache import Cache
+from smeltery.study.step import Study
+
+from . import models as M
+from .common import ports, row, utc_iso
+
+router = APIRouter(prefix="/api", tags=["notebook"])
+
+
+def _campaign(c) -> M.CampaignOut:
+    return M.CampaignOut(
+        id=c.id, name=c.name, description=getattr(c, "description", "") or "", created_at=c.created_at or ""
+    )
+
+
+@router.get("/campaigns", response_model=list[M.CampaignOut])
+def list_campaigns(request: Request) -> list[M.CampaignOut]:
+    return [_campaign(c) for c in ports(request).project_store.list_campaigns()]
+
+
+@router.post("/campaigns", response_model=M.CampaignOut, status_code=201)
+def create_campaign(request: Request, body: M.CampaignIn) -> M.CampaignOut:
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="a campaign needs a name")
+    try:
+        return _campaign(ports(request).project_store.create_campaign(body.name.strip(), description=body.description))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _get_campaign(request: Request, campaign_id: str):
+    try:
+        c = ports(request).project_store.get_campaign(campaign_id)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}") from e
+    if c is None:
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    return c
+
+
+@router.get("/campaigns/{campaign_id}", response_model=M.CampaignOut)
+def get_campaign(request: Request, campaign_id: str) -> M.CampaignOut:
+    return _campaign(_get_campaign(request, campaign_id))
+
+
+def _entries(request: Request, campaign_id: str) -> list[M.EntryOut]:
+    es: list[NotebookEntry] = list(ports(request).project_store.entries(campaign_id))
+    superseded_by = {e.supersedes: e.id for e in es if e.supersedes}
+    return [
+        M.EntryOut(
+            id=e.id,
+            campaign_id=e.campaign_id,
+            title=e.title,
+            body=e.body,
+            author=e.author,
+            created_at=e.created_at,
+            artefacts=list(e.artefacts),
+            supersedes=e.supersedes,
+            superseded_by=superseded_by.get(e.id),
+        )
+        for e in es
+    ]
+
+
+@router.get("/campaigns/{campaign_id}/entries", response_model=list[M.EntryOut])
+def list_entries(request: Request, campaign_id: str) -> list[M.EntryOut]:
+    _get_campaign(request, campaign_id)
+    return _entries(request, campaign_id)
+
+
+@router.get("/campaigns/{campaign_id}/entries/{entry_id}", response_model=M.EntryOut)
+def get_entry(request: Request, campaign_id: str, entry_id: str) -> M.EntryOut:
+    for e in _entries(request, campaign_id):
+        if e.id == entry_id:
+            return e
+    raise HTTPException(status_code=404, detail=f"no entry {entry_id}")
+
+
+@router.post("/campaigns/{campaign_id}/entries", response_model=M.EntryOut, status_code=201)
+def add_entry(request: Request, campaign_id: str, body: M.EntryIn) -> M.EntryOut:
+    """Attached runs are recorded by the sha256 of their run record, through `ArtifactStore`, never by path."""
+    _get_campaign(request, campaign_id)
+    st = ports(request)
+    if body.supersedes is not None and body.supersedes not in {e.id for e in _entries(request, campaign_id)}:
+        raise HTTPException(status_code=400, detail=f"cannot supersede unknown entry {body.supersedes}")
+    artefacts = [st.artifact_store.put(Path(row(request, i)["path"])) for i in body.runs]
+    try:
+        e = st.project_store.add_entry(
+            campaign_id,
+            title=body.title,
+            body=body.body,
+            author=st.identity.current(),
+            artefacts=artefacts,
+            supersedes=body.supersedes,
+            created_at=utc_iso(st.clock.now()),
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return next(x for x in _entries(request, campaign_id) if x.id == e.id)
+
+
+# ---------------------------------------------------------------------------------------------------- studies
+
+
+def _study(request: Request, module_path: str) -> Study:
+    if module_path not in ports(request).settings.studies:
+        raise HTTPException(status_code=404, detail=f"{module_path} is not a configured study")
+    try:
+        mod = importlib.import_module(module_path)
+    except Exception as e:  # noqa: BLE001 - any import failure is the user's study, reported verbatim
+        raise HTTPException(status_code=404, detail=f"cannot import {module_path}: {e}") from e
+    found = [v for v in vars(mod).values() if isinstance(v, Study)]
+    if len(found) != 1:
+        raise HTTPException(status_code=404, detail=f"{module_path} defines {len(found)} Study objects; expected one")
+    return found[0]
+
+
+@router.get("/studies", response_model=list[str])
+def list_studies(request: Request) -> list[str]:
+    return list(ports(request).settings.studies)
+
+
+@router.get("/studies/{module_path}/dag")
+def study_dag(request: Request, module_path: str) -> list[dict]:
+    return _study(request, module_path).dag()
+
+
+@router.get("/studies/{module_path}/cells", response_model=list[M.StudyCell])
+def study_cells(request: Request, module_path: str) -> list[M.StudyCell]:
+    """Per (condition, step), cached or to run, against the study cache in settings -- the cache a real run of the
+    study writes to, so 'cached' means something."""
+    study = _study(request, module_path)
+    out = []
+    for cell in study.plan_cells(Cache(ports(request).settings.cache_dir)):
+        cond = dict(cell["condition"])
+        label = ", ".join(f"{k}={v}" for k, v in cond.items())
+        out.append(M.StudyCell(condition=cond, label=label, step=cell["step"], state=cell["state"], key=cell["key"]))
+    return out

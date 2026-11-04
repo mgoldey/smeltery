@@ -25,6 +25,7 @@ from .gates import (
 )
 from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, Measurement, PointCharge, Pose
 from .pocket import PocketField, load_pocket
+from .project import Campaign, NotebookEntry, Proposal
 from .record import RunRecord, ferric_identity
 from .scoring import Rescoring, Score, ScoringProvider, VinaScoreProvider
 
@@ -57,6 +58,9 @@ __all__ = [
     "PointCharge",
     "Pose",
     "RunRecord",
+    "Campaign",
+    "NotebookEntry",
+    "Proposal",
     "UnmeasuredFloorError",
     "cut",
     "ferric_identity",
