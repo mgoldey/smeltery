@@ -4,6 +4,7 @@ import { api, unwrap } from "../api/client";
 import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { PoseExplorer } from "../components/PoseExplorer";
+import { ProposeForm } from "../components/ProposeForm";
 import { Shell } from "../components/Shell";
 import { Structure2D } from "../components/Structure2D";
 import { VerdictBanner } from "../components/VerdictBanner";
@@ -86,6 +87,7 @@ export function Report() {
               />
             </section>
           ) : null}
+          <ProposeForm idx={idx} />
           <section aria-label="Discussion">
             <h2>Discussion</h2>
             <CommentThread idx={idx} anchor="run" title="this run" />

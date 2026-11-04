@@ -6,6 +6,7 @@ export const RUN_TABS: { to: string; label: string }[] = [
   { to: "results", label: "Results" },
   { to: "poses", label: "Poses" },
   { to: "decisions", label: "Decisions" },
+  { to: "proposals", label: "Proposals" },
   { to: "structure", label: "Structure" },
   { to: "pipeline", label: "Pipeline" },
   { to: "overview", label: "Overview" },

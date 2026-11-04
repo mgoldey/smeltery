@@ -3,6 +3,7 @@ import { BenchHome } from "./pages/BenchHome";
 import { NotFound } from "./pages/NotFound";
 import { Report } from "./pages/Report";
 import { Decisions } from "./pages/run/Decisions";
+import { Proposals } from "./pages/run/Proposals";
 import { Study } from "./pages/Study";
 import { Overview } from "./pages/run/Overview";
 import { Pipeline } from "./pages/run/Pipeline";
@@ -25,6 +26,7 @@ export function App() {
         <Route path="structure" element={<Structure />} />
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="decisions" element={<Decisions />} />
+        <Route path="proposals" element={<Proposals />} />
         <Route path="overview" element={<Overview />} />
       </Route>
       <Route path="*" element={<NotFound />} />

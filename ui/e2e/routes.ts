@@ -13,6 +13,7 @@ export function routes(): string[] {
     `/run/${IDX.a_resolved}/structure`,
     `/run/${IDX.a_resolved}/pipeline`,
     `/run/${IDX.a_resolved}/decisions`,
+    `/run/${IDX.a_resolved}/proposals`,
     "/studies/bench.study_dag_fixture",
     `/report/${IDX.a_resolved}`,
     `/report/${IDX.c_incomplete}`,

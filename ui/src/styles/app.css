@@ -147,3 +147,6 @@ pre.log { background: var(--sunken); border: 1px solid var(--hairline); padding:
 .comments p { margin: 2px 0 0; }
 .comment-author { font-weight: 500; }
 .comment-form textarea { width: 100%; max-width: 64ch; display: block; margin-bottom: 4px; }
+.propose { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 24px; align-items: start; }
+.propose input, .propose textarea { width: 100%; }
+.propose-preview { margin-top: 8px; min-height: 120px; }

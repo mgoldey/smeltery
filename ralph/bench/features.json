@@ -893,7 +893,7 @@
         "Mutation: make the proposal handler call LaunchRun -> this test fails -> revert."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI18-notebook",
