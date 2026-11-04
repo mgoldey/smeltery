@@ -46,13 +46,17 @@ def test_launch_run_submits_argv_and_executes_nothing(tmp_path, pipeline):
     LaunchRun(
         q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock()
     ).execute(pipeline, out=tmp_path / "out")
-    assert q.submitted[0][1][:2] == ["smeltery", "run"]
+    expected = ["smeltery", "run", str(tmp_path / "out" / "config.toml"), "--out", str(tmp_path / "out")]
+    assert q.submitted[0][1] == expected
     assert q.executed == []
 
 
 @pytest.fixture
 def pipeline():
-    return Pipeline.minimal("c", "parent", {"parent": "C", "a": "C"})
+    p = Pipeline.minimal("c", "parent", {"parent": "C", "a": "C"})
+    p.stage("pocket").params["site"] = [{"q": 1.0, "atom": 3, "from_atom": 4, "distance": 3.0}]
+    p.set("cut", keep=1, floor=0.0)
+    return p
 
 
 def test_edit_pipeline_returns_every_issue_not_just_the_first(pipeline):

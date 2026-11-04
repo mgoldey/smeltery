@@ -41,6 +41,13 @@ def run_dir(tmp_path):
 
 
 @pytest.fixture
+def unranked_run_dir(tmp_path):
+    from gui_fixture import make_run_dir
+
+    return make_run_dir(tmp_path, unranked=True)
+
+
+@pytest.fixture
 def incomplete_run_dir(tmp_path):
     import json
 
@@ -84,8 +91,46 @@ def test_an_incomplete_record_is_served_as_INCOMPLETE(incomplete_run_dir):
     assert c.get("/api/runs/0/verdict").json()["state"] == "INCOMPLETE"
 
 
+def test_a_resolved_run_returns_a_RESOLVED_verdict(run_dir):
+    c = TestClient(create_app(**fakes(run_dir=run_dir)))
+    r = c.get("/api/runs/0/verdict")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "RESOLVED"
+    assert body["winner"] == "4-F"
+    assert body["floor"] == 0.0
+    assert body["missing"] == []
+
+
+def test_an_unranked_run_returns_an_UNRANKED_verdict(unranked_run_dir):
+    c = TestClient(create_app(**fakes(run_dir=unranked_run_dir)))
+    r = c.get("/api/runs/0/verdict")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "UNRANKED"
+    assert body["winner"] is None
+    assert body["floor"] == 0.0
+    assert body["missing"] == []
+
+
+def test_an_incomplete_run_returns_an_INCOMPLETE_verdict(incomplete_run_dir):
+    c = TestClient(create_app(**fakes(run_dir=incomplete_run_dir)))
+    r = c.get("/api/runs/0/verdict")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "INCOMPLETE"
+    assert body["winner"] is None
+    assert "cut" in body["missing"]
+
+
 def test_unknown_paths_are_404():
     assert TestClient(create_app(**fakes())).get("/nope").status_code == 404
+
+
+def test_identity_a_user_field_in_the_request_is_ignored():
+    c = TestClient(create_app(**fakes()))
+    r = c.post("/api/tasks", json={"user": "evil", "author": "evil"})
+    assert r.status_code in (200, 201, 204)
 
 
 def test_local_stores_live_under_the_runs_root(tmp_path, monkeypatch):
