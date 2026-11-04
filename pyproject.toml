@@ -72,12 +72,12 @@ aimnet2 = ["aimnet>=0.2.0", "torch>=2.8", "numpy"]
 experiments = ["psutil>=5.9", "scipy>=1.11"]
 # The GUI (smeltery.gui.app, docs/gui.md): the Marimo app and its views. Only smeltery.gui.views imports these, and
 # only inside functions, so `import smeltery.gui` works without the extra. mols2grid needs pandas and pulls it in.
-gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
+gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6", "tomlkit>=0.13"]
 # `smeltery bench` (smeltery.bench): the API and the built React app (ui/, built into src/smeltery/bench/web/ and
 # shipped in the wheel). plotly and molviewspec are here, not only in `gui`, because the API serves the figures
 # and pose scenes smeltery.gui builds, and those import them lazily: without them the app starts and then fails
 # on the first plot.
-bench = ["fastapi>=0.120", "uvicorn>=0.38", "plotly>=6", "molviewspec>=1.8"]
+bench = ["fastapi>=0.120", "uvicorn>=0.38", "plotly>=6", "molviewspec>=1.8", "tomlkit>=0.13"]
 # `smeltery gui OUT --desktop`: the same app in a pywebview window instead of a browser tab.
 desktop = ["pywebview>=5", "marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
