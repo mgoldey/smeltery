@@ -123,6 +123,9 @@ class DftSize:
 
 # STO-3G contracted functions per atom, by row. Enough to compare two
 # molecules' XC work without building a basis; NOT a general basis-set model.
+# Each entry is ferric's own count (`ferric.shell_info` on `BasisSet.bundled("sto-3g")`;
+# tests/test_cost.py checks them): row 1 is 1s, row 2 adds 2s 2p (5), row 3 adds 3s 3p (9).
+# ferric's bundled STO-3G stops at Ar -- it has no Br or I -- so those stay out of the table.
 _STO3G_NBF = {
     "H": 1,
     "He": 1,
@@ -134,6 +137,14 @@ _STO3G_NBF = {
     "Be": 5,
     "Li": 5,
     "Ne": 5,
+    "Na": 9,
+    "Mg": 9,
+    "Al": 9,
+    "Si": 9,
+    "P": 9,
+    "S": 9,
+    "Cl": 9,
+    "Ar": 9,
 }
 
 

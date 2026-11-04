@@ -128,6 +128,7 @@ from pathlib import Path
 import numpy as np
 from rdkit import Chem
 
+from .cost import available_memory_gb
 from .decisions import DecisionSet
 from .funnel import cut, paired_delta, tier_floor, unpaired_delta
 from .gates import PoseGateError, check_candidate_poses, require_passing_poses
@@ -955,8 +956,51 @@ def _describe_plan(plan: Plan, digest: str) -> str:
         f"plan OK (no SCF run)\nparent {plan.parent.name} atoms (index:element): {atoms}\n"
         f"{len(plan.field)} pocket charge(s); {len(plan.parent.poses)} poses per candidate; "
         f"stages: {' -> '.join(e['stage'] for e in plan.stage_log)}; "
-        f"floor {plan.floor:g} from {plan.floor_source}\ninput_digest {digest}"
+        f"floor {plan.floor:g} from {plan.floor_source}\n"
+        + "\n".join(describe_memory(plan))
+        + f"\ninput_digest {digest}"
     )
+
+
+def describe_memory(plan: Plan) -> list[str]:
+    """What `--plan` says about memory: the measurement tier's own prediction (the one its pre-SCF check uses, so
+    the plan and the run cannot disagree), what the machine has free now, and what each would refuse."""
+    tier = plan.tier
+    estimate = getattr(tier, "estimate_memory", None)
+    if estimate is None:
+        return [f"memory: {tier.name} has no memory model; nothing is checked before its SCFs"]
+    mem = estimate(plan.candidates)
+    enforced = getattr(tier, "check_memory", True)
+    if "total_gb" not in mem:  # the model cannot count this basis or element: "cannot say", never "fits"
+        lines = [f"memory ({tier.name}, per calculation): cannot say ({mem['basis']}); the run will not refuse on it"]
+    else:
+        verdict = (
+            "fits"
+            if mem["fits_budget"]
+            else "does NOT fit: the run will refuse before its first SCF"
+            if enforced
+            else "does NOT fit (check_memory = false, so the run will start anyway and may spill to disk)"
+        )
+        lines = [
+            f"memory ({tier.name}, per calculation): the largest pose ({mem['n_atoms']} atoms, "
+            f"{mem['n_basis_functions']} basis functions) needs {mem['total_gb']:.2f} GB "
+            f"(AO cache {mem['ao_cache_gb']:.2f} + RI tensor {mem['ri_tensor_gb']:.2f}); "
+            f"budget {mem['budget_gb']:g} GB: {verdict}"
+        ]
+    free = available_memory_gb()
+    need = getattr(tier, "require_free_gb", None)
+    have = "unknown (no /proc/meminfo)" if free is None else f"{free:.1f} GB available now"
+    if need is None:
+        lines.append(f"machine: {have}; require_free_gb unset, so free memory is not checked")
+    elif free is not None and free < need and enforced:
+        lines.append(f"machine: {have}, below require_free_gb {need:g}: the run would refuse if started now")
+    else:
+        lines.append(f"machine: {have}; require_free_gb {need:g}")
+    lines.append(
+        "  (a per-calculation figure: a long run has been measured holding ~11 GB against a ~2 GB prediction, "
+        "so leave the machine headroom beyond it)"
+    )
+    return lines
 
 
 #: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.

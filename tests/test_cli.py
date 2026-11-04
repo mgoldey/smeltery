@@ -427,3 +427,54 @@ def test_a_pbe_run_through_the_cli_equals_the_pbe_tier_called_by_hand(tmp_path):
     for c in cands[1:]:
         by_hand = paired_delta(parent, c, "dE_int")
         assert out["paired"][c.name].mean == pytest.approx(by_hand.mean, abs=1e-9)
+
+
+# ---- --plan says what memory the measurement needs, before any SCF ---------------------------------------------
+
+BENZOIC_PBE = BASE + '\n[field_dft_interaction]\nfunctional = "PBE"\n'
+
+
+def _plan_text(text, tmp_path, capsys):
+    assert main(["run", str(write(tmp_path, text)), "--plan"]) == 0
+    return capsys.readouterr().out
+
+
+def test_plan_prints_the_tiers_own_memory_prediction_for_the_largest_pose(tmp_path, capsys):
+    """Data source: FieldDftInteraction.estimate_memory on the same plan, the call its pre-SCF check makes."""
+    out = _plan_text(BENZOIC_PBE, tmp_path, capsys)
+    plan = build_plan(validate_config(tomllib.loads(BENZOIC_PBE)))
+    mem = plan.tier.estimate_memory(plan.candidates)
+    (line,) = [ln for ln in out.splitlines() if ln.startswith("memory (field_dft_interaction")]
+    assert f"{mem['n_atoms']} atoms, {mem['n_basis_functions']} basis functions" in line
+    assert f"needs {mem['total_gb']:.2f} GB" in line and line.endswith(": fits")
+    assert any(ln.startswith("machine: ") for ln in out.splitlines())
+
+
+def test_plan_says_when_the_run_would_refuse_and_when_it_would_not_check(tmp_path, capsys):
+    tight = BENZOIC_PBE + "memory_budget_gb = 0.001\n"
+    assert "does NOT fit: the run will refuse before its first SCF" in _plan_text(tight, tmp_path, capsys)
+    unchecked = tight + "check_memory = false\n"
+    assert "check_memory = false, so the run will start anyway" in _plan_text(unchecked, tmp_path, capsys)
+
+
+def test_plan_says_cannot_say_for_a_basis_the_model_cannot_count_never_fits(tmp_path, capsys):
+    out = _plan_text(
+        BENZOIC_PBE.replace('functional = "PBE"\n', 'functional = "PBE"\nbasis = "def2-svp"\n'), tmp_path, capsys
+    )
+    (line,) = [ln for ln in out.splitlines() if ln.startswith("memory (")]
+    assert "cannot say" in line and "def2-svp" in line and "fits" not in line
+
+
+def test_plan_compares_free_memory_with_require_free_gb(tmp_path, capsys, monkeypatch):
+    import smeltery.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "available_memory_gb", lambda: 3.0)  # data source: a machine with 3 GB free
+    out = _plan_text(BENZOIC_PBE + "require_free_gb = 12.0\n", tmp_path, capsys)
+    assert "3.0 GB available now, below require_free_gb 12: the run would refuse if started now" in out
+    monkeypatch.setattr(cli_mod, "available_memory_gb", lambda: None)
+    assert "unknown (no /proc/meminfo)" in _plan_text(BENZOIC_PBE, tmp_path, capsys)
+
+
+def test_an_rhf_plan_says_it_has_no_memory_model_rather_than_printing_nothing(tmp_path, capsys):
+    out = _plan_text(BASE, tmp_path, capsys)
+    assert "memory: field_interaction has no memory model; nothing is checked before its SCFs" in out
