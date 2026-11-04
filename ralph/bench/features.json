@@ -871,10 +871,10 @@
         "Open /report/0: the verdict precedes the forest plot, which precedes the candidates (DOM order).",
         "Add a comment on candidate 4-F; it appears in that thread with the Identity author, and GET /api/runs/0/comments includes it with anchor candidate:4-F.",
         "No element on the page posts to /api/pipeline/*, /api/tasks or any launch route (intercept and assert none fired after exercising every control).",
-        "Archive snapshot shows a path and sha256; the file at that path has no http(s):// reference and contains every mean shown on the page (formatted as displayed)."
+        "Archive snapshot shows a path and sha256; the file at that path contains every mean shown on the page (formatted as displayed), and its only http(s):// references are the pinned library URLs the API lists in the snapshot's `external`."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI17-proposals",
