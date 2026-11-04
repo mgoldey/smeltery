@@ -19,3 +19,18 @@
 7. Launching writes the config into `OUT/config.toml`, staging every referenced input file into
    `OUT` by sha256 through `ArtifactStore` and rewriting its `path` knob, so relative paths resolve
    inside OUT. The task argv is `["smeltery","run","<OUT>/config.toml","--out","<OUT>"]`.
+
+## In the app (Run → Pipeline)
+8. The palette lists methods by rung. Unwired methods are shown disabled with their reason.
+9. Stages can be added, removed and reordered with mouse and keyboard alone.
+10. Each stage's knobs are a form generated from its `Param` kinds.
+11. An issues panel shows every issue from `/api/pipeline/check` and updates on each edit.
+12. A TOML pane (CodeMirror) and the visual editor stay in sync both ways: an edit in either
+    updates the other through the API's round trip.
+13. **Click-to-place.** The parent is drawn in 2D by RDKit.js with explicit hydrogens. Each atom is
+    an SVG element with `data-atom-index` equal to its index in `Chem.AddHs` order. Clicking an
+    atom and then its `from_atom` opens a small form for `q` and `distance`; confirming posts to
+    `/api/pipeline/site`, and the TOML pane shows the new `[[pocket.site]]`. A 3D view of the
+    provisional conformer, labelled "provisional geometry", highlights the same two atoms.
+14. "Run pipeline" is disabled while any error-level issue exists; once clicked, it shows
+    "Pipeline running" and the task appears in the work panel.

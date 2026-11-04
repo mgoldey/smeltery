@@ -171,7 +171,37 @@
         "Do not add noqa to silence a real finding."
       ],
       "full_suite": false,
-      "passes": true
+      "passes": false
+    },
+    {
+      "id": "R12-no-hollow-compare",
+      "spec": "README.md",
+      "category": "repair",
+      "description": "Comparison has no property that ignores its data: pooled_is_confounded is removed or derived from the arms.",
+      "depends_on": [],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/test_gui_compare.py tests/bench/test_use_cases.py",
+      "steps": [
+        "src/smeltery/gui/compare.py: delete `pooled_is_confounded` (it returns True unconditionally) and `per_key_median` unless something uses them; if a test needs them, derive them from summary().",
+        "If kept, data source for its test: two arms with identical per-cell composition, where pooled and per-cell differences agree, must give False.",
+        "Mutation: make it return True again -> the test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "R13-ci-jobs-intact",
+      "spec": "layering.md",
+      "category": "repair",
+      "description": "The ty CI jobs are separate jobs that leave the existing test job's steps intact, and the repo-wide job really checks the whole repo.",
+      "depends_on": [],
+      "verify": ".venv/bin/python - <<'EOF'\nimport yaml,subprocess\nnew=yaml.safe_load(open('.github/workflows/test.yml'))['jobs']\nold=yaml.safe_load(subprocess.run(['git','show','42486f9:.github/workflows/test.yml'],capture_output=True,text=True).stdout)['jobs']\nfor name,job in old.items():\n    assert [s.get('name') for s in job.get('steps',[])]==[s.get('name') for s in new[name].get('steps',[])], name\nassert 'ty' in new and 'ty-repo-wide' in new\nprint('ok')\nEOF",
+      "steps": [
+        "Move the ty and ty-repo-wide jobs so no existing job loses steps (data source: the workflow at 42486f9, compared job by job in the verify command).",
+        "ty-repo-wide checks the whole repo: pass explicit paths (e.g. `uvx ty@0.0.96 check src tests`) so it does not inherit [tool.ty.src] include; keep continue-on-error: true.",
+        "Mutation: move one step of an existing job into ty-repo-wide -> verify fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": false
     },
     {
       "id": "M1-repairs-baseline",
@@ -509,315 +539,6 @@
       "passes": true
     },
     {
-      "id": "U1-vendored-offline",
-      "spec": "frontend.md",
-      "category": "frontend",
-      "description": "All browser assets are vendored; no served HTML references an http(s) origin.",
-      "depends_on": [
-        "S5-cli-bench"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_static.py",
-      "steps": [
-        "Write scripts/vendor_bench_assets.py and run it once; commit static/vendor/ with its README (URL, version, sha256 per file).",
-        "test_no_page_references_an_external_origin scans every served HTML and template.",
-        "test_static_files_are_served: GET /static/app.css is 200."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "U2-tokens",
-      "spec": "frontend.md",
-      "category": "frontend",
-      "description": "Colour tokens and dark mode match frontend.md; data colours come from smeltery.gui.scenes.",
-      "depends_on": [
-        "U1-vendored-offline"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_static.py",
-      "steps": [
-        "test_the_data_colours_match_the_scene_builder imports scenes.CHARGE_POSITIVE, CHARGE_NEGATIVE, CANDIDATE_CARBON and finds them in app.css.",
-        "test_dark_mode_is_defined_for_every_colour_token.",
-        "test_numeric_cells_use_tabular_figures: app.css sets font-variant-numeric: tabular-nums.",
-        "test_reduced_motion_is_respected: app.css has a prefers-reduced-motion block; test_focus_is_visible: it has a :focus-visible rule."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "U3-context-bar",
-      "spec": "frontend.md",
-      "category": "frontend",
-      "description": "Every run page shows the campaign and digest in the context bar, and the verdict is its largest text.",
-      "depends_on": [
-        "U2-tokens"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_static.py -k context",
-      "steps": [
-        "test_every_run_page_shows_campaign_and_digest: for each run route, the HTML contains the run's campaign and input_digest[:12]."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V1-work-panel",
-      "spec": "work-panel.md",
-      "category": "view",
-      "description": "The work panel lists, labels and cancels tasks per work-panel.md.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_work_panel.py",
-      "steps": [
-        "test_a_tasks_lifecycle_renders with a real SubprocessTaskQueue in tmp_path.",
-        "test_cancel_cancels; test_cancelling_an_unknown_task_is_404.",
-        "test_the_panel_states_tasks_run_at_most_once.",
-        "test_an_unreachable_queue_is_reported_and_the_page_still_loads."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V2-campaign-panel",
-      "spec": "campaign-panel.md",
-      "category": "view",
-      "description": "Studies imported by module path show their DAG and per-cell state.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_campaign_panel.py",
-      "steps": [
-        "Create a small study module under tests/bench/ for the fixture.",
-        "test_dag_rows_are_in_order (compare the `order` field), test_cells_report_cached_or_to_run, test_an_unimportable_study_path_is_404_naming_it."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V3-structure-tab",
-      "spec": "structure-tab.md",
-      "category": "view",
-      "description": "Opening a structure reports hashes, origin and every dropped HETATM.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_structure_tab.py",
-      "steps": [
-        "Use a small committed .pdb with a HOH and a ligand HETATM.",
-        "test_a_local_pdb_reports_its_sha256 (64 hex chars, matching hashlib on the prepared file).",
-        "test_what_was_dropped_is_listed: the HOH residue name appears.",
-        "test_network_source_without_permission_is_400; test_a_missing_file_is_400_naming_it."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V4-pipeline-check",
-      "spec": "pipeline-editor.md",
-      "category": "view",
-      "description": "The editor returns every issue, groups the palette by rung, and hides unwired tiers from addable.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_pipeline_editor.py -k 'issue or palette or unwired'",
-      "steps": [
-        "test_every_issue_is_returned: a TOML with two independent errors yields both.",
-        "test_the_palette_groups_methods_by_rung (keys come from catalog.RUNGS).",
-        "test_an_unwired_tier_is_listed_with_a_reason_but_not_addable (qmmm)."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V5-rigour-by-quantity",
-      "spec": "pipeline-editor.md",
-      "category": "view",
-      "description": "The palette groups comparable methods by quantity and never presents one rigour ladder across quantities.",
-      "depends_on": [
-        "V4-pipeline-check"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_pipeline_editor.py -k rigour",
-      "steps": [
-        "test_methods_are_grouped_by_quantity: designability and field_dft_interaction are never in the same ordered group.",
-        "Data source: Method.comparable_rigour from smeltery.gui.catalog."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V6-site-roundtrip",
-      "spec": "pipeline-editor.md",
-      "category": "view",
-      "description": "The site endpoint applies place_site and the returned TOML round-trips clean.",
-      "depends_on": [
-        "V4-pipeline-check"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_pipeline_editor.py -k site",
-      "steps": [
-        "test_clicking_two_atoms_writes_one_pocket_site: the returned TOML has one [[pocket.site]] with the posted values.",
-        "test_the_returned_toml_checks_clean: POST it back to /api/pipeline/check; no errors."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V7-launch-staging",
-      "spec": "pipeline-editor.md",
-      "category": "view",
-      "description": "Launching stages inputs into OUT by hash and submits the documented argv.",
-      "depends_on": [
-        "V6-site-roundtrip"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_use_cases.py -k launch",
-      "steps": [
-        "test_launch_stages_referenced_files_into_out: a pocket file outside OUT is copied in by sha256 and the written config's path knob points inside OUT.",
-        "test_launch_submits_the_documented_argv: the fake queue receives exactly ['smeltery','run','<OUT>/config.toml','--out','<OUT>'] and executes nothing.",
-        "Data source: OUT/config.toml as written, parsed with tomllib."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V8-pose-viewer",
-      "spec": "pose-viewer.md",
-      "category": "view",
-      "description": "The scene endpoint serves pose_scene unchanged and refuses records without pose output.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_pose_viewer.py",
-      "steps": [
-        "test_the_scene_equals_pose_scene: the JSON equals scenes.pose_scene(run, '4-F', 0).",
-        "test_the_page_states_pose_pairing.",
-        "test_a_record_without_pose_output_is_409; test_an_out_of_range_pose_is_400."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V9-results-endpoints",
-      "spec": "results-view.md",
-      "category": "view",
-      "description": "The ddE, resolved and per-pose endpoints return the gui.results tables exactly.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_results_view.py",
-      "steps": [
-        "test_resolved_matrix_is_served_exactly: equals gui.results.resolved_matrix(load_run(run_dir)).",
-        "test_ddE_rows_equal_ddE_table and carry floor, floor_source, z, keep, verdict.",
-        "test_no_composite_score_column."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V10-honesty-anchors",
-      "spec": "results-view.md",
-      "category": "view",
-      "description": "Each honesty anchor in results-view.md is a test, and each is proven live by mutation.",
-      "depends_on": [
-        "V9-results-endpoints"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_honesty_anchors.py",
-      "steps": [
-        "Tests: UNRANKED shows 'does not resolve' and never 'winner'; the floor and its source are on the page; INCOMPLETE renders as itself; tie groups carry labels as well as bands.",
-        "Mutation 1: render UNRANKED's first group as winner -> a test fails -> revert.",
-        "Mutation 2: drop the floor band -> a test fails -> revert.",
-        "Mutation 3: render INCOMPLETE as an empty verdict -> a test fails -> revert.",
-        "Mutation 4: serve a resolved matrix with one extra True -> a test fails -> revert.",
-        "Record in NOTES.md that all four mutations failed their tests."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V11-decisions-grid",
-      "spec": "decisions-grid.md",
-      "category": "view",
-      "description": "Decisions go through DecisionSet alone, with the user from Identity.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_decisions_grid.py",
-      "steps": [
-        "test_a_decision_is_written_to_the_digest_named_file (decisions-<input_digest[:12]>.json).",
-        "test_a_tie_choice_without_a_note_is_400_with_the_cores_message; test_an_unknown_reason_is_400.",
-        "test_the_user_comes_from_identity_not_the_request.",
-        "Mutation: add a surface-side check that duplicates a DecisionSet rule with a different message; confirm the message test fails; revert."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V12-served-report",
-      "spec": "report.md",
-      "category": "view",
-      "description": "The served report leads with the verdict and accepts anchored comments.",
-      "depends_on": [
-        "V9-results-endpoints"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_report.py -k 'served or comment'",
-      "steps": [
-        "test_the_verdict_precedes_the_candidate_table.",
-        "test_a_comment_anchors_to_a_candidate (anchor 'candidate:4-F' reads back).",
-        "test_the_report_surface_cannot_change_the_method: POST to any pipeline/config route under /report or /api/runs/{idx}/pipeline is 404 or 405."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V13-frozen-snapshot",
-      "spec": "report.md",
-      "category": "view",
-      "description": "The frozen snapshot has no external references and agrees with the served numbers.",
-      "depends_on": [
-        "V12-served-report"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_report.py -k 'frozen or agree'",
-      "steps": [
-        "test_the_frozen_snapshot_has_zero_external_references.",
-        "test_served_and_frozen_reports_agree: every ddE mean (formatted %.2f) from /api/runs/0/ddE appears in the frozen file.",
-        "Data source: the frozen HTML file written by smeltery.gui.report.write_report."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V14-proposals",
-      "spec": "proposals.md",
-      "category": "view",
-      "description": "A proposal is stored for review and causes no compute.",
-      "depends_on": [
-        "V12-served-report"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_report.py -k proposal tests/bench/test_project_model.py",
-      "steps": [
-        "test_a_proposal_is_a_draft_and_submits_nothing: after POST /api/runs/0/proposals, the fake queue's submitted list is empty.",
-        "test_an_invalid_smiles_is_400; test_an_unknown_reason_is_400.",
-        "Mutation: make the proposal route call LaunchRun; confirm the test fails; revert."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
-      "id": "V15-notebook",
-      "spec": "notebook.md",
-      "category": "view",
-      "description": "Notebook entries are append-only, hash-referenced, and authored by Identity.",
-      "depends_on": [
-        "U3-context-bar"
-      ],
-      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_notebook.py",
-      "steps": [
-        "test_an_entry_records_artefacts_by_sha256.",
-        "test_there_is_no_route_that_edits_an_entry (PUT and PATCH are 404/405).",
-        "test_a_correction_supersedes_and_the_old_entry_stays_readable.",
-        "test_the_author_comes_from_identity."
-      ],
-      "full_suite": false,
-      "passes": true
-    },
-    {
       "id": "G1-ty-in-ci",
       "spec": "layering.md",
       "category": "gate",
@@ -830,72 +551,426 @@
         "Add the two jobs to .github/workflows/test.yml; the repo-wide one has continue-on-error: true."
       ],
       "full_suite": false,
-      "passes": true
+      "passes": false
     },
     {
-      "id": "M3-final",
-      "spec": "README.md",
-      "category": "milestone",
-      "description": "Everything passes: the full suite is no worse than baseline, ty is clean, and docs/bench.md describes what was built.",
+      "id": "UI0-retire-string-ui",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "The string-built HTML pages and the unused vendored assets are gone; the Python side serves JSON only (until UI1 adds the built app).",
       "depends_on": [
-        "R1-one-home",
-        "R2-queue-no-false-failure",
-        "R3-queue-unknown-ids",
-        "R4-temporal-typed-init",
-        "R5-atom-order-anchor",
-        "R6-specific-exception",
-        "R7-stores-under-root",
-        "R8-gitignore",
-        "R9-docs-bench-true",
-        "R10-pyproject-comments",
         "R11-lint-clean",
-        "M1-repairs-baseline",
-        "C1-contract-runstore",
-        "C2-contract-artifactstore",
-        "C3-contract-commentstore",
-        "C4-contract-projectstore",
-        "C5-contract-structuresource",
-        "C6-contract-identity",
-        "C7-layering",
-        "K1-verdict",
-        "K2-plan-cells",
-        "K3-split-parent-once",
-        "K4-split-combine-identical",
-        "K5-split-rss-flat",
         "M2-core-baseline",
-        "S1-injected-app",
-        "S2-independent-failure",
-        "S3-verdict-endpoint",
-        "S4-identity-server-side",
-        "S5-cli-bench",
-        "U1-vendored-offline",
-        "U2-tokens",
-        "U3-context-bar",
-        "V1-work-panel",
-        "V2-campaign-panel",
-        "V3-structure-tab",
-        "V4-pipeline-check",
-        "V5-rigour-by-quantity",
-        "V6-site-roundtrip",
-        "V7-launch-staging",
-        "V8-pose-viewer",
-        "V9-results-endpoints",
-        "V10-honesty-anchors",
-        "V11-decisions-grid",
-        "V12-served-report",
-        "V13-frozen-snapshot",
-        "V14-proposals",
-        "V15-notebook",
+        "R12-no-hollow-compare",
+        "R13-ci-jobs-intact"
+      ],
+      "verify": "! rg -n 'HTMLResponse' src/smeltery/bench && test ! -e src/smeltery/bench/static && test ! -e src/smeltery/bench/templates && test ! -e scripts/vendor_bench_assets.py && .venv/bin/python -m pytest -q -p no:randomly tests/bench",
+      "steps": [
+        "Delete the HTML routes /run, /work, /run/poses, /run/results and the HTML form of /report/{idx} from app.py. Keep every /api route.",
+        "Delete src/smeltery/bench/static/ (including the 12.8 MB vendor/ directory), templates/, and scripts/vendor_bench_assets.py.",
+        "Delete or convert tests that asserted on those HTML pages (test_static.py; HTML assertions in test_work_panel.py, test_results_view.py, test_honesty_anchors.py, test_report.py). API assertions stay.",
+        "Run the bench gate."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI1-scaffold",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "ui/ is a Vite + React + strict TypeScript app with the app shell; its build is served by `smeltery bench` with a single-page fallback.",
+      "depends_on": [
+        "UI0-retire-string-ui"
+      ],
+      "verify": "cd ui && npm ci && npm run typecheck && npm run build && cd .. && test -f src/smeltery/bench/web/index.html && .venv/bin/python -m pytest -q -p no:randomly tests/bench/test_app.py -k web",
+      "steps": [
+        "Create ui/ with package.json scripts: dev, build (outDir ../src/smeltery/bench/web, emptyOutDir), typecheck (tsc --noEmit), test (vitest run), e2e (playwright test), gen:api.",
+        "tsconfig strict: true, noUncheckedIndexedAccess: true.",
+        "App shell: left rail (Bench, Run, Report), context bar, work column, inspector slot; React Router routes /bench, /run/:idx/*, /report/:idx, /campaigns/:id.",
+        "app.py serves web/index.html at / and every non-/api path, and web/assets at /assets.",
+        "Add tests/bench/test_app.py::test_web_index_is_served_with_spa_fallback and ::test_bench_refuses_without_a_built_ui (exit 2, message names `npm run build`).",
+        "Add src/smeltery/bench/web/ to .gitignore."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI2-api-types",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "TypeScript API types are generated from FastAPI's OpenAPI schema, and a stale schema file fails CI.",
+      "depends_on": [
+        "UI1-scaffold"
+      ],
+      "verify": "cd ui && npm run gen:api && git diff --exit-code src/api/schema.d.ts && npm run typecheck",
+      "steps": [
+        "Add src/smeltery/bench/openapi.py: `python -m smeltery.bench.openapi` prints create_app(...).openapi() as JSON (fake ports are fine; only the schema matters).",
+        "gen:api runs it and openapi-typescript into ui/src/api/schema.d.ts; commit that file.",
+        "All fetch calls in ui/src go through a typed client built on schema.d.ts; no hand-written response interfaces.",
+        "Mutation: rename a field in one API response model, regenerate, confirm `npm run typecheck` fails; revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI3-e2e-harness",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "Playwright runs against the real API serving fixture runs, offline, and the shell renders the fixture's campaign and digest.",
+      "depends_on": [
+        "UI2-api-types"
+      ],
+      "verify": "cd ui && npx playwright test e2e/shell.spec.ts",
+      "steps": [
+        "ui/e2e/serve_fixture.py builds three run dirs with tests/gui_fixture.make_run_dir (RESOLVED; unranked=True; INCOMPLETE with results.cut deleted) under one temp root, and serves `smeltery bench` on BENCH_E2E_PORT.",
+        "playwright.config.ts uses webServer to start it; Chromium only.",
+        "A shared fixture aborts every request whose host is not 127.0.0.1/localhost and fails the test if any was attempted.",
+        "shell.spec.ts: the context bar shows the campaign and input_digest[:12]. Data source: read them from the fixture's run-*.json (serve_fixture.py writes the paths to e2e/.fixture.json).",
+        "If Chromium is missing: `npx playwright install chromium`."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI4-tokens-a11y",
+      "spec": "frontend.md",
+      "category": "ui",
+      "description": "Tokens, dark mode, tabular figures and accessibility hold on every page.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/a11y.spec.ts",
+      "steps": [
+        "For each route: @axe-core/playwright reports no serious or critical violations.",
+        "Dark mode: with page.emulateMedia({colorScheme:'dark'}) the computed --ground differs from light and matches the spec's dark value.",
+        "Every element with the numeric-cell class has computed font-variant-numeric containing tabular-nums.",
+        "rg finds no hex colour literal in ui/src outside the tokens file (a vitest or a lint check).",
+        "Mutation: hard-code a colour in one component; confirm the check fails; revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI5-verdict-banner",
+      "spec": "verdict.md",
+      "category": "ui",
+      "description": "The verdict banner renders RESOLVED, UNRANKED and INCOMPLETE correctly and is the largest text on run pages.",
+      "depends_on": [
+        "UI4-tokens-a11y"
+      ],
+      "verify": "cd ui && npx playwright test e2e/verdict.spec.ts",
+      "steps": [
+        "For each of the three fixture runs, open /run/:idx/results.",
+        "Data source: GET /api/runs/{idx}/verdict for the expected state, winner and floor.",
+        "UNRANKED: banner contains 'does not resolve' and the floor value; the page contains no 'winner'.",
+        "INCOMPLETE: banner lists each missing key from the verdict's `missing`.",
+        "The banner's computed font-size is the maximum on the page.",
+        "Mutation 1: render UNRANKED with a winner name -> a test fails -> revert. Mutation 2: render INCOMPLETE as an empty banner -> a test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI6-figures-api",
+      "spec": "results-view.md",
+      "category": "api",
+      "description": "The API serves the Python-built forest, matrix and per-pose figures as Plotly JSON.",
+      "depends_on": [
+        "UI0-retire-string-ui"
+      ],
+      "verify": ".venv/bin/python -m pytest -q -p no:randomly tests/bench/test_figures.py",
+      "steps": [
+        "Add GET /api/runs/{idx}/figures/{name} for forest, matrix and per_pose, returning fig.to_plotly_json() from gui.views.forest_figure, matrix_figure and per_pose_figure.",
+        "test_figures.py: each response equals the builder's output for load_run(fixture) (data source: the builders called directly in the test).",
+        "Unknown figure name is 404; an INCOMPLETE run is 409 with the reason."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI7-results-view",
+      "spec": "results-view.md",
+      "category": "ui",
+      "description": "The results page draws the figures in Plotly, unchanged, with tie-group labels and the floor band.",
+      "depends_on": [
+        "UI5-verdict-banner",
+        "UI6-figures-api"
+      ],
+      "verify": "cd ui && npx playwright test e2e/results.spec.ts",
+      "steps": [
+        "Data source: /api/runs/0/figures/forest and /api/runs/0/ddE.",
+        "The forest plot has one marker per analogue (count Plotly points in the DOM; compare with ddE rows).",
+        "The floor band is present: the figure's layout.shapes reaches the page (check Plotly's rendered shape elements).",
+        "Each tie group's label text is visible.",
+        "The resolved matrix cells equal /api/runs/0/resolved.",
+        "Mutation: remove the floor band in gui.views.forest_figure -> this test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI8-pose-viewer",
+      "spec": "pose-viewer.md",
+      "category": "ui",
+      "description": "Mol* renders the API's scene, and selectors change it.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/poses.spec.ts",
+      "steps": [
+        "Open /run/0/poses. A Mol* canvas renders; a screenshot of it is not a single uniform colour.",
+        "Changing candidate and pose issues GET /api/runs/0/scene with those query values (assert on the request).",
+        "The page states 'pose i of <candidate> is paired to pose i of <parent>' for the selection.",
+        "For a run whose pose output was removed, the panel shows the API's 409 reason, not an empty canvas."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI9-structure",
+      "spec": "structure-tab.md",
+      "category": "ui",
+      "description": "Opening a structure shows hashes, origin and dropped residues, and draws the receptor.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/structure.spec.ts",
+      "steps": [
+        "Use a small committed .pdb with a HOH and a ligand HETATM under ui/e2e/data/.",
+        "Typing its path and opening shows a 64-hex sha256 matching the API response, the origin, and HOH in the dropped list.",
+        "The receptor renders in Mol* (non-uniform canvas).",
+        "A missing path shows the API's message inline."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI10-pipeline-editor",
+      "spec": "pipeline-editor.md",
+      "category": "ui",
+      "description": "The pipeline editor edits stages with mouse and keyboard, lists every issue, and keeps the TOML pane in sync both ways.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/pipeline.spec.ts",
+      "steps": [
+        "Palette groups by rung from /api/catalog; qmmm is disabled and its reason is visible.",
+        "Add, remove and reorder a stage using only the keyboard.",
+        "A pipeline with two independent errors shows both in the issues panel.",
+        "Editing a knob updates the TOML pane; editing the TOML updates the visual stage list (both via /api/pipeline/check).",
+        "Methods of different quantities are never shown in one ordered rigour list (data source: comparable_rigour via /api/catalog)."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI11-click-to-place",
+      "spec": "click-to-place.md",
+      "category": "ui",
+      "description": "Clicking two atoms in the parent's 2D depiction writes one [[pocket.site]] on the atoms the run uses.",
+      "depends_on": [
+        "UI10-pipeline-editor"
+      ],
+      "verify": "cd ui && npx playwright test e2e/click_to_place.spec.ts",
+      "steps": [
+        "Add GET /api/runs/{idx}/pose_atoms?candidate= returning the atom symbols parsed from pose_sdf(run, candidate) (RDKit, removeHs=False). It reads the SDF, not the SMILES.",
+        "The 2D depiction uses RDKit.js with explicit hydrogens; each atom carries data-atom-index from RDKit's atom-N class.",
+        "Click atom 3 then atom 4, confirm with q and distance; the TOML pane shows [[pocket.site]] with atom = 3 and from_atom = 4.",
+        "Data source for the anchor: for every index in the depiction, the element shown equals pose_atoms[index] from the API.",
+        "The provisional 3D view is labelled 'provisional geometry' and highlights the same two atoms.",
+        "Mutation: depict without explicit hydrogens (indices shift) -> the anchor assertion fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI12-work-panel",
+      "spec": "work-panel.md",
+      "category": "ui",
+      "description": "The work panel is live, escapes task output, cancels, and degrades when the queue is down.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/work.spec.ts",
+      "steps": [
+        "Submit a task via POST /api/tasks that prints '<b>bold</b>' then sleeps 30 s.",
+        "Without reloading, its row appears as running; elapsed increases between two reads.",
+        "Its log in the inspector shows the literal characters '<b>bold</b>' (no <b> element is created).",
+        "Cancel moves it to cancelled.",
+        "With serve_fixture started with a broken queue (env flag), a banner shows the reason and /run/0/results still renders."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI13-launch",
+      "spec": "pipeline-editor.md",
+      "category": "ui",
+      "description": "Run pipeline is disabled with errors, and launching stages inputs into OUT and shows the task.",
+      "depends_on": [
+        "UI10-pipeline-editor",
+        "UI12-work-panel"
+      ],
+      "verify": "cd ui && npx playwright test e2e/launch.spec.ts",
+      "steps": [
+        "With an error-level issue present, the Run pipeline button is disabled.",
+        "With a clean pipeline, clicking it shows 'Pipeline running' and a new task appears in the work panel whose command is smeltery run <OUT>/config.toml --out <OUT>.",
+        "Data source: the task's command from GET /api/tasks, and OUT/config.toml on disk.",
+        "Cancel the task at the end of the test."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI14-campaign",
+      "spec": "campaign-panel.md",
+      "category": "ui",
+      "description": "The campaign page draws a study's DAG and per-cell grid.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/campaign.spec.ts",
+      "steps": [
+        "Use the study module under tests/bench/ that test_campaign_panel.py already uses.",
+        "One node per step and one edge per upstream link (data source: /api/studies/<path>/dag).",
+        "Every grid cell shows 'cached' or 'to run' as text (data source: /cells).",
+        "An unimportable path shows the API's message inline."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI15-decisions",
+      "spec": "decisions-grid.md",
+      "category": "ui",
+      "description": "The decisions grid records keep/reject/hold through the API, shows core refusals, and works by keyboard.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/decisions.spec.ts",
+      "steps": [
+        "Add GET /api/decisions/vocabulary returning STATUSES and REASONS from smeltery.decisions.",
+        "The reason select's options equal the vocabulary (data source: that endpoint).",
+        "within_tie_choice with no note shows the core's message beside the row; GET of the decisions file is unchanged.",
+        "Keep 4-F with cut_survivor using only the keyboard; OUT/decisions-<digest12>.json then holds it with user from Identity."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI16-report",
+      "spec": "report.md",
+      "category": "ui",
+      "description": "The served report is read-only, verdict-first, with anchored comment threads.",
+      "depends_on": [
+        "UI7-results-view",
+        "UI8-pose-viewer"
+      ],
+      "verify": "cd ui && npx playwright test e2e/report.spec.ts",
+      "steps": [
+        "Open /report/0: the verdict precedes the forest plot, which precedes the candidates (DOM order).",
+        "Add a comment on candidate 4-F; it appears in that thread with the Identity author, and GET /api/runs/0/comments includes it with anchor candidate:4-F.",
+        "No element on the page posts to /api/pipeline/*, /api/tasks or any launch route (intercept and assert none fired after exercising every control).",
+        "Archive snapshot shows a path and sha256; the file at that path has no http(s):// reference and contains every mean shown on the page (formatted as displayed)."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI17-proposals",
+      "spec": "proposals.md",
+      "category": "ui",
+      "description": "A proposal from the report reaches the review queue and starts no work.",
+      "depends_on": [
+        "UI16-report"
+      ],
+      "verify": "cd ui && npx playwright test e2e/proposals.spec.ts",
+      "steps": [
+        "Count tasks via GET /api/tasks.",
+        "Propose Cc1ccccc1 with reason synthesis from /report/0; the 2D preview renders before submitting.",
+        "It appears in the Run area's review queue.",
+        "The task count is unchanged and no request hit /api/tasks with POST.",
+        "Mutation: make the proposal handler call LaunchRun -> this test fails -> revert."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI18-notebook",
+      "spec": "notebook.md",
+      "category": "ui",
+      "description": "The campaign notebook appends entries, shows supersession, and offers no editing.",
+      "depends_on": [
+        "UI3-e2e-harness"
+      ],
+      "verify": "cd ui && npx playwright test e2e/notebook.spec.ts",
+      "steps": [
+        "Create an entry attaching run 0; it shows the run's sha256 (data source: the API response).",
+        "Supersede it; the old entry is marked superseded and still opens.",
+        "No entry has an edit control (no button or menu item whose name includes edit)."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI19-compare",
+      "spec": "results-view.md",
+      "category": "ui",
+      "description": "The compare view draws compare_figure for two chosen arms and refuses an arm compared with itself.",
+      "depends_on": [
+        "UI7-results-view"
+      ],
+      "verify": "cd ui && npx playwright test e2e/compare.spec.ts",
+      "steps": [
+        "Add GET /api/compare?a=..&b=.. returning gui.views.compare_figure JSON and comparison_caption.",
+        "Choosing two different fixture runs renders the figure and the caption text from the API.",
+        "Choosing the same run for both arms shows the refusal message and no figure."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "UI20-ci-and-wheel",
+      "spec": "ui-architecture.md",
+      "category": "ui",
+      "description": "CI builds and tests the UI, and the wheel contains the built app.",
+      "depends_on": [
+        "UI19-compare",
+        "UI18-notebook",
+        "UI17-proposals",
+        "UI15-decisions",
+        "UI14-campaign",
+        "UI13-launch",
+        "UI11-click-to-place",
+        "UI9-structure",
         "G1-ty-in-ci"
       ],
-      "verify": "see AGENTS.md: full suite",
+      "verify": "rg -q 'playwright' .github/workflows/test.yml && rg -q 'npm run build' .github/workflows/test.yml",
       "steps": [
-        "Run every gate and the full suite once.",
-        "Update docs/bench.md to list the routes and the three verdict states as built.",
-        "Record the counts in NOTES.md."
+        "Add a CI job: npm ci, typecheck, vitest, gen:api diff check, build, playwright install chromium, e2e.",
+        "The wheel build runs npm run build first; scripts/wheel_smoke.py (bench extra) asserts smeltery/bench/web/index.html is inside the wheel.",
+        "Run the wheel smoke locally for the bench extra."
+      ],
+      "full_suite": false,
+      "passes": false
+    },
+    {
+      "id": "M4-final",
+      "spec": "README.md",
+      "category": "milestone",
+      "description": "The full Python suite, the full browser suite and the validator all pass.",
+      "depends_on": [
+        "UI20-ci-and-wheel"
+      ],
+      "verify": "see AGENTS.md: full suite; and cd ui && npx playwright test",
+      "steps": [
+        "Run the full Python suite once and the full Playwright suite once.",
+        "Run python3 ~/.claude/skills/ralph-prompts/scripts/validate_features.py ralph/bench/features.json.",
+        "Update docs/bench.md: how to start it, the three areas, and what each page shows.",
+        "Record the counts in NOTES.md in one line."
       ],
       "full_suite": true,
-      "passes": true
+      "passes": false
     }
   ]
 }

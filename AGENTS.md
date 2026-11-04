@@ -34,6 +34,16 @@ The full suite takes ~30 minutes. **Do not run it unless a feature's `"full_suit
 
 Never use `pytest -x` when checking for regressions: it hides every failure after the first.
 
+## Frontend (`ui/`)
+- Install: `cd ui && npm ci`. Browser for tests: `npx playwright install chromium` (cached builds may
+  already be in `~/.cache/ms-playwright`).
+- While working on a UI feature: `cd ui && npx playwright test e2e/<file>.spec.ts` (only that file).
+- Before committing a UI change: `cd ui && npm run typecheck && npm run test && npm run build`.
+- After changing any API route or response: `cd ui && npm run gen:api`, then commit
+  `ui/src/api/schema.d.ts`.
+- The full browser suite (`cd ui && npx playwright test`) runs only for milestone features.
+- `src/smeltery/bench/web/` is build output: never edit or commit it.
+
 ## Gates (all must pass before a commit)
 ```
 .venv/bin/python -m ruff check src tests
@@ -54,4 +64,6 @@ uvx ty@0.0.96 check
 
 ## Git
 - Commit only the paths you changed: `git add <paths>`. Never `git add -A` or `git add .`.
-- Do not commit `.ralph/`, `.opencode/`, `.smeltery/`, `*.sqlite`, or anything under `benchmarks/`.
+- Do not commit `.ralph/`, `.opencode/`, `.smeltery/`, `*.sqlite`, `ui/node_modules/`,
+  `src/smeltery/bench/web/`, or anything under `benchmarks/`.
+- Do not commit `scripts/temporal_ddE.py`; its changes belong to unrelated work.

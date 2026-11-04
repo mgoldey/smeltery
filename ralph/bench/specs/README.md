@@ -42,7 +42,8 @@ if the two disagree, record it in `../NOTES.md`.
 | `run-split.md` | One campaign runs as one process per candidate and produces the same record as one process. |
 | `app-shell.md` | The web app is built from injected ports and degrades per surface, not as a whole. |
 | `layering.md` | Dependencies point inward and the gates enforce it. |
-| `frontend.md` | The served app works offline and looks like an instrument. |
+| `ui-architecture.md` | Bench's interface is one React application, served by the Bench API, verified in a real browser. |
+| `frontend.md` | The app looks and behaves like a laboratory instrument. |
 | `work-panel.md` | The computational chemist sees and cancels running work. |
 | `campaign-panel.md` | A study's DAG and per-cell cache state are visible. |
 | `structure-tab.md` | Opening a structure shows what its preparation kept and dropped. |

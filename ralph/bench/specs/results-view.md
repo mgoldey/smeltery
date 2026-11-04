@@ -19,3 +19,11 @@
 Each of these is a test, proven live by mutation (break the code, confirm the test fails, revert):
 UNRANKED rendered as a winner; the floor band or its source dropped; INCOMPLETE rendered blank;
 the served resolved matrix differing from `resolved_matrix`; a composite score column appearing.
+
+## In the app (Run → Results)
+7. The forest plot, resolved matrix and per-pose plot render from
+   `/api/runs/{idx}/figures/{forest,matrix,per_pose}`. Python builds the figures and the browser
+   draws them unchanged.
+8. The verdict banner is the largest text on the page. UNRANKED reads "does not resolve" with the
+   floor value; INCOMPLETE lists what the record is missing.
+9. Tie groups carry text labels as well as bands.

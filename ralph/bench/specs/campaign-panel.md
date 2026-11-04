@@ -12,3 +12,8 @@
 3. `GET /api/studies/{module_path}/dag` returns `Study.dag()`; `.../cells` returns `plan_cells`.
 4. An unimportable module path is 404 with the path in the message, never a traceback.
 5. The page draws the DAG from the `upstream` edges and the condition-by-step grid.
+
+## In the app (Bench area)
+6. The DAG is drawn as a graph: one node per step, one edge per `upstream` link.
+7. The condition-by-step grid shows each cell's state as text as well as colour.
+8. An unimportable module path shows the API's message inline.

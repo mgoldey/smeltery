@@ -12,3 +12,11 @@
 4. Both reports render from `smeltery.gui.results` tables, so every ΔΔE mean in the served report
    appears in the frozen one.
 5. No route on the report surface changes the pipeline, the method, the floor, or starts a task.
+
+## In the app (Report area, `/report/:idx`)
+6. Read-only layout, in order: the verdict, the forest plot, candidates with 2D structures, and a
+   pose viewer.
+7. Each candidate, each pose and the run as a whole has a comment thread; adding a comment shows it
+   immediately with its author.
+8. The page has no control that edits the pipeline, the method or the floor, or that launches work.
+9. "Archive snapshot" writes the frozen report and shows its path and sha256.
