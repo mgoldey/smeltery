@@ -2053,7 +2053,7 @@ export interface operations {
             header?: never;
             path: {
                 idx: number;
-                name: "forest" | "matrix" | "per_pose";
+                name: string;
             };
             cookie?: never;
         };

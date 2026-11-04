@@ -685,7 +685,7 @@
         "Unknown figure name is 404; an INCOMPLETE run is 409 with the reason."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI7-results-view",

@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from rdkit import Chem
@@ -137,9 +137,14 @@ def run_per_pose(request: Request, idx: int, quantity: str = QUANTITY) -> list[M
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
+FIGURES = ("forest", "matrix", "per_pose")
+
+
 @router.get("/runs/{idx}/figures/{name}")
-def run_figure(request: Request, idx: int, name: Literal["forest", "matrix", "per_pose"]) -> dict[str, Any]:
+def run_figure(request: Request, idx: int, name: str) -> dict[str, Any]:
     """The figure `smeltery.gui.views` builds, as Plotly JSON. The browser draws it; it never re-derives it."""
+    if name not in FIGURES:
+        raise HTTPException(status_code=404, detail=f"no figure {name!r}; figures are {', '.join(FIGURES)}")
     r = run(request, idx)
     table = R.ddE_table(r)
     if name == "forest":
