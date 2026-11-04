@@ -855,7 +855,7 @@
         "Keep 4-F with cut_survivor using only the keyboard; OUT/decisions-<digest12>.json then holds it with user from Identity."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI16-report",

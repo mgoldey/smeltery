@@ -134,3 +134,6 @@ pre.log { background: var(--sunken); border: 1px solid var(--hairline); padding:
 .dag-node text { font-size: 13px; text-anchor: middle; fill: var(--ink); font-family: "IBM Plex Mono", monospace; }
 .dag-edge { fill: none; stroke: var(--ink-muted); stroke-width: 1.4; }
 .dag-arrow { fill: var(--ink-muted); }
+.structure2d { display: inline-block; vertical-align: middle; }
+.structure2d svg { display: block; }
+@media (prefers-color-scheme: dark) { .structure2d svg { filter: invert(1) hue-rotate(180deg); } }

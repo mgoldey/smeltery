@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { BenchHome } from "./pages/BenchHome";
 import { NotFound } from "./pages/NotFound";
+import { Decisions } from "./pages/run/Decisions";
 import { Study } from "./pages/Study";
 import { Overview } from "./pages/run/Overview";
 import { Pipeline } from "./pages/run/Pipeline";
@@ -21,6 +22,7 @@ export function App() {
         <Route path="poses" element={<Poses />} />
         <Route path="structure" element={<Structure />} />
         <Route path="pipeline" element={<Pipeline />} />
+        <Route path="decisions" element={<Decisions />} />
         <Route path="overview" element={<Overview />} />
       </Route>
       <Route path="*" element={<NotFound />} />
