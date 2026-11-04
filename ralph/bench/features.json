@@ -572,7 +572,7 @@
         "Run the bench gate."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI1-scaffold",
