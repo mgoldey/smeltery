@@ -1058,10 +1058,13 @@ export interface components {
             kind: string;
             /** Seconds */
             seconds: number | null;
-            /** Settings */
+            /**
+             * Settings
+             * @description None: the stage should have a tier but the record has none
+             */
             settings: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** Stage */
             stage: string;
         };

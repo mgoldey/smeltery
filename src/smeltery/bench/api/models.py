@@ -376,7 +376,7 @@ class LineageStep(BaseModel):
     stage: str
     kind: str
     seconds: float | None
-    settings: dict[str, Any]
+    settings: dict[str, Any] | None = Field(description="None: the stage should have a tier but the record has none")
 
 
 class LineageField(BaseModel):

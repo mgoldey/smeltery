@@ -58,3 +58,40 @@ def test_the_parent_and_unknown_candidates_are_refused(run_dir, client_for, cand
 def test_an_incomplete_run_is_refused(incomplete_run_dir, client_for):
     client, _ = client_for(incomplete_run_dir)
     assert client.get("/api/runs/0/lineage", params={"candidate": "4-Br"}).status_code == 409
+
+
+def _lineage_with(run_dir, client_for, edit):
+    p = record_path(run_dir)
+    rec = json.loads(p.read_text())
+    edit(rec)
+    p.write_text(json.dumps(rec))
+    client, _ = client_for(run_dir)
+    r = client.get("/api/runs/0/lineage", params={"candidate": "4-Br"})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_stages_join_to_tiers_under_the_names_smeltery_run_records(run_dir, client_for):
+    def edit(rec):
+        rec["tiers"].insert(1, {"name": "gfn2", "charge": 0})
+        rec["results"]["stages"].insert(
+            1, {"stage": "xtb", "kind": "gate", "summary": "", "candidates_in": 4, "candidates_out": 4, "seconds": 2.0}
+        )
+
+    j = _lineage_with(run_dir, client_for, edit)
+    steps = {s["stage"]: s for s in j["steps"]}
+    assert steps["poses"]["settings"] == {"name": "paired_poses", "n_poses": 4}
+    assert steps["xtb"]["settings"] == {"name": "gfn2", "charge": 0}
+    assert not [m for m in j["missing"] if m.startswith("steps.")]
+
+
+def test_a_stage_without_a_tier_is_empty_but_a_missing_tier_is_none_and_named(run_dir, client_for):
+    def edit(rec):
+        rec["tiers"] = [t for t in rec["tiers"] if t["name"] != "paired_poses"]
+
+    j = _lineage_with(run_dir, client_for, edit)
+    steps = {s["stage"]: s for s in j["steps"]}
+    assert steps["pocket"]["settings"] == {}  # no tier by design
+    assert steps["poses"]["settings"] is None  # should have one; the record lacks it
+    assert "steps.poses.settings" in j["missing"]
+    assert "steps.pocket.settings" not in j["missing"]
