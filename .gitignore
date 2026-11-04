@@ -17,3 +17,6 @@ __marimo__/
 .ralph/
 .opencode/
 .smeltery/
+
+# Bench UI build output (npm run build in ui/)
+src/smeltery/bench/web/

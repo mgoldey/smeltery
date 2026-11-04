@@ -1,0 +1,68 @@
+@import "./tokens.css";
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Shell: rail | (context bar / work column + inspector) */
+.shell { display: grid; grid-template-columns: 168px 1fr; height: 100%; }
+.rail { border-right: 1px solid var(--hairline); background: var(--panel); display: flex; flex-direction: column; }
+.rail .brand { padding: 14px 16px 18px; font-weight: 600; letter-spacing: 0.01em; }
+.rail .brand small { display: block; font-weight: 400; color: var(--ink-muted); }
+.rail nav a { display: block; padding: 7px 16px; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; }
+.rail nav a[aria-current="page"], .rail nav a.active { border-left-color: var(--accent); background: var(--sunken); font-weight: 500; }
+.rail nav a[aria-disabled="true"] { color: var(--ink-muted); pointer-events: none; }
+.rail .who { margin-top: auto; padding: 12px 16px; color: var(--ink-muted); font-size: 12px; border-top: 1px solid var(--hairline); }
+
+.main { display: grid; grid-template-rows: auto 1fr; min-width: 0; height: 100%; }
+.context-bar { display: flex; gap: 18px; align-items: baseline; padding: 10px 24px; border-bottom: 1px solid var(--hairline); background: var(--panel); min-height: 44px; }
+.context-bar .campaign { font-weight: 600; }
+.context-bar .digest { color: var(--ink-muted); }
+.context-bar .empty { color: var(--ink-muted); }
+.context-bar nav.tabs { margin-left: auto; display: flex; gap: 2px; }
+.context-bar nav.tabs a { padding: 4px 10px; color: var(--ink-muted); text-decoration: none; border-bottom: 2px solid transparent; }
+.context-bar nav.tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+.body { display: grid; grid-template-columns: 1fr auto; min-height: 0; }
+.work { overflow: auto; padding: 24px 28px 48px; min-width: 0; }
+.inspector { width: 380px; border-left: 1px solid var(--hairline); background: var(--panel); overflow: auto; padding: 18px 20px; }
+
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+h2 { font-size: 15px; font-weight: 600; margin: 28px 0 8px; }
+.lede { color: var(--ink-muted); margin: 0 0 18px; max-width: 72ch; }
+section + section { margin-top: 8px; }
+
+table.grid { border-collapse: collapse; width: 100%; }
+table.grid th { text-align: left; font-weight: 500; color: var(--ink-muted); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--hairline); }
+table.grid td { padding: 7px 10px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+table.grid th.num, table.grid td.num { text-align: right; }
+table.grid tbody tr:hover { background: var(--sunken); }
+table.grid tr.selected { background: var(--sunken); }
+.num { font-variant-numeric: tabular-nums; }
+
+.status { font-weight: 500; }
+.status[data-state="succeeded"], .status[data-state="RESOLVED"] { color: var(--ok); }
+.status[data-state="failed"], .status[data-state="INCOMPLETE"] { color: var(--bad); }
+.status[data-state="running"], .status[data-state="queued"] { color: var(--accent); }
+.status[data-state="cancelled"], .status[data-state="UNRANKED"] { color: var(--pending); }
+
+.banner { border: 1px solid var(--hairline); border-left: 3px solid var(--bad); background: var(--panel); padding: 10px 14px; margin: 0 0 16px; }
+.empty-state { color: var(--ink-muted); padding: 18px 0; }
+
+button, .button { font: inherit; padding: 6px 12px; border: 1px solid var(--hairline); background: var(--panel); color: var(--ink); border-radius: 3px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+input, select, textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--hairline); background: var(--panel); color: var(--ink); border-radius: 3px; }
+label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0 4px; }
+.field-error { color: var(--bad); font-size: 12.5px; margin-top: 4px; }

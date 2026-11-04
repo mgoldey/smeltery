@@ -592,7 +592,7 @@
         "Add src/smeltery/bench/web/ to .gitignore."
       ],
       "full_suite": false,
-      "passes": false
+      "passes": true
     },
     {
       "id": "UI2-api-types",
