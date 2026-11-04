@@ -171,7 +171,13 @@ class ConfigError(ValueError):
 
 
 class StageError(RuntimeError):
-    """A pipeline stage failed. Exit code 3."""
+    """A pipeline stage failed. Exit code 3.
+
+    `gates`: when the failure is a gate rejection, every gate result computed before it stopped (the
+    `results["gates"]` dict), so the CLI can leave OUT/gates.json behind.
+    """
+
+    gates: dict | None = None
 
 
 @dataclass
@@ -192,6 +198,7 @@ class Plan:
     stage_log: list = dataclasses.field(default_factory=list)  # one dict per stage: its name and a summary line
     receptor_pdb: Path | None = None  # a receptor .pdb in the poses' frame, when one exists
     decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
+    gate_results: dict = dataclasses.field(default_factory=dict)  # results["gates"]: per-pose gate results that ran
 
     @property
     def inputs(self) -> dict:
@@ -590,69 +597,93 @@ def cfg_poses_relax(cfg: dict) -> bool:
     return bool(cfg.get("poses", {}).get("relax_unmapped", False))
 
 
-def _run_gates(plan_cfg: dict, cands: list[Candidate], field, pocket_path: Path | None, log: list) -> list:
-    """The recorded stages between pairing and the SCFs. Returns the tiers to put in the record."""
+def _run_gates(
+    plan_cfg: dict, cands: list[Candidate], field, pocket_path: Path | None, log: list, results: dict
+) -> list:
+    """The recorded stages between pairing and the SCFs. Returns the tiers to put in the record.
+
+    Every gate is evaluated on every pose of every candidate and its per-pose result goes into `results`
+    (`posebusters`: {candidate: PoseReport.to_dict()}, `strain_kcal`: {candidate: [kcal/mol]}) whether or not a
+    gate then rejects. Rejections are collected: one StageError names every failing candidate and pose, with
+    `results` attached. Once PoseBusters has rejected, the later gates do not run: their tiers refuse poses that
+    failed it, so those gates are simply absent from `results`.
+    """
     gates = plan_cfg.get("gates", {})
     recorded = []
+    failures: list[str] = []
     if gates.get("posebusters"):
         receptor = str(pocket_path) if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
 
         def posebusters():
+            report, bad = None, []
             for c in cands:
                 report = check_candidate_poses(c, receptor)
+                results.setdefault("posebusters", {})[c.name] = report.to_dict()
                 try:
                     require_passing_poses(c, {"require_pose_report": True})
                 except PoseGateError as e:
-                    hint = ""
-                    if c.name != plan_cfg["parent"] and not cfg_poses_relax(plan_cfg):
-                        hint = (
-                            " Analogue poses copy the parent's core and embed the substituent unrelaxed, which "
-                            "PoseBusters rejects at the junction; [poses] relax_unmapped = true relaxes only the "
-                            "substituent (the core stays exactly the parent's)."
-                        )
-                    raise StageError(f"stage 'posebusters' failed: {e}.{hint}") from e
-            return report
+                    bad.append((c.name, str(e)))
+            return report, bad
 
-        report = _stage("posebusters", posebusters)
+        report, bad = _stage("posebusters", posebusters)
         n = sum(len(c.poses) for c in cands)
         mode = "ligand + protein" if receptor else "ligand only"
-        _log(
-            log,
-            "posebusters",
-            f"posebusters ({mode}): all {n} pose(s) of {len(cands)} candidate(s) pass",
-            len(cands),
-            len(cands),
-            "gate",
-            posebusters_version=getattr(report, "posebusters_version", None),
-        )
-    if gates.get("forcefield"):
+        if bad:
+            hint = ""
+            if any(name != plan_cfg["parent"] for name, _ in bad) and not cfg_poses_relax(plan_cfg):
+                hint = (
+                    " Analogue poses copy the parent's core and embed the substituent unrelaxed, which "
+                    "PoseBusters rejects at the junction; [poses] relax_unmapped = true relaxes only the "
+                    "substituent (the core stays exactly the parent's)."
+                )
+            failures.append(f"stage 'posebusters' failed: {'; '.join(m for _, m in bad)}.{hint}")
+        else:
+            _log(
+                log,
+                "posebusters",
+                f"posebusters ({mode}): all {n} pose(s) of {len(cands)} candidate(s) pass",
+                len(cands),
+                len(cands),
+                "gate",
+                posebusters_version=getattr(report, "posebusters_version", None),
+            )
+    if gates.get("forcefield") and not failures:  # the tier itself refuses poses that failed PoseBusters
         ff = ForceField()
         _stage("forcefield", lambda: ff.run(cands, {}))
         strain = {
-            c.name: [a - b for a, b in zip(c.per_pose["E_mmff"], c.per_pose["E_mmff_relaxed"], strict=True)]
+            c.name: [float(a - b) for a, b in zip(c.per_pose["E_mmff"], c.per_pose["E_mmff_relaxed"], strict=True)]
             for c in cands
         }
+        results["strain_kcal"] = strain
         worst = max(max(v) for v in strain.values())
         limit = gates.get("max_strain_kcal")
+        over = []
         if limit is not None:
             for name, v in strain.items():
-                bad = [i for i, x in enumerate(v) if x > limit]
-                if bad:
-                    raise StageError(
-                        f"stage 'forcefield' failed: {name} pose(s) {bad} have MMFF94 strain "
-                        f"{max(v):.1f} kcal/mol > the configured max_strain_kcal {limit:g}"
+                bad_poses = [i for i, x in enumerate(v) if x > limit]
+                if bad_poses:
+                    over.append(
+                        f"{name} pose(s) {bad_poses} have MMFF94 strain {max(v):.1f} kcal/mol "
+                        f"> the configured max_strain_kcal {limit:g}"
                     )
-        what = f"gated at {limit:g} kcal/mol" if limit is not None else "recorded, no rejection threshold"
-        _log(
-            log,
-            "forcefield",
-            f"forcefield MMFF94 {what}; largest pose strain {worst:.1f} kcal/mol",
-            len(cands),
-            len(cands),
-            "gate" if limit is not None else "recorded",
-            strain=strain,
-        )
+        if over:
+            failures.append(f"stage 'forcefield' failed: {'; '.join(over)}")
+        else:
+            what = f"gated at {limit:g} kcal/mol" if limit is not None else "recorded, no rejection threshold"
+            _log(
+                log,
+                "forcefield",
+                f"forcefield MMFF94 {what}; largest pose strain {worst:.1f} kcal/mol",
+                len(cands),
+                len(cands),
+                "gate" if limit is not None else "recorded",
+                strain=strain,
+            )
         recorded.append(ff)
+    if failures:
+        err = StageError("\n".join(failures))
+        err.gates = results
+        raise err
     if gates.get("xtb"):
         xtb = Gfn2()
         _stage("xtb", lambda: xtb.run(cands, {"field": field}))
@@ -726,7 +757,8 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     )
     field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared), log)
     _stage("parity", lambda: _check_parity(cands))
-    after = _run_gates(cfg, cands, field, pocket_path, log)
+    gate_results: dict = {}
+    after = _run_gates(cfg, cands, field, pocket_path, log, gate_results)
     tier = measurement_tier(cfg)
     tier.field_provenance = getattr(field, "provenance", None)  # what run() will record, so plan and run digests agree
     try:
@@ -738,6 +770,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     receptor = pocket_path if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
     plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
+    plan.gate_results = gate_results
     return plan
 
 
@@ -966,6 +999,8 @@ def write_outputs(
         results["receptor"]["file"] = _out_path(results["receptor"]["file"], out_dir)
     if "decisions_in" in results:
         results["decisions_in"]["file"] = _out_path(results["decisions_in"]["file"], out_dir)
+    if plan.gate_results:  # only the gates that ran
+        results["gates"] = plan.gate_results
     if calc_rows is not None and not calc_rows:
         results["calcs"] = None  # a combine of partials with no calc logs: no SCF count is known, never "0"
     else:
@@ -1283,6 +1318,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except StageError as e:
         print(f"error: {e}", file=sys.stderr)
+        if explicit_out and e.gates:  # a rejected gate still leaves every pose's result
+            try:
+                args.out.mkdir(parents=True, exist_ok=True)
+                (args.out / "gates.json").write_text(json.dumps(e.gates, indent=2, sort_keys=True) + "\n")
+            except OSError as oe:  # never mask the exit code of the failure itself
+                print(f"warning: could not write gates.json: {oe}", file=sys.stderr)
         if explicit_out and plan is not None:  # a failed SCF still leaves the SCFs it ran
             try:
                 write_calc_log(plan, args.out, calc_file)

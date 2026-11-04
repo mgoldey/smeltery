@@ -291,3 +291,19 @@ def test_a_real_run_writes_sdfs_that_match_its_poses(tmp_path):
         assert len(mols) == entry["n_poses"] == len(res["per_pose"][name]["dE_int"])
         for m, v in zip(mols, res["per_pose"][name]["dE_int"], strict=True):
             assert float(m.GetProp("dE_int")) == pytest.approx(v, rel=1e-9)
+
+
+def test_the_record_carries_the_gate_results_of_the_gates_that_ran(tmp_path):
+    plan = make_plan(tmp_path, CONFIG + "\n[gates]\nforcefield = true\n")
+    path, _ = run_and_write(plan, tmp_path / "out")
+    gates = json.loads(path.read_text())["results"]["gates"]
+    assert set(gates) == {"strain_kcal"}  # posebusters did not run: no key for it
+    for c in plan.candidates:
+        assert gates["strain_kcal"][c.name] == [
+            a - b for a, b in zip(c.per_pose["E_mmff"], c.per_pose["E_mmff_relaxed"], strict=True)
+        ]
+
+
+def test_a_run_without_gates_has_no_gates_key(tmp_path):
+    path, _ = run_and_write(make_plan(tmp_path), tmp_path / "out")
+    assert "gates" not in json.loads(path.read_text())["results"]

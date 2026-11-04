@@ -331,6 +331,65 @@ def test_posebusters_rejects_unrelaxed_analogue_poses_loudly_with_the_reason(tmp
     r = _cli("run", str(p), "--plan")
     assert r.returncode == 3, r.stdout + r.stderr
     assert "stage 'posebusters' failed" in r.stderr and "propanol" in r.stderr and "relax_unmapped = true" in r.stderr
+    assert "butanol" in r.stderr  # every failing candidate is named, not just the first
+
+
+def _stub_posebusters(monkeypatch, failing: dict[str, tuple[str, ...]]):
+    """check_candidate_poses without the extra: candidates in `failing` fail those checks on every pose."""
+    from smeltery.gates import PoseReport, PoseVerdict
+
+    def check(cand, receptor=None):
+        bad = failing.get(cand.name, ())
+        verdict = PoseVerdict(("sanitization",), bad)
+        cand.pose_report = PoseReport((verdict,) * len(cand.poses), "mol", "9.9", receptor)
+        return cand.pose_report
+
+    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+
+
+def test_gates_report_every_pose_of_every_candidate_before_failing(tmp_path, monkeypatch, capsys):
+    _stub_posebusters(monkeypatch, {"propanol": ("bond_lengths",), "butanol": ("internal_clash", "planar")})
+    p = write(tmp_path, GATED_UNRELAXED)
+    out = tmp_path / "out"
+    assert main(["run", str(p), "--out", str(out)]) == 3
+    err = capsys.readouterr().err
+    assert "stage 'posebusters' failed" in err and "propanol" in err and "butanol" in err
+    assert "ethanol" not in err.split("failed:", 1)[1].split("relax_unmapped")[0]  # the passing parent is not blamed
+    gates = json.loads((out / "gates.json").read_text())
+    assert set(gates) == {"posebusters"} and set(gates["posebusters"]) == {"ethanol", "propanol", "butanol"}
+    for name, failed in [("ethanol", []), ("propanol", ["bond_lengths"]), ("butanol", ["internal_clash", "planar"])]:
+        poses = gates["posebusters"][name]["poses"]
+        assert len(poses) == 3 and all(x["failed_checks"] == failed for x in poses)
+        assert all(x["passed"] is (not failed) for x in poses)
+
+
+def test_a_failing_strain_gate_still_records_every_pose_strain(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, SMALL.format(floor=0.0) + "\n[gates]\nforcefield = true\nmax_strain_kcal = 0.001\n")
+    out = tmp_path / "out"
+    assert main(["run", str(p), "--out", str(out)]) == 3
+    err = capsys.readouterr().err
+    assert "stage 'forcefield' failed" in err
+    strain = json.loads((out / "gates.json").read_text())["strain_kcal"]
+    assert set(strain) == {"ethanol", "propanol", "butanol"} and all(len(v) == 3 for v in strain.values())
+    assert all(isinstance(x, float) for v in strain.values() for x in v)
+
+
+def test_later_gates_do_not_run_on_poses_posebusters_rejected(tmp_path, monkeypatch, capsys):
+    _stub_posebusters(monkeypatch, {"propanol": ("bond_lengths",)})
+    p = write(tmp_path, GATED_UNRELAXED + "forcefield = true\nmax_strain_kcal = 0.001\n")
+    out = tmp_path / "out"
+    assert main(["run", str(p), "--out", str(out)]) == 3
+    err = capsys.readouterr().err
+    assert "stage 'posebusters' failed" in err and "stage 'forcefield'" not in err
+    assert set(json.loads((out / "gates.json").read_text())) == {"posebusters"}  # no strain recorded for bad poses
+
+
+def test_no_gates_json_without_out_and_none_when_the_gates_pass(tmp_path, monkeypatch):
+    _stub_posebusters(monkeypatch, {"propanol": ("bond_lengths",)})
+    p = write(tmp_path, GATED_UNRELAXED)
+    monkeypatch.chdir(tmp_path)
+    assert main(["run", str(p)]) == 3
+    assert not list(tmp_path.glob("**/gates.json"))
 
 
 def test_relaxing_only_the_substituent_lets_the_same_poses_pass_posebusters(tmp_path):
