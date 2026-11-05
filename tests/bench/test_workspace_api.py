@@ -295,3 +295,73 @@ def test_from_a_run_keeps_the_runs_value_whatever_the_workspace_default(client_f
     made = c.post("/api/pipelines", json={"name": "next", "from_run": 0})
     assert made.status_code == 201, made.text
     assert made.json()["toml"] == HAND  # n_poses = 6 as the run had it, byte for byte
+
+
+def _gates_record(run_dir, gates: dict) -> None:
+    rec_path = next(run_dir.glob("run-*.json"))
+    rec = json.loads(rec_path.read_text())
+    rec["inputs"]["gates"] = gates
+    rec_path.write_text(json.dumps(rec))
+
+
+def test_a_rebuilt_run_keeps_its_own_gate_settings_not_the_workspace_defaults(client_for, run_dir):
+    _gates_record(run_dir, {"forcefield": True, "max_strain_kcal": 7.0})
+    c, _ = client_for(run_dir)
+    assert c.put("/api/methods/forcefield", json={"defaults": {"max_strain_kcal": 9.5}}).status_code == 200
+    made = c.post("/api/pipelines", json={"name": "next", "from_run": 0}).json()
+    assert tomllib.loads(made["toml"])["gates"] == {"forcefield": True, "max_strain_kcal": 7.0}
+
+
+def test_a_rebuilt_run_without_a_strain_setting_gets_none_from_the_workspace(client_for, run_dir):
+    _gates_record(run_dir, {"forcefield": True})
+    c, _ = client_for(run_dir)
+    assert c.put("/api/methods/forcefield", json={"defaults": {"max_strain_kcal": 9.5}}).status_code == 200
+    made = c.post("/api/pipelines", json={"name": "next", "from_run": 0}).json()
+    assert tomllib.loads(made["toml"])["gates"] == {"forcefield": True}
+
+
+# ------------------------------------------------------------------------------------------------ revert one step
+
+
+def test_reverting_one_step_keeps_the_other_steps_draft_edits(client_for):
+    c, _ = client_for()
+    draft = _edit(c, HAND, "set", "paired_poses", params={"n_poses": 8}).json()["toml"]
+    draft = _edit(c, draft, "set", "cut", params={"z": 3.0}).json()["toml"]
+    r = _edit(c, draft, "revert", "poses", baseline_toml=HAND)
+    assert r.status_code == 200, r.text
+    text = r.json()["toml"]
+    assert "n_poses = 6  # poses per ligand" in text and "z = 3.0" in text
+    assert _changed(HAND, text) == [("z = 2.0", "z = 3.0")]
+
+
+def test_reverting_the_measure_step_puts_rhf_back(client_for):
+    c, _ = client_for()
+    draft = _edit(c, HAND, "choose", "field_dft_interaction").json()["toml"]
+    draft = _edit(c, draft, "set", "paired_poses", params={"n_poses": 9}).json()["toml"]
+    text = _edit(c, draft, "revert", "measure", baseline_toml=HAND).json()["toml"]
+    assert "[field_dft_interaction]" not in text and "n_poses = 9" in text
+
+
+def test_reverting_needs_the_kept_text_and_a_real_step(client_for):
+    c, _ = client_for()
+    assert _edit(c, HAND, "revert", "poses").status_code == 400
+    assert _edit(c, HAND, "revert", "nope", baseline_toml=HAND).status_code == 400
+
+
+# ------------------------------------------------------------------------------------------------ R16
+
+
+def test_the_run_directory_holds_the_kept_text_with_only_input_paths_rewritten(client_for, tmp_path):
+    queue = FakeTaskQueue()
+    c, _ = client_for(queue=queue)
+    doc = _saved(c, "p1", HAND)
+    (Path(doc["folder"]) / "decisions.toml").write_text("")
+    text = HAND + '\n# who decided what\n[decisions]\nfile = "decisions.toml"\n'
+    c.put("/api/pipelines/p1", json={"toml": text, "base_sha256": doc["sha256"]})
+    out = tmp_path / "runs" / "kept"
+    assert c.post("/api/pipelines/p1/launch", json={"out": str(out)}).status_code == 201
+    written = (out / "config.toml").read_text()
+    changed = _changed(text, written)
+    assert len(changed) == 1 and changed[0][0] == 'file = "decisions.toml"'
+    assert changed[0][1].startswith('file = "inputs/') and changed[0][1].endswith('/decisions.toml"')
+    assert written.count("\n") == text.count("\n") and "# poses per ligand" in written

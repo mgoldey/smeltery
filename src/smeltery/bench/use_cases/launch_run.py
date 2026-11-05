@@ -31,7 +31,11 @@ class LaunchRun:
         *,
         command: list[str] | None = None,
         config_dir: Path | None = None,
+        text: str | None = None,
     ):  # noqa: E501
+        """Stage inputs into `out_dir`, write `out_dir/config.toml` and submit `smeltery run` on it. `text` is the
+        config as the user wrote it (comments and all); given, it is what the run directory holds, with only the input
+        paths rewritten to their staged copies. Without it the pipeline's compiled TOML is written."""
         if out_dir is None:
             out_dir = out if out is not None else Path("out")
         out_dir = Path(out_dir)
@@ -39,8 +43,8 @@ class LaunchRun:
         # relative paths resolve against `config_dir` (the folder the config lives in, as `smeltery run` does);
         # None means the Bench root
         base = Path(config_dir) if config_dir is not None else self.root
-        text, _ = stage_inputs(pipeline.to_toml(), base, out_dir)
-        (out_dir / "config.toml").write_text(text)
+        staged, _ = stage_inputs(text if text is not None else pipeline.to_toml(), base, out_dir)
+        (out_dir / "config.toml").write_text(staged)
         if command is None:
             command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
         task_id = self.task_queue.submit(

@@ -134,10 +134,11 @@ class SiteSpec(BaseModel):
 
 class StepEdit(BaseModel):
     toml: str
-    op: Literal["add", "remove", "set", "choose", "site"]
-    key: str  # a catalog method key
+    op: Literal["add", "remove", "set", "choose", "site", "revert"]
+    key: str  # a catalog method key; for `revert`, a step key
     params: dict[str, Any] | None = None  # `set`: knob -> value, null unsets; `add`/`choose`: initial knobs
     site: SiteSpec | None = None  # `site`: the charge to place
+    baseline_toml: str | None = None  # `revert`: the kept text the step goes back to
 
 
 class EditedText(BaseModel):
@@ -394,7 +395,38 @@ def _patch(target: dict, before: dict, after: dict) -> None:
             target[k] = v
 
 
+def _revert(p: Pipeline, step: str, kept: Pipeline) -> None:
+    """Put step `step` of `p` back as it is in `kept`: the methods it places and their knobs (or, for Ligands, the
+    campaign, parent, candidates and decisions). Every other step keeps its draft edits."""
+    offered = {k: methods for k, _, methods in step_model.STEPS}
+    if step not in offered:
+        raise ValueError(f"no step {step!r}; steps: {list(offered)}")
+    methods = offered[step]
+    if not methods:
+        p.campaign, p.parent, p.candidates, p.decisions = (
+            kept.campaign,
+            kept.parent,
+            dict(kept.candidates),
+            kept.decisions,
+        )
+        return
+    for m in methods:
+        if m in p.keys() and m not in kept.keys():
+            p.remove(m)
+    for m in methods:
+        if m in kept.keys():
+            if m not in p.keys():
+                p.add(m)
+            p.stage(m).params = dict(kept.stage(m).params)
+
+
 def _edit(p: Pipeline, body: StepEdit, defaults: dict[str, dict[str, Any]]) -> None:
+    if body.op == "revert":
+        kept = _parse_or_400(body.baseline_toml) if body.baseline_toml is not None else None
+        if kept is None:
+            raise ValueError("a revert needs baseline_toml, the kept pipeline")
+        _revert(p, body.key, kept)
+        return
     if body.op == "add":
         p.add(body.key, body.params or None, defaults=defaults)
     elif body.op == "remove":
@@ -466,7 +498,7 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
     if not out.is_absolute():
         out = root / out
     tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-        p, out_dir=out, config_dir=f.folder
+        p, out_dir=out, config_dir=f.folder, text=f.text
     )
     t = st.task_queue.get(tid)
     if t is None:

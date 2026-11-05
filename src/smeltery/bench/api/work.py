@@ -141,7 +141,6 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
     charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
     notes say so, and click-to-place puts them back."""
     r = run(request, body.run)
-    defaults = workspace_defaults(request)
     inputs = r.record.get("inputs", {})
     p = Pipeline.minimal(r.campaign, r.parent, dict(r.candidates))
     notes = []
@@ -151,10 +150,13 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
         cut["floor"] = floor.get("value")
     p.set("cut", **cut)
     by_gate = {m.gate_key: k for k, m in catalog().items() if m.gate_key}  # the TOML's gate names -> stage keys
-    for gate, on in inputs.get("gates", {}).items():
+    gates = inputs.get("gates", {})
+    for gate, on in gates.items():
         key = by_gate.get(gate)
         if on is True and key and key in p.addable():
-            p.add(key, defaults=defaults)
+            p.add(key)  # a copy of what ran: the workspace defaults are for methods added new, not for this
+    if "forcefield" in p.keys() and gates.get("max_strain_kcal") is not None:
+        p.set("forcefield", max_strain_kcal=gates["max_strain_kcal"])
     if inputs.get("field"):
         notes.append(
             f"This run's {len(inputs['field'])} pocket charges are recorded as positions, not as the atom sites that "

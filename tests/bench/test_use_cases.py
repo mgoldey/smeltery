@@ -178,3 +178,12 @@ def test_a_launched_run_keeps_the_users_original_source_through_the_cli_restage(
     assert (out / "config.toml").read_bytes() == first
     assert entry["sha256"] == hashlib.sha256(first).hexdigest()
     assert len(list((out / "inputs").rglob("*.pqr"))) == 1
+
+
+def test_launch_run_writes_the_given_text_not_a_regenerated_one(tmp_path, pipeline):
+    q = FakeTaskQueue()
+    text = "# mine\n" + pipeline.to_toml()
+    LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock()).run(
+        pipeline, out_dir=tmp_path / "out", text=text
+    )
+    assert (tmp_path / "out" / "config.toml").read_text() == text
