@@ -11,9 +11,6 @@ type Preview = { n_charges: number; net_charge: number; nearest_ang: number | nu
 type Opened = Schemas["StructureInfo"];
 type Choice = "structure" | "pocket_file" | "hand_placed";
 
-/** The event a step view fires with the new draft TOML; the workspace page turns it into its draft. */
-export const DRAFT_EVENT = "bench:draft";
-
 async function post<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
@@ -48,7 +45,7 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
  * Step 1: the active site, three ways. Each way writes its own sections into the draft through
  * `POST /api/pipelines/active_site`; the preview builds the point-charge field with no docking and no SCF.
  */
-export function ActiveSiteView({ toml, onDraft }: StepViewProps & { onDraft?: (toml: string) => void }) {
+export function ActiveSiteView({ toml, onToml }: StepViewProps & { onToml?: (text: string) => void }) {
   const current = chosen(toml);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,8 +63,7 @@ export function ActiveSiteView({ toml, onDraft }: StepViewProps & { onDraft?: (t
     try {
       const r = await post<{ toml: string }>("/api/pipelines/active_site", { toml, ...body });
       setError(null);
-      if (onDraft) onDraft(r.toml);
-      window.dispatchEvent(new CustomEvent(DRAFT_EVENT, { detail: r.toml }));
+      onToml?.(r.toml);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
