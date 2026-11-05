@@ -4,7 +4,7 @@ import copy
 
 from smeltery.gui.catalog import catalog
 from smeltery.gui.pipeline import Pipeline
-from smeltery.gui.steps import STEPS, steps
+from smeltery.gui.steps import STEPS, pipeline_issues, steps
 
 
 def _pipeline() -> Pipeline:
@@ -74,3 +74,53 @@ def test_each_param_reports_its_previous_value_only_when_changed():
 
 def test_the_fixture_pipeline_checks_clean():
     assert Pipeline.ok.fget(_pipeline())
+
+
+def _broken():
+    from smeltery.gui.pipeline import Stage
+
+    a = _pipeline()
+    a.remove("field_interaction")
+    b = _pipeline()
+    b.candidates = {}
+    c = _pipeline()
+    c.parent = "nope"
+    d = _pipeline()
+    d.stage("paired_poses").params["n_poses"] = "many"  # check() cannot see a site atom out of range; that is the run's
+    e = _pipeline()
+    e.stages.append(Stage("bogus"))
+    return [a, b, c, d, e]
+
+
+def test_every_check_issue_appears_exactly_once():
+    from collections import Counter
+
+    for p in _broken():
+        views = steps(p)
+        shown = Counter(x for v in views for x in v.issues) + Counter(pipeline_issues(p, views))
+        for issue, n in Counter(p.check()).items():
+            assert shown[issue] == n, (issue, p.check())
+        assert any(x.level == "error" for x in p.check())
+        if any(x.level == "error" for x in p.check()):
+            assert any(v.state == "needs_input" for v in views) or any(
+                x.level == "error" for x in pipeline_issues(p, views)
+            )
+
+
+def test_an_empty_ligands_step_says_what_is_missing():
+    p = _pipeline()
+    p.candidates = {}
+    v = _by_key(steps(p))["ligands"]
+    assert v.state == "needs_input"
+    assert any(x.level == "error" and ("candidates" in x.message) for x in v.issues)
+    q = _pipeline()
+    q.campaign = ""
+    v = _by_key(steps(q))["ligands"]
+    assert v.state == "needs_input" and v.issues
+
+
+def test_candidate_and_parent_problems_land_on_the_ligands_step():
+    for p in _broken()[1:3]:
+        v = _by_key(steps(p))["ligands"]
+        assert v.state == "needs_input"
+        assert [x for x in p.check() if x.level == "error"][0] in v.issues

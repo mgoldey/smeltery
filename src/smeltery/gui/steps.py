@@ -94,11 +94,33 @@ def _step_signature(p: Pipeline, key: str, methods: tuple[str, ...]):
     return sig
 
 
-def _belongs(issue: Issue, methods: tuple[str, ...]) -> bool:
+def _home(issue: Issue) -> int | None:
+    """The ONE step an issue is shown on (index into STEPS), or None for the pipeline as a whole: by its stage if
+    that is a placed-able method; else the first step whose method key it quotes; else Ligands when it is about
+    the campaign, parent or candidates."""
     if issue.stage is not None:
-        return issue.stage in methods
-    # A pipeline-level issue ("add 'cut' (...)") names the method it wants in quotes.
-    return any(f"'{m}'" in issue.message for m in methods)
+        for i, (_, _, methods) in enumerate(STEPS):
+            if issue.stage in methods:
+                return i
+        return None
+    for i, (_, _, methods) in enumerate(STEPS):
+        if any(f"'{m}'" in issue.message for m in methods):
+            return i
+    if any(w in issue.message for w in ("campaign", "parent", "candidates")):
+        return 1
+    return None
+
+
+def pipeline_issues(p: Pipeline, views: list[StepView]) -> list[Issue]:
+    """The issues of `p.check()` that landed on no step (shown above the drawing), so each shows exactly once."""
+    shown = [x for v in views for x in v.issues]
+    out = []
+    for x in p.check():
+        if x in shown:
+            shown.remove(x)
+        else:
+            out.append(x)
+    return out
 
 
 def steps(p: Pipeline, baseline: Pipeline | None = None, defaults: dict | None = None) -> list[StepView]:
@@ -106,18 +128,28 @@ def steps(p: Pipeline, baseline: Pipeline | None = None, defaults: dict | None =
     `defaults` is `{method_key: {param_name: value}}`, the workspace's defaults, shown beside each knob."""
     defaults = defaults or {}
     issues = p.check()
+    home = [_home(x) for x in issues]
     views: list[StepView] = []
     first_changed: int | None = None
     for i, (key, label, methods) in enumerate(STEPS):
         placed = [m for m in methods if m in p.keys()]
         chosen = placed[0] if placed else None
-        errors_here = [x for x in issues if _belongs(x, methods) and x.level == "error"]
+        here = [x for x, h in zip(issues, home) if h == i]
+        if (
+            methods == ()
+            and not (p.campaign and p.parent and p.candidates)
+            and not any(x.level == "error" for x in here)
+        ):
+            missing = [
+                n for n, v in (("campaign", p.campaign), ("parent", p.parent), ("candidates", p.candidates)) if not v
+            ]
+            here.append(Issue("error", None, "needs " + ", ".join(missing)))
+        errors_here = [x for x in here if x.level == "error"]
         changed = baseline is not None and _step_signature(p, key, methods) != _step_signature(baseline, key, methods)
         if changed and first_changed is None:
             first_changed = i
-        if methods == () and not (p.campaign and p.parent and p.candidates):
-            state: State = "needs_input"
-        elif errors_here:
+        state: State
+        if errors_here:
             state = "needs_input"
         elif changed:
             state = "changed"
@@ -156,7 +188,7 @@ def steps(p: Pipeline, baseline: Pipeline | None = None, defaults: dict | None =
                 methods=list(methods),
                 chosen=chosen,
                 params=params,
-                issues=[x for x in issues if _belongs(x, methods)],
+                issues=here,
             )
         )
     return views
