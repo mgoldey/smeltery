@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { rdkit } from "../../../chem/rdkit";
 import type { StepViewProps } from "./registry";
@@ -17,7 +17,8 @@ export type LigandCheck = {
   core_atoms: number[];
   problems: string[];
 };
-type LigandsOut = { parent: string; candidates: LigandCheck[] };
+type LigandsOut = { parent: string; candidates: LigandCheck[]; problems: string[] };
+type Entry = { name: string; smiles: string };
 
 /** The edit route's only caller wiring: the workspace hands the view a way to replace the draft text. */
 export type LigandsViewProps = StepViewProps;
@@ -176,10 +177,18 @@ function Row({
  * parent, highlighted), and the list edited in place. The text is the only state: an edit goes to the API, which
  * writes `[candidates]` and `parent` into it, and `onToml` replaces the draft. Nothing here runs an SCF or docking.
  */
-export function LigandsView({ toml, onToml }: LigandsViewProps) {
+export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
+  // The check is debounced: typing in the TOML pane must not run a core search per keystroke. The server caches by
+  // (parent SMILES, candidate SMILES), so an unchanged pair costs nothing even when the text around it changes.
+  const [toml, setToml] = useState(live);
+  useEffect(() => {
+    const t = setTimeout(() => setToml(live), 300);
+    return () => clearTimeout(t);
+  }, [live]);
   const q = useQuery({
     queryKey: ["ligands", toml],
     queryFn: () => post<LigandsOut>("/api/pipelines/ligands", { toml }),
+    placeholderData: keepPreviousData,
     retry: false,
   });
   const [busy, setBusy] = useState(false);
@@ -188,15 +197,26 @@ export function LigandsView({ toml, onToml }: LigandsViewProps) {
   const data = q.data;
   const canEdit = onToml !== undefined;
 
-  async function write(candidates: Record<string, string>, parent: string) {
-    if (!onToml) return;
+  async function write(candidates: Entry[], parent: string): Promise<boolean> {
+    if (!onToml) return false;
+    const dup = candidates.find((c, i) => candidates.findIndex((d) => d.name === c.name) !== i);
+    if (dup) {
+      setError(`there is already a candidate named ${JSON.stringify(dup.name)}; names must be unique`);
+      return false;
+    }
+    if (candidates.some((c) => !c.name.trim())) {
+      setError("a candidate needs a name");
+      return false;
+    }
     setBusy(true);
     try {
-      const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml, candidates, parent });
+      const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml: live, candidates, parent });
       setError(null);
       onToml(r.toml);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -206,13 +226,13 @@ export function LigandsView({ toml, onToml }: LigandsViewProps) {
   if (!data) return <p className="lede" data-view="ligands">Checking the candidates...</p>;
 
   const onCommit = (kind: "rename" | "smiles" | "parent" | "remove", c: LigandCheck, value?: string) => {
-    const next: Record<string, string> = {};
+    const next: Entry[] = [];
     let parent = data.parent;
     for (const x of data.candidates) {
-      if (x.name !== c.name) next[x.name] = x.smiles;
+      if (x.name !== c.name) next.push({ name: x.name, smiles: x.smiles });
       else if (kind === "remove") continue;
-      else if (kind === "rename") next[(value ?? "").trim()] = x.smiles;
-      else next[x.name] = kind === "smiles" ? (value ?? "") : x.smiles;
+      else if (kind === "rename") next.push({ name: (value ?? "").trim(), smiles: x.smiles });
+      else next.push({ name: x.name, smiles: kind === "smiles" ? (value ?? "") : x.smiles });
     }
     if (kind === "rename" && c.is_parent) parent = (value ?? "").trim();
     if (kind === "parent") parent = c.name;
@@ -221,9 +241,9 @@ export function LigandsView({ toml, onToml }: LigandsViewProps) {
 
   const heavy = (s: string) => (s.match(/\[[^\]]+\]|Cl|Br|[BCNOPSFI]|[bcnops]/g) ?? []).length;
   const add = () => {
-    const next = Object.fromEntries(data.candidates.map((x) => [x.name, x.smiles]));
-    next[fresh.name.trim()] = fresh.smiles.trim();
-    void write(next, data.parent).then(() => setFresh({ name: "", smiles: "" }));
+    const next: Entry[] = data.candidates.map((x) => ({ name: x.name, smiles: x.smiles }));
+    next.push({ name: fresh.name.trim(), smiles: fresh.smiles.trim() });
+    void write(next, data.parent).then((ok) => ok && setFresh({ name: "", smiles: "" }));
   };
 
   return (
@@ -258,8 +278,11 @@ export function LigandsView({ toml, onToml }: LigandsViewProps) {
         </tbody>
       </table>
       {data.candidates.length === 0 ? <p className="empty-state">No candidates yet. Add the parent first.</p> : null}
-      {data.candidates.some((c) => c.problems.length) ? (
+      {data.candidates.some((c) => c.problems.length) || data.problems.length ? (
         <ul data-testid="ligands-problems">
+          {data.problems.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
           {data.candidates.flatMap((c) => c.problems.map((p) => <li key={`${c.name}:${p}`}>{p}</li>))}
         </ul>
       ) : null}

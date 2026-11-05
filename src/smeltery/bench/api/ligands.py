@@ -6,6 +6,7 @@ Its own module so the tasks building step views never edit the same file.
 from __future__ import annotations
 
 import tomllib
+from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -20,9 +21,6 @@ from . import models as M
 from .pipelines import EditedText, _parse_or_400
 
 router = APIRouter(prefix="/api/pipelines", tags=["ligands"])
-
-#: A check runs on every edit, so the MCS search gets a short leash; a timeout is reported, not hidden.
-CORE_TIMEOUT_S = 3
 
 
 class LigandsRequest(BaseModel):
@@ -51,24 +49,44 @@ class LigandCheck(BaseModel):
 class LigandsOut(BaseModel):
     parent: str
     candidates: list[LigandCheck]
+    problems: list[str] = Field(description="problems with the list as a whole, e.g. a parent that is not a candidate")
+
+
+class CandidateIn(BaseModel):
+    name: str
+    smiles: str
 
 
 class LigandsEdit(BaseModel):
     toml: str
-    candidates: dict[str, str] = Field(description="the whole new candidate list, name -> SMILES, in order")
+    candidates: list[CandidateIn] = Field(description="the whole new candidate list, in order; names must be unique")
     parent: str
 
 
-def _core(parent: Candidate, cand: Candidate) -> tuple[list[int], str | None]:
-    """The analogue atoms `PairedPoses` copies from the parent: its own scaffold map, not a second MCS."""
-    tier = PairedPoses(n_poses=1, mcs_timeout_s=CORE_TIMEOUT_S)
+@lru_cache(maxsize=512)
+def _core_cached(parent_smiles: str, smiles: str) -> tuple[tuple[int, ...], str | None]:
+    """The analogue atoms `PairedPoses` copies from the parent: its own scaffold map, not a second MCS, with the
+    run's own default search time so the check and the run agree. Pure in its two SMILES, so cached; the reason (if
+    any) carries a placeholder name the caller replaces."""
+    tier = PairedPoses(n_poses=1)
+    parent = Candidate("parent", parent_smiles)
     try:
-        tier.run([Candidate(parent.name, parent.smiles), cand], {"parent": Candidate(parent.name, parent.smiles)})
+        tier.run([parent, Candidate("candidate", smiles)], {"parent": Candidate("parent", parent_smiles)})
     except NoCommonCoreError as e:
-        return [], str(e)
-    except (RuntimeError, ValueError) as e:  # an embedding that fails is a reason, not a crash
-        return [], f"{cand.name}: cannot pair with the parent: {e}"
-    return sorted(a for a, _ in tier.scaffold_maps[cand.name]), None
+        if "timed out" in str(e):
+            return (), (
+                f"the common-core search with the parent timed out after {tier.mcs_timeout_s} s; "
+                "a run searches the same way and would stop here too"
+            )
+        return (), str(e).removeprefix("candidate: ")
+    except Exception as e:  # noqa: BLE001 - one bad molecule is a row's problem, never a 500 for the table
+        return (), f"cannot pair with the parent: {e}"
+    return tuple(sorted(a for a, _ in tier.scaffold_maps["candidate"])), None
+
+
+def _core(parent_smiles: str, name: str, smiles: str) -> tuple[list[int], str | None]:
+    core, why = _core_cached(parent_smiles, smiles)
+    return list(core), (f"{name}: {why}" if why else None)
 
 
 def _check(name: str, smiles: str, parent: Candidate, parent_ok: bool) -> LigandCheck:
@@ -104,10 +122,9 @@ def _check(name: str, smiles: str, parent: Candidate, parent_ok: bool) -> Ligand
     if is_parent:
         core: list[int] = list(range(molh.GetNumAtoms()))
     elif not parent_ok:
-        core = []
-        problems.append(f"{name}: no core, because the parent's SMILES cannot be read")
+        core = []  # the list-level problem says why, once
     else:
-        core, why = _core(parent, Candidate(name, smiles))
+        core, why = _core(parent.smiles, name, smiles)
         if why:
             problems.append(why)
     return LigandCheck(
@@ -135,7 +152,16 @@ def ligands_check(body: LigandsRequest) -> LigandsOut:
     parent_smiles = p.candidates.get(p.parent, "")
     parent = Candidate(p.parent, parent_smiles)
     parent_ok = bool(parent_smiles.strip()) and Chem.MolFromSmiles(parent_smiles) is not None
-    return LigandsOut(parent=p.parent, candidates=[_check(n, s, parent, parent_ok) for n, s in p.candidates.items()])
+    problems = []
+    if p.candidates and p.parent not in p.candidates:
+        problems.append(f"the parent {p.parent!r} is not among the candidates, so no core can be found")
+    elif p.candidates and not parent_ok:
+        problems.append(f"the parent {p.parent!r} has a SMILES that cannot be read, so no core can be found")
+    return LigandsOut(
+        parent=p.parent,
+        candidates=[_check(n, s, parent, parent_ok) for n, s in p.candidates.items()],
+        problems=problems,
+    )
 
 
 @router.post("/ligands/edit", response_model=EditedText, responses={400: {"model": M.Problem}})
@@ -145,9 +171,13 @@ def ligands_edit(body: LigandsEdit) -> EditedText:
     p = _parse_or_400(body.toml)
     if p is None:
         raise HTTPException(status_code=400, detail="this TOML is not a pipeline config; fix it in the TOML pane")
-    if any(not n.strip() for n in body.candidates):
+    names = [c.name for c in body.candidates]
+    if any(not n.strip() for n in names):
         raise HTTPException(status_code=400, detail="a candidate needs a name")
-    if body.parent not in body.candidates:
+    for n in dict.fromkeys(names):
+        if names.count(n) > 1:
+            raise HTTPException(status_code=400, detail=f"two candidates are named {n!r}; names must be unique")
+    if body.parent not in names:
         if body.parent == p.parent:
             raise HTTPException(
                 status_code=400,
@@ -156,7 +186,7 @@ def ligands_edit(body: LigandsEdit) -> EditedText:
             )
         raise HTTPException(status_code=400, detail=f"the parent {body.parent!r} is not among the candidates")
     target = tomllib.loads(body.toml)
-    target["candidates"] = dict(body.candidates)
+    target["candidates"] = {c.name: c.smiles for c in body.candidates}
     target["parent"] = body.parent
     try:
         return EditedText(toml=apply(body.toml, target))

@@ -36,6 +36,13 @@ test("add, rename, change a SMILES and pick the parent write the text; removing 
   await nm.press("Enter");
   await expect(row(page, "4-Et")).toBeVisible();
 
+  // a rename onto an existing name is refused, not merged
+  const clash = page.getByLabel("Name of 4-Et");
+  await clash.fill("4-F");
+  await clash.press("Enter");
+  await expect(page.getByTestId("ligands-error")).toContainText("4-F");
+  await expect(row(page, "4-Et")).toBeVisible();
+
   await page.getByRole("button", { name: "Remove benzoic" }).click();
   await expect(page.getByTestId("ligands-error")).toContainText("parent");
   await expect(row(page, "benzoic")).toBeVisible();

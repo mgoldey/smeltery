@@ -90,8 +90,9 @@ def test_text_that_is_not_toml_is_a_400_naming_the_line_and_an_empty_pipeline_ha
 
 
 def edit(client, cands, parent, text=None):
+    rows = cands if isinstance(cands, list) else [{"name": n, "smiles": s} for n, s in cands.items()]
     return client.post(
-        "/api/pipelines/ligands/edit", json={"toml": text or toml_of(), "candidates": cands, "parent": parent}
+        "/api/pipelines/ligands/edit", json={"toml": text or toml_of(), "candidates": rows, "parent": parent}
     )
 
 
@@ -125,3 +126,58 @@ def test_a_parent_that_is_not_a_candidate_and_a_blank_name_are_refused(client_fo
     c, _ = client_for()
     assert edit(c, CANDS, "nope").status_code == 400
     assert edit(c, {**CANDS, "": "CC"}, "benzoic").status_code == 400
+
+
+def test_a_duplicate_name_is_refused_naming_it(client_for):
+    c, _ = client_for()
+    r = edit(
+        c,
+        [{"name": "a", "smiles": "CC"}, {"name": "benzoic", "smiles": PARENT}, {"name": "a", "smiles": "CCC"}],
+        "benzoic",
+    )
+    assert r.status_code == 400 and "'a'" in r.json()["detail"]
+
+
+def test_a_repeated_pair_is_computed_once(client_for, monkeypatch):
+    from smeltery.bench.api import ligands
+
+    c, _ = client_for()
+    ligands._core_cached.cache_clear()
+    calls = []
+    real = PairedPoses.run
+    monkeypatch.setattr(PairedPoses, "run", lambda self, *a, **k: (calls.append(1), real(self, *a, **k))[1])
+    check(c)
+    check(c)
+    check(c, {**CANDS, "4-Cl": "OC(=O)c1ccc(Cl)cc1"})
+    assert len(calls) == 2  # 4-F once, 4-Cl once; the repeats were cache hits
+
+
+def test_the_check_searches_as_long_as_a_run_does_and_a_bad_molecule_is_a_row(client_for, monkeypatch):
+    from smeltery.bench.api import ligands
+
+    c, _ = client_for()
+    ligands._core_cached.cache_clear()
+    seen = []
+    real = PairedPoses.run
+
+    def run(self, *a, **k):
+        seen.append(self.mcs_timeout_s)
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(PairedPoses, "run", run)
+    check(c)
+    assert seen == [PairedPoses().mcs_timeout_s]
+
+    def boom(self, *a, **k):
+        raise MemoryError("boom")
+
+    monkeypatch.setattr(PairedPoses, "run", boom)
+    got = check(c, {**CANDS, "4-Cl": "OC(=O)c1ccc(Cl)cc1"})
+    assert got["4-Cl"]["core_atoms"] == [] and "boom" in got["4-Cl"]["problems"][0]
+
+
+def test_a_missing_parent_is_one_list_level_problem(client_for):
+    c, _ = client_for()
+    r = c.post("/api/pipelines/ligands", json={"toml": toml_of(CANDS, "ghost")}).json()
+    assert len(r["problems"]) == 1 and "ghost" in r["problems"][0]
+    assert all(not any("SMILES cannot be read" in m for m in x["problems"]) for x in r["candidates"])
