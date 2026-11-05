@@ -78,6 +78,8 @@ class Pipeline:
     stages: list[Stage] = field(default_factory=list)
     #: The config's `[decisions]` table, carried through unchanged (an input file, not a stage), or None.
     decisions: dict | None = None
+    #: The config's `[run]` table (how the run executes, e.g. `scf_timeout_s`), carried through unchanged, or None.
+    run: dict | None = None
 
     # ------------------------------------------------------------------ building
 
@@ -303,6 +305,8 @@ class Pipeline:
             cfg["gates"] = gates
         if self.decisions is not None:
             cfg["decisions"] = dict(self.decisions)
+        if self.run is not None:
+            cfg["run"] = dict(self.run)
         return cfg
 
     def compile(self) -> dict:
@@ -327,6 +331,8 @@ class Pipeline:
         p = cls(cfg.get("campaign", ""), cfg.get("parent", ""), dict(cfg.get("candidates", {})))
         if "decisions" in cfg:
             p.decisions = dict(cfg["decisions"])
+        if isinstance(cfg.get("run"), dict):
+            p.run = dict(cfg["run"])
         for section, key in by_section.items():
             m = method(key)
             alternative = any(method(o).section in cfg for o in m.exclusive)

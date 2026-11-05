@@ -1,9 +1,10 @@
 """`smeltery run --temporal`: the pipeline as a durable Temporal workflow, and the RHF remedy ladder.
 
-The SCFs are a fake `ferric` (no engine runs): its energies are a deterministic function of the geometry and the
-field, and it fails to converge on demand, so both the Temporal run and the plain run it is compared with compute
-the same numbers. The workflow tests need the Temporal dev server at 127.0.0.1:7233; each uses its own task queue
-and an in-process worker (as `smeltery temporal-worker` runs it), and terminates what it started.
+The SCFs are a fake `ferric` (`tests/fake_ferric.py`; no engine runs): its energies are a deterministic function of
+the geometry and the field, it fails to converge or hangs on demand, and it serves both this process (a plain run)
+and the score child processes the Temporal worker spawns, so both compute the same numbers. The workflow tests need
+the Temporal dev server at 127.0.0.1:7233; each uses its own task queue and an in-process worker (as
+`smeltery temporal-worker` runs it), and terminates what it started.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
 import socket
 import sys
@@ -26,6 +28,7 @@ import pytest
 
 pytest.importorskip("temporalio", reason="temporalio (the `temporal` extra) is not installed")
 
+import fake_ferric  # noqa: E402
 from golden_path import results_without_timing  # noqa: E402
 
 from smeltery import cli, temporal_run  # noqa: E402
@@ -35,6 +38,7 @@ from smeltery.model import HARTREE_TO_KCAL, PointCharge  # noqa: E402
 from smeltery.tiers import FieldInteraction  # noqa: E402
 
 HOST = "127.0.0.1:7233"
+FAKE_CHILD = [sys.executable, str(Path(fake_ferric.__file__).resolve())]
 
 TINY = """
 campaign = "tiny"
@@ -78,73 +82,60 @@ def _server_up() -> bool:
 needs_server = pytest.mark.skipif(not _server_up(), reason="no Temporal dev server at 127.0.0.1:7233")
 
 
-# ------------------------------------------------------------------------------------------------ a fake ferric
+# ------------------------------------------------------------------------------------------------ the fake engine
 
 
-class FakeFerric(types.ModuleType):
-    """`BasisSet.bundled`, `Molecule.from_xyz_string`, `run_rhf`: energies from the geometry, convergence on demand.
+class Fake:
+    """The fake ferric's controls: `rules[(label, leg)]`, saved for the child processes; what ran, read back."""
 
-    `rules[(label, leg)]` is a predicate on the run_rhf kwargs saying whether that SCF converges (default: yes).
-    `block_after`: the SCF call with that index (0-based) waits on `gate`, and raises if `killed` is set then."""
+    def __init__(self, d: Path):
+        self.dir = d
+        self.rules: dict[tuple[str, str], str] = {}
+        self.save()
 
-    def __init__(self):
-        super().__init__("ferric")
-        self.rules: dict = {}
-        self.calls: list[tuple[str, str, dict]] = []  # completed SCFs
-        self.lock = threading.Lock()
-        self.block_after: int | None = None
-        self.blocked, self.gate, self.killed = threading.Event(), threading.Event(), False
-        self._started = 0
-        fake = self
+    def save(self) -> None:
+        cfg = {"rules": {f"{k[0]}|{k[1]}": v for k, v in self.rules.items()}, "dir": str(self.dir)}
+        (self.dir / "cfg.json").write_text(json.dumps(cfg))
 
-        class BasisSet:
-            @staticmethod
-            def bundled(name):
-                return name
+    def set(self, label: str, leg: str, rule: str | None) -> None:
+        if rule is None:
+            self.rules.pop((label, leg), None)
+        else:
+            self.rules[(label, leg)] = rule
+        self.save()
 
-        class Molecule:
-            def __init__(self, label, xyz):
-                self.label, self.xyz = label, xyz
+    def calls(self) -> list[dict]:
+        p = self.dir / "calls.jsonl"
+        return [json.loads(x) for x in p.read_text().splitlines()] if p.is_file() else []
 
-            @staticmethod
-            def from_xyz_string(text, charge=0):
-                lines = text.splitlines()
-                xyz = np.array([[float(v) for v in ln.split()[1:4]] for ln in lines[2:] if ln.strip()])
-                return Molecule(lines[1], xyz)
-
-        def run_rhf(mol, bs, point_charges=None, **kw):
-            leg = "vacuum" if point_charges is None else "field"
-            with fake.lock:
-                k = fake._started
-                fake._started += 1
-            if fake.block_after is not None and k == fake.block_after:
-                fake.blocked.set()
-                fake.gate.wait(60)
-                if fake.killed:
-                    raise RuntimeError("worker killed mid-SCF")
-            e = -0.1 * len(mol.xyz) - 0.01 * float(np.abs(mol.xyz).sum())
-            if point_charges:
-                for q, x, y, z in point_charges:
-                    d = np.linalg.norm(mol.xyz - np.array([x, y, z]) / 1.8897261246, axis=1)
-                    e += -0.02 * q * float(np.sum(1.0 / (d + 1.0)))
-            ok = fake.rules.get((mol.label, leg), lambda kw: True)(kw)
-            with fake.lock:
-                fake.calls.append((mol.label, leg, dict(kw)))
-            return types.SimpleNamespace(converged=bool(ok), iterations=7, energy=e)
-
-        self.BasisSet, self.Molecule, self.run_rhf = BasisSet, Molecule, run_rhf
+    def pids(self) -> list[int]:
+        p = self.dir / "pids"
+        return [int(x) for x in p.read_text().split()] if p.is_file() else []
 
 
 @pytest.fixture
-def ferric(monkeypatch):
-    fake = FakeFerric()
-    monkeypatch.setitem(sys.modules, "ferric", fake)
-    temporal_run._CACHE.clear()
+def ferric(tmp_path, monkeypatch):
+    d = tmp_path / "fake"
+    d.mkdir()
+    monkeypatch.setenv("FAKE_FERRIC", str(d / "cfg.json"))
+    fake = Fake(d)
+    monkeypatch.setitem(sys.modules, "ferric", fake_ferric.install())
     return fake
 
 
-def _config(tmp_path: Path, n_poses: int = 2, extra: str = "") -> Path:
-    p = tmp_path / "c.toml"
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    with contextlib.suppress(OSError):  # a zombie is dead: it only waits to be reaped
+        if Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z":
+            return False
+    return True
+
+
+def _config(tmp_path: Path, n_poses: int = 2, extra: str = "", name: str = "c.toml") -> Path:
+    p = tmp_path / name
     p.write_text(TINY.format(n_poses=n_poses) + extra)
     return p
 
@@ -159,8 +150,9 @@ def _rows(out: Path) -> list[dict]:
 
 
 @contextlib.contextmanager
-def worker(task_queue: str, workers: int = 2):
-    """A pipeline worker on its own thread and event loop, as `smeltery temporal-worker` runs it."""
+def worker(task_queue: str, workers: int = 2, threads: int = 1):
+    """A pipeline worker on its own thread and event loop, as `smeltery temporal-worker` runs it, its score children
+    running the fake engine."""
     loop = asyncio.new_event_loop()
     ready, box = threading.Event(), {}
 
@@ -168,7 +160,7 @@ def worker(task_queue: str, workers: int = 2):
         box["stop"] = asyncio.Event()
         client = await temporal_run.connect(HOST)
         ready.set()
-        await temporal_run.run_worker(client, task_queue, workers, box["stop"])
+        await temporal_run.run_worker(client, task_queue, workers, threads, box["stop"], FAKE_CHILD)
 
     th = threading.Thread(target=loop.run_until_complete, args=(run(),), daemon=True)
     th.start()
@@ -194,6 +186,40 @@ def _terminate(out: Path) -> None:
         asyncio.run(go())
 
 
+def _staged(cfg: Path, out: Path, heartbeat_s: float = 3.0, workers: int = 1) -> temporal_run.RunInput:
+    _, info = cli._stage_config(cfg, out)
+    staged = out / "config.toml"
+    return temporal_run.RunInput(
+        str(staged), str(out), workers, info, heartbeat_s=heartbeat_s, config_sha=temporal_run.sha256_file(staged)
+    )
+
+
+async def _start(inp, queue):
+    client = await temporal_run.connect(HOST)
+    return await client.start_workflow(
+        temporal_run.PipelineRunWorkflow.run,
+        inp,
+        id=temporal_run.workflow_id(inp.out, Path(inp.config).read_text()),
+        task_queue=queue,
+    )
+
+
+def _finish(inp, queue):
+    async def go():
+        client = await temporal_run.connect(HOST)
+        return await temporal_run.start_and_wait(client, inp, queue, poll_s=1, log=lambda *_: None)
+
+    return asyncio.run(go())
+
+
+def _wait_for(path: Path, timeout: float = 60.0) -> None:
+    t0 = time.monotonic()
+    while not path.exists():
+        if time.monotonic() - t0 > timeout:
+            raise TimeoutError(f"{path} never appeared")
+        time.sleep(0.1)
+
+
 @pytest.fixture
 def queue():
     return f"smeltery-pipeline-test-{uuid.uuid4().hex[:8]}"
@@ -202,33 +228,61 @@ def queue():
 # ------------------------------------------------------------------------------------------------ the remedy ladder
 
 
-def test_the_ladder_climbs_when_an_scf_does_not_converge(ferric):
-    """Rung 0 does not converge, rung 1 (a level shift) does: the value is rung 1's, and the rung is recorded."""
+def _water():
     from smeltery.model import Candidate, Pose
 
-    ferric.rules[("m pose 0", "field")] = lambda kw: "level_shift" in kw
-    tier = FieldInteraction(remedies=[{"level_shift": 0.5}, {"max_iter": 500, "soscf": True}])
     c = Candidate("m", "O")
     c.poses = [Pose(("O", "H", "H"), np.array([[0.0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]]))]
+    return c
+
+
+def test_the_ladder_climbs_when_an_scf_does_not_converge(ferric):
+    """Rung 0 does not converge, rung 1 (a level shift) does: the value is rung 1's, and the rung is recorded."""
+    ferric.set("m pose 0", "field", "needs:level_shift")
+    tier = FieldInteraction(remedies=[{"level_shift": 0.5}, {"max_iter": 500, "soscf": True, "diis": "adiis"}])
+    c = _water()
     tier.run([c], {"field": [PointCharge(1.0, (3.0, 0.0, 0.0))]})
     assert c.per_pose["scf_rung"] == [1.0]
     legs = [(r["leg"], r["rung"], r["converged"]) for r in tier.calc_log]
     assert legs == [("vacuum", 0, True), ("field", 0, False), ("field", 1, True)]
-    assert ferric.calls[-1][2]["level_shift"] == 0.5 and ferric.calls[-1][2]["energy_conv"] == 1e-10
+    last = ferric.calls()[-1]["kw"]
+    assert last["level_shift"] == 0.5 and last["energy_conv"] == 1e-10
     assert tier.produces() == {"dE_int": "kcal/mol", "scf_rung": "rung"}
-    assert tier.settings()["remedies"] == [{"level_shift": 0.5}, {"max_iter": 500, "soscf": True}]
+    assert tier.settings()["remedies"] == [{"level_shift": 0.5}, {"max_iter": 500, "soscf": True, "diis": "adiis"}]
 
 
 def test_every_rung_failing_still_raises_and_logs_every_scf(ferric):
-    from smeltery.model import Candidate, Pose
-
-    ferric.rules[("m pose 0", "vacuum")] = lambda kw: False
+    ferric.set("m pose 0", "vacuum", "never")
     tier = FieldInteraction(remedies=[{"level_shift": 0.5}])
-    c = Candidate("m", "O")
-    c.poses = [Pose(("O", "H", "H"), np.array([[0.0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]]))]
     with pytest.raises(RuntimeError, match="did not converge"):
-        tier.run([c], {"field": [PointCharge(1.0, (3.0, 0.0, 0.0))]})
+        tier.run([_water()], {"field": [PointCharge(1.0, (3.0, 0.0, 0.0))]})
     assert [(r["leg"], r["rung"]) for r in tier.calc_log] == [("vacuum", 0), ("vacuum", 1), ("field", 0)]
+
+
+@pytest.mark.needs_ferric
+def test_every_remedy_knob_is_one_real_ferric_accepts():
+    """Against the real engine on H2 in a field: a rung setting every allowed knob, with each DIIS flavour, is
+    accepted by `run_rhf` and converges to the base settings' energy (both legs)."""
+    import ferric
+
+    from smeltery.model import Pose
+
+    rungs = [
+        {"max_iter": 100, "diis": d, "diis_size": 8, "level_shift": 0.0, "soscf": False}
+        for d in ("pulay", "adiis", "ediis")
+    ]
+    tier = FieldInteraction(remedies=rungs)
+    pose = Pose(("H", "H"), np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]]))
+    mol = ferric.Molecule.from_xyz_string(pose.to_xyz("h2"), charge=0)
+    bs = ferric.BasisSet.bundled(tier.basis)
+    charges = [PointCharge(0.5, (0.0, 3.0, 0.0)).as_ferric_bohr()]
+    for q in (None, charges):
+        energies = []
+        for rung in range(tier.n_rungs):
+            res, _ = tier.scf(ferric, mol, bs, q, rung)
+            assert res.converged, (rung, q)
+            energies.append(res.energy)
+        assert max(energies) - min(energies) < 1e-8
 
 
 def test_no_ladder_is_the_tier_unchanged():
@@ -245,7 +299,9 @@ def test_no_ladder_is_the_tier_unchanged():
         ({"smearing": 0.01}, "fractional occupations"),
         ({"max_iterz": 5}, "unknown override"),
         ({"max_iter": 0}, "not a valid int"),
-        ({"diis": 1}, "not a valid bool"),
+        ({"diis": True}, "is not one of"),
+        ({"diis": "anderson"}, "is not one of"),
+        ({"soscf": 1}, "not a valid bool"),
         ({}, "non-empty table"),
     ],
 )
@@ -255,11 +311,14 @@ def test_a_bad_remedy_is_a_config_error(tmp_path, rung, match):
     cfg = tomllib.loads(TINY.format(n_poses=2))
     with pytest.raises(ConfigError, match=match):
         validate_config({**cfg, "field_interaction": {"remedies": [rung]}})
-    validate_config({**cfg, "field_interaction": {"remedies": [{"level_shift": 0.5, "diis_size": 12}]}})
+    ok = [{"level_shift": 0.5, "diis_size": 12}, {"diis": "adiis", "max_iter": 300, "soscf": True}]
+    validate_config({**cfg, "field_interaction": {"remedies": ok}})
 
 
-def test_run_scf_timeout_is_validated():
+def test_run_scf_timeout_is_validated_and_survives_the_pipeline_round_trip():
     import tomllib
+
+    from smeltery.gui.pipeline import Pipeline
 
     cfg = tomllib.loads(TINY.format(n_poses=2))
     assert cli.scf_timeout_s(cfg) == 14400.0
@@ -270,6 +329,38 @@ def test_run_scf_timeout_is_validated():
             validate_config({**cfg, "run": {"scf_timeout_s": bad}})
     with pytest.raises(ConfigError, match=r"unknown key\(s\) \['timeout'\] in \[run\]"):
         validate_config({**cfg, "run": {"timeout": 60}})
+    p = Pipeline.from_toml(TINY.format(n_poses=2) + "\n[run]\nscf_timeout_s = 60\n")
+    assert p.to_config()["run"] == {"scf_timeout_s": 60}
+
+
+# ------------------------------------------------------------------------------------------------ the log
+
+
+def test_a_torn_last_line_is_skipped_and_reported_and_the_next_row_is_whole(tmp_path):
+    row = {"candidate": "a", "pose": 0, "leg": "vacuum", "field_model": None, "rung": 0, "digest": "d" * 12}
+    (tmp_path / "calcs.jsonl").write_text(json.dumps(row) + "\n" + '{"candidate": "a", "po')
+    rows, torn = temporal_run.read_rows(tmp_path, "d" * 64)
+    assert rows == [row] and torn == 1
+    temporal_run.append_row(tmp_path, {**row, "pose": 1})
+    rows, torn = temporal_run.read_rows(tmp_path, "d" * 64)
+    assert rows == [row, {**row, "pose": 1}] and torn == 1
+
+
+def test_duplicate_scf_lines_are_dropped_keeping_the_first():
+    a = {"candidate": "a", "pose": 0, "leg": "vacuum", "field_model": None, "rung": 0, "energy_hartree": -1.0}
+    b = {**a, "energy_hartree": -2.0}
+    o = {"candidate": "a", "pose": 0, "leg": "vacuum", "field_model": None, "outcome": "error"}
+    assert temporal_run.dedupe([a, b, o, o, {**a, "rung": 1}]) == ([a, o, o, {**a, "rung": 1}], 1)
+
+
+def test_a_changed_config_is_refused_by_the_activities(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text("a = 1\n")
+    sha = temporal_run.sha256_file(p)
+    temporal_run.check_config(str(p), sha)
+    p.write_text("a = 2\n")
+    with pytest.raises(ValueError, match="changed under a running workflow"):
+        temporal_run.check_config(str(p), sha)
 
 
 # ------------------------------------------------------------------------------------------------ the workflow
@@ -280,18 +371,22 @@ def test_a_temporal_run_records_what_a_plain_run_records(ferric, tmp_path, queue
     cfg = _config(tmp_path)
     plain, durable = tmp_path / "plain", tmp_path / "durable"
     assert main(["run", str(cfg), "--out", str(plain)]) == 0
-    n_plain = len(ferric.calls)
+    n_plain = len(ferric.calls())
     try:
         with worker(queue):
             assert main(["run", str(cfg), "--out", str(durable), "--temporal", "--task-queue", queue]) == 0
     finally:
         _terminate(durable)
-    assert len(ferric.calls) == 2 * n_plain  # the same SCFs, once each
+    assert len(ferric.calls()) == 2 * n_plain == 16  # the same SCFs, once each (one field model: nothing shared)
+    assert all(c["pid"] != os.getpid() for c in ferric.calls()[n_plain:])  # each in a child process
     a, b = _record(plain), _record(durable)
     assert a["input_digest"] == b["input_digest"]
-    assert results_without_timing(a["results"]) == results_without_timing(b["results"])
+    ra, rb = results_without_timing(a["results"]), results_without_timing(b["results"])
+    ca, cb = ra.pop("calcs"), rb.pop("calcs")
+    assert ra == rb and ca["n"] == cb["n"] == 8
+    assert cb["by_model"] == {"primary": 4, "shared_vacuum": 4}
     rows = _rows(durable)
-    assert len(rows) == 2 * 2 * 2 and {r["field_model"] for r in rows} == {"primary"}
+    assert {(r["leg"], r["field_model"]) for r in rows} == {("vacuum", None), ("field", "primary")}
     assert all(r["rung"] == 0 and r["converged"] for r in rows)
     assert "run record:" in capsys.readouterr().out
 
@@ -302,9 +397,9 @@ def test_a_pose_failing_every_rung_is_dropped_pairwise(ferric, tmp_path, queue):
     pose 1 fails: it goes for propanol only, and the parent's pose 1 is not in propanol's ddE. The parent's pose 2
     converges on rung 1."""
     cfg = _config(tmp_path, n_poses=4, extra="\n[field_interaction]\nremedies = [{level_shift = 0.5}]\n")
-    ferric.rules[("ethanol pose 0", "field")] = lambda kw: False
-    ferric.rules[("ethanol pose 2", "field")] = lambda kw: "level_shift" in kw
-    ferric.rules[("propanol pose 1", "vacuum")] = lambda kw: False
+    ferric.set("ethanol pose 0", "field", "never")
+    ferric.set("ethanol pose 2", "field", "needs:level_shift")
+    ferric.set("propanol pose 1", "vacuum", "never")
     out = tmp_path / "out"
     try:
         with worker(queue):
@@ -315,26 +410,18 @@ def test_a_pose_failing_every_rung_is_dropped_pairwise(ferric, tmp_path, queue):
     assert res["pose_index"] == {"ethanol": [1, 2, 3], "propanol": [2, 3]}
     drops = {(d["candidate"], d["pose"]): d for d in res["dropped_poses"]}
     assert set(drops) == {("ethanol", 0), ("propanol", 1)}
-    assert drops[("ethanol", 0)]["rungs_tried"] == [0, 1] and drops[("ethanol", 0)]["outcome"] == "not_converged"
+    assert drops[("ethanol", 0)]["rungs_tried"] == {"field": [0, 1]}
+    assert drops[("ethanol", 0)]["outcome"] == "not_converged"
     assert drops[("ethanol", 0)]["dropped_with"] == ["ethanol", "propanol"]
     assert drops[("propanol", 1)]["dropped_with"] == ["ethanol", "propanol"]
+    assert drops[("propanol", 1)]["rungs_tried"] == {"vacuum": [0, 1]}
     assert res["per_pose"]["ethanol"]["scf_rung"] == [0.0, 1.0, 0.0]
     # every SCF is in the log with its rung; a converged leg was not recomputed on the next rung
-    rows = _rows(out)
-    scf = [r for r in rows if "outcome" not in r]
-    e0 = [(r["leg"], r["rung"], r["converged"]) for r in scf if r["candidate"] == "ethanol" and r["pose"] == 0]
-    assert sorted(e0) == [
-        ("field", 0, False),
-        ("field", 1, False),
-        ("vacuum", 0, True),
-    ]
-    assert sum(1 for r in rows if r.get("outcome") == "not_converged") == 2
-    # propanol's ddE pairs its poses 2, 3 with the parent's poses 2, 3
-    e = {
-        (r["candidate"], r["pose"], r["leg"]): r["energy_hartree"]
-        for r in rows
-        if "outcome" not in r and r["converged"]
-    }
+    scf = [r for r in _rows(out) if "outcome" not in r]
+    e0 = sorted((r["leg"], r["rung"], r["converged"]) for r in scf if r["candidate"] == "ethanol" and r["pose"] == 0)
+    assert e0 == [("field", 0, False), ("field", 1, False), ("vacuum", 0, True)]
+    assert sum(1 for r in _rows(out) if r.get("outcome") == "not_converged") == 2
+    e = {(r["candidate"], r["pose"], r["leg"]): r["energy_hartree"] for r in scf if r["converged"]}
 
     def de(c, i):
         return (e[(c, i, "field")] - e[(c, i, "vacuum")]) * HARTREE_TO_KCAL
@@ -346,51 +433,87 @@ def test_a_pose_failing_every_rung_is_dropped_pairwise(ferric, tmp_path, queue):
 
 @needs_server
 def test_a_killed_worker_resumes_without_recomputing(ferric, tmp_path, queue):
-    """The 4th SCF hangs; the worker is stopped mid-SCF and a new one takes over. Every SCF that had finished is
-    not run again; a whole new workflow run on the same OUT reads everything back and runs nothing."""
-    cfg = _config(tmp_path)
+    """An SCF hangs; its worker is stopped mid-SCF (the child is killed with it) and a new worker takes over. No
+    SCF that had finished runs again; a whole new workflow run on the same OUT reads everything back."""
     out = tmp_path / "out"
-    _, config_info = cli._stage_config(cfg, out)
-    inp = temporal_run.RunInput(str(out / "config.toml"), str(out), 1, config_info, heartbeat_s=3.0)
-    ferric.block_after = 3
-
-    async def go():
-        client = await temporal_run.connect(HOST)
-        return await client.start_workflow(
-            temporal_run.PipelineRunWorkflow.run,
-            inp,
-            id=temporal_run.workflow_id(out, (out / "config.toml").read_text()),
-            task_queue=queue,
-        )
-
+    inp = _staged(_config(tmp_path), out)
+    ferric.set("propanol pose 0", "vacuum", "hang_once")
     try:
         with worker(queue, workers=1):
-            asyncio.run(go())
-            assert ferric.blocked.wait(60), "the hanging SCF never started"
-            done_before = list(ferric.calls)
-        # worker A is gone, its SCF still hanging: let it die the way a killed process's work does
-        ferric.killed = True
-        ferric.gate.set()
-        time.sleep(0.2)
-        ferric.killed, ferric.block_after = False, None
-        assert len(done_before) == 3
+            asyncio.run(_start(inp, queue))
+            _wait_for(ferric.dir / "hanging")
+            hung = int((ferric.dir / "hanging").read_text())
+            done_before = [(c["label"], c["leg"]) for c in ferric.calls()]
+        time.sleep(0.5)
+        assert not _alive(hung), "stopping the worker left its SCF child running"
+        with worker(queue, workers=1):
+            first = _finish(inp, queue)
+            keys = [(c["label"], c["leg"]) for c in ferric.calls()]
+            assert len(keys) == len(set(keys)) == 8  # every SCF once: none of the finished ones again
+            assert keys[: len(done_before)] == done_before and ("propanol pose 0", "vacuum") not in done_before
+            again = _finish(inp, queue)  # a new run of the same workflow id: everything is read back
+            assert len(ferric.calls()) == 8 and again.n_resumed == 8
+            per_pose = json.loads(Path(first.record).read_text())["results"]["per_pose"]
+            assert json.loads(Path(again.record).read_text())["results"]["per_pose"] == per_pose
+    finally:
+        _terminate(out)
+
+
+@needs_server
+def test_a_timed_out_scf_is_killed_and_an_error_refuses_the_record_until_rerun(ferric, tmp_path, queue):
+    """A hanging SCF is ended at `[run] scf_timeout_s` (its child killed, no row written) and retried; after three
+    attempts it is an infrastructure error, which is not a measurement: finalize refuses. Running again reschedules
+    it (and only it)."""
+    from temporalio.client import WorkflowFailureError
+
+    out = tmp_path / "out"
+    inp = _staged(_config(tmp_path, extra="\n[run]\nscf_timeout_s = 2\n"), out, heartbeat_s=2.0, workers=2)
+    ferric.set("propanol pose 1", "field", "hang")
+    try:
+        with worker(queue, workers=2):
+            with pytest.raises(WorkflowFailureError) as e:
+                _finish(inp, queue)
+            msg = str(e.value.cause.cause)
+            assert "not chemistry" in msg and "propanol pose 1 field (primary)" in msg
+            time.sleep(0.5)
+            hung = [c for c in ferric.pids() if not any(x["pid"] == c for x in ferric.calls())]
+            assert len(hung) == 3 and not any(_alive(p) for p in hung)  # three attempts, every child killed
+            assert ("propanol pose 1", "field") not in {(c["label"], c["leg"]) for c in ferric.calls()}
+            assert not list(out.glob("run-*.json"))
+            errors = [r for r in _rows(out) if r.get("outcome") == "error"]
+            assert len(errors) == 1 and ("Timeout" in errors[0]["error"] or "timed out" in errors[0]["error"])
+            n_before = len(ferric.calls())
+            ferric.set("propanol pose 1", "field", None)
+            s = _finish(inp, queue)
+            assert len(ferric.calls()) == n_before + 1  # only the failed leg ran again
+            assert Path(s.record).is_file() and "dropped_poses" not in _record(out)["results"]
+    finally:
+        _terminate(out)
+
+
+@needs_server
+def test_restaging_over_a_running_workflow_is_refused(ferric, tmp_path, queue, capsys):
+    out = tmp_path / "out"
+    cfg = _config(tmp_path)
+    ferric.set("ethanol pose 0", "vacuum", "hang")
+    try:
         with worker(queue, workers=1):
 
-            async def finish():
-                client = await temporal_run.connect(HOST)
-                return await temporal_run.start_and_wait(client, inp, queue, poll_s=1, log=lambda *_: None)
+            def run_temporal():
+                main(["run", str(cfg), "--out", str(out), "--temporal", "--task-queue", queue])
 
-            first = asyncio.run(finish())
-            keys = [(label, leg) for label, leg, _ in ferric.calls]
-            assert len(keys) == len(set(keys)) == 8  # every SCF once: none of the finished ones again
-            assert keys[:3] == [(label, leg) for label, leg, _ in done_before]
-            record = Path(first.record).read_text()
-            again = asyncio.run(finish())  # a new run of the same workflow id: everything is read back
-            assert len(ferric.calls) == 8 and again.n_resumed == 4
-            assert (
-                json.loads(Path(again.record).read_text())["results"]["per_pose"]
-                == json.loads(record)["results"]["per_pose"]
-            )
+            th = threading.Thread(target=run_temporal, daemon=True)
+            th.start()
+            _wait_for(ferric.dir / "hanging")
+            capsys.readouterr()
+            changed = _config(tmp_path, extra="\n[run]\nscf_timeout_s = 99\n", name="c2.toml")
+            staged = (out / "config.toml").read_text()
+            for argv in (["--plan"], []):
+                assert main(["run", str(changed), "--out", str(out), *argv]) == 2
+                assert "is still running" in capsys.readouterr().err
+            assert main(["run", str(cfg), "--out", str(out)]) == 2  # a plain run of the same config too
+            assert "is still running" in capsys.readouterr().err
+            assert (out / "config.toml").read_text() == staged
     finally:
         _terminate(out)
 
@@ -400,7 +523,7 @@ def test_the_server_down_exits_2_naming_the_docker_command(ferric, tmp_path, cap
     rc = main(["run", str(cfg), "--out", str(tmp_path / "out"), "--temporal", "--host", "127.0.0.1:1"])
     err = capsys.readouterr().err
     assert rc == 2 and temporal_run.DOCKER_COMMAND in err and "never falls back" in err
-    assert not (tmp_path / "out" / "calcs.jsonl").exists() and not ferric.calls  # nothing ran instead
+    assert not (tmp_path / "out" / "calcs.jsonl").exists() and not ferric.calls()  # nothing ran instead
     assert main(["temporal-worker", "--host", "127.0.0.1:1"]) == 2
     assert temporal_run.DOCKER_COMMAND in capsys.readouterr().err
 
@@ -476,7 +599,11 @@ def test_an_extra_fields_analysis_is_scored_and_summarized(ferric, tmp_path, que
     assert all(len(v) == 2 and all(isinstance(x, float) for x in v) for v in measured["HALF"].values())
     assert res["half_field"] == {"models": ["HALF"], "parent_mean": pytest.approx(np.mean(measured["HALF"]["ethanol"]))}
     rows = _rows(out)
-    assert {r["field_model"] for r in rows} == {"primary", "HALF"} and len(rows) == 2 * 2 * 2 * 2
+    assert {(r["leg"], r["field_model"]) for r in rows} == {("vacuum", None), ("field", "primary"), ("field", "HALF")}
+    # the vacuum leg is shared by the two models: 4 vacuum SCFs, 8 field SCFs, not 8 + 8
+    legs = [c["leg"] for c in ferric.calls()]
+    assert legs.count("vacuum") == 4 and legs.count("field") == 8 and len(rows) == 12
+    assert _record(out)["results"]["calcs"]["by_model"] == {"shared_vacuum": 4, "primary": 4, "HALF": 4}
     # the half field's values differ from the primary's: the scores used their own field
     assert measured["HALF"]["ethanol"] != res["per_pose"]["ethanol"]["dE_int"]
 
@@ -485,18 +612,23 @@ def test_plan_counts_the_scf_work_including_extra_fields(ferric, tmp_path, half,
     cfg = _config(tmp_path, extra="\n[half_field]\n")
     assert main(["run", str(cfg), "--plan"]) == 0
     out = capsys.readouterr().out
-    assert "SCF work: 8 scores = 2 poses x 2 candidates x 2 field model(s) (16 SCFs: vacuum + field)" in out
-    one = re.search(r"estimate ([0-9.]+) CPU-h", out)
+    assert (
+        "SCF work: 8 scores = 2 poses x 2 candidates x 2 field model(s); "
+        "12 SCFs under --temporal (one vacuum leg per pose, shared), 16 in a plain run"
+    ) in out
+    one = re.search(r"estimate ([0-9.]+) CPU-h under --temporal, ([0-9.]+) CPU-h plain", out)
     # the cheap `extra_models(cfg)`, when the hook has it, is what counts (no field is built for --plan)
     _, hook = half
     monkeypatch.setattr(hook, "extra_models", lambda cfg: ["HALF", "THIRD"], raising=False)
     monkeypatch.setattr(hook, "extra_fields", lambda plan, ctx: pytest.fail("--plan built a field"))
     assert main(["run", str(cfg), "--plan"]) == 0
     out = capsys.readouterr().out
-    assert "SCF work: 12 scores = 2 poses x 2 candidates x 3 field model(s) (24 SCFs: vacuum + field)" in out
-    three = re.search(r"estimate ([0-9.]+) CPU-h", out)
-    if one is not None:  # the tier's calibration covers these elements: the hours scale with the models
-        assert float(three.group(1)) == pytest.approx(1.5 * float(one.group(1)), rel=0.05, abs=0.011)
+    assert "SCF work: 12 scores = 2 poses x 2 candidates x 3 field model(s); 16 SCFs under --temporal" in out
+    three = re.search(r"estimate ([0-9.]+) CPU-h under --temporal, ([0-9.]+) CPU-h plain", out)
+    assert (one is None) == (three is None)
+    if one is not None:  # the tier's calibration covers these elements: the hours scale with the SCF count
+        assert float(three.group(1)) == pytest.approx(4 / 3 * float(one.group(1)), rel=0.05, abs=0.011)
+        assert float(three.group(2)) == pytest.approx(1.5 * float(one.group(2)), rel=0.05, abs=0.011)
 
 
 def test_a_serial_analysiss_scf_lines_move_into_the_one_calc_log(ferric, tmp_path, half, monkeypatch):
@@ -616,3 +748,23 @@ def test_bench_launches_with_temporal_only_on_the_temporal_queue(tmp_path):
         LaunchRun(q, None, None, who, clock, root=tmp_path).run(pipeline, out_dir=tmp_path / f"o{temporal}")
         (cmd,) = q.commands
         assert cmd[-1] == "--temporal" if temporal else "--temporal" not in cmd
+
+
+@needs_server
+def test_with_no_worker_polling_the_wait_says_so(ferric, tmp_path, queue):
+    out = tmp_path / "out"
+    inp = _staged(_config(tmp_path), out)
+    said: list[str] = []
+
+    async def go():
+        client = await temporal_run.connect(HOST)
+        await asyncio.wait_for(
+            temporal_run.start_and_wait(client, inp, queue, poll_s=0.5, log=said.append, no_worker_after_s=0), 5
+        )
+
+    try:
+        with pytest.raises(TimeoutError):
+            asyncio.run(go())
+    finally:
+        _terminate(out)
+    assert any("no worker is polling" in s and "smeltery temporal-worker" in s for s in said)

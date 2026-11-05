@@ -538,7 +538,9 @@ def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seco
 
 #: `run_rhf` knobs a remedy rung may override, with their types: they change how the SCF reaches its solution, not
 #: which solution it reports.
-REMEDY_KEYS: dict[str, type] = {"max_iter": int, "diis": bool, "diis_size": int, "level_shift": float, "soscf": bool}
+REMEDY_KEYS: dict[str, type] = {"max_iter": int, "diis": str, "diis_size": int, "level_shift": float, "soscf": bool}
+#: The DIIS flavours ferric's `run_rhf(diis=...)` accepts (a string; True is a TypeError there).
+DIIS_KINDS = ("pulay", "adiis", "ediis")
 #: Knobs a remedy may NOT override, and why: each changes the quantity being measured, so a value from that rung
 #: would not be the same measurement as a value from rung 0.
 REMEDY_REFUSED: dict[str, str] = {
@@ -567,6 +569,10 @@ def check_remedies(remedies) -> list[dict]:
             if key not in REMEDY_KEYS:
                 raise ValueError(f"remedies rung {k}: unknown override {key!r}; allowed: {sorted(REMEDY_KEYS)}")
             want = REMEDY_KEYS[key]
+            if want is str:
+                if v not in DIIS_KINDS:
+                    raise ValueError(f"remedies rung {k}: diis = {v!r} is not one of {list(DIIS_KINDS)}")
+                continue
             ok = isinstance(v, bool) if want is bool else (isinstance(v, (int, float)) and not isinstance(v, bool))
             if want is int and ok:
                 ok = isinstance(v, int) and v >= 1

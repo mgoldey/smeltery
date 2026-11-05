@@ -130,6 +130,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -1307,8 +1308,9 @@ def _count_models(path: Path) -> dict[str, int]:
     for x in path.read_text().splitlines():
         if x.strip():
             r = json.loads(x)
-            if "outcome" not in r:
-                out[str(r.get("field_model"))] = out.get(str(r.get("field_model")), 0) + 1
+            if "outcome" not in r:  # a --temporal vacuum leg has no model: it is shared by every model
+                k = "shared_vacuum" if r.get("field_model") is None else str(r["field_model"])
+                out[k] = out.get(k, 0) + 1
     return out
 
 
@@ -1320,7 +1322,9 @@ def write_calc_log(plan: Plan, out_dir: Path, name: str = "calcs.jsonl", rows: l
     calc_log = [_tag(r, primary) for r in rows]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / name).write_text("".join(json.dumps(e) + "\n" for e in calc_log))
+    tmp = out_dir / (name + ".tmp")  # written whole, then renamed: a crash never leaves a half-written log
+    tmp.write_text("".join(json.dumps(e) + "\n" for e in calc_log))
+    os.replace(tmp, out_dir / name)
     return len(calc_log)
 
 
@@ -1373,8 +1377,9 @@ def _describe_plan(plan: Plan, digest: str) -> str:
 
 
 def describe_scf_work(plan: Plan) -> str:
-    """How many scores (poses x candidates x field models; two SCFs each, vacuum and field) the run will do, and
-    the measurement tier's own time estimate for them in CPU-hours (`estimate_cost`, scaled by the field models)."""
+    """How many scores (poses x candidates x field models) the run will do and how many SCFs that is: under
+    `--temporal` one vacuum leg per pose shared by the models plus one field leg per model, in a plain run two legs
+    per score; and the tier's own time estimate (`estimate_cost`, for two legs per pose) scaled to each, in CPU-h."""
     n_models = 1
     for spec in active_hooks("analysis", plan.cfg):
         hook = spec.hook
@@ -1386,15 +1391,19 @@ def describe_scf_work(plan: Plan) -> str:
     per_cand = sorted({len(c.poses) for c in plan.candidates})
     poses = str(per_cand[0]) if len(per_cand) == 1 else f"{per_cand[0]}-{per_cand[-1]}"
     n = n_poses * n_models
+    temporal, plain = n_poses * (1 + n_models), 2 * n
     head = (
-        f"SCF work: {n} scores = {poses} poses x {len(plan.candidates)} candidates x {n_models} field model(s) "
-        f"({2 * n} SCFs: vacuum + field)"
+        f"SCF work: {n} scores = {poses} poses x {len(plan.candidates)} candidates x {n_models} field model(s); "
+        f"{temporal} SCFs under --temporal (one vacuum leg per pose, shared), {plain} in a plain run"
     )
     est = plan.tier.estimate_cost(plan.candidates)
     if est.get("predicted") is None:
         return f"{head}; time estimate: none ({est.get('basis')})"
-    hours = float(est["predicted"]) * n_models / 3600.0
-    return f"{head}; estimate {hours:.2f} CPU-h (one SCF per worker slot; {est.get('basis')})"
+    legs_h = float(est["predicted"]) / 2 / 3600.0  # one leg of every pose: estimate_cost covers two
+    return (
+        f"{head}; estimate {legs_h * (1 + n_models):.2f} CPU-h under --temporal, "
+        f"{legs_h * 2 * n_models:.2f} CPU-h plain (summed SCF wall time; {est.get('basis')})"
+    )
 
 
 def memory_estimate(plan) -> dict:
@@ -1527,9 +1536,10 @@ VIEWERS = {
 }
 
 
-def _stage_config(config: Path, out_dir: Path) -> tuple[Path, dict]:
+def _stage_config(config: Path, out_dir: Path, temporal: bool = False) -> tuple[Path, dict]:
     """Write OUT/config.toml with every input file copied under OUT/inputs/, and return its path and the record's
-    `results.config` entry; the run then reads only from OUT."""
+    `results.config` entry; the run then reads only from OUT. Refused (ConfigError) while a Temporal run is live in
+    OUT, unless this is `--temporal` with the same staged config (it attaches)."""
     from .run_inputs import stage_inputs
 
     config = Path(config)
@@ -1544,9 +1554,18 @@ def _stage_config(config: Path, out_dir: Path) -> tuple[Path, dict]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     staged, inputs = stage_inputs(text, config.resolve().parent, out_dir)
+    _guard_out(out_dir, hashlib.sha256(staged.encode()).hexdigest(), temporal)
     dest = out_dir / "config.toml"
     dest.write_text(staged)
     return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
+
+
+def _guard_out(out_dir: Path, staged_sha: str | None, temporal: bool = False) -> None:
+    from .temporal_run import guard_out
+
+    why = guard_out(Path(out_dir), staged_sha, temporal)
+    if why:
+        raise ConfigError(why)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1594,7 +1613,10 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--host", default="127.0.0.1:7233", help="with --temporal: the Temporal server")
     run.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline", help="with --temporal")
     pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
-    pw.add_argument("--workers", type=int, default=2, help="scores at once (memory is the limit, not cores)")
+    pw.add_argument("--workers", type=int, default=2, help="SCFs at once, one child process each (memory-bound)")
+    pw.add_argument(
+        "--threads-per-worker", dest="threads_per_worker", type=int, default=1, help="RAYON_NUM_THREADS per SCF"
+    )
     pw.add_argument("--host", default="127.0.0.1:7233")
     pw.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline")
     args = ap.parse_args(argv)
@@ -1638,7 +1660,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "temporal-worker":
         from .temporal_run import worker_cli
 
-        return worker_cli(args.host, args.task_queue, args.workers)
+        return worker_cli(args.host, args.task_queue, args.workers, args.threads_per_worker)
     explicit_out = args.out is not None
     if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
         print(
@@ -1653,7 +1675,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config_info = None
         if explicit_out and not args.combine:
-            args.config, config_info = _stage_config(args.config, args.out)
+            args.config, config_info = _stage_config(args.config, args.out, temporal=args.temporal)
+        elif explicit_out:  # a combine writes its record into OUT
+            _guard_out(args.out, None)
         cfg = load_config(args.config)
         if args.only_candidate is not None or args.combine:
             from .temporal_run import remeasuring_analyses

@@ -387,7 +387,7 @@ def run_calcs(request: Request, idx: int, candidate: str, pose: int, field_model
             continue
         if isinstance(d, dict) and d.get("candidate") == candidate and d.get("pose") == pose:
             model = d.get("field_model", primary)
-            if want is None or model == want:
+            if want is None or model is None or model == want:  # None: a --temporal vacuum leg, shared by all
                 lines.append(d)
     return CalcLines(file=str(calcs["file"]), lines=lines)
 
