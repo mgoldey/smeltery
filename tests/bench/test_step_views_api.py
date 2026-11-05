@@ -169,3 +169,32 @@ def test_core_on_the_parent_changes_nothing(client_for, run_dir):
     plain = c.get("/api/runs/0/scene", params=q).json()
     core = c.get("/api/runs/0/scene", params={**q, "core": True}).json()
     assert plain["root"] == core["root"]  # only the build timestamp differs
+
+
+SENSITIVITY = {
+    "CHARMM": {
+        "primary_model": "AMBER",
+        "paired_ddE": {
+            "4-F": {"primary": -1.0, "model": -1.4, "delta": -0.4, "n": 4},
+            "4-Cl": {"primary": -3.0, "model": 0.5, "delta": 3.5, "n": 3},
+            "4-Br": {"primary": None, "model": None, "delta": None, "n": 0},
+        },
+        "sign_flips": 1,
+        "spearman": -1.0,
+        "floor": 3.9,
+        "n_dropped": 5,
+        "dropped_poses": {"4-Cl": [1], "4-Br": [0, 1, 2, 3]},
+        "per_pose": {"4-F": [1.0, 2.0, 3.0, 4.0]},
+    }
+}
+
+
+def test_charge_sensitivity_is_the_records_and_absent_when_it_did_not_run(client_for, run_dir):
+    c, _ = client_for(run_dir)
+    assert c.get("/api/runs/0/charge_sensitivity").json() == {"models": None}
+    _edit(run_dir, lambda rec: rec["results"].update(charge_sensitivity=SENSITIVITY))
+    c, _ = client_for(run_dir)
+    got = c.get("/api/runs/0/charge_sensitivity").json()["models"]["CHARMM"]
+    assert got["paired_ddE"] == SENSITIVITY["CHARMM"]["paired_ddE"]
+    assert (got["sign_flips"], got["spearman"], got["n_dropped"]) == (1, -1.0, 5)
+    assert got["note"] is None and "per_pose" not in got

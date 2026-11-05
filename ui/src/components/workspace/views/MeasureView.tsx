@@ -1,10 +1,79 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, unwrap } from "../../../api/client";
+import type { components } from "../../../api/schema";
 import { PlotlyFigure } from "../../PlotlyFigure";
 import { useScheme } from "../../../styles/scheme";
 import type { StepViewProps } from "./registry";
 import { CorePose, getJson, NotRun, useRunDetail } from "./PosesView";
+
+type Sensitivity = components["schemas"]["ModelSensitivity"];
+
+/** One table row per (model, analogue): the analogue's paired ddE under the primary and the other charge model. */
+export function sensitivityRows(models: Record<string, Sensitivity> | null | undefined) {
+  return Object.entries(models ?? {}).flatMap(([model, m]) =>
+    Object.entries(m.paired_ddE).map(([candidate, r]) => ({ ...r, chargeModel: model, candidate })),
+  );
+}
+
+const fmt = (v: number | null | undefined, digits = 3) => (v === null || v === undefined ? "—" : v.toFixed(digits));
+
+/** `results.charge_sensitivity`: the measurement repeated under another force field's pocket charges. Nothing when absent. */
+export function SensitivityTable({ models, unit, parent }: { models: Record<string, Sensitivity> | null | undefined; unit: string; parent?: string }) {
+  if (!models || Object.keys(models).length === 0) return null;
+  return (
+    <section aria-label="Charge-model sensitivity" data-testid="charge-sensitivity">
+      <h4>Charge-model sensitivity</h4>
+      <table className="grid" aria-label="Charge-model sensitivity summary">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>vs</th>
+            <th className="num">Sign flips</th>
+            <th className="num">Spearman</th>
+            <th className="num">Poses dropped</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(models).map(([model, m]) => (
+            <tr key={model} data-model={model}>
+              <td>{model}</td>
+              <td>{m.primary_model ?? "primary"}</td>
+              <td className="num" data-col="sign_flips">{m.sign_flips ?? "—"}</td>
+              <td className="num" data-col="spearman">{fmt(m.spearman, 2)}</td>
+              <td className="num" data-col="dropped">{m.n_dropped ?? 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {Object.entries(models).map(([model, m]) => (m.note ? <p className="lede" key={model}>{model}: {m.note}</p> : null))}
+      <table className="grid" aria-label="Paired ddE under each charge model">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Ligand</th>
+            <th className="num">Paired ΔΔE{parent ? ` vs ${parent}` : ""}, primary charges ({unit})</th>
+            <th className="num">Paired ΔΔE, this model ({unit})</th>
+            <th className="num">Shift</th>
+            <th className="num">Poses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sensitivityRows(models).map((r) => (
+            <tr key={`${r.chargeModel}/${r.candidate}`} data-model={r.chargeModel} data-ligand={r.candidate}>
+              <td>{r.chargeModel}</td>
+              <td>{r.candidate}</td>
+              <td className="num" data-col="primary">{fmt(r.primary)}</td>
+              <td className="num" data-col="model">{fmt(r.model)}</td>
+              <td className="num" data-col="delta">{fmt(r.delta)}</td>
+              <td className="num" data-col="n">{r.n}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
 
 type Picked = { candidate: string; pose: number };
 type CalcLines = { file: string | null; lines: Record<string, unknown>[] };
@@ -55,6 +124,11 @@ export function MeasureView({ sourceRun }: StepViewProps) {
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/per_pose", { params: { path: { idx } } })),
     enabled: sourceRun !== null,
   });
+  const sensitivity = useQuery({
+    queryKey: ["charge_sensitivity", idx],
+    queryFn: () => unwrap(api.GET("/api/runs/{idx}/charge_sensitivity", { params: { path: { idx } } })),
+    enabled: sourceRun !== null,
+  });
   const log = useQuery({
     queryKey: ["calcs", idx, picked?.candidate, picked?.pose],
     queryFn: () =>
@@ -76,6 +150,7 @@ export function MeasureView({ sourceRun }: StepViewProps) {
     <div data-view="measure">
       <p className="lede">Each marker is one pose of one ligand. Click a marker to see that pose and every ligand's value at it.</p>
       <div ref={host}>{figure.data ? <PlotlyFigure figure={figure.data} name="per_pose_values" /> : <p className="lede">Loading the measurements.</p>}</div>
+      <SensitivityTable models={sensitivity.data?.models} unit={unit} parent={parent} />
       {picked ? (
         <section aria-label="Selected pose" data-testid="picked" data-candidate={picked.candidate} data-pose={picked.pose}>
           <h4>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindClicks, type PlotDiv } from "./MeasureView";
+import { bindClicks, type PlotDiv, sensitivityRows } from "./MeasureView";
 
 /** A stand-in for the div Plotly draws into: `.on` records its listeners. */
 function plot(): PlotDiv & { fire: (e: unknown) => void } {
@@ -41,5 +41,27 @@ describe("bindClicks", () => {
     const state = { el: null };
     bindClicks(host, state, () => {});
     expect(state.el).toBeNull();
+  });
+});
+
+describe("sensitivityRows", () => {
+  it("is one row per charge model and analogue, and nothing when the analysis did not run", () => {
+    const models = {
+      CHARMM: {
+        paired_ddE: { "4-F": { primary: -1, model: -1.5, delta: -0.5, n: 3 }, "4-Br": { primary: null, model: null, delta: null, n: 0 } },
+        sign_flips: 0,
+        spearman: 1,
+        n_dropped: 3,
+        dropped_poses: { "4-Br": [0, 1, 2] },
+      },
+      PARSE: { paired_ddE: { "4-F": { primary: -1, model: 0.5, delta: 1.5, n: 3 } }, sign_flips: null, spearman: null, n_dropped: 0, dropped_poses: {}, note: "1 analogue(s)" },
+    };
+    expect(sensitivityRows(models)).toEqual([
+      { chargeModel: "CHARMM", candidate: "4-F", primary: -1, model: -1.5, delta: -0.5, n: 3 },
+      { chargeModel: "CHARMM", candidate: "4-Br", primary: null, model: null, delta: null, n: 0 },
+      { chargeModel: "PARSE", candidate: "4-F", primary: -1, model: 0.5, delta: 1.5, n: 3 },
+    ]);
+    expect(sensitivityRows(null)).toEqual([]);
+    expect(sensitivityRows(undefined)).toEqual([]);
   });
 });

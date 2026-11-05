@@ -615,6 +615,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/charge_sensitivity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Charge Sensitivity */
+        get: operations["run_charge_sensitivity_api_runs__idx__charge_sensitivity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/comments": {
         parameters: {
             query?: never;
@@ -1189,6 +1206,16 @@ export interface components {
             rungs: components["schemas"]["RungOut"][];
             /** Site Fields */
             site_fields: components["schemas"]["SiteField"][];
+        };
+        /**
+         * ChargeSensitivity
+         * @description `results.charge_sensitivity`, one entry per extra charge model; `models` None: the analysis did not run.
+         */
+        ChargeSensitivity: {
+            /** Models */
+            models: {
+                [key: string]: components["schemas"]["ModelSensitivity"];
+            } | null;
         };
         /** CommentIn */
         CommentIn: {
@@ -1800,6 +1827,35 @@ export interface components {
              */
             workspace_default: unknown;
         };
+        /** ModelSensitivity */
+        ModelSensitivity: {
+            /**
+             * Dropped Poses
+             * @default {}
+             */
+            dropped_poses: {
+                [key: string]: number[];
+            };
+            /** Floor */
+            floor?: number | null;
+            /**
+             * N Dropped
+             * @default 0
+             */
+            n_dropped: number;
+            /** Note */
+            note?: string | null;
+            /** Paired Dde */
+            paired_ddE: {
+                [key: string]: components["schemas"]["SensitivityRow"];
+            };
+            /** Primary Model */
+            primary_model?: string | null;
+            /** Sign Flips */
+            sign_flips: number | null;
+            /** Spearman */
+            spearman: number | null;
+        };
         /** ParamOut */
         ParamOut: {
             /**
@@ -2175,6 +2231,20 @@ export interface components {
             methods: string[];
             /** Name */
             name: string;
+        };
+        /**
+         * SensitivityRow
+         * @description One analogue's paired ddE under the primary charge model and under the other one (None: no pose on both).
+         */
+        SensitivityRow: {
+            /** Delta */
+            delta: number | null;
+            /** Model */
+            model: number | null;
+            /** N */
+            n: number;
+            /** Primary */
+            primary: number | null;
         };
         /** SiteField */
         SiteField: {
@@ -3687,6 +3757,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CalcLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_charge_sensitivity_api_runs__idx__charge_sensitivity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChargeSensitivity"];
                 };
             };
             /** @description Validation Error */

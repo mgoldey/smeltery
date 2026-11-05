@@ -249,6 +249,41 @@ def run_pose_maps(request: Request, idx: int) -> PoseMaps:
     return PoseMaps(maps=record(request, idx).get("results", {}).get("pose_maps") or {})
 
 
+class SensitivityRow(BaseModel):
+    """One analogue's paired ddE under the primary charge model and under the other one (None: no pose on both)."""
+
+    primary: float | None
+    model: float | None
+    delta: float | None
+    n: int
+
+
+class ModelSensitivity(BaseModel):
+    primary_model: str | None = None
+    paired_ddE: dict[str, SensitivityRow]
+    #: None when fewer than two analogues could be compared (`note` says why).
+    sign_flips: int | None
+    spearman: float | None
+    floor: float | None = None
+    n_dropped: int = 0
+    dropped_poses: dict[str, list[int]] = {}
+    note: str | None = None
+
+
+class ChargeSensitivity(BaseModel):
+    """`results.charge_sensitivity`, one entry per extra charge model; `models` None: the analysis did not run."""
+
+    models: dict[str, ModelSensitivity] | None
+
+
+@router.get("/runs/{idx}/charge_sensitivity", response_model=ChargeSensitivity)
+def run_charge_sensitivity(request: Request, idx: int) -> ChargeSensitivity:
+    got = (record(request, idx).get("results") or {}).get("charge_sensitivity")
+    if not isinstance(got, dict):
+        return ChargeSensitivity(models=None)
+    return ChargeSensitivity(models={k: ModelSensitivity.model_validate(v) for k, v in got.items()})
+
+
 class GateRow(BaseModel):
     candidate: str
     pose: int
