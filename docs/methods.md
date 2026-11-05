@@ -72,6 +72,9 @@ changes the digest. Builtins carry no hook, so configs that use only builtins ke
 
 ## A worked example
 
+(For the methods below in a whole running pipeline, see
+[worked-example.md](worked-example.md).)
+
 A method that adds a count to the record. It is an `analysis`, so it fills a slot but changes no measurement:
 
 ```python

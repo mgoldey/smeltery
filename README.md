@@ -60,10 +60,16 @@ candidates, with a plan: [docs/gui-review.md](docs/gui-review.md).
 `smeltery bench ROOT` serves a local web app (install with the `bench` extra). It draws a pipeline
 as its six steps (active site, ligands, paired poses, pose checks, ΔE_int, cut), lets you edit each
 step in place with what the edit costs shown before you keep it, checks ligands before anything runs,
-and traces any ΔΔE back to the settings, inputs and calculations that made it. It starts from four
+and traces any ΔΔE back to the settings, inputs and calculations that made it. It starts from five
 prebuilt pipelines with finished example runs, a blank pipeline, or a pipeline copied from a run. The
 pipeline is the TOML file `smeltery run` reads; Bench does not schedule work or bound memory. Details
 and limits: [docs/bench.md](docs/bench.md).
+
+## A whole pipeline, worked
+
+One shipped pipeline from its config to its numbers, section by section, with the run it produced,
+what it cost, what the result does and does not support, and which piece to copy to add a step of
+your own: [docs/worked-example.md](docs/worked-example.md).
 
 ## The end-to-end path, and long work
 
