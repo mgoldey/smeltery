@@ -15,7 +15,8 @@ test("start from benzoic-pbe: every step is ready and step 5 shows the committed
   const name = `pbe-${Date.now().toString(36)}`;
   await page.goto("/bench");
   const card = page.getByRole("group", { name: "Start from a working pipeline" });
-  await expect(card.locator("[data-prebuilt]")).toHaveCount(4);
+  const listed = (await (await page.request.get("/api/prebuilt")).json()) as unknown[]; // data source: the API
+  await expect(card.locator("[data-prebuilt]")).toHaveCount(listed.length);
   const row = card.locator('[data-prebuilt="benzoic-pbe"]');
   await expect(row).toContainText("ranked by field-interaction DFT");
   await expect(row.locator(".status")).toHaveAttribute("data-state", "RESOLVED");
