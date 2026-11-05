@@ -14,6 +14,14 @@ def smeltery_command() -> list[str]:
     return [str(script)] if script.is_file() else [sys.executable, "-m", "smeltery.cli"]
 
 
+def uses_temporal(task_queue) -> bool:
+    """Bench is configured with the Temporal task queue: launch `smeltery run --temporal` on it (the subprocess
+    queue keeps the plain run, the default)."""
+    from smeltery.bench.adapters.task_queue import TemporalTaskQueue
+
+    return isinstance(task_queue, TemporalTaskQueue)
+
+
 class LaunchRun:
     def __init__(self, task_queue, run_store, artifact_store, identity, clock, root: Path | str | None = None):
         self.root = Path(root) if root is not None else Path.cwd()  # the Bench root: where relative paths start
@@ -47,6 +55,8 @@ class LaunchRun:
         (out_dir / "config.toml").write_text(staged)
         if command is None:
             command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
+            if uses_temporal(self.task_queue):  # the run itself is then a durable workflow, not one long process
+                command.append("--temporal")
         task_id = self.task_queue.submit(
             f"run {pipeline.campaign}",
             list(command),

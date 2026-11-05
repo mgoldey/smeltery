@@ -111,6 +111,16 @@ UNRANKED exactly as above; it counts analogues, because the parent is the paired
 is deliberately not offered: the only wired ranker has an unmeasured floor, so a ladder would need a second invented
 floor, and totals are never compared across formulas.
 
+Durable runs (`smeltery.temporal_run`): `smeltery run CONFIG --out OUT --temporal [--workers N]` runs the same plan as
+a Temporal workflow, one activity per (candidate, pose, field model), and `smeltery temporal-worker` executes it. The
+same OUT and staged config resume the same workflow; finished SCFs are read back from OUT/calcs.jsonl. With the server
+down it exits 2 naming the docker command; it never falls back to an in-process run.
+
+    [run]
+    scf_timeout_s = 14400       # one score's start-to-close timeout under --temporal (not an input: no digest change)
+    [field_interaction]
+    remedies = [{level_shift = 0.5}, {max_iter = 300, soscf = true}]  # tried in order when an SCF does not converge
+
 Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed.
 """
 
@@ -140,10 +150,22 @@ from .model import Candidate, PointCharge
 from .pocket import load_pocket
 from .pocket.loader import file_digest
 from .record import RunRecord
-from .tiers import FieldDftInteraction, FieldInteraction, ForceField, Gfn2, PairedPoses, _net_charge
+from .tiers import (
+    FieldDftInteraction,
+    FieldInteraction,
+    ForceField,
+    Gfn2,
+    PairedPoses,
+    _net_charge,
+    check_remedies,
+)
 
 #: Top-level keys that are inputs of the pipeline, not a method's section (the Ligands step, and the gate switches).
-OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions"}
+OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions", "run"}
+#: `[run]`: how the run executes, not what it measures (not an input: it never moves the digest).
+RUN_KEYS = {"scf_timeout_s"}
+#: `[run] scf_timeout_s` default: one SCF score (both legs, one rung) is ended after this long under `--temporal`.
+SCF_TIMEOUT_S = 14400
 DECISIONS_KEYS = {"file"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
 QUANTITY = "dE_int"
@@ -304,9 +326,38 @@ def validate_config(cfg: dict) -> dict:
         hooks = active_hooks(slot, cfg)
         if len(hooks) > 1:
             raise ConfigError(f"{' and '.join(f'[{s.section}]' for s in hooks)} are each a {slot}; keep one")
+    for spec in active_hooks("pose_source", cfg):
+        for other, why in (("structure", "[structure] implies docking, which"), ("docking", "[docking]")):
+            if other in cfg:
+                raise ConfigError(f"[{spec.section}] gives the parent's poses, and {why} gives them too; keep one")
+    for spec in active_hooks("field_source", cfg):
+        if "structure" in cfg:
+            raise ConfigError(
+                f"[{spec.section}] gives the point-charge field, and [structure] supplies the field from its prepared "
+                "receptor; keep one"
+            )
     _validate_gates(cfg)
     _validate_decisions(cfg)
+    _validate_run(cfg)
     return cfg
+
+
+def _validate_run(cfg: dict) -> None:
+    """[run]: execution settings. `scf_timeout_s` (seconds, > 0) bounds one SCF score under `--temporal`."""
+    if "run" not in cfg:
+        return
+    r = cfg["run"]
+    if not isinstance(r, dict):
+        raise ConfigError("[run] must be a table")
+    _check_keys("[run]", r, RUN_KEYS)
+    t = r.get("scf_timeout_s", SCF_TIMEOUT_S)
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or t <= 0:
+        raise ConfigError(f"[run] scf_timeout_s must be a positive number of seconds, got {t!r}")
+
+
+def scf_timeout_s(cfg: dict) -> float:
+    """`[run] scf_timeout_s`, or the default (4 h)."""
+    return float((cfg.get("run") or {}).get("scf_timeout_s", SCF_TIMEOUT_S))
 
 
 def _exclusive_with(spec: MethodSpec) -> list[MethodSpec]:
@@ -331,8 +382,13 @@ def _validate_section(spec: MethodSpec, cfg: dict) -> None:
 
 def _validate_measurement(cfg: dict) -> None:
     """[field_interaction] (RHF) or [field_dft_interaction] (KS-DFT): tier knobs, and at most one of them."""
-    _knobs(cfg, "field_interaction", FieldInteraction)
+    rhf = _knobs(cfg, "field_interaction", FieldInteraction)
     _knobs(cfg, "field_dft_interaction", FieldDftInteraction)
+    if "remedies" in rhf:
+        try:
+            check_remedies(rhf["remedies"])
+        except ValueError as e:
+            raise ConfigError(f"[field_interaction] {e}") from e
     if "field_interaction" in cfg and "field_dft_interaction" in cfg:
         raise ConfigError(
             "[field_interaction] (RHF) and [field_dft_interaction] (KS-DFT) both choose how dE_int is measured; "
@@ -981,12 +1037,34 @@ def per_pose_results(plan: Plan) -> tuple[dict, dict]:
     return per_pose, units
 
 
-def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord, dict]:
+def _paired_parent(plan: Plan, c: Candidate, pose_index: dict[str, list[int]] | None) -> Candidate:
+    """The parent as analogue `c` pairs with it: itself, or (after a pairwise pose drop) a view holding only the
+    parent's values at `c`'s kept pose indices, so pose i still pairs with pose i."""
+    if not pose_index:
+        return plan.parent
+    at = {orig: k for k, orig in enumerate(pose_index[plan.parent.name])}
+    view = Candidate(plan.parent.name, plan.parent.smiles)
+    view.per_pose = {q: [v[at[i]] for i in pose_index[c.name]] for q, v in plan.parent.per_pose.items()}
+    return view
+
+
+def run_plan(
+    plan: Plan,
+    measure=None,
+    partial: bool = False,
+    skip_analyses: frozenset[str] = frozenset(),
+    pose_index: dict[str, list[int]] | None = None,
+) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
     `measure(plan)`, when given, fills `per_pose[QUANTITY]` on every candidate in place of running
     `plan.tier` (the field-interaction SCFs); tests inject fixed numbers, so everything after the SCFs is checked
     without ferric.
+
+    `skip_analyses`: analysis keys the caller computes itself (the Temporal runner summarizes the ones that
+    re-measure). `pose_index`: after a pairwise pose drop, each candidate's kept ORIGINAL pose indices (its poses
+    and per_pose hold only those); an analogue then pairs with the parent's values at its own kept indices, and
+    the record carries `results.pose_index`.
     """
     if measure is None:
         _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
@@ -1001,8 +1079,8 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
             "stages": plan.stage_log,
         }
     else:
-        paired = {c.name: paired_delta(plan.parent, c, QUANTITY) for c in analogues}
-        unpaired = {c.name: unpaired_delta(plan.parent, c, QUANTITY) for c in analogues}
+        paired = {c.name: paired_delta(_paired_parent(plan, c, pose_index), c, QUANTITY) for c in analogues}
+        unpaired = {c.name: unpaired_delta(_paired_parent(plan, c, pose_index), c, QUANTITY) for c in analogues}
         res = cut(paired, keep=plan.cfg["cut"]["keep"], z=plan.cfg["cut"].get("z", 2.0), floor=plan.floor)
         results: dict[str, object] = {
             "paired_ddE": {
@@ -1014,6 +1092,8 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
             "funnel": funnel_counts(plan, res),
         }
     results["candidate_order"] = [c.name for c in plan.candidates]
+    if pose_index:  # only after a pairwise drop, so ordinary records keep their shape
+        results["pose_index"] = {k: list(v) for k, v in pose_index.items()}
     # (analogue atom, parent atom) pairs copied exactly from the parent's pose: the core a view draws solid
     results["pose_maps"] = {k: [list(p) for p in v] for k, v in plan.poses.scaffold_maps.items()}
     results["per_pose"], results["units"] = per_pose_results(plan)
@@ -1028,6 +1108,8 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
     if not partial:  # an analysis reads the whole measurement; a combine of the partials runs it
         for spec in active_hooks("analysis", plan.cfg):
+            if spec.key in skip_analyses:
+                continue
             _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log})
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
 
@@ -1121,6 +1203,7 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
             if c.name in paired_ddE and isinstance(paired_ddE[c.name], dict):
                 paired = paired_ddE[c.name].get("per_pose")
         mol = mols[c.name]
+        index = (results.get("pose_index") or {}).get(c.name)  # original indices after a pairwise drop
         with Chem.SDWriter(str(path)) as w:
             for i, conf in enumerate(mol.GetConformers()):
                 m = Chem.Mol(mol)
@@ -1128,7 +1211,7 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
                 m.AddConformer(Chem.Conformer(conf), assignId=True)
                 m.SetProp("_Name", f"{c.name} pose {i}")
                 m.SetProp("smeltery_candidate", c.name)
-                m.SetProp("smeltery_pose_index", str(i))
+                m.SetProp("smeltery_pose_index", str(i if index is None else index[i]))
                 m.SetProp("smeltery_parent", "1" if c is plan.parent else "0")
                 for q, v in values.items():
                     m.SetProp(q, f"{v[i]:.10g}")
@@ -1234,8 +1317,31 @@ def _describe_plan(plan: Plan, digest: str) -> str:
         f"stages: {' -> '.join(e['stage'] for e in plan.stage_log)}; "
         f"floor {plan.floor:g} from {plan.floor_source}\n"
         + "\n".join(describe_memory(plan))
+        + "\n"
+        + describe_scf_work(plan)
         + f"\ninput_digest {digest}"
     )
+
+
+def describe_scf_work(plan: Plan) -> str:
+    """How many scores (poses x candidates x field models; two SCFs each, vacuum and field) the run will do, and
+    the measurement tier's own time estimate for them in CPU-hours (`estimate_cost`, scaled by the field models)."""
+    from .temporal_run import field_models
+
+    n_models = len(field_models(plan, None)[0])
+    n_poses = sum(len(c.poses) for c in plan.candidates)
+    per_cand = sorted({len(c.poses) for c in plan.candidates})
+    poses = str(per_cand[0]) if len(per_cand) == 1 else f"{per_cand[0]}-{per_cand[-1]}"
+    n = n_poses * n_models
+    head = (
+        f"SCF work: {n} scores = {poses} poses x {len(plan.candidates)} candidates x {n_models} field model(s) "
+        f"({2 * n} SCFs: vacuum + field)"
+    )
+    est = plan.tier.estimate_cost(plan.candidates)
+    if est.get("predicted") is None:
+        return f"{head}; time estimate: none ({est.get('basis')})"
+    hours = float(est["predicted"]) * n_models / 3600.0
+    return f"{head}; estimate {hours:.2f} CPU-h (one SCF per worker slot; {est.get('basis')})"
 
 
 def memory_estimate(plan) -> dict:
@@ -1426,6 +1532,18 @@ def main(argv: list[str] | None = None) -> int:
         help="measure one candidate only, writing a partial result",
     )  # noqa: E501
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
+    run.add_argument(
+        "--temporal",
+        action="store_true",
+        help="run as a durable Temporal workflow (needs --out, a server and `smeltery temporal-worker`)",
+    )
+    run.add_argument("--workers", type=int, default=2, help="with --temporal: scores run at once")
+    run.add_argument("--host", default="127.0.0.1:7233", help="with --temporal: the Temporal server")
+    run.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline", help="with --temporal")
+    pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
+    pw.add_argument("--workers", type=int, default=2, help="scores at once (memory is the limit, not cores)")
+    pw.add_argument("--host", default="127.0.0.1:7233")
+    pw.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline")
     args = ap.parse_args(argv)
     if getattr(args, "command", None) == "golden":
         from smeltery.golden import main as _golden_main
@@ -1464,7 +1582,17 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             return 0
         return 0
+    if args.command == "temporal-worker":
+        from .temporal_run import worker_cli
+
+        return worker_cli(args.host, args.task_queue, args.workers)
     explicit_out = args.out is not None
+    if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
+        print(
+            "config error: --temporal needs --out OUT, and runs the whole config (no --only-candidate/--combine)",
+            file=sys.stderr,
+        )
+        return 2
     plan = None
     calc_file = "calcs.jsonl"
     if args.out is None:
@@ -1474,6 +1602,19 @@ def main(argv: list[str] | None = None) -> int:
         if explicit_out and not args.combine:
             args.config, config_info = _stage_config(args.config, args.out)
         cfg = load_config(args.config)
+        if args.only_candidate is not None or args.combine:
+            from .temporal_run import remeasuring_analyses
+
+            again = remeasuring_analyses(cfg)
+            if again:  # a partial measures one field only; a combine has no SCFs to re-measure with
+                raise ConfigError(
+                    f"[{again[0].section}] re-measures every pose under other fields, which a partial "
+                    "(--only-candidate) run does not do and a combine cannot; run the whole config, or use --temporal"
+                )
+        if args.temporal and not args.plan:
+            from .temporal_run import run_cli
+
+            return run_cli(args.config, args.out, args.workers, args.host, args.task_queue, config_info)
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
                 print(f"config error: unknown candidate {args.only_candidate!r}", file=sys.stderr)
