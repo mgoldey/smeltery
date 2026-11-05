@@ -373,3 +373,16 @@ def test_step_view_routers_do_not_shadow_the_pipeline_routes(client_for):
     r = c.get("/api/pipelines/somename")
     assert r.status_code == 200
     assert r.json()["toml"] == HAND
+
+
+def test_run_into_a_live_temporal_out_is_409_and_writes_nothing(client_for, tmp_path, monkeypatch):
+    import smeltery.temporal_run as temporal_run
+
+    monkeypatch.setattr(temporal_run, "guard_out", lambda out, sha, temporal: "a Temporal run is still running")
+    queue = FakeTaskQueue()
+    c, _ = client_for(queue=queue)
+    assert _saved(c, "p1", HAND)["ok"]
+    out = tmp_path / "runs" / "live"
+    r = c.post("/api/pipelines/p1/launch", json={"out": str(out)})
+    assert r.status_code == 409 and "still running" in r.json()["detail"]
+    assert queue.submitted == [] and not out.exists()

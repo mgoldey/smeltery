@@ -18,7 +18,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 from smeltery.bench.provisional import place_site, provisional_pose
-from smeltery.bench.use_cases.launch_run import LaunchRun
+from smeltery.bench.use_cases.launch_run import LaunchRun, LiveRunRefused
 from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import catalog, catalog_json, method
 from smeltery.gui.pipeline import Pipeline
@@ -226,9 +226,12 @@ def pipeline_launch(request: Request, body: M.LaunchRequest) -> Any:
     out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
     if not out.is_absolute():
         out = root / out
-    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-        p, out_dir=out
-    )
+    try:
+        tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
+            p, out_dir=out
+        )
+    except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
+        raise HTTPException(status_code=409, detail=str(e)) from None
     t = st.task_queue.get(tid)
     if t is None:
         raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")

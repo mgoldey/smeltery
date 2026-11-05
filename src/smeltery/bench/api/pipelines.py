@@ -26,7 +26,7 @@ from smeltery.gui.config_text import ConfigTextError, apply, diff_lines
 from smeltery.gui.pipeline import Pipeline
 
 from ..use_cases.impact import SourceRun, as_dict, impact
-from ..use_cases.launch_run import LaunchRun, smeltery_command
+from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
 from . import models as M
 from . import prebuilt as prebuilt_api
 from .common import ports, record, row
@@ -509,9 +509,12 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
     out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
     if not out.is_absolute():
         out = root / out
-    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-        p, out_dir=out, config_dir=f.folder, text=f.text
-    )
+    try:
+        tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
+            p, out_dir=out, config_dir=f.folder, text=f.text
+        )
+    except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
+        raise HTTPException(status_code=409, detail=str(e)) from None
     t = st.task_queue.get(tid)
     if t is None:
         raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
