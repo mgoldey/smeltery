@@ -359,41 +359,81 @@ _SCF_HELP = {
 }
 
 
-#: What each method's code can say about its wall time, in the words its own `estimate_cost` / docs/tiers/*.md use.
-#: A method with no model says "cannot say", and the Methods tab shows that rather than a guess.
+def _cost_dft() -> str:
+    from .. import cost
+    from ..tiers import FieldDftInteraction
+
+    t = FieldDftInteraction()
+    ref = cost.PBE_REFERENCE
+    return (
+        f"measured {t.functional} reference ({ref.n_atoms} atoms, {ref.n_basis_functions} bf: "
+        f"{cost.PBE_REFERENCE_VACUUM_SECONDS:g} s vacuum + {cost.PBE_REFERENCE_FIELD_SECONDS:g} s in field) scaled by "
+        f"nbf^2 x XC grid points; {t.functional} at {t.basis.upper()} only, otherwise cannot say; "
+        "a LOWER BOUND for slower-converging chemistry"
+    )
+
+
+def _cost_rhf() -> str:
+    from .. import cost
+
+    cal = cost.rhf_calibration()
+    return (
+        f"measured {cal.reference_name} reference ({cal.reference_nbf} bf, {cal.reference_seconds:.3g} s per pose, "
+        f"vacuum plus field RHF) scaled by (basis functions / {cal.reference_nbf})^{cal.exponent:.2f}; "
+        f"{cal.basis.upper()} only, otherwise cannot say; assumes the reference's SCF iteration count"
+    )
+
+
+def _cost_gfn2() -> str:
+    from ..tiers import Gfn2
+
+    return f"{Gfn2().estimate_cost([])['kind']}; estimate_cost counts the runs, not seconds"
+
+
+def _cost_forcefield() -> str:
+    from ..tiers import ForceField
+
+    return f"cannot say: {ForceField().estimate_cost([])['basis']}"
+
+
+def _memory_dft() -> str:
+    from ..tiers import FieldDftInteraction
+
+    t = FieldDftInteraction()
+    return (
+        f"peak resident GB of the largest pose (AO cache + packed RI tensor), checked against memory_budget_gb "
+        f"(default {t.memory_budget_gb:g}) before the first SCF; basis functions are counted for "
+        f"{t.basis.upper()} only, otherwise cannot say"
+    )
+
+
+#: What each method's code can say about its wall time and memory. Every number is read from the code that owns it
+#: (the calibration in `smeltery.cost`, the tier's own estimator), so the text cannot drift from the model; only the
+#: surrounding wording lives here. A method with no model says "cannot say".
 _COST_MODEL = {
-    "docking": "cannot say: no Vina timing is recorded in smeltery, so estimate_cost gives no prediction",
-    "paired_poses": (
-        "cannot say: estimate_cost gives no prediction; one measurement, 0.0862 s for 6 parent and 6 paired poses "
-        "of a 15-atom pair, which says nothing about growth with atoms, relax_unmapped or a long mcs_timeout_s"
+    "docking": lambda: "cannot say: no Vina timing is recorded in smeltery, so estimate_cost gives no prediction",
+    "paired_poses": lambda: (
+        "cannot say: estimate_cost gives no prediction (no recorded timing for its RDKit embeddings "
+        "and common-core search)"
     ),
-    "forcefield": "cannot say: no estimate; one MMFF94 minimisation of a 15-atom pose took 1.8 ms",
-    "gfn2": "about 0.1 to 1 s per pose (one xtb subprocess each); estimate_cost counts the runs, not seconds",
-    "field_interaction": (
-        "measured benzoic acid reference scaled by (basis functions / 51)^2.71, vacuum plus field RHF per pose; "
-        "STO-3G only, otherwise cannot say; assumes the reference's SCF iteration count"
-    ),
-    "field_dft_interaction": (
-        "measured PBE reference (74 atoms, 246 bf: 71.1 s vacuum + 80.7 s in field) scaled by nbf^2 x XC grid "
-        "points; PBE at STO-3G only, otherwise cannot say; a LOWER BOUND for slower-converging chemistry"
-    ),
+    "forcefield": _cost_forcefield,
+    "gfn2": _cost_gfn2,
+    "field_interaction": _cost_rhf,
+    "field_dft_interaction": _cost_dft,
 }
-_MEMORY_MODEL = {
-    "field_dft_interaction": (
-        "peak resident GB of the largest pose (AO cache + packed RI tensor), checked against memory_budget_gb "
-        "before the first SCF; basis functions are counted for STO-3G only, otherwise cannot say"
-    ),
-}
+_MEMORY_MODEL = {"field_dft_interaction": _memory_dft}
 
 
 def cost_model(key: str) -> str:
     """How `key`'s wall time is estimated, or 'cannot say: ...'. A stage with no tier has no model."""
-    return _COST_MODEL.get(key, "cannot say: no cost model for this stage")
+    f = _COST_MODEL.get(key)
+    return f() if f else "cannot say: no cost model for this stage"
 
 
 def memory_model(key: str) -> str:
     """How `key`'s memory is estimated, or 'cannot say: ...'."""
-    return _MEMORY_MODEL.get(key, "cannot say: no memory model for this stage")
+    f = _MEMORY_MODEL.get(key)
+    return f() if f else "cannot say: no memory model for this stage"
 
 
 def measured_floor(m: Method) -> float | None:

@@ -6,6 +6,7 @@ The file is edited as text through `smeltery.gui.config_text`, so comments a use
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import threading
 import tomllib
@@ -33,8 +34,14 @@ class FilesystemMethodDefaults:
             return ""
 
     def all(self) -> dict[str, dict[str, Any]]:
-        cfg = tomllib.loads(self._text())
-        return {k: dict(v) for k, v in cfg.items() if isinstance(v, dict) and v}
+        return {k: dict(v) for k, v in self._cfg(self._text()).items() if isinstance(v, dict) and v}
+
+    def _cfg(self, text: str) -> dict:
+        try:
+            return tomllib.loads(text)
+        except tomllib.TOMLDecodeError as e:
+            m = re.search(r"line (\d+)", str(e))
+            raise config_text.ConfigTextError(f"{self.path} is not valid TOML: {e}", int(m.group(1)) if m else 1) from e
 
     def get(self, method_key: str) -> dict[str, Any]:
         return self.all().get(method_key, {})
@@ -42,7 +49,7 @@ class FilesystemMethodDefaults:
     def put(self, method_key: str, values: dict[str, Any]) -> None:
         with self._lock:
             text = self._text() or HEADER
-            cfg = tomllib.loads(text)
+            cfg = self._cfg(text)
             if values:
                 cfg[method_key] = dict(values)
             else:

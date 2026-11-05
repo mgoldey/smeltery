@@ -420,3 +420,36 @@ def test_a_default_is_copied_not_referenced(tmp_path):
     before = digest()
     store.unlink()
     assert digest() == before
+
+
+def test_the_cost_and_memory_text_is_read_from_the_code_that_owns_the_numbers(monkeypatch):
+    """Changing a calibration value changes the catalog string: the text cannot drift from the model."""
+    import dataclasses
+
+    from smeltery import cost
+    from smeltery.gui.catalog import cost_model, memory_model
+
+    cal = cost.rhf_calibration()
+    assert f"{cal.reference_nbf} bf" in cost_model("field_interaction")
+    assert f"{cal.reference_seconds:.3g} s per pose" in cost_model("field_interaction")
+    changed = dataclasses.replace(cal, reference_nbf=777, reference_seconds=123.0, exponent=1.5, basis="def2-svp")
+    monkeypatch.setattr(cost, "rhf_calibration", lambda: changed)
+    text = cost_model("field_interaction")
+    assert "777 bf" in text and "123 s per pose" in text and "^1.50" in text and "DEF2-SVP only" in text
+
+    assert f"{cost.PBE_REFERENCE_VACUUM_SECONDS:g} s vacuum" in cost_model("field_dft_interaction")
+    monkeypatch.setattr(cost, "PBE_REFERENCE_VACUUM_SECONDS", 12.5)
+    monkeypatch.setattr(cost, "PBE_REFERENCE", cost.DftSize(n_atoms=9, n_basis_functions=33))
+    dft = cost_model("field_dft_interaction")
+    assert "12.5 s vacuum" in dft and "9 atoms, 33 bf" in dft
+
+    from smeltery.tiers import FieldDftInteraction
+
+    # the budget is the tier's own default, read from an instance rather than written into the text
+    assert f"default {FieldDftInteraction().memory_budget_gb:g}" in memory_model("field_dft_interaction")
+
+
+def test_a_method_without_a_model_says_it_cannot_say():
+    from smeltery.gui.catalog import cost_model, memory_model
+
+    assert cost_model("structure").startswith("cannot say") and memory_model("cut").startswith("cannot say")

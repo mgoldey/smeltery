@@ -25,6 +25,7 @@ from smeltery.gui.pipeline import Pipeline
 
 from . import models as M
 from .common import ports, run
+from .methods import workspace_defaults
 
 router = APIRouter(prefix="/api", tags=["work"])
 
@@ -140,6 +141,7 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
     charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
     notes say so, and click-to-place puts them back."""
     r = run(request, body.run)
+    defaults = workspace_defaults(request)
     inputs = r.record.get("inputs", {})
     p = Pipeline.minimal(r.campaign, r.parent, dict(r.candidates))
     notes = []
@@ -152,7 +154,7 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
     for gate, on in inputs.get("gates", {}).items():
         key = by_gate.get(gate)
         if on is True and key and key in p.addable():
-            p.add(key)
+            p.add(key, defaults=defaults)
     if inputs.get("field"):
         notes.append(
             f"This run's {len(inputs['field'])} pocket charges are recorded as positions, not as the atom sites that "
@@ -164,11 +166,12 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
 
 
 @router.post("/pipeline/edit", response_model=M.PipelineState)
-def pipeline_edit(body: M.PipelineEdit) -> M.PipelineState:
+def pipeline_edit(request: Request, body: M.PipelineEdit) -> M.PipelineState:
     p = _parse(body.toml)
+    defaults = workspace_defaults(request) if body.op == "add" else None
     try:
         if body.op == "add":
-            p.add(body.key, body.params or None, at=body.at)
+            p.add(body.key, body.params or None, at=body.at, defaults=defaults)
         elif body.op == "remove":
             p.remove(body.key)
         elif body.op == "move":

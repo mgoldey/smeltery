@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from smeltery.gui.catalog import Method, catalog, cost_model, measured_floor, memory_model
+from smeltery.gui.config_text import ConfigTextError
 from smeltery.gui.pipeline import Pipeline
 
 from . import models as M
@@ -22,6 +23,15 @@ router = APIRouter(prefix="/api", tags=["methods"])
 
 def _defaults(request: Request) -> Any:
     return ports(request).method_defaults
+
+
+def workspace_defaults(request: Request) -> dict[str, dict[str, Any]]:
+    """The workspace's `{method_key: {param: value}}`. A methods.toml that was hand-broken is a 409 naming the file
+    and line, not a 500."""
+    try:
+        return _defaults(request).all()
+    except ConfigTextError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 def _used_by(request: Request) -> dict[str, list[str]]:
@@ -76,7 +86,7 @@ def _wired(key: str) -> Method:
 
 @router.get("/methods", response_model=list[M.MethodInfo])
 def list_methods(request: Request) -> list[M.MethodInfo]:
-    defaults, used = _defaults(request).all(), _used_by(request)
+    defaults, used = workspace_defaults(request), _used_by(request)
     return [_view(m, defaults, used) for m in catalog().values() if m.wired]
 
 
@@ -98,5 +108,8 @@ def put_method_defaults(request: Request, key: str, body: M.MethodDefaultsPut) -
             raise HTTPException(status_code=400, detail=why)
         clean[name] = value
     store = _defaults(request)
-    store.put(key, clean)
-    return _view(m, store.all(), _used_by(request))
+    try:
+        store.put(key, clean)
+    except ConfigTextError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return _view(m, workspace_defaults(request), _used_by(request))

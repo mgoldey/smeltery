@@ -96,3 +96,38 @@ def test_a_pipeline_that_does_not_parse_is_skipped_not_fatal(client_for):
     Path(broken["folder"], "config.toml").write_text("not = = toml")
     assert made["name"] == "ok"
     assert _methods(c)["cut"]["used_by"] == ["ok"]
+
+
+def test_a_hand_broken_methods_file_is_a_409_naming_it_not_a_500(client_for):
+    c, ports = client_for()
+    f = Path(ports["settings"].root, ".smeltery", "bench", "methods.toml")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("[cut]\nz = = 1\n")
+    for r in (c.get("/api/methods"), c.put("/api/methods/cut", json={"defaults": {"z": 3.0}})):
+        assert r.status_code == 409 and "methods.toml" in r.json()["detail"] and "line 2" in r.json()["detail"]
+
+
+def _edit(c, toml, op, key, **kw):
+    r = c.post("/api/pipeline/edit", json={"toml": toml, "op": op, "key": key, **kw})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_workspace_default_is_copied_into_a_method_added_through_the_edit_route(client_for):
+    from smeltery.gui._toml import dumps
+    from smeltery.gui.pipeline import Pipeline
+
+    c, _ = client_for()
+    assert c.put("/api/methods/field_dft_interaction", json={"defaults": {"basis": "def2-svp"}}).status_code == 200
+    toml = dumps(Pipeline.minimal("cdk2", "a", {"a": "CCO", "b": "CCN"}).to_config())
+    toml = _edit(c, toml, "remove", "field_interaction")["toml"]
+    added = _edit(c, toml, "add", "field_dft_interaction")
+    assert tomllib.loads(added["toml"])["field_dft_interaction"] == {"basis": "def2-svp"}
+    # an explicit value in the request beats the default
+    explicit = _edit(c, toml, "add", "field_dft_interaction", params={"basis": "sto-3g"})
+    assert tomllib.loads(explicit["toml"])["field_dft_interaction"] == {"basis": "sto-3g"}
+    # copied, not referenced: clearing the default leaves the already-added stage as it was
+    assert c.put("/api/methods/field_dft_interaction", json={"defaults": {}}).status_code == 200
+    assert tomllib.loads(added["toml"])["field_dft_interaction"] == {"basis": "def2-svp"}
+    bare = _edit(c, toml, "add", "field_dft_interaction")
+    assert tomllib.loads(bare["toml"])["field_dft_interaction"] == {}

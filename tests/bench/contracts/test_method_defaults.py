@@ -57,3 +57,15 @@ def test_the_file_keeps_its_comments_across_edits(store, bench_tmp):
     store.put("gfn2", {})
     text = path.read_text()
     assert text.startswith("# my lab's choices\n") and tomllib.loads(text) == {"cut": {"z": 2.5}}
+
+
+def test_a_hand_broken_file_is_a_config_text_error_naming_the_file_and_line(store, bench_tmp):
+    from smeltery.gui.config_text import ConfigTextError
+
+    path = bench_tmp / "methods.toml"
+    path.write_text("[cut]\nz = 2.0\nbad = = 1\n")
+    for call in (store.all, lambda: store.get("cut"), lambda: store.put("cut", {"z": 3.0})):
+        with pytest.raises(ConfigTextError) as e:
+            call()
+        assert e.value.line == 3 and str(path) in str(e.value)
+    assert path.read_text() == "[cut]\nz = 2.0\nbad = = 1\n"
