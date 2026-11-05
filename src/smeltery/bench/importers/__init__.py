@@ -87,4 +87,4 @@ def import_run(original: Path, out_dir: Path) -> Path:
 
 
 def _load_builtin() -> None:
-    from . import danuglipron_2026_10  # noqa: F401  (registers itself)
+    from . import paired_amber_2026_10  # noqa: F401  (registers itself)

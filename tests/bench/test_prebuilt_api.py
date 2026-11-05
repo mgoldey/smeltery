@@ -1,7 +1,6 @@
 """Prebuilt pipelines over HTTP: the list, and starting a workspace pipeline from one."""
 
 import hashlib
-import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -12,14 +11,6 @@ from smeltery.bench.app import Settings, create_app
 
 NAMES = ["benzoic-pbe", "benzoic-rhf", "danuglipron-halogen", "docking", "structure"]
 PREBUILT = Path(__file__).resolve().parents[2] / "src" / "smeltery" / "prebuilt"
-
-
-def _imported_state(name: str) -> str:
-    """The verdict of the folder's imported record, read from the file."""
-    from smeltery.bench.verdict import verdict_of
-
-    (rec,) = (PREBUILT / name / "imported").glob("run-*.json")
-    return verdict_of(json.loads(rec.read_text())).state
 
 
 def _tree(folder: Path) -> dict[str, str]:
@@ -42,7 +33,7 @@ def _real_client(tmp_path):
     return TestClient(app), root
 
 
-def test_the_route_lists_all_four_with_their_two_lines_and_the_example_verdict(client_for):
+def test_the_route_lists_every_prebuilt_with_their_two_lines_and_the_example_verdict(client_for):
     c, _ = client_for()
     got = c.get("/api/prebuilt")
     assert got.status_code == 200, got.text
@@ -54,7 +45,7 @@ def test_the_route_lists_all_four_with_their_two_lines_and_the_example_verdict(c
     assert {n: by[n]["verdict"]["state"] for n in NAMES} == {
         "benzoic-pbe": "RESOLVED",
         "benzoic-rhf": "RESOLVED",
-        "danuglipron-halogen": _imported_state("danuglipron-halogen"),
+        "danuglipron-halogen": "UNRANKED",  # the record: keep=3 falls inside an unresolved group
         "docking": "UNRANKED",
         "structure": "UNRANKED",
     }

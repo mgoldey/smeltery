@@ -74,7 +74,7 @@ def test_missing_keys_are_listed_not_invented(imported):
     assert not missing & set(results)
     assert not set(results["not_recorded"]) & set(results)
     meta = results["imported"]
-    assert meta["importer"] == "danuglipron_2026_10"
+    assert meta["importer"] == "paired_amber_2026_10"
     assert meta["original"] == f"original/{ORIGINAL.name}"
     import hashlib
 
@@ -99,7 +99,7 @@ def test_an_unknown_shape_has_no_importer(tmp_path):
 
 
 def test_the_original_is_recognised():
-    assert importers.find(json.loads(ORIGINAL.read_text())).name == "danuglipron_2026_10"
+    assert importers.find(json.loads(ORIGINAL.read_text())).name == "paired_amber_2026_10"
 
 
 def test_a_missing_pose_key_says_the_run_was_imported(imported):
@@ -107,7 +107,8 @@ def test_a_missing_pose_key_says_the_run_was_imported(imported):
 
     _, out = imported
     run = load_run(out)
-    with pytest.raises(ValueError, match=r"imported from danuglipron_2026_10.*results\.per_pose was not recorded") as e:
+    msg = r"imported from paired_amber_2026_10.*results\.per_pose was not recorded"
+    with pytest.raises(ValueError, match=msg) as e:
         pose_output(run, "per_pose")
     assert "predates" not in str(e.value) and "re-run" not in str(e.value)
     run.record["results"].pop("imported")

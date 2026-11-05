@@ -16,12 +16,15 @@ from pathlib import Path
 
 from . import register
 
-NAME = "danuglipron_2026_10"
+NAME = "paired_amber_2026_10"
 #: The example's `cut(paired, keep=3, z=2.0, floor=...)`; the record's own cut note reads "keep=3 falls inside ...".
 _KEEP, _Z = 3, 2.0
 _PARENT = "parent"
 DERIVED = {
-    "inputs.cut": "examples/danuglipron_halogen.py:583 cut(keep=3, z=2.0); the record's cut note says keep=3",
+    "inputs.cut": (
+        "the cut(keep=3, z=2.0) call (line 583) of the example script that wrote this record, named in this"
+        " importer's docstring; the record's cut note says keep=3"
+    ),
     "results.funnel": "counts from paired_ddE_amber (12 analogues) plus the parent, and results.cut",
 }
 
