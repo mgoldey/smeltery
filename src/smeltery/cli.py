@@ -1260,15 +1260,64 @@ def write_outputs(
     if calc_rows is not None and not calc_rows:
         results["calcs"] = None  # a combine of partials with no calc logs: no SCF count is known, never "0"
     else:
-        results["calcs"] = {"file": calc_file, "n": write_calc_log(plan, out_dir, calc_file, calc_rows)}
+        base = list(calc_rows) if calc_rows is not None else list(getattr(plan.tier, "calc_log", None) or [])
+        rows = write_calc_log(plan, out_dir, calc_file, base + _analysis_calcs(plan, results))
+        results["calcs"] = {
+            "file": calc_file,
+            "n": rows,
+            "primary": primary_model(plan.field),
+            "by_model": _count_models(out_dir / calc_file),
+        }
     path = out_dir / f"run-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     return path
 
 
+def primary_model(field) -> str:
+    """The name of the plan's own field model: the force field pdb2pqr charged it with, else "primary" (sites, a
+    .pqr)."""
+    prov = getattr(field, "provenance", None) or {}
+    return str(prov.get("pdb2pqr_ff") or "primary")
+
+
+def _tag(row: dict, model: str) -> dict:
+    """An SCF line as calcs.jsonl holds it: every line names its field model and its rung (0 without a ladder)."""
+    if "outcome" in row:  # a Temporal outcome line: already names its model
+        return row
+    return {**row, "field_model": row.get("field_model", model), "rung": row.get("rung", 0)}
+
+
+def _analysis_calcs(plan: Plan, results: dict) -> list[dict]:
+    """Move every active analysis's per-model SCF lines (`results[key][model]["calcs"]`) out of the record, which
+    then keeps `{"n": count}`: calcs.jsonl is the one per-SCF log."""
+    rows: list[dict] = []
+    for spec in active_hooks("analysis", plan.cfg):
+        val = results.get(spec.key)
+        if not isinstance(val, dict):
+            continue
+        for model, entry in val.items():
+            if isinstance(entry, dict) and isinstance(entry.get("calcs"), list):
+                rows += [_tag(r, str(model)) for r in entry["calcs"]]
+                entry["calcs"] = {"n": len(entry["calcs"])}
+    return rows
+
+
+def _count_models(path: Path) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for x in path.read_text().splitlines():
+        if x.strip():
+            r = json.loads(x)
+            if "outcome" not in r:
+                out[str(r.get("field_model"))] = out.get(str(r.get("field_model")), 0) + 1
+    return out
+
+
 def write_calc_log(plan: Plan, out_dir: Path, name: str = "calcs.jsonl", rows: list[dict] | None = None) -> int:
-    """Write OUT/<name> (one line per SCF: `rows`, else the ones the tier ran) and return how many lines it has."""
-    calc_log = list(rows) if rows is not None else list(getattr(plan.tier, "calc_log", None) or [])
+    """Write OUT/<name> (one line per SCF: `rows`, else the ones the tier ran) and return how many lines it has.
+    A line without a field model is the primary field's."""
+    primary = primary_model(plan.field)
+    rows = list(rows) if rows is not None else list(getattr(plan.tier, "calc_log", None) or [])
+    calc_log = [_tag(r, primary) for r in rows]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / name).write_text("".join(json.dumps(e) + "\n" for e in calc_log))
@@ -1326,9 +1375,13 @@ def _describe_plan(plan: Plan, digest: str) -> str:
 def describe_scf_work(plan: Plan) -> str:
     """How many scores (poses x candidates x field models; two SCFs each, vacuum and field) the run will do, and
     the measurement tier's own time estimate for them in CPU-hours (`estimate_cost`, scaled by the field models)."""
-    from .temporal_run import field_models
-
-    n_models = len(field_models(plan, None)[0])
+    n_models = 1
+    for spec in active_hooks("analysis", plan.cfg):
+        hook = spec.hook
+        if hasattr(hook, "extra_models"):  # cheap: the model names from the config
+            n_models += len(hook.extra_models(plan.cfg))
+        elif hasattr(hook, "extra_fields"):
+            n_models += len(hook.extra_fields(plan, {"log": plan.stage_log, "out_dir": None}))
     n_poses = sum(len(c.poses) for c in plan.candidates)
     per_cand = sorted({len(c.poses) for c in plan.candidates})
     poses = str(per_cand[0]) if len(per_cand) == 1 else f"{per_cand[0]}-{per_cand[-1]}"

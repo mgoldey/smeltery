@@ -45,10 +45,22 @@ def test_every_scf_is_logged_with_its_leg_iterations_and_time(tmp_path):
     assert len(rows) == 2 * 2 * 2  # candidates x poses x (vacuum, field)
     assert {r["leg"] for r in rows} == {"vacuum", "field"}
     for r in rows:
-        assert set(r) == {"candidate", "pose", "leg", "converged", "iterations", "energy_hartree", "seconds"}
+        assert set(r) == {
+            "candidate",
+            "pose",
+            "leg",
+            "converged",
+            "iterations",
+            "energy_hartree",
+            "seconds",
+            "field_model",
+            "rung",
+        }
+        assert r["field_model"] == "primary" and r["rung"] == 0
         assert r["converged"] is True and r["iterations"] > 0 and r["seconds"] >= 0
     rec = json.loads(next(out.glob("run-*.json")).read_text())
-    assert rec["results"]["calcs"] == {"file": "calcs.jsonl", "n": len(rows)}
+    want = {"file": "calcs.jsonl", "n": len(rows), "primary": "primary", "by_model": {"primary": len(rows)}}
+    assert rec["results"]["calcs"] == want
 
 
 @pytest.mark.needs_ferric
@@ -104,7 +116,7 @@ def test_combine_merges_the_partial_logs_instead_of_overwriting(tmp_path):
     assert main(["run", str(cfg), "--out", str(out), "--combine"]) == 0
     assert len(_lines(out / "calcs.jsonl")) == 3
     rec = json.loads(next(out.glob("run-*.json")).read_text())
-    assert rec["results"]["calcs"] == {"file": "calcs.jsonl", "n": 3}
+    assert rec["results"]["calcs"] == {"file": "calcs.jsonl", "n": 3, "primary": "primary", "by_model": {"primary": 3}}
     assert (out / "calcs-ethanol.jsonl").is_file() and (out / "calcs-propanol.jsonl").is_file()
 
 

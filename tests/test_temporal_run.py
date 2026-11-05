@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import socket
 import sys
 import threading
@@ -480,12 +481,37 @@ def test_an_extra_fields_analysis_is_scored_and_summarized(ferric, tmp_path, que
     assert measured["HALF"]["ethanol"] != res["per_pose"]["ethanol"]["dE_int"]
 
 
-def test_plan_counts_the_scf_work_including_extra_fields(ferric, tmp_path, half, capsys):
+def test_plan_counts_the_scf_work_including_extra_fields(ferric, tmp_path, half, capsys, monkeypatch):
     cfg = _config(tmp_path, extra="\n[half_field]\n")
     assert main(["run", str(cfg), "--plan"]) == 0
     out = capsys.readouterr().out
     assert "SCF work: 8 scores = 2 poses x 2 candidates x 2 field model(s) (16 SCFs: vacuum + field)" in out
-    assert "CPU-h" in out or "time estimate: none" in out
+    one = re.search(r"estimate ([0-9.]+) CPU-h", out)
+    # the cheap `extra_models(cfg)`, when the hook has it, is what counts (no field is built for --plan)
+    _, hook = half
+    monkeypatch.setattr(hook, "extra_models", lambda cfg: ["HALF", "THIRD"], raising=False)
+    monkeypatch.setattr(hook, "extra_fields", lambda plan, ctx: pytest.fail("--plan built a field"))
+    assert main(["run", str(cfg), "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert "SCF work: 12 scores = 2 poses x 2 candidates x 3 field model(s) (24 SCFs: vacuum + field)" in out
+    three = re.search(r"estimate ([0-9.]+) CPU-h", out)
+    if one is not None:  # the tier's calibration covers these elements: the hours scale with the models
+        assert float(three.group(1)) == pytest.approx(1.5 * float(one.group(1)), rel=0.05, abs=0.011)
+
+
+def test_a_serial_analysiss_scf_lines_move_into_the_one_calc_log(ferric, tmp_path, half, monkeypatch):
+    """calcs.jsonl is the single per-SCF log: an analysis's per-model `calcs` go there, the record keeps a count."""
+    _, hook = half
+    extra = [{"candidate": "ethanol", "pose": 0, "leg": "field", "converged": True, "energy_hartree": -1.0}]
+    monkeypatch.setattr(hook, "run", lambda plan, rec, ctx: {"HALF": {"value": 1.0, "calcs": list(extra)}})
+    out = tmp_path / "out"
+    assert main(["run", str(_config(tmp_path, extra="\n[half_field]\n")), "--out", str(out)]) == 0
+    res = _record(out)["results"]
+    assert res["half_field"] == {"HALF": {"value": 1.0, "calcs": {"n": 1}}}
+    assert res["calcs"] == {"file": "calcs.jsonl", "n": 9, "primary": "primary", "by_model": {"primary": 8, "HALF": 1}}
+    rows = _rows(out)
+    assert rows[-1] == {**extra[0], "field_model": "HALF", "rung": 0}
+    assert all("field_model" in r and "rung" in r for r in rows)
 
 
 def test_a_remeasuring_analysis_is_refused_for_partial_and_combine(ferric, tmp_path, half, capsys):

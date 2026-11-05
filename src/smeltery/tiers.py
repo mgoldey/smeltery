@@ -683,10 +683,7 @@ class FieldInteraction:
         """One leg up the ladder until it converges or the rungs run out; every SCF logged. Returns (result, rung)."""
         for rung in range(self.n_rungs):
             res, secs = self.scf(ferric, mol, bs, charges, rung)
-            entry = _calc_entry(cand, pose, leg, res, res.energy, secs)
-            if self.remedies:
-                entry["rung"] = rung
-            self.calc_log.append(entry)
+            self.calc_log.append({**_calc_entry(cand, pose, leg, res, res.energy, secs), "rung": rung})
             if res.converged:
                 return res, rung
         return res, rung

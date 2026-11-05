@@ -5,8 +5,8 @@ compute, and the science is the non-Temporal run's: the same plan (`cli.build_pl
 same pairing, cut and record (`cli.run_plan`, `cli.write_outputs`). What it adds is around each SCF:
 
 * **The unit of work is one score**: (candidate, pose, field model), both legs (vacuum, field) of one pose under one
-  field. The field models are the plan's own field (`PRIMARY`) plus every field an active analysis asks for through
-  `extra_fields(plan, ctx) -> {model: [PointCharge]}`.
+  field. The field models are the plan's own field (named by `cli.primary_model`: its pdb2pqr force field, else
+  "primary") plus every field an active analysis asks for through `extra_fields(plan, ctx) -> {model: [PointCharge]}`.
 * **Timeouts and heartbeats**: a score ends after `[run] scf_timeout_s` (default 4 h); it heartbeats while the SCF
   runs, so a dead worker is noticed within the heartbeat timeout, not at the start-to-close timeout.
 * **Retries for transient faults only**: `RetryPolicy(maximum_attempts=3)` with `ScfNotConverged` and
@@ -61,8 +61,6 @@ DOCKER_COMMAND = (
     "docker run -d --name temporal-dev -p 7233:7233 -p 8233:8233 "
     "temporalio/temporal:latest server start-dev --ip 0.0.0.0"
 )
-#: The field model name of the plan's own field (the one `[pocket]` / a field source gives).
-PRIMARY = "primary"
 CALCS = "calcs.jsonl"
 WORK_DIR = "temporal"
 WORK_FILE = "work.json"
@@ -201,7 +199,9 @@ def unit_state(rows: list[dict], n_rungs: int) -> dict[tuple[str, int, str], dic
 def field_models(plan, out: Path | None) -> tuple[dict[str, list], dict[str, str]]:
     """The plan's own field, plus each extra field an active analysis asks for (`extra_fields`); and which
     analysis asked for each extra model."""
-    models, owner = {PRIMARY: list(plan.field)}, {}
+    from .cli import primary_model
+
+    models, owner = {primary_model(plan.field): list(plan.field)}, {}
     for spec in remeasuring_analyses(plan.cfg):
         for name, charges in spec.hook.extra_fields(plan, {"log": plan.stage_log, "out_dir": out}).items():
             if name in models:
@@ -249,6 +249,7 @@ def prepare_sync(inp: RunInput) -> PrepareResult:
     models, owner = field_models(plan, out)
     work = {
         "digest": digest,
+        "primary": next(iter(models)),
         "model_owner": owner,
         "candidates": {
             c.name: {
@@ -372,6 +373,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
             raise ValueError(f"{c.name}: the rebuilt poses differ from the scored ones")
     rows = read_rows(out, digest)
     state = unit_state(rows, plan.tier.n_rungs)
+    primary = work["primary"]
     remedies = bool(plan.tier.remedies)
 
     values: dict[str, dict[str, list]] = {m: {} for m in work["fields"]}
@@ -398,12 +400,12 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
                             "rungs_tried": o.get("rungs_tried", []),
                         }
                     )
-                    if model == PRIMARY:
+                    if model == primary:
                         failed[c.name].add(i)
                     continue
                 legs = st["legs"]
                 vals.append((legs["field"]["energy_hartree"] - legs["vacuum"]["energy_hartree"]) * HARTREE_TO_KCAL)
-                if model == PRIMARY:
+                if model == primary:
                     rung_of.setdefault(c.name, [None] * len(c.poses))[i] = max(
                         int(legs["vacuum"]["rung"]), int(legs["field"]["rung"])
                     )
@@ -419,10 +421,10 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
             gone = failed[c.name] | failed[parent.name]
             pose_index[c.name] = [i for i in range(len(c.poses)) if i not in gone]
             for d in dropped:  # who the drop took with it
-                if d["field_model"] == PRIMARY and d["candidate"] == c.name:
+                if d["field_model"] == primary and d["candidate"] == c.name:
                     d["dropped_with"] = [parent.name, c.name]
         for d in dropped:
-            if d["field_model"] == PRIMARY and d["candidate"] == parent.name:
+            if d["field_model"] == primary and d["candidate"] == parent.name:
                 d["dropped_with"] = [c.name for c in plan.candidates]
         empty = [k for k, v in pose_index.items() if not v]
         if empty:
@@ -432,7 +434,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
         for c in p.candidates:
             keep = pose_index[c.name] if pose_index else list(range(len(c.poses)))
             c.poses = [c.poses[i] for i in keep]
-            c.per_pose["dE_int"] = [float(values[PRIMARY][c.name][i]) for i in keep]
+            c.per_pose["dE_int"] = [float(values[primary][c.name][i]) for i in keep]
             if remedies:
                 c.per_pose["scf_rung"] = [float(rung_of[c.name][i]) for i in keep]
 
