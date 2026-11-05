@@ -3,6 +3,7 @@
 import hashlib
 import inspect
 import shutil
+import sys
 from pathlib import Path
 
 import ferric
@@ -186,6 +187,7 @@ def test_broken_pdb2pqr30_shim_is_not_installed(tmp_path, monkeypatch):
     shim.write_text("#!/bin/sh\nexit 127\n")
     shim.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "bare" / "python"))  # no venv pdb2pqr30 to prefer
     assert shutil.which("pdb2pqr30") == str(shim)
     assert pdb2pqr_version() is None
     with pytest.raises(Pdb2PqrUnavailableError, match=r"pip install pdb2pqr.*|--version fails") as e:
@@ -270,3 +272,33 @@ def test_reference_pose_control_catches_crystal_waters_left_in_a_real_field():
     with pytest.raises(ValueError, match="the FIELD is wrong"):
         check_reference_pose(coords, with_waters, min_ang=far, name="crystal parent")
     check_reference_pose(coords, without, min_ang=near, name="crystal parent")
+
+
+def _fake_pdb2pqr(d, version: str):
+    d.mkdir(parents=True)
+    exe = d / "pdb2pqr30"
+    exe.write_text(f"#!/bin/sh\necho '{version}'\n")
+    exe.chmod(0o755)
+    return exe
+
+
+def test_pdb2pqr_is_the_interpreters_own_before_the_first_on_path(tmp_path, monkeypatch):
+    """The venv's pdb2pqr30 wins over a different one earlier on PATH, so the charges (and the digest) do not depend
+    on whether the venv was activated."""
+    from smeltery.pocket import loader
+
+    env = _fake_pdb2pqr(tmp_path / "venv" / "bin", "pdb2pqr 3.8.0")
+    _fake_pdb2pqr(tmp_path / "shims", "pdb2pqr 3.7.1")
+    monkeypatch.setattr(loader.sys, "executable", str(env.parent / "python"))
+    monkeypatch.setenv("PATH", str(tmp_path / "shims"))
+    assert loader.pdb2pqr_exe() == str(env)
+    assert loader.pdb2pqr_version() == "pdb2pqr 3.8.0"
+
+
+def test_without_one_beside_the_interpreter_pdb2pqr_is_the_first_on_path(tmp_path, monkeypatch):
+    from smeltery.pocket import loader
+
+    shim = _fake_pdb2pqr(tmp_path / "shims", "pdb2pqr 3.7.1")
+    monkeypatch.setattr(loader.sys, "executable", str(tmp_path / "bare" / "python"))
+    monkeypatch.setenv("PATH", str(tmp_path / "shims"))
+    assert loader.pdb2pqr_exe() == str(shim)

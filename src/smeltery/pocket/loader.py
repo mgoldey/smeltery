@@ -11,8 +11,10 @@ written into the tier settings.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -39,6 +41,16 @@ def file_digest(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def pdb2pqr_exe() -> str | None:
+    """The `pdb2pqr30` this interpreter's environment installed (beside `sys.executable`), else the first on PATH.
+
+    The charges, and so the input digest, depend on the pdb2pqr version. Taking the first on PATH made the same
+    command give different charges depending on whether the venv was activated (3.8.0 in the venv, 3.7.1 behind a
+    pyenv shim), and a resumed run refuse the log it wrote."""
+    here = str(Path(sys.executable).parent)
+    return shutil.which(PDB2PQR, path=os.pathsep.join(p for p in (here, os.environ.get("PATH", "")) if p))
+
+
 def pdb2pqr_version() -> str | None:
     """Version string of the installed `pdb2pqr30`, or None if it is not usable.
 
@@ -47,7 +59,7 @@ def pdb2pqr_version() -> str | None:
     `--version` (non-zero exit, missing or non-executable file, empty output)
     therefore means not installed, and never raises.
     """
-    exe = shutil.which(PDB2PQR)
+    exe = pdb2pqr_exe()
     if exe is None:
         return None
     try:
@@ -207,7 +219,7 @@ def load_pocket(
     elif suffix == ".pdb":
         version = pdb2pqr_version()
         if version is None:
-            found = shutil.which(PDB2PQR)
+            found = pdb2pqr_exe()
             why = (
                 f"`{PDB2PQR}` is not on PATH"
                 if found is None
@@ -217,7 +229,7 @@ def load_pocket(
                 f"{path.name} is a PDB and needs a working `{PDB2PQR}` to assign charges: {why}; "
                 "install it (pip install pdb2pqr) or pass a pre-made .pqr"
             )
-        exe = shutil.which(PDB2PQR)
+        exe = pdb2pqr_exe()
         prov["pdb2pqr_version"] = version
         prov["pdb2pqr_ff"] = ff
         with tempfile.TemporaryDirectory() as tmp:
