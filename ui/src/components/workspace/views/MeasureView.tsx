@@ -7,12 +7,23 @@ import { useScheme } from "../../../styles/scheme";
 import type { StepViewProps } from "./registry";
 import { CorePose, getJson, NotRun, useRunDetail } from "./PosesView";
 
-type Sensitivity = components["schemas"]["ModelSensitivity"];
+export type Sensitivity = components["schemas"]["ModelSensitivity"];
 
 /** One table row per (model, analogue): the analogue's paired ddE under the primary and the other charge model. */
 export function sensitivityRows(models: Record<string, Sensitivity> | null | undefined) {
   return Object.entries(models ?? {}).flatMap(([model, m]) =>
-    Object.entries(m.paired_ddE).map(([candidate, r]) => ({ ...r, chargeModel: model, candidate })),
+    Object.entries(m.paired_ddE ?? {}).map(([candidate, r]) => ({ ...r, chargeModel: model, candidate })),
+  );
+}
+
+/** Every pose whose SCF gave no value under an extra model: one entry per (model, ligand, pose), poses in order. */
+export function sensitivityFailures(models: Record<string, Sensitivity> | null | undefined) {
+  return Object.entries(models ?? {}).flatMap(([model, m]) =>
+    Object.entries(m.failures ?? {}).flatMap(([candidate, poses]) =>
+      Object.entries(poses)
+        .map(([pose, error]) => ({ chargeModel: model, candidate, pose: Number(pose), error }))
+        .sort((a, b) => a.pose - b.pose),
+    ),
   );
 }
 
@@ -35,15 +46,25 @@ export function SensitivityTable({ models, unit, parent }: { models: Record<stri
           </tr>
         </thead>
         <tbody>
-          {Object.entries(models).map(([model, m]) => (
-            <tr key={model} data-model={model}>
-              <td>{model}</td>
-              <td>{m.primary_model ?? "primary"}</td>
-              <td className="num" data-col="sign_flips">{m.sign_flips ?? "—"}</td>
-              <td className="num" data-col="spearman">{fmt(m.spearman, 2)}</td>
-              <td className="num" data-col="dropped">{m.n_dropped ?? 0}</td>
-            </tr>
-          ))}
+          {Object.entries(models).map(([model, m]) =>
+            m.error ? (
+              <tr key={model} data-model={model} data-error="true">
+                <td>{model}</td>
+                <td colSpan={4}>
+                  not measured: {m.error}
+                  {m.stage ? ` (at ${m.stage})` : ""}
+                </td>
+              </tr>
+            ) : (
+              <tr key={model} data-model={model}>
+                <td>{model}</td>
+                <td>{m.primary_model ?? "primary"}</td>
+                <td className="num" data-col="sign_flips">{m.sign_flips ?? "—"}</td>
+                <td className="num" data-col="spearman">{fmt(m.spearman, 2)}</td>
+                <td className="num" data-col="dropped">{m.n_dropped ?? 0}</td>
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
       {Object.entries(models).map(([model, m]) => (m.note ? <p className="lede" key={model}>{model}: {m.note}</p> : null))}
@@ -54,7 +75,7 @@ export function SensitivityTable({ models, unit, parent }: { models: Record<stri
             <th>Ligand</th>
             <th className="num">Paired ΔΔE{parent ? ` vs ${parent}` : ""}, primary charges ({unit})</th>
             <th className="num">Paired ΔΔE, this model ({unit})</th>
-            <th className="num">Shift</th>
+            <th className="num">Shift ({unit})</th>
             <th className="num">Poses</th>
           </tr>
         </thead>
@@ -71,6 +92,18 @@ export function SensitivityTable({ models, unit, parent }: { models: Record<stri
           ))}
         </tbody>
       </table>
+      {sensitivityFailures(models).length ? (
+        <>
+          <p className="lede">Poses with no value under the extra model (dropped pairwise from both sides):</p>
+          <ul aria-label="Failed poses under the extra charge models" data-testid="sensitivity-failures">
+            {sensitivityFailures(models).map((f) => (
+              <li key={`${f.chargeModel}/${f.candidate}/${f.pose}`}>
+                {f.chargeModel}: {f.candidate} pose {f.pose}: {f.error}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -140,7 +173,7 @@ export function MeasureView({ sourceRun }: StepViewProps) {
     setShowLog(false);
   });
   if (sourceRun === null) return <NotRun step="measure" shows="the interaction energy of every ligand at every pose, and the SCF behind each point" />;
-  const err = figure.error ?? rows.error ?? detail.error;
+  const err = figure.error ?? rows.error ?? detail.error ?? sensitivity.error;
   if (err) return <div className="banner" role="alert">{err.message}</div>;
   const unit = detail.data?.unit ?? "";
   const parent = detail.data?.parent;

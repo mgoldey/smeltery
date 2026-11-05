@@ -13,8 +13,14 @@ Interface (the Temporal runner, task D4, calls the first two; `run` is the seria
   model (None for a failed or dropped pose). Returns `{model: {"paired_ddE", "sign_flips", "spearman", ...}}`, paired
   against the primary per-pose values in `rec.results["per_pose"]`. Pairwise drop: a pose missing on either side (or
   for the parent on either side) is dropped from both, and each model's entry lists the dropped poses and counts them.
-* `run(plan, rec, ctx)`: `extra_fields`, then every pose under each extra field (serially; an SCF that does not
-  converge is recorded as None with its error, not retried), then `summarize`. Merged into `results.charge_sensitivity`.
+* `extra_models(cfg) -> list[str]`: the models the section asks for, without pdb2pqr (for counting SCFs at --plan).
+* `run(plan, rec, ctx)`: per model, its field, then every pose under it (serially; an SCF that does not converge is
+  recorded as None with its error, not retried), then `summarize`. Merged into `results.charge_sensitivity`. It
+  never raises: a model whose field or measurement fails is recorded as `{"error": ..., "stage": ...}`.
+
+SCF log contract: each extra-model calc row is the tier's own row (so it keeps a `rung` if the tier wrote one) plus
+`"pose"` and `"field_model": <model>`, kept in `results.charge_sensitivity[model]["calcs"]`. The runner's output
+writer (D4) moves them into calcs.jsonl, the one per-SCF log, and replaces the list with their count.
 
 `ctx["measure"]` (the measure `run_plan` was given) is NOT used to re-measure: a combine of partial runs passes one that
 replays the primary values, which would report a sensitivity of exactly zero. Tests inject `ChargeSensitivity.measure`
@@ -99,7 +105,7 @@ def _finite(v: Any) -> float | None:
     return x if math.isfinite(x) else None
 
 
-def _nan_none(x: float) -> float | None:
+def _nan_none(x: float | None) -> float | None:
     return None if x is None or not math.isfinite(x) else float(x)
 
 
@@ -114,6 +120,19 @@ class ChargeSensitivity:
     def extra_fields(self, plan: Any, ctx: dict) -> dict[str, list]:
         """{model: the primary pocket re-charged by pdb2pqr --ff=model}, built from the primary field's provenance:
         the same file (checked by digest), cutoff, centre and water choice."""
+        return {model: self.extra_field(plan, model) for model in self.extra_models(plan.cfg)}
+
+    def extra_models(self, cfg: dict) -> list[str]:
+        """The extra force fields the config asks for, without running pdb2pqr: a plan counts its SCFs with this
+        (poses x candidates x (1 + len(extra_models)))."""
+        section = cfg.get("charge_sensitivity")
+        if not isinstance(section, dict):
+            return []
+        return list(section.get("models", ["CHARMM"]))
+
+    def extra_field(self, plan: Any, model: str) -> list:
+        """One model's field (see `extra_fields`); raises if the primary field is not a pdb2pqr-charged .pdb, the file
+        changed, or pdb2pqr fails."""
         from ..pocket import file_digest, load_pocket
 
         prov = getattr(plan.field, "provenance", None)
@@ -125,19 +144,15 @@ class ChargeSensitivity:
             )
         if file_digest(path) != prov["input_sha256"]:
             raise ValueError(f"{path.name} no longer has the digest the primary field was built from")
-        models = list(plan.cfg["charge_sensitivity"].get("models", ["CHARMM"]))
-        out: dict[str, list] = {}
-        for model in models:
-            if model == prov["pdb2pqr_ff"]:
-                raise ValueError(f"model {model} is the primary field's force field")
-            out[model] = load_pocket(
-                path,
-                cutoff_ang=prov.get("cutoff_ang"),
-                center_ang=prov.get("center_ang"),
-                ff=model,
-                drop_waters=bool(prov.get("drop_waters", False)),
-            )
-        return out
+        if model == prov["pdb2pqr_ff"]:
+            raise ValueError(f"model {model} is the primary field's force field")
+        return load_pocket(
+            path,
+            cutoff_ang=prov.get("cutoff_ang"),
+            center_ang=prov.get("center_ang"),
+            ff=model,
+            drop_waters=bool(prov.get("drop_waters", False)),
+        )
 
     # ---------------------------------------------------------------------------------------------- the summary
 
@@ -174,6 +189,8 @@ class ChargeSensitivity:
             dropped: dict[str, list[int]] = {}
             pairs: dict[str, tuple[float, float]] = {}
             excluded: list[str] = []
+            n_par = max(len(par_a), len(par_b))
+            parent_gone = [i for i in range(n_par) if at(par_a, i) is None or at(par_b, i) is None]
             for name in order:
                 if name == parent:
                     continue
@@ -181,9 +198,9 @@ class ChargeSensitivity:
                 n = max(len(a), len(b), len(par_a), len(par_b))
                 # pairwise: a pose missing on either side (the analogue's or the parent's) is dropped from both
                 keep = [i for i in range(n) if all(at(x, i) is not None for x in (a, b, par_a, par_b))]
-                gone = [i for i in range(n) if i not in keep]
-                if gone:
-                    dropped[name] = gone
+                own = [i for i in range(n) if at(a, i) is None or at(b, i) is None]  # its own missing poses
+                if own:
+                    dropped[name] = own
                 if not keep:
                     excluded.append(name)
                     rows[name] = {"primary": None, "model": None, "delta": None, "n": 0}
@@ -194,8 +211,10 @@ class ChargeSensitivity:
             entry: dict[str, Any] = {
                 "primary_model": primary_ff,
                 "paired_ddE": rows,
-                "dropped_poses": dropped,
-                "n_dropped": sum(len(v) for v in dropped.values()),
+                "dropped_poses": dropped,  # an analogue's own missing poses
+                "parent_dropped_poses": parent_gone,  # the parent's: dropped for every analogue
+                # distinct (candidate, pose) values missing on either side; a parent pose counts once
+                "n_dropped": len(parent_gone) + sum(len(v) for v in dropped.values()),
                 "excluded": excluded,
                 "per_pose": {k: [_finite(v) for v in vs] for k, vs in values.items()},
             }
@@ -220,7 +239,9 @@ class ChargeSensitivity:
 
     # -------------------------------------------------------------------------------------------- the serial path
 
-    def _measure_field(self, plan: Any, fld: list) -> tuple[dict[str, list[float | None]], dict, list[dict]]:
+    def _measure_field(
+        self, plan: Any, model: str, fld: list
+    ) -> tuple[dict[str, list[float | None]], dict, list[dict]]:
         """Every pose of every candidate in `fld`: ({candidate: per-pose dE_int or None}, failures, SCF log rows)."""
         from ..model import Candidate
 
@@ -246,24 +267,37 @@ class ChargeSensitivity:
                 try:
                     tier.run([one], {"field": fld})
                     vals.append(_finite(one.per_pose[QUANTITY][0]))
-                except RuntimeError as e:  # an SCF that did not converge: recorded, not retried
+                except Exception as e:  # an SCF that did not converge (or any failure): recorded, not retried
                     vals.append(None)
                     failures.setdefault(c.name, {})[str(i)] = f"{type(e).__name__}: {e}"
-                calcs.extend({**row, "pose": i} for row in (getattr(tier, "calc_log", None) or []))
+                # the row keeps any rung the tier wrote; field_model says which pocket it ran in
+                calcs.extend(
+                    {**row, "pose": i, "field_model": model} for row in (getattr(tier, "calc_log", None) or [])
+                )
             values[c.name] = vals
         return values, failures, calcs
 
     def run(self, plan: Any, rec: Any, ctx: dict) -> dict:
-        fields = self.extra_fields(plan, ctx)
-        measured, failures, calcs = {}, {}, {}
-        for model, fld in fields.items():
-            measured[model], failures[model], calcs[model] = self._measure_field(plan, fld)
-        out = self.summarize(plan, rec, measured)
-        for model, fld in fields.items():
-            out[model]["field"] = dict(getattr(fld, "provenance", {}) or {})
-            out[model]["failures"] = failures[model]
-            if calcs[model]:
-                out[model]["calcs"] = calcs[model]
+        """Never raises: the primary measurement is already done, so a model whose field cannot be built, or whose
+        measurement or summary fails, is recorded as `{model: {"error": ..., "stage": ...}}` and the run keeps its
+        record."""
+        out: dict[str, dict] = {}
+        for model in self.extra_models(plan.cfg):
+            stage = "field"
+            try:
+                fld = self.extra_field(plan, model)
+                stage = "measure"
+                measured, failures, calcs = self._measure_field(plan, model, fld)
+                stage = "summary"
+                entry = self.summarize(plan, rec, {model: measured})[model]
+            except Exception as e:
+                out[model] = {"error": f"{type(e).__name__}: {e}", "stage": stage}
+                continue
+            entry["field"] = dict(getattr(fld, "provenance", {}) or {})
+            entry["failures"] = failures
+            if calcs:
+                entry["calcs"] = calcs
+            out[model] = entry
         return out
 
 

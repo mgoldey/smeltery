@@ -192,6 +192,7 @@ def test_a_pose_missing_on_either_side_is_dropped_from_both():
     p = _Plan(names)
     out = cs_mod.ChargeSensitivity().summarize(p, _summary_rec(p, primary), measured)["CHARMM"]
     assert out["dropped_poses"] == {"a": [1], "b": [2]} and out["n_dropped"] == 2
+    assert out["parent_dropped_poses"] == []
     # a: poses 0 and 2 on both sides; b: poses 0 and 1
     assert out["paired_ddE"]["a"] == {"primary": 2.0, "model": 2.0, "delta": 0.0, "n": 2}
     assert out["paired_ddE"]["b"] == {"primary": -1.0, "model": -2.5, "delta": -1.5, "n": 2}
@@ -207,7 +208,10 @@ def test_a_pose_missing_on_either_side_is_dropped_from_both():
     # a parent pose missing under one model drops that pose for every analogue
     measured["CHARMM"]["p"] = [0.5, 0.5, None]
     out = cs_mod.ChargeSensitivity().summarize(p, _summary_rec(p, primary), measured)["CHARMM"]
-    assert out["dropped_poses"] == {"a": [1, 2], "b": [2], "c": [2]}
+    # reported once, as the parent's, not once per analogue
+    assert out["parent_dropped_poses"] == [2] and out["dropped_poses"] == {"a": [1], "b": [2]}
+    assert out["n_dropped"] == 3  # (p, 2), (a, 1), (b, 2)
+    assert out["paired_ddE"]["c"]["n"] == 2 and out["paired_ddE"]["a"]["n"] == 1
 
 
 def test_fewer_than_two_comparable_analogues_is_recorded_not_raised():
@@ -236,8 +240,10 @@ class FieldTier:
 
     def run(self, candidates, ctx):
         phi = potential(ctx["field"])
+        self.calc_log = []
         for c in candidates:
             self.calls.append(c.name)
+            self.calc_log.append({"candidate": c.name, "pose": 0, "leg": "field", "rung": 0, "converged": True})
             if c.name == "4-Cl" and len(self.calls) % 2 == 0:
                 raise RuntimeError(f"{c.name} pose 0: SCF did not converge")
             c.per_pose["dE_int"] = [FACTOR[c.name] * phi for _ in c.poses]
@@ -264,6 +270,46 @@ def test_the_serial_path_measures_through_the_tier_never_through_the_runs_measur
     assert entry["per_pose"]["4-Cl"].count(None) >= 1 and entry["failures"]["4-Cl"]
     assert all(v is not None for v in entry["per_pose"]["4-F"])
     assert entry["per_pose"]["4-F"] != rec.results["per_pose"]["4-F"]["dE_int"]
+    # every extra-model SCF row says which pocket it ran in, keeps the tier's rung, and its real pose index
+    assert len(entry["calcs"]) == len(tier.calls)
+    assert all(r["field_model"] == "CHARMM" and r["rung"] == 0 for r in entry["calcs"])
+    assert sorted({r["pose"] for r in entry["calcs"]}) == [0, 1, 2]
+
+
+def test_extra_models_reads_the_section_without_pdb2pqr():
+    h = cs_mod.ChargeSensitivity()
+    assert h.extra_models({"charge_sensitivity": {"models": ["CHARMM", "PARSE"]}}) == ["CHARMM", "PARSE"]
+    assert h.extra_models({"charge_sensitivity": {}}) == ["CHARMM"]
+    assert h.extra_models({}) == []
+
+
+@needs_pdb2pqr
+def test_a_field_that_cannot_be_built_is_recorded_and_the_run_keeps_its_record(plan, hook, monkeypatch):
+    """pdb2pqr failing for one model (or the pocket file changing) after every primary SCF has run must not cost the
+    record: run_plan returns, and the model's entry carries the error."""
+    import subprocess
+
+    import smeltery.pocket as pocket_mod
+
+    plan.cfg["charge_sensitivity"] = {"models": ["CHARMM", "PARSE"]}
+    real = pocket_mod.load_pocket
+
+    def flaky(path, **kw):
+        if kw.get("ff") == "CHARMM":
+            raise subprocess.CalledProcessError(1, ["pdb2pqr30", "--ff=CHARMM"])
+        return real(path, **kw)
+
+    monkeypatch.setattr(pocket_mod, "load_pocket", flaky)
+    rec, _ = run_plan(plan, measure=field_measure)
+    got = rec.results["charge_sensitivity"]
+    assert got["CHARMM"]["stage"] == "field" and "CalledProcessError" in got["CHARMM"]["error"]
+    assert got["PARSE"]["field"]["pdb2pqr_ff"] == "PARSE" and "error" not in got["PARSE"]
+    assert rec.results["paired_ddE"]  # the primary result is intact
+
+    plan.receptor_pdb.write_text(plan.receptor_pdb.read_text() + "REMARK changed\n")
+    rec, _ = run_plan(plan, measure=field_measure)
+    for m in ("CHARMM", "PARSE"):
+        assert "no longer has the digest" in rec.results["charge_sensitivity"][m]["error"]
 
 
 def test_validation_refuses_what_it_cannot_measure():

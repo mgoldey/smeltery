@@ -604,7 +604,8 @@ export interface paths {
         /**
          * Run Calcs
          * @description Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
-         *     written. 409 when the run kept no SCF log.
+         *     written, of one field model: `field_model`, else the run's primary one (`results.calcs.primary`). A line naming
+         *     no model (a run from before models were recorded) is the primary's. 409 when the run kept no SCF log.
          */
         get: operations["run_calcs_api_runs__idx__calcs_get"];
         put?: never;
@@ -1836,8 +1837,30 @@ export interface components {
             dropped_poses: {
                 [key: string]: number[];
             };
+            /** Error */
+            error?: string | null;
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded: string[];
+            /**
+             * Failures
+             * @default {}
+             */
+            failures: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
+            /** Field */
+            field?: {
+                [key: string]: unknown;
+            } | null;
             /** Floor */
             floor?: number | null;
+            /** N */
+            n?: number | null;
             /**
              * N Dropped
              * @default 0
@@ -1845,16 +1868,26 @@ export interface components {
             n_dropped: number;
             /** Note */
             note?: string | null;
-            /** Paired Dde */
+            /**
+             * Paired Dde
+             * @default {}
+             */
             paired_ddE: {
                 [key: string]: components["schemas"]["SensitivityRow"];
             };
+            /**
+             * Parent Dropped Poses
+             * @default []
+             */
+            parent_dropped_poses: number[];
             /** Primary Model */
             primary_model?: string | null;
             /** Sign Flips */
-            sign_flips: number | null;
+            sign_flips?: number | null;
             /** Spearman */
-            spearman: number | null;
+            spearman?: number | null;
+            /** Stage */
+            stage?: string | null;
         };
         /** ParamOut */
         ParamOut: {
@@ -3741,6 +3774,7 @@ export interface operations {
             query: {
                 candidate: string;
                 pose: number;
+                field_model?: string | null;
             };
             header?: never;
             path: {

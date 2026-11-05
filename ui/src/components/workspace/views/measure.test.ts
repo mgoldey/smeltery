@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { bindClicks, type PlotDiv, sensitivityRows } from "./MeasureView";
+import { bindClicks, type PlotDiv, type Sensitivity, sensitivityFailures, sensitivityRows } from "./MeasureView";
+
+/** A model's entry with the response's defaults filled in. */
+const ms = (m: Partial<Sensitivity>): Sensitivity => ({
+  paired_ddE: {},
+  sign_flips: null,
+  spearman: null,
+  n_dropped: 0,
+  dropped_poses: {},
+  parent_dropped_poses: [],
+  excluded: [],
+  failures: {},
+  ...m,
+});
 
 /** A stand-in for the div Plotly draws into: `.on` records its listeners. */
 function plot(): PlotDiv & { fire: (e: unknown) => void } {
@@ -47,14 +60,14 @@ describe("bindClicks", () => {
 describe("sensitivityRows", () => {
   it("is one row per charge model and analogue, and nothing when the analysis did not run", () => {
     const models = {
-      CHARMM: {
+      CHARMM: ms({
         paired_ddE: { "4-F": { primary: -1, model: -1.5, delta: -0.5, n: 3 }, "4-Br": { primary: null, model: null, delta: null, n: 0 } },
         sign_flips: 0,
         spearman: 1,
         n_dropped: 3,
         dropped_poses: { "4-Br": [0, 1, 2] },
-      },
-      PARSE: { paired_ddE: { "4-F": { primary: -1, model: 0.5, delta: 1.5, n: 3 } }, sign_flips: null, spearman: null, n_dropped: 0, dropped_poses: {}, note: "1 analogue(s)" },
+      }),
+      PARSE: ms({ paired_ddE: { "4-F": { primary: -1, model: 0.5, delta: 1.5, n: 3 } }, sign_flips: null, spearman: null, n_dropped: 0, dropped_poses: {}, note: "1 analogue(s)" }),
     };
     expect(sensitivityRows(models)).toEqual([
       { chargeModel: "CHARMM", candidate: "4-F", primary: -1, model: -1.5, delta: -0.5, n: 3 },
@@ -63,5 +76,26 @@ describe("sensitivityRows", () => {
     ]);
     expect(sensitivityRows(null)).toEqual([]);
     expect(sensitivityRows(undefined)).toEqual([]);
+  });
+});
+
+describe("sensitivityFailures", () => {
+  it("lists every failed pose per model in pose order, and skips a model that failed as a whole", () => {
+    const models = {
+      CHARMM: ms({
+        paired_ddE: {},
+        sign_flips: null,
+        spearman: null,
+        n_dropped: 2,
+        dropped_poses: { "4-Cl": [0, 2] },
+        failures: { "4-Cl": { "2": "RuntimeError: b", "0": "RuntimeError: a" } },
+      }),
+      PARSE: ms({ error: "CalledProcessError: x", stage: "field" }),
+    };
+    expect(sensitivityFailures(models)).toEqual([
+      { chargeModel: "CHARMM", candidate: "4-Cl", pose: 0, error: "RuntimeError: a" },
+      { chargeModel: "CHARMM", candidate: "4-Cl", pose: 2, error: "RuntimeError: b" },
+    ]);
+    expect(sensitivityRows(models)).toEqual([]);
   });
 });

@@ -185,7 +185,12 @@ SENSITIVITY = {
         "n_dropped": 5,
         "dropped_poses": {"4-Cl": [1], "4-Br": [0, 1, 2, 3]},
         "per_pose": {"4-F": [1.0, 2.0, 3.0, 4.0]},
-    }
+        "failures": {"4-Cl": {"1": "RuntimeError: 4-Cl pose 0: SCF did not converge"}},
+        "excluded": ["4-Br"],
+        "n": 2,
+        "field": {"pdb2pqr_ff": "CHARMM"},
+    },
+    "PARSE": {"error": "CalledProcessError: pdb2pqr failed", "stage": "field"},
 }
 
 
@@ -198,3 +203,21 @@ def test_charge_sensitivity_is_the_records_and_absent_when_it_did_not_run(client
     assert got["paired_ddE"] == SENSITIVITY["CHARMM"]["paired_ddE"]
     assert (got["sign_flips"], got["spearman"], got["n_dropped"]) == (1, -1.0, 5)
     assert got["note"] is None and "per_pose" not in got
+    assert got["failures"] == SENSITIVITY["CHARMM"]["failures"] and got["excluded"] == ["4-Br"] and got["n"] == 2
+    assert got["field"] == {"pdb2pqr_ff": "CHARMM"}
+    parse = c.get("/api/runs/0/charge_sensitivity").json()["models"]["PARSE"]
+    assert parse["error"].startswith("CalledProcessError") and parse["stage"] == "field" and parse["paired_ddE"] == {}
+
+
+def test_calcs_are_the_primary_models_unless_another_is_asked_for(client_for, run_dir):
+    rows = [
+        {"candidate": "4-F", "pose": 1, "leg": "field", "field_model": "AMBER", "rung": 0},
+        {"candidate": "4-F", "pose": 1, "leg": "field", "field_model": "CHARMM", "rung": 0},
+        {"candidate": "4-F", "pose": 1, "leg": "vacuum"},  # a line from before models were recorded: the primary's
+    ]
+    (run_dir / "calcs.jsonl").write_text("".join(json.dumps(x) + "\n" for x in rows))
+    _edit(run_dir, lambda rec: rec["results"].update(calcs={"file": "calcs.jsonl", "n": 3, "primary": "AMBER"}))
+    c, _ = client_for(run_dir)
+    q = {"candidate": "4-F", "pose": 1}
+    assert c.get("/api/runs/0/calcs", params=q).json()["lines"] == [rows[0], rows[2]]
+    assert c.get("/api/runs/0/calcs", params={**q, "field_model": "CHARMM"}).json()["lines"] == [rows[1]]

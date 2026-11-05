@@ -260,14 +260,25 @@ class SensitivityRow(BaseModel):
 
 class ModelSensitivity(BaseModel):
     primary_model: str | None = None
-    paired_ddE: dict[str, SensitivityRow]
-    #: None when fewer than two analogues could be compared (`note` says why).
-    sign_flips: int | None
-    spearman: float | None
+    paired_ddE: dict[str, SensitivityRow] = {}
+    #: None when fewer than two analogues could be compared (`note` says why) or the model failed (`error`).
+    sign_flips: int | None = None
+    spearman: float | None = None
     floor: float | None = None
+    #: analogues compared
+    n: int | None = None
     n_dropped: int = 0
     dropped_poses: dict[str, list[int]] = {}
+    parent_dropped_poses: list[int] = []
+    excluded: list[str] = []
+    #: {candidate: {pose: error}}: SCFs under this model that did not give a value
+    failures: dict[str, dict[str, str]] = {}
+    #: provenance of this model's pocket field (pdb2pqr version, force field, file digest, cutoff)
+    field: dict[str, Any] | None = None
     note: str | None = None
+    #: the model could not be measured at all; `stage` is where it failed (field, measure, summary)
+    error: str | None = None
+    stage: str | None = None
 
 
 class ChargeSensitivity(BaseModel):
@@ -348,9 +359,10 @@ class CalcLines(BaseModel):
 
 
 @router.get("/runs/{idx}/calcs", response_model=CalcLines)
-def run_calcs(request: Request, idx: int, candidate: str, pose: int) -> CalcLines:
+def run_calcs(request: Request, idx: int, candidate: str, pose: int, field_model: str | None = None) -> CalcLines:
     """Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
-    written. 409 when the run kept no SCF log."""
+    written, of one field model: `field_model`, else the run's primary one (`results.calcs.primary`). A line naming
+    no model (a run from before models were recorded) is the primary's. 409 when the run kept no SCF log."""
     raw = record(request, idx)
     calcs = (raw.get("results") or {}).get("calcs")
     if not calcs:
@@ -363,6 +375,8 @@ def run_calcs(request: Request, idx: int, candidate: str, pose: int) -> CalcLine
         text = path.read_text()
     except OSError as e:
         raise HTTPException(status_code=409, detail=f"cannot read the SCF log {path}: {e}") from e
+    primary = calcs.get("primary")
+    want = field_model if field_model is not None else primary
     lines = []
     for x in text.splitlines():
         if not x.strip():
@@ -372,7 +386,9 @@ def run_calcs(request: Request, idx: int, candidate: str, pose: int) -> CalcLine
         except ValueError:
             continue
         if isinstance(d, dict) and d.get("candidate") == candidate and d.get("pose") == pose:
-            lines.append(d)
+            model = d.get("field_model", primary)
+            if want is None or model == want:
+                lines.append(d)
     return CalcLines(file=str(calcs["file"]), lines=lines)
 
 
