@@ -11,8 +11,8 @@ from typing import Protocol, runtime_checkable
 class StaleWrite(Exception):
     """`put` was given a `base_sha256` that is not the stored file's: someone saved in between."""
 
-    def __init__(self, name: str, current_sha256: str):
-        super().__init__(f"pipeline {name!r} changed since it was read (now {current_sha256[:12]})")
+    def __init__(self, name: str, current_sha256: str, message: str | None = None):
+        super().__init__(message or f"pipeline {name!r} changed since it was read (now {current_sha256[:12]})")
         self.name = name
         self.current_sha256 = current_sha256
 

@@ -85,3 +85,14 @@ def test_create_refuses_a_path_that_leaves_the_folder_and_leaves_nothing_behind(
             store.create("p", "", {rel: src})
     assert store.list() == []
     store.create("p", "", {})  # the name was not consumed by the failures
+
+
+def test_crlf_and_non_ascii_text_keeps_its_hash_across_put_and_get(store):
+    text = 'note = "ΔE"\r\nx = 1\r\n'
+    a = store.create("p", text, {})
+    got = store.get("p")
+    assert (got.text, got.sha256) == (text, a.sha256)
+    b = store.put("p", text + "y = 2\r\n", a.sha256)
+    got = store.get("p")
+    assert (got.text, got.sha256) == (text + "y = 2\r\n", b.sha256)
+    store.put("p", "z = 1\n", got.sha256)

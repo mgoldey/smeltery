@@ -130,3 +130,28 @@ def test_a_recorded_input_that_is_missing_from_the_run_dir_is_409_and_creates_no
 def test_an_unknown_run_is_404(client_for):
     c, _ = client_for()
     assert c.post("/api/pipelines", json={"name": "n", "from_run": 5}).status_code == 404
+
+
+def test_a_blank_pipeline_with_an_odd_parent_is_a_saved_draft_not_a_500(client_for):
+    # Pipeline.minimal does not raise for this input; a draft may be saved with errors, so it is created.
+    c, _ = client_for()
+    bad = {"campaign": "x", "parent": "zzz", "candidates": {"a": "CCO"}}
+    r = c.post("/api/pipelines", json={"name": "p1", "blank": bad})
+    assert r.status_code == 201 and r.json()["ok"] is False
+    assert c.get("/api/pipelines").json() == ["p1"]
+
+
+def test_a_save_without_a_base_says_a_base_is_required(client_for):
+    c, _ = client_for()
+    _make(c)
+    r = c.put("/api/pipelines/p1", json={"toml": "a = 1\n"})
+    assert r.status_code == 409 and "base_sha256 is required" in r.json()["reason"]
+
+
+def test_crlf_text_saved_over_http_does_not_make_the_next_save_stale(client_for):
+    c, _ = client_for()
+    made = _make(c)
+    r1 = c.put("/api/pipelines/p1", json={"toml": 'a = "ΔE"\r\n', "base_sha256": made["sha256"]}).json()
+    got = c.get("/api/pipelines/p1").json()
+    assert got["sha256"] == r1["sha256"] and got["toml"] == 'a = "ΔE"\r\n'
+    assert c.put("/api/pipelines/p1", json={"toml": "a = 2\n", "base_sha256": got["sha256"]}).status_code == 200

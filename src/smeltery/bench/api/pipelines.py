@@ -143,7 +143,12 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
     files: dict[str, Path] = {}
     if body.blank is not None:
         b = body.blank
-        text = dumps(Pipeline.minimal(b.campaign, b.parent, dict(b.candidates)).to_config())
+        try:
+            text = dumps(Pipeline.minimal(b.campaign, b.parent, dict(b.candidates)).to_config())
+        except (KeyError, ValueError, TypeError) as e:
+            raise HTTPException(
+                status_code=400, detail=f"cannot build a blank pipeline: {str(e).strip(chr(39))}"
+            ) from e
     else:
         assert body.from_run is not None
         try:

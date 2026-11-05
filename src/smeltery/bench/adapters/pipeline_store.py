@@ -39,7 +39,7 @@ class FilesystemPipelineStore:
     def get(self, name: str) -> PipelineFile:
         folder = self._folder(name)
         try:
-            text = (folder / CONFIG).read_text()
+            text = (folder / CONFIG).read_bytes().decode("utf-8")
         except FileNotFoundError as e:
             raise KeyError(name) from e
         return PipelineFile(name, text, _sha(text), folder)
@@ -48,7 +48,7 @@ class FilesystemPipelineStore:
     def _write(folder: Path, text: str) -> None:
         fd, tmp = tempfile.mkstemp(dir=folder, prefix=".config-", suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
             os.replace(tmp, folder / CONFIG)
         except BaseException:
@@ -58,6 +58,12 @@ class FilesystemPipelineStore:
     def put(self, name: str, text: str, base_sha256: str | None) -> PipelineFile:
         with self._lock:
             current = self.get(name)
+            if base_sha256 is None:
+                raise StaleWrite(
+                    name,
+                    current.sha256,
+                    f"pipeline {name!r} already exists: a base_sha256 is required to overwrite it",
+                )
             if base_sha256 != current.sha256:
                 raise StaleWrite(name, current.sha256)
             self._write(current.folder, text)
