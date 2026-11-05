@@ -14,15 +14,18 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from smeltery.bench.ports.pipeline_store import PipelineFile, StaleWrite
+from smeltery.bench.provisional import place_site
+from smeltery.gui import steps as step_model
 from smeltery.gui._toml import dumps
-from smeltery.gui.config_text import ConfigTextError
+from smeltery.gui.catalog import method
+from smeltery.gui.config_text import ConfigTextError, apply, diff_lines
 from smeltery.gui.pipeline import Pipeline
 
 from ..use_cases.impact import SourceRun, as_dict, impact
-from ..use_cases.launch_run import smeltery_command
+from ..use_cases.launch_run import LaunchRun, smeltery_command
 from . import models as M
 from .common import ports, record, row
 from .work import pipeline_from_run, pipeline_issues
@@ -66,6 +69,74 @@ class Impact(BaseModel):
 
 class PreviewStarted(BaseModel):
     task: str
+
+
+class StepsRequest(BaseModel):
+    toml: str
+    baseline_toml: str | None = None  # the kept text: what "changed", "was" and "result will change" compare with
+
+
+class StepParam(BaseModel):
+    method: str
+    name: str
+    value: Any
+    default: Any
+    help: str
+    kind: str
+    changed_from: Any = Field(description="the baseline's value when it differs, else null")
+    workspace_default: Any = Field(description="the Methods tab's default for this knob, null when none is set")
+
+
+class StepLink(BaseModel):
+    step: str | None  # the step it comes from (inputs) or goes to (gives); null for the pipeline's own inputs
+    text: str
+
+
+class StepOut(BaseModel):
+    key: str
+    label: str
+    summary: str
+    state: Literal["ready", "needs_input", "off", "changed", "stale"]
+    inputs: list[StepLink]
+    gives: list[StepLink]
+    methods: list[str]
+    chosen: str | None
+    params: list[StepParam]
+    issues: list[M.Issue]
+
+
+class DiffLine(BaseModel):
+    sign: str = Field(description='"+" added, "-" removed, " " unchanged context')
+    line: str
+
+
+class StepsOut(BaseModel):
+    steps: list[StepOut]
+    pipeline_issues: list[M.Issue] = Field(description="issues that belong to no one step: shown above the drawing")
+    diff: list[DiffLine] = Field(description="the line diff from baseline_toml to toml, context lines included")
+
+
+class SiteSpec(BaseModel):
+    atom: int
+    from_atom: int
+    q: float = 1.0
+    distance: float = 3.0
+
+
+class StepEdit(BaseModel):
+    toml: str
+    op: Literal["add", "remove", "set", "choose", "site"]
+    key: str  # a catalog method key
+    params: dict[str, Any] | None = None  # `set`: knob -> value, null unsets; `add`/`choose`: initial knobs
+    site: SiteSpec | None = None  # `site`: the charge to place
+
+
+class EditedText(BaseModel):
+    toml: str
+
+
+class PipelineLaunch(BaseModel):
+    out: str | None = None
 
 
 def _validate(text: str) -> Pipeline | None:
@@ -234,6 +305,145 @@ def pipeline_impact(request: Request, body: ImpactRequest) -> Any:
     return as_dict(
         impact(body.toml, body.baseline_toml, base, source=source, preview_dir=preview_dir, preview_task=task)
     )
+
+
+def _issue(x: Any) -> M.Issue:
+    return M.Issue(level=x.level, stage=x.stage, message=x.message)
+
+
+def _parse_or_400(text: str) -> Pipeline | None:
+    try:
+        return _validate(text)
+    except ConfigTextError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _workspace_defaults(request: Request) -> dict[str, dict[str, Any]]:
+    """The Methods tab's `{method_key: {param: value}}`; a hand-broken methods.toml is a 409 naming its line."""
+    try:
+        return ports(request).method_defaults.all()
+    except ConfigTextError as e:
+        raise HTTPException(status_code=409, detail=f"methods.toml: {e}") from e
+
+
+@router.post("/pipelines/steps", response_model=StepsOut, responses={400: {"model": M.Problem}})
+def pipeline_steps(request: Request, body: StepsRequest) -> StepsOut:
+    """The draft drawn as its six steps, each with its knobs, its state against the kept text, and its issues."""
+    p = _parse_or_400(body.toml)
+    base = _parse_or_400(body.baseline_toml) if body.baseline_toml is not None else None
+    diff = [DiffLine(sign=s, line=ln) for s, ln in diff_lines(body.baseline_toml or body.toml, body.toml)]
+    if p is None:
+        return StepsOut(steps=[], pipeline_issues=_issues(body.toml), diff=diff)
+    views = step_model.steps(p, base, _workspace_defaults(request))
+    out = [
+        StepOut(
+            key=v.key,
+            label=v.label,
+            summary=v.summary,
+            state=v.state,
+            inputs=[StepLink(step=d["from"], text=d["text"]) for d in v.inputs],
+            gives=[StepLink(step=d["to"], text=d["text"]) for d in v.gives],
+            methods=v.methods,
+            chosen=v.chosen,
+            params=[StepParam(**x) for x in v.params],
+            issues=[_issue(x) for x in v.issues],
+        )
+        for v in views
+    ]
+    return StepsOut(steps=out, pipeline_issues=[_issue(x) for x in step_model.pipeline_issues(p, views)], diff=diff)
+
+
+def _patch(target: dict, before: dict, after: dict) -> None:
+    """Carry what changed from `before` to `after` (two `Pipeline.to_config()`s) into `target` (the user's config as
+    parsed), so the edit touches only the keys it changed and nothing the Pipeline would normalise."""
+    for k in [k for k in before if k not in after]:
+        target.pop(k, None)
+    for k, v in after.items():
+        old = before.get(k)
+        if isinstance(v, dict) and isinstance(old, dict) and isinstance(target.get(k), dict):
+            _patch(target[k], old, v)
+        elif k not in before or old != v or type(old) is not type(v):
+            target[k] = v
+
+
+def _edit(p: Pipeline, body: StepEdit, defaults: dict[str, dict[str, Any]]) -> None:
+    if body.op == "add":
+        p.add(body.key, body.params or None, defaults=defaults)
+    elif body.op == "remove":
+        p.remove(body.key)
+    elif body.op == "set":
+        p.set(body.key, **(body.params or {}))
+    elif body.op == "choose":  # the other method of a step: drop the ones it excludes, then place it
+        for other in method(body.key).exclusive:
+            if other in p.keys():
+                p.remove(other)
+        if body.key not in p.keys():
+            p.add(body.key, body.params or None, defaults=defaults)
+    else:
+        if body.site is None:
+            raise ValueError("a site edit needs the site: atom, from_atom, q, distance")
+        s = body.site
+        place_site(p, s.atom, s.from_atom, q=s.q, distance=s.distance)
+
+
+@router.post("/pipelines/edit", response_model=EditedText, responses={400: {"model": M.Problem}})
+def pipeline_edit(request: Request, body: StepEdit) -> EditedText:
+    """One step edit applied to the user's text: only the lines the edit changes are written, comments and layout
+    stay (`config_text.apply`). Workspace defaults are copied into a method when it is added."""
+    p = _parse_or_400(body.toml)
+    if p is None:
+        raise HTTPException(status_code=400, detail="this TOML is not a pipeline config; fix it in the TOML pane")
+    defaults = _workspace_defaults(request) if body.op in ("add", "choose") else {}
+    before = p.to_config()
+    try:
+        _edit(p, body, defaults)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e).strip("'\"")) from e
+    after = p.to_config()
+    if body.op == "remove" and body.key in Pipeline.from_config(after).keys():
+        others = ", ".join(repr(o) for o in method(body.key).exclusive) or "nothing"
+        raise HTTPException(
+            status_code=400, detail=f"every pipeline needs {body.key!r}; choose its alternative instead: {others}"
+        )
+    target = tomllib.loads(body.toml)
+    _patch(target, before, after)
+    try:
+        return EditedText(toml=apply(body.toml, target))
+    except ConfigTextError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/pipelines/{name}/launch",
+    response_model=M.Task,
+    status_code=201,
+    responses={409: {"model": M.Problem}},
+)
+def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
+    """Run the KEPT config: inputs staged into OUT by hash, relative paths resolved against the pipeline's folder.
+    Refused, with the number of errors and each one, while `Pipeline.check()` reports an error."""
+    f = _get(request, name)
+    issues = _issues(f.text)
+    errors = [i.message for i in issues if i.level == "error"]
+    p = _validate(f.text) if not errors else None
+    if errors or p is None:
+        n = len(errors)
+        return JSONResponse(
+            status_code=409,
+            content={"reason": f"{n} error{'s' if n != 1 else ''} block Run: " + "; ".join(errors)},
+        )
+    st = ports(request)
+    root = Path(st.settings.root)
+    out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
+    if not out.is_absolute():
+        out = root / out
+    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
+        p, out_dir=out, config_dir=f.folder
+    )
+    t = st.task_queue.get(tid)
+    if t is None:
+        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
+    return M.Task(**(t.to_dict() if hasattr(t, "to_dict") else t))
 
 
 @router.post("/pipelines/{name}/preview", response_model=PreviewStarted, status_code=201)
