@@ -188,6 +188,17 @@ COLLATERAL: dict[str, set[str]] = {
 }
 
 
+def results_without_timing(results: dict) -> dict:
+    """`results` with the wall-clock `seconds` of every stage and funnel row removed; nothing else changes.
+
+    Two runs of identical inputs share every number but not their timings, so this is the form to compare."""
+    out = dict(results)
+    for key in ("stages", "funnel"):
+        if key in out:
+            out[key] = [{k: v for k, v in e.items() if k != "seconds"} for e in out[key]]
+    return out
+
+
 def apply_mutation(spec: str) -> Callable[[], None]:
     """spec 'G3:0' -> disable variant 0 of G3; return the undo."""
     gate, _, idx = spec.partition(":")
@@ -577,7 +588,9 @@ def check_happy(ctx: Ctx, twice: bool = True, trace: Path | None = None) -> dict
     if twice:
         a, b = records
         assert a["input_digest"] == b["input_digest"], "input_digest is not stable across identical runs"
-        assert a["results"] == b["results"], "identical inputs gave different results"
+        assert results_without_timing(a["results"]) == results_without_timing(b["results"]), (
+            "identical inputs gave different results"
+        )
     return rec
 
 

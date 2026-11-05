@@ -43,6 +43,7 @@ from golden_path import (
     Reach,
     install_tier_trace,
     replace_function,
+    results_without_timing,
     run_library_tiers,
     run_smoke,
     tier_accounting,
@@ -105,7 +106,8 @@ def test_input_digest_is_stable_across_two_runs_of_identical_inputs(golden):
     a, b = golden.records
     assert re.fullmatch(r"[0-9a-f]{64}", a["input_digest"])
     assert a["input_digest"] == b["input_digest"]
-    assert a["results"] == b["results"]  # same inputs, same numbers and the same (non-)ranking
+    # same numbers and the same (non-)ranking; only wall time may differ
+    assert results_without_timing(a["results"]) == results_without_timing(b["results"])
     assert a["results"]["cut"]["unranked"] is True
 
 

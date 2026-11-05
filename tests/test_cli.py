@@ -12,6 +12,7 @@ import sys
 import tomllib
 
 import pytest
+from golden_path import results_without_timing
 
 from smeltery.cli import ConfigError, build_plan, format_table, load_config, main, run_plan, validate_config
 from smeltery.record import RunRecord
@@ -227,10 +228,8 @@ def test_an_unranked_run_exits_zero_and_a_rerun_reproduces_the_digest_and_the_de
         records.append(json.loads(path.read_text()))
     a, b = records
     assert a["input_digest"] == b["input_digest"]
-    for r in (a, b):  # wall time is the one thing two runs of the same inputs do not share
-        for entry in r["results"]["stages"] + r["results"]["funnel"]:
-            entry.pop("seconds", None)
-    assert a["results"] == b["results"]  # same ranking decision AND the same numbers
+    # wall time is the one thing two runs of the same inputs do not share; same ranking decision AND same numbers
+    assert results_without_timing(a["results"]) == results_without_timing(b["results"])
     assert a["results"]["cut"]["unranked"] is True and a["results"]["cut"]["survivors"] is None
 
 
@@ -626,3 +625,18 @@ def test_each_stage_records_its_seconds(monkeypatch):
     log: list = []
     cli._log(log, "never_timed", "x", None, None, "prep")
     assert log[0]["seconds"] is None  # never timed is not "took zero seconds"
+
+
+def test_the_record_keeps_the_scaffold_maps_as_pose_maps():
+    """Data source: `PairedPoses.scaffold_maps` of the same plan, (analogue atom, parent atom) per analogue, which
+    the Poses view reads to draw the shared core solid. The parent has no map."""
+    cfg = validate_config(tomllib.loads(SMALL.format(floor=0.0)))
+    plan = build_plan(cfg)
+    plan.tier = _KnownValues(
+        plan.tier, {"ethanol": [0.0, 0.0, 0.0], "propanol": [1.0, 1.1, 0.9], "butanol": [3.0, 3.1, 2.9]}
+    )
+    rec, _ = run_plan(plan)
+    maps = plan.poses.scaffold_maps
+    assert set(maps) == {"propanol", "butanol"} and all(maps.values())
+    assert rec.results["pose_maps"] == {k: [list(p) for p in v] for k, v in maps.items()}
+    assert json.loads(rec.to_json())["results"]["pose_maps"] == rec.results["pose_maps"]
