@@ -42,11 +42,12 @@ def _write(tmp_path, structure=""):
     return src, cfg
 
 
-def test_the_input_paths_are_the_four_the_run_reads():
+def test_the_input_paths_are_the_ones_the_run_reads():
     assert INPUT_PATHS == (
         ("structure", "spec"),
         ("pocket", "file"),
         ("docking", "receptor"),
+        ("bound_pose", "file"),
         ("decisions", "file"),
     )
 

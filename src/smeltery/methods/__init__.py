@@ -140,6 +140,7 @@ class MethodSpec:
 
 _REGISTRY: dict[str, MethodSpec] = {}
 _BUILTINS_LOADED = False
+_EXTENSIONS_CALLED: set[str] = set()  # modules whose `register_methods()` has run against the current registry
 _VERSION = 0  # bumped on every change, so derived views know to rebuild
 
 
@@ -154,23 +155,29 @@ def _ensure_builtins() -> None:
             _register_extensions()
         except BaseException:  # never leave a half-registered catalog behind: the next call retries from scratch
             _REGISTRY.clear()
+            _EXTENSIONS_CALLED.clear()
             _BUILTINS_LOADED = False
             raise
 
 
 def _register_extensions() -> None:
     """Every other module of this package that defines `register_methods()` declares its methods: adding a method is
-    adding a module here, with no list to edit. Modules are loaded in name order, after the built-ins."""
+    adding a module here, with no list to edit. Modules are loaded in name order, after the built-ins. A module's
+    `register_methods()` runs once per registry: calling this again registers only the modules not yet seen."""
     import importlib
     import pkgutil
 
     for info in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
         if info.name == "builtin" or info.name.startswith("_"):
             continue
-        mod = importlib.import_module(f"{__name__}.{info.name}")
+        name = f"{__name__}.{info.name}"
+        if name in _EXTENSIONS_CALLED:
+            continue
+        mod = importlib.import_module(name)
         hook = getattr(mod, "register_methods", None)
         if callable(hook):
             hook()
+            _EXTENSIONS_CALLED.add(name)
 
 
 def register(spec: MethodSpec) -> MethodSpec:
