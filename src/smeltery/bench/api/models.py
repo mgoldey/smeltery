@@ -53,6 +53,7 @@ class DdeRow(BaseModel):
     mean: float
     sem: float
     n: int
+    per_pose: list[float] = Field(description="the per-pose values behind the mean, in pose order")
     lo: float
     hi: float
     unpaired_sem: float | None

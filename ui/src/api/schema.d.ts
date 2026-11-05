@@ -1289,6 +1289,11 @@ export interface components {
             mean: number;
             /** N */
             n: number;
+            /**
+             * Per Pose
+             * @description the per-pose values behind the mean, in pose order
+             */
+            per_pose: number[];
             /** Sem */
             sem: number;
             /** Smiles */

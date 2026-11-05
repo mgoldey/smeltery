@@ -41,8 +41,12 @@ def test_the_forest_has_one_point_per_analogue_and_a_floor_band(client_for, run_
     c, _ = client_for(run_dir)
     fig = c.get("/api/runs/0/figures/forest").json()
     rows = c.get("/api/runs/0/ddE").json()["rows"]
-    assert fig["layout"]["yaxis"]["ticktext"] == [r["candidate"] for r in rows]
-    assert sum(len(tr.get("y") or []) for tr in fig["data"] if tr.get("mode") == "markers") == len(rows)
+    ticks = fig["layout"]["yaxis"]["ticktext"]  # the name, and the pose count that decides what the SEM means
+    assert ticks == [f"{r['candidate']}<br><sup>n={r['n']}</sup>" for r in rows]
+    summary = [tr for tr in fig["data"] if tr.get("mode") == "markers" and tr.get("name") != "one pose"]
+    assert sum(len(tr.get("y") or []) for tr in summary) == len(rows)
+    (poses,) = [tr for tr in fig["data"] if tr.get("name") == "one pose"]  # every value behind every mean
+    assert len(poses["x"]) == sum(len(r["per_pose"]) for r in rows)
     assert fig["layout"].get("shapes"), "the tie bands are layout shapes"
     labels = [a.get("text", "") for a in fig["layout"].get("annotations", [])]
     assert any("tie group" in t for t in labels), labels

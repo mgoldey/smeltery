@@ -170,7 +170,7 @@ def _cut_order(run: Run) -> list[str]:
 
 
 def ddE_table(run: Run) -> list[dict]:
-    """One row per analogue, in cut order (groups flattened): candidate, smiles, mean, sem, n, lo, hi
+    """One row per analogue, in cut order (groups flattened): candidate, smiles, mean, sem, n, per_pose, lo, hi
     (mean -/+ z*sem), unpaired_sem, group (index into run.groups), survivor (None when the cut was unranked)."""
     smiles = run.candidates
     unpaired = run.record["results"]["unpaired_sem"]
@@ -186,6 +186,7 @@ def ddE_table(run: Run) -> list[dict]:
                     "mean": m.mean,
                     "sem": m.sem,
                     "n": m.n,
+                    "per_pose": list(m.per_pose),  # the values behind the mean: a forest plot draws them
                     "lo": m.mean - run.z * m.sem,
                     "hi": m.mean + run.z * m.sem,
                     "unpaired_sem": float(unpaired[name]) if name in unpaired else None,

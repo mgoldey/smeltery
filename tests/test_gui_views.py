@@ -64,8 +64,9 @@ def test_forest_has_one_band_per_tie_group_and_the_keep_boundary(run):
 
     rows = results.ddE_table(run)
     fig = forest_figure(rows, run)
-    assert sum(len(t.x) for t in fig.data) == len(rows) == len(run.analogues)
-    assert {t.name for t in fig.data} == {"kept by the cut", "dropped by the cut"}
+    summary = [t for t in fig.data if t.name != "one pose"]
+    assert sum(len(t.x) for t in summary) == len(rows) == len(run.analogues)
+    assert {t.name for t in summary} == {"kept by the cut", "dropped by the cut"}
     assert len(_named(fig.layout.shapes, "tie-group-")) == len(run.groups) == 2
     labels = [a.text for a in _named(fig.layout.annotations, "tie-group-")]
     assert "tie group 2 (no order)" in labels and "group 1" in labels
@@ -84,7 +85,7 @@ def test_forest_on_an_unranked_cut_says_so_and_draws_no_keep_boundary(unranked_r
     (banner,) = _named(fig.layout.annotations, "unranked")
     assert "UNRANKED" in banner.text
     assert not _named(fig.layout.shapes, "keep-boundary")
-    assert {t.name for t in fig.data} == {"not cut"}
+    assert {t.name for t in fig.data if t.name != "one pose"} == {"not cut"}
     assert len(_named(fig.layout.shapes, "tie-group-")) == len(run.groups)
 
 
@@ -98,6 +99,53 @@ def test_forest_draws_a_floor_band_on_each_group_boundary_when_the_floor_is_posi
     bands = _named(fig.layout.shapes, "floor-band-")
     assert len(bands) == len(run.groups) - 1
     assert all(abs((b.x1 - b.x0) - 1.0) < 1e-12 for b in bands)
+
+
+def test_forest_draws_every_pose_behind_every_mean_and_labels_the_pose_count(run):
+    """A wide interval from one disagreeing pose and one from a genuinely uncertain measurement look the same at
+    the summary level and call for different work, so the values behind the mean are drawn, not hovered."""
+    pytest.importorskip("plotly")
+    from smeltery.gui import results
+    from smeltery.gui.views.forest import forest_figure
+
+    rows = results.ddE_table(run)
+    fig = forest_figure(rows, run)
+    (poses,) = [t for t in fig.data if t.name == "one pose"]
+    assert len(poses.x) == sum(len(r["per_pose"]) for r in rows)
+    for r in rows:  # every value, at its own row
+        assert all(v in list(poses.x) for v in r["per_pose"])
+    ticks = list(fig.layout.yaxis.ticktext)
+    assert all(f"n={r['n']}" in t for r, t in zip(rows, ticks, strict=True))
+
+
+def test_an_unranked_verdict_names_the_analogues_too_uncertain_to_place(unranked_run):
+    """ "UNRANKED" alone makes the reader measure whiskers by eye. The banner states the count and the worst few,
+    computed from the rows, so the figure cannot disagree with the numbers it draws."""
+    pytest.importorskip("plotly")
+    from smeltery.gui import results
+    from smeltery.gui.views.forest import forest_figure, wide_rows
+
+    rows = results.ddE_table(unranked_run)
+    rows[0]["sem"] = abs(rows[0]["mean"]) * 2 + 1.0  # one analogue whose own SEM swamps its mean
+    wide = wide_rows(rows)
+    assert rows[0] in wide
+    (banner,) = _named(forest_figure(rows, unranked_run).layout.annotations, "unranked")
+    assert f"{len(wide)} of {len(rows)} have SEM at or above their own mean" in banner.text
+    assert rows[0]["candidate"] in banner.text
+
+
+def test_a_tight_set_gets_no_uncertainty_sentence(unranked_run):
+    """The sentence is a finding, not decoration: with every SEM below its mean the banner stays short."""
+    pytest.importorskip("plotly")
+    from smeltery.gui import results
+    from smeltery.gui.views.forest import forest_figure, wide_rows
+
+    rows = results.ddE_table(unranked_run)
+    for r in rows:
+        r["mean"], r["sem"] = 10.0, 0.1
+    assert wide_rows(rows) == []
+    (banner,) = _named(forest_figure(rows, unranked_run).layout.annotations, "unranked")
+    assert "SEM at or above" not in banner.text and "UNRANKED" in banner.text
 
 
 def test_matrix_is_the_resolved_predicate_with_tie_groups_outlined(run):
