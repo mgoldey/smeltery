@@ -279,6 +279,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/active_site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose Active Site
+         * @description Switch step 1 to one of its three ways, writing only the lines that change into the user's text
+         *     (`config_text.apply`): a structure adds `[structure]` and `[docking]`, a pocket file keeps `[pocket] file` with
+         *     the docking receptor and box, hand-placed charges drop both.
+         */
+        post: operations["choose_active_site_api_pipelines_active_site_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/edit": {
         parameters: {
             query?: never;
@@ -315,6 +337,70 @@ export interface paths {
          *     run's poses when nothing upstream of them changed, or "cannot say".
          */
         post: operations["pipeline_impact_api_pipelines_impact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/ligands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ligands Check
+         * @description What can be said about each candidate before anything runs: parses, charge, electron parity, STO-3G cover
+         *     and the core it shares with the parent. RDKit only; fast enough to call on every edit.
+         */
+        post: operations["ligands_check_api_pipelines_ligands_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/ligands/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ligands Edit
+         * @description Apply one add / remove / rename / set_smiles / set_parent to the user's live text (comments and layout stay).
+         *     Removing the parent is refused: pick another parent first. A rename of the parent moves `parent` with it.
+         */
+        post: operations["ligands_edit_api_pipelines_ligands_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/pocket_preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pocket Preview
+         * @description The point-charge field the run would build, without docking or an SCF: `[structure]` is cleaned and cut around
+         *     its centre exactly as `smeltery run` does (minus the Meeko receptor), `[pocket] file` is loaded whole, and placed
+         *     sites are only counted. 409 names the binary a .pdb needs when it is missing.
+         */
+        post: operations["pocket_preview_api_pipelines_pocket_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -491,6 +577,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/calcs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Calcs
+         * @description Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
+         *     written. 409 when the run kept no SCF log.
+         */
+        get: operations["run_calcs_api_runs__idx__calcs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/comments": {
         parameters: {
             query?: never;
@@ -568,6 +675,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/gates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Gates */
+        get: operations["run_gates_api_runs__idx__gates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/lineage": {
         parameters: {
             query?: never;
@@ -615,6 +739,26 @@ export interface paths {
          *     SDF bytes, never derived from the SMILES, so a mismatch with any depiction is detectable.
          */
         get: operations["run_pose_atoms_api_runs__idx__pose_atoms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/pose_maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Pose Maps
+         * @description Empty for a record written before pose maps were kept; the Poses view then cannot tell core from the rest.
+         */
+        get: operations["run_pose_maps_api_runs__idx__pose_maps_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -917,6 +1061,49 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActiveSiteChoice */
+        ActiveSiteChoice: {
+            /**
+             * Allow Network
+             * @default false
+             */
+            allow_network: boolean;
+            /** Box Center */
+            box_center?: number[] | null;
+            /** Box Size */
+            box_size?: number[] | null;
+            /** Center */
+            center?: number[] | null;
+            /**
+             * Choice
+             * @enum {string}
+             */
+            choice: "structure" | "pocket_file" | "hand_placed";
+            /**
+             * File
+             * @description pocket_file: a .pdb or .pqr in the receptor's frame
+             */
+            file?: string | null;
+            /** Pocket Cutoff */
+            pocket_cutoff?: number | null;
+            /**
+             * Receptor
+             * @description pocket_file: the prepared .pdbqt docking uses
+             */
+            receptor?: string | null;
+            /**
+             * Reference Ligand
+             * @description structure: HETATM RES[:CHAIN[:RESNUM]]; or center
+             */
+            reference_ligand?: string | null;
+            /**
+             * Spec
+             * @description structure: a .pdb path, PDB id or accession
+             */
+            spec?: string | null;
+            /** Toml */
+            toml: string;
+        };
         /** BlankPipeline */
         BlankPipeline: {
             /** Campaign */
@@ -927,6 +1114,18 @@ export interface components {
             };
             /** Parent */
             parent: string;
+        };
+        /**
+         * CalcLines
+         * @description The SCF log lines of one pose: every line of the run's calc log whose candidate and pose match.
+         */
+        CalcLines: {
+            /** File */
+            file: string | null;
+            /** Lines */
+            lines: {
+                [key: string]: unknown;
+            }[];
         };
         /** CampaignIn */
         CampaignIn: {
@@ -1133,6 +1332,41 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** GateRow */
+        GateRow: {
+            /** Candidate */
+            candidate: string;
+            /** Checked */
+            checked: boolean;
+            /** Failed Checks */
+            failed_checks: string[];
+            /** Ok */
+            ok: boolean;
+            /** Over Strain */
+            over_strain: boolean | null;
+            /** Pose */
+            pose: number;
+            /** Posebusters */
+            posebusters: boolean | null;
+            /** Strain Kcal */
+            strain_kcal: number | null;
+        };
+        /**
+         * Gates
+         * @description `results.gates` as one row per (candidate, pose). `raw` is the record's own dict, unchanged.
+         */
+        Gates: {
+            /** Max Strain Kcal */
+            max_strain_kcal: number | null;
+            /** Ran */
+            ran: string[];
+            /** Raw */
+            raw: {
+                [key: string]: unknown;
+            };
+            /** Rows */
+            rows: components["schemas"]["GateRow"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1218,6 +1452,52 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** LigandCheck */
+        LigandCheck: {
+            /**
+             * Core Atoms
+             * @description atoms of this candidate (SMILES with explicit hydrogens, AddHs order) that PairedPoses copies exactly from the parent; empty when there is no core. For the parent: every atom
+             */
+            core_atoms: number[];
+            /**
+             * Electrons
+             * @description electrons at that charge, hydrogens added: the CLI parity rule
+             */
+            electrons: number | null;
+            /**
+             * Electrons Even
+             * @description false means the closed-shell RHF tiers cannot run it
+             */
+            electrons_even: boolean | null;
+            /**
+             * Formal Charge
+             * @description sum of the SMILES' formal charges, as the CLI uses; null if unparseable
+             */
+            formal_charge: number | null;
+            /** Is Parent */
+            is_parent: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Problems
+             * @description every reason this candidate would fail a run, in words
+             */
+            problems: string[];
+            /** Smiles */
+            smiles: string;
+            /** Smiles Ok */
+            smiles_ok: boolean;
+            /**
+             * Sto3G Missing
+             * @description the elements without STO-3G, e.g. Br and I
+             */
+            sto3g_missing: string[];
+            /**
+             * Sto3G Ok
+             * @description false when an element has no STO-3G in ferric's bundled basis set
+             */
+            sto3g_ok: boolean | null;
+        };
         /** Ligands */
         Ligands: {
             /** Campaign */
@@ -1228,6 +1508,52 @@ export interface components {
             };
             /** Parent */
             parent: string;
+        };
+        /**
+         * LigandsEdit
+         * @description One operation on the live text. The server reads the candidates from `toml` itself, so an edit can never be
+         *     built from a stale copy of the list.
+         */
+        LigandsEdit: {
+            /**
+             * Name
+             * @description the candidate the op applies to (for add: the new name)
+             */
+            name: string;
+            /**
+             * New Name
+             * @description rename: the new name
+             */
+            new_name?: string | null;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "add" | "remove" | "rename" | "set_smiles" | "set_parent";
+            /**
+             * Smiles
+             * @description add and set_smiles: the SMILES
+             */
+            smiles?: string | null;
+            /** Toml */
+            toml: string;
+        };
+        /** LigandsOut */
+        LigandsOut: {
+            /** Candidates */
+            candidates: components["schemas"]["LigandCheck"][];
+            /** Parent */
+            parent: string;
+            /**
+             * Problems
+             * @description problems with the list as a whole, e.g. a parent that is not a candidate
+             */
+            problems: string[];
+        };
+        /** LigandsRequest */
+        LigandsRequest: {
+            /** Toml */
+            toml: string;
         };
         /**
          * Lineage
@@ -1619,6 +1945,43 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** PocketPreview */
+        PocketPreview: {
+            /** N Charges */
+            n_charges: number;
+            /**
+             * Nearest Ang
+             * @description nearest charge to the box centre / reference ligand, Angstrom
+             */
+            nearest_ang: number | null;
+            /**
+             * Net Charge
+             * @description sum of the point charges, e
+             */
+            net_charge: number;
+            /**
+             * Scene
+             * @description a MolViewSpec state for the viewer; null when nothing is placed in 3D
+             */
+            scene: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Source
+             * @description what the field was built from, in words
+             */
+            source: string;
+        };
+        /** PocketPreviewRequest */
+        PocketPreviewRequest: {
+            /**
+             * Pipeline
+             * @description the saved pipeline: relative paths resolve against its folder
+             */
+            pipeline?: string | null;
+            /** Toml */
+            toml: string;
+        };
         /** PoseAtoms */
         PoseAtoms: {
             /** Candidate */
@@ -1630,6 +1993,16 @@ export interface components {
             source: string;
             /** Symbols */
             symbols: string[];
+        };
+        /**
+         * PoseMaps
+         * @description `results.pose_maps`: per analogue, (analogue atom, parent atom) pairs copied exactly from the parent's pose.
+         */
+        PoseMaps: {
+            /** Maps */
+            maps: {
+                [key: string]: number[][];
+            };
         };
         /** PreviewStarted */
         PreviewStarted: {
@@ -2669,6 +3042,48 @@ export interface operations {
             };
         };
     };
+    choose_active_site_api_pipelines_active_site_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveSiteChoice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedText"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pipeline_edit_api_pipelines_edit_post: {
         parameters: {
             query?: never;
@@ -2731,6 +3146,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Impact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_check_api_pipelines_ligands_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LigandsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LigandsOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_edit_api_pipelines_ligands_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LigandsEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedText"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pocket_preview_api_pipelines_pocket_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PocketPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PocketPreview"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Validation Error */
@@ -3069,6 +3619,40 @@ export interface operations {
             };
         };
     };
+    run_calcs_api_runs__idx__calcs_get: {
+        parameters: {
+            query: {
+                candidate: string;
+                pose: number;
+            };
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalcLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_comments_api_runs__idx__comments_get: {
         parameters: {
             query?: never;
@@ -3268,6 +3852,37 @@ export interface operations {
             };
         };
     };
+    run_gates_api_runs__idx__gates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Gates"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     run_lineage_api_runs__idx__lineage_get: {
         parameters: {
             query: {
@@ -3367,6 +3982,37 @@ export interface operations {
             };
         };
     };
+    run_pose_maps_api_runs__idx__pose_maps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoseMaps"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     propose_api_runs__idx__proposals_post: {
         parameters: {
             query?: never;
@@ -3438,6 +4084,7 @@ export interface operations {
             query: {
                 candidate: string;
                 pose?: number;
+                core?: boolean;
             };
             header?: never;
             path: {
