@@ -1,13 +1,12 @@
-# The danuglipron halogen campaign (12 analogues of the parent at four aromatic CH sites), as it was run on
-# 2026-10-16: benchmarks/danuglipron_halogen/results/danuglipron-halogen-38fa833cb90c.json, imported under imported/.
+# The danuglipron halogen campaign (12 analogues of the parent at four aromatic CH sites). The 2026-10-16 run of it
+# (benchmarks/danuglipron_halogen/results/danuglipron-halogen-38fa833cb90c.json) is imported under imported/; this
+# config is the campaign as a pipeline, with what that run lacked:
+#   - 4 kept poses per candidate, pose 0 the cryo-EM bound conformer ([bound_pose]); the 2026-10-16 run kept 2 and
+#     dropped pose 0 (its amendment A1), so its paired ddE had n = 1 per candidate after its non-converged SCFs;
+#   - a remedy ladder for SCFs that do not converge ([field_interaction] remedies), each value naming its rung;
+#   - the AMBER-vs-CHARMM pocket charge sensitivity ([charge_sensitivity]), which the 2026-10-16 run skipped.
 # The parent is the NEUTRAL ACID (the SMILES carries no formal charge), as recorded.
-#
-# This config does NOT yet express the whole campaign. Still needed, and the task that adds each:
-#   - the cryo-EM bound conformer as the parent's pose 0 (conf_00_cryo_em.xyz, copied here): [bound_pose], task D2
-#   - the AMBER-vs-CHARMM pocket charge sensitivity (criterion 4, not run in the record): [charge_sensitivity], task D3
-#   - the remedy ladder for SCFs that do not converge, and pairwise dropping of failed poses: task D4
-# Until D2 lands, `smeltery run` would embed ETKDG parent poses instead of the bound conformer, so do not read a new
-# run of this file as a repeat of the 2026-10-16 record.
+# Run it durably: `smeltery run pipeline.toml --out OUT --temporal --workers 6` with `smeltery temporal-worker`.
 campaign = "danuglipron-halogen-scan"
 parent = "parent"
 
@@ -28,13 +27,22 @@ pyr-C28-F = "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n
 
 # Sites (parent heavy-atom index): bzim-C9 = 9, pyr-C28 = 28, bnz-C34 = 34, bnz-C36 = 36.
 [poses]
-n_poses = 3
+n_poses = 4                # the parent's poses come from [bound_pose]; this matches its count
 seed = 20261005
 jitter_deg = 15.0
 jitter_ang = 0.5
 mcs_timeout_s = 900        # the default 10 s hit NoCommonCoreError for 9 of 12 analogues on this 74-atom parent
 min_core_heavy = 3
 relax_unmapped = true
+# [poses] seed also seeds the analogues' substituent embedding on each parent pose; [bound_pose] seed drives the jitters.
+
+[bound_pose]
+file = "conf_00_cryo_em.xyz"   # the cryo-EM bound conformer of the parent (atoms in SMILES order with explicit H)
+n_poses = 4                    # pose 0 = the conformer itself; poses 1-3 = seeded rigid jitters
+jitter_deg = 15.0
+jitter_ang = 0.5
+seed = 20261005
+skip_first = 0                 # pose 0 is kept: the remedy ladder replaces the 2026-10-16 run's drop of it
 
 [pocket]
 file = "7LCJ_pocket.pdb"   # 7LCJ pocket, charges from pdb2pqr30 (AMBER); no distance cutoff, as recorded
@@ -44,6 +52,18 @@ basis = "sto-3g"
 energy_conv = 1e-10
 density_conv = 1e-8
 max_iter = 200
+# Tried in order when an SCF does not converge (rung 0 is the settings above). No rung loosens a threshold or smears:
+# those change the quantity measured. A pose whose parent or analogue fails every rung is dropped for both.
+remedies = [
+  { diis = "adiis", level_shift = 0.5 },
+  { diis = "adiis", level_shift = 1.0, soscf = true, max_iter = 150 },
+]
+
+[charge_sensitivity]
+models = ["CHARMM"]            # the same pocket charged by pdb2pqr --ff=CHARMM, every pose measured again
+
+[run]
+scf_timeout_s = 14400          # the 2026-10-16 run's slowest SCF took 2 h 6 min
 
 [cut]
 keep = 3

@@ -369,8 +369,10 @@ DIGESTS_AT_7389ABA = {
     ),
     "src/smeltery/prebuilt/docking/pipeline.toml": "1a841ad89f2e0f2e7abb495aa0126e562209abea7013596f58d89856a7c891c6",
     "src/smeltery/prebuilt/structure/pipeline.toml": "bc3482ef4170810fced726a207ac434bcec15b2f59e886d922600719bf7642b2",
+    # this config changed after 7389aba (its file did, not the registry): 67618b4d... at 7389aba, then the controller
+    # added [bound_pose], the remedy ladder and [charge_sensitivity] to the file
     "src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml": (
-        "67618b4d3edee7dc31e222e3afd880ca7030115f2d9c130950fdb606d50230f8"
+        "4abb6eef3f889acc77467ee17ab5e684206c0accf06ad916d98db276b203fb69"
     ),
 }
 ONLY_CANDIDATE = {"src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml": "bnz-C34-F"}
