@@ -365,3 +365,11 @@ def test_the_run_directory_holds_the_kept_text_with_only_input_paths_rewritten(c
     assert len(changed) == 1 and changed[0][0] == 'file = "decisions.toml"'
     assert changed[0][1].startswith('file = "inputs/') and changed[0][1].endswith('/decisions.toml"')
     assert written.count("\n") == text.count("\n") and "# poses per ligand" in written
+
+
+def test_step_view_routers_do_not_shadow_the_pipeline_routes(client_for):
+    c, _ = client_for()
+    _saved(c, "somename", HAND)
+    r = c.get("/api/pipelines/somename")
+    assert r.status_code == 200
+    assert r.json()["toml"] == HAND

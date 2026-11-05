@@ -228,6 +228,9 @@ export function Workspace() {
               {step ? (
                 <StepPanel
                   key={step.key}
+                  pipeline={name}
+                  toml={text}
+                  sourceRun={sourceRun}
                   step={step}
                   steps={steps}
                   index={index}

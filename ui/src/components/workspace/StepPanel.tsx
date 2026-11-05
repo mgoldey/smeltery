@@ -1,6 +1,7 @@
 import type { Schemas } from "../../api/client";
 import { SitePlacer } from "./SitePlacer";
 import { ParamRow } from "./ParamRow";
+import { STEP_VIEWS } from "./views/registry";
 
 type Step = Schemas["StepOut"];
 type Catalog = Schemas["CatalogOut"];
@@ -83,6 +84,9 @@ function offer(m: MethodInfo, step: Step): "add" | "choose" | null {
  * (Method), and the step's output (View). Every edit goes to the API, which writes it into the TOML text.
  */
 export function StepPanel({
+  pipeline,
+  toml,
+  sourceRun,
   step,
   steps,
   index,
@@ -91,6 +95,9 @@ export function StepPanel({
   disabled,
   onEdit,
 }: {
+  pipeline: string;
+  toml: string;
+  sourceRun: number | null;
   step: Step;
   steps: Step[];
   index: number;
@@ -102,6 +109,7 @@ export function StepPanel({
   const info = (k: string) => catalog?.methods[k];
   const label = (k: string) => info(k)?.label ?? k;
   const sites = step.params.find((p) => p.kind === "sites");
+  const StepView = STEP_VIEWS[step.key];
   const parentSmiles = ligands ? ligands.candidates[ligands.parent] : undefined;
   return (
     <section className="step-panel" aria-label={`Step ${index + 1} · ${step.label}`} data-panel={step.key}>
@@ -206,7 +214,11 @@ export function StepPanel({
         </section>
         <section aria-label="View">
           <h3>View</h3>
-          <p className="lede">What this step produced will be shown here; the step views are not built yet.</p>
+          {StepView ? (
+            <StepView pipeline={pipeline} toml={toml} step={step} sourceRun={sourceRun} />
+          ) : (
+            <p className="lede">What this step produced will be shown here; the step views are not built yet.</p>
+          )}
         </section>
       </div>
       {sites && ligands && parentSmiles ? (

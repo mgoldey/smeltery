@@ -303,3 +303,11 @@ test.describe("night mode", () => {
     expect([...new Set(outside)]).toEqual([]);
   });
 });
+
+test("the selected step shows its view", async ({ page }) => {
+  const { name } = await newPipeline(page, withPoses);
+  await openWorkspace(page, name, "poses");
+  await expect(page.locator('[data-panel="poses"] [data-view="poses"]')).toBeVisible();
+  await step(page, "cut").click();
+  await expect(page.locator('[data-panel="cut"] [data-view="cut"]')).toBeVisible();
+});
