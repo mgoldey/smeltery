@@ -41,3 +41,16 @@ describe("pipelineName", () => {
     expect(pipelineName({ idx: 3, campaign: null, digest: null })).toBe("run-run3");
   });
 });
+
+describe("parseAnalogues", () => {
+  it("reads name and SMILES per line and needs at least one", async () => {
+    const { parseAnalogues } = await import("../../pages/BenchHome");
+    expect(parseAnalogues("4-F  OC(=O)c1ccc(F)cc1\n\n4-Cl OC(=O)c1ccc(Cl)cc1")).toEqual({
+      ok: true,
+      candidates: { "4-F": "OC(=O)c1ccc(F)cc1", "4-Cl": "OC(=O)c1ccc(Cl)cc1" },
+      why: "",
+    });
+    expect(parseAnalogues("").ok).toBe(false);
+    expect(parseAnalogues("4-F").why).toContain("give a name and a SMILES");
+  });
+});

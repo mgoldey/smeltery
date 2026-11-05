@@ -1,5 +1,7 @@
 import type { Page } from "@playwright/test";
-import { expect, IDX, newPipeline, openWorkspace, replaceToml, test } from "./bench";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { expect, fixture, IDX, newPipeline, openWorkspace, replaceToml, test } from "./bench";
 
 type Doc = { toml: string; sha256: string; ok: boolean; issues: { level: string; stage: string | null; message: string }[] };
 type Catalog = { methods: Record<string, { key: string; label: string }> };
@@ -185,6 +187,64 @@ test("a run's Pipeline tab opens the workspace on the pipeline made from that ru
   // opening it again reopens the same pipeline rather than failing on the taken name
   await page.goto(`/run/${IDX.a_resolved}/pipeline`);
   await expect(page).toHaveURL(new RegExp(`/pipelines/${name}\\?run=`));
+});
+
+test("Discard puts back only the selected step; the other step's edit stays in the draft", async ({ page }) => {
+  const { name, toml } = await newPipeline(page, withPoses);
+  await openWorkspace(page, name, "poses");
+  await setParam(page, "n_poses", "8");
+  await expect(step(page, "poses")).toHaveAttribute("data-state", "changed");
+  await step(page, "cut").click();
+  await setParam(page, "z", "3");
+  await expect(step(page, "cut")).toHaveAttribute("data-state", "changed");
+  await step(page, "poses").click();
+  await page.getByRole("button", { name: "Discard Paired poses edits" }).click();
+
+  const pane = page.getByTestId("toml-pane");
+  await expect(pane).toContainText("n_poses = 6  # poses per ligand"); // the kept line, comment and all
+  await expect(page.locator('[data-param="n_poses"]').getByRole("textbox")).toHaveValue("6");
+  await expect(page.locator('[data-param="n_poses"]')).not.toHaveAttribute("data-changed", "true");
+  await expect(step(page, "cut")).toHaveAttribute("data-state", "changed");
+  await expect(pane).toContainText("z = 3");
+  // the draft was never saved
+  expect((await doc(page, name)).toml).toBe(toml);
+});
+
+test("a blank pipeline starts from the home page and lands on its ligands", async ({ page }) => {
+  const name = `blank-${Date.now().toString(36)}`;
+  await page.goto("/bench");
+  const form = page.getByRole("form", { name: "New blank pipeline" });
+  await form.getByLabel("Pipeline name").fill(name);
+  await form.getByLabel("Campaign").fill("acids");
+  await form.getByLabel("Parent name").fill("benzoic");
+  await form.getByLabel("Parent SMILES").fill("OC(=O)c1ccccc1");
+  await form.getByLabel(/Analogues/).fill("4-F OC(=O)c1ccc(F)cc1\n4-Cl OC(=O)c1ccc(Cl)cc1");
+  await form.getByRole("button", { name: "New blank pipeline" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pipelines/${name}\\?step=ligands$`));
+  const inputs = page.locator('[data-panel="ligands"]').getByRole("region", { name: "Inputs" });
+  await expect(inputs).toContainText("benzoic (parent), 4-F, 4-Cl");
+  await expect(inputs).toContainText("campaign acids");
+  // Data source: the saved config over the API holds what was entered.
+  const kept = await doc(page, name);
+  expect(kept.toml).toContain('campaign = "acids"');
+  expect(kept.toml).toContain('4-Cl = "OC(=O)c1ccc(Cl)cc1"');
+});
+
+test("a broken methods.toml is reported as itself, not as unparseable pipeline TOML", async ({ page }) => {
+  const dir = join(fixture().root, ".smeltery", "bench");
+  const file = join(dir, "methods.toml");
+  const before = existsSync(file) ? readFileSync(file, "utf8") : null;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, "[paired_poses\n");
+  try {
+    const { name } = await newPipeline(page);
+    await page.goto(`/pipelines/${name}`);
+    await expect(page.getByTestId("steps-error")).toContainText("methods.toml");
+    await expect(page.getByTestId("toml-error")).toHaveCount(0);
+  } finally {
+    if (before === null) rmSync(file);
+    else writeFileSync(file, before);
+  }
 });
 
 test.describe("night mode", () => {

@@ -37,7 +37,7 @@ function Memory({ m }: { m: Impact["memory"] }) {
 
 /**
  * What keeping the draft does, every figure from the impact API (the tier's own cost and memory models and
- * `Pipeline.check`), plus Discard and Keep. With no draft it states the kept pipeline's own cost.
+ * `Pipeline.check`), plus Discard (the selected step back to the kept text, or every edit) and Keep. With no draft it states the kept pipeline's own cost.
  */
 export function ImpactStrip({
   dirty,
@@ -45,6 +45,9 @@ export function ImpactStrip({
   loading,
   error,
   pending,
+  stepLabel,
+  stepChanged,
+  onDiscardStep,
   onDiscard,
   onKeep,
   onPreview,
@@ -55,6 +58,9 @@ export function ImpactStrip({
   loading: boolean;
   error: string | null;
   pending: boolean;
+  stepLabel: string | null;
+  stepChanged: boolean;
+  onDiscardStep: () => void;
   onDiscard: () => void;
   onKeep: () => void;
   onPreview: (() => void) | null;
@@ -102,8 +108,11 @@ export function ImpactStrip({
         </>
       )}
       <span className="grow" />
+      <button type="button" disabled={!dirty || !stepChanged || pending} onClick={onDiscardStep}>
+        Discard {stepLabel ? `${stepLabel} edits` : "this step"}
+      </button>
       <button type="button" disabled={!dirty || pending} onClick={onDiscard}>
-        Discard
+        Discard all
       </button>
       <button type="button" className="primary" disabled={!dirty || pending} onClick={onKeep}>
         Keep

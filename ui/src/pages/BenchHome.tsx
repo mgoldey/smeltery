@@ -5,6 +5,18 @@ import { api, unwrap } from "../api/client";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
 
+/** "name SMILES" per line; at least one analogue. */
+export function parseAnalogues(text: string): { ok: boolean; candidates: Record<string, string>; why: string } {
+  const candidates: Record<string, string> = {};
+  for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    const [name, smiles, ...rest] = line.split(/\s+/);
+    if (!name || !smiles || rest.length) return { ok: false, candidates, why: `"${line}": give a name and a SMILES` };
+    candidates[name] = smiles;
+  }
+  const ok = Object.keys(candidates).length > 0;
+  return { ok, candidates, why: ok ? "" : "at least one analogue" };
+}
+
 export function BenchHome() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
   const [task, setTask] = useState<string | null>(null);
@@ -22,6 +34,33 @@ export function BenchHome() {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
       navigate(`/pipelines/${d.name}?run=${fromRun}`);
     },
+  });
+  const [blank, setBlank] = useState({ name: "", campaign: "", parent: "", parentSmiles: "", analogues: "" });
+  const analogues = parseAnalogues(blank.analogues);
+  const blankReady =
+    !!blank.name.trim() && !!blank.campaign.trim() && !!blank.parent.trim() && !!blank.parentSmiles.trim() && analogues.ok;
+  const newBlank = useMutation({
+    mutationFn: () =>
+      unwrap(
+        api.POST("/api/pipelines", {
+          body: {
+            name: blank.name.trim(),
+            blank: {
+              campaign: blank.campaign.trim(),
+              parent: blank.parent.trim(),
+              candidates: { [blank.parent.trim()]: blank.parentSmiles.trim(), ...analogues.candidates },
+            },
+          },
+        }),
+      ),
+    onSuccess: (d) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      navigate(`/pipelines/${d.name}?step=ligands`);
+    },
+  });
+  const field = (k: keyof typeof blank) => ({
+    value: blank[k],
+    onChange: (e: { target: { value: string } }) => setBlank((b) => ({ ...b, [k]: e.target.value })),
   });
   const create = useMutation({
     mutationFn: () => unwrap(api.POST("/api/campaigns", { body: { name, description: "" } })),
@@ -125,6 +164,42 @@ export function BenchHome() {
               </button>
             </form>
             {newPipeline.isError ? <p className="field-error">{newPipeline.error.message}</p> : null}
+            <form
+              aria-label="New blank pipeline"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (blankReady) newBlank.mutate();
+              }}
+            >
+              <h3>Or start a blank pipeline</h3>
+              <div className="controls">
+                <div>
+                  <label htmlFor="blank-name">Pipeline name</label>
+                  <input id="blank-name" className="mono" {...field("name")} />
+                </div>
+                <div>
+                  <label htmlFor="blank-campaign">Campaign</label>
+                  <input id="blank-campaign" {...field("campaign")} />
+                </div>
+                <div>
+                  <label htmlFor="blank-parent">Parent name</label>
+                  <input id="blank-parent" {...field("parent")} />
+                </div>
+                <div>
+                  <label htmlFor="blank-parent-smiles">Parent SMILES</label>
+                  <input id="blank-parent-smiles" className="mono" {...field("parentSmiles")} />
+                </div>
+              </div>
+              <label htmlFor="blank-analogues">Analogues, one per line: name, then SMILES</label>
+              <textarea id="blank-analogues" className="mono" rows={3} cols={60} {...field("analogues")} />
+              {blank.analogues.trim() && !analogues.ok ? <p className="field-error">{analogues.why}</p> : null}
+              <p>
+                <button type="submit" disabled={newBlank.isPending || !blankReady}>
+                  New blank pipeline
+                </button>
+              </p>
+            </form>
+            {newBlank.isError ? <p className="field-error">{newBlank.error.message}</p> : null}
           </section>
           <WorkPanel selected={task} onSelect={setTask} />
           <section aria-labelledby="campaigns-h">

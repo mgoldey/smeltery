@@ -2,6 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, unwrap, type Schemas } from "../../api/client";
+import { ApiError } from "../../api/http";
 import { Shell } from "../../components/Shell";
 import { TomlEditor } from "../../components/TomlEditor";
 import { ConfigDiff } from "../../components/workspace/ConfigDiff";
@@ -81,7 +82,11 @@ export function Workspace() {
   const lastGood = useRef<StepsOut | undefined>(undefined);
   if (stepsQ.data && !stepsQ.isPlaceholderData) lastGood.current = stepsQ.data;
   const view = stepsQ.data ?? lastGood.current;
-  const parseError = stepsQ.isError ? message(stepsQ.error) : null;
+  // A 400 from the steps route is text that does not parse (it names the line); anything else (a broken
+  // methods.toml is a 409, a crash a 500) is shown as what it is.
+  const stepsError = stepsQ.isError ? message(stepsQ.error) : null;
+  const parseError = stepsQ.isError && stepsQ.error instanceof ApiError && stepsQ.error.status === 400 ? stepsError : null;
+  const otherError = stepsError !== null && parseError === null ? stepsError : null;
 
   const impact = useQuery({
     queryKey: ["impact", name, text, saved, sourceRun],
@@ -102,7 +107,14 @@ export function Workspace() {
       try {
         const r = await unwrap(
           api.POST("/api/pipelines/edit", {
-            body: { toml: latest.current, op, key, params: extra.params ?? null, site: extra.site ?? null },
+            body: {
+              toml: latest.current,
+              op,
+              key,
+              params: extra.params ?? null,
+              site: extra.site ?? null,
+              baseline_toml: extra.baseline_toml ?? null,
+            },
           }),
         );
         setDraft(r.toml);
@@ -148,7 +160,7 @@ export function Workspace() {
       },
       { replace: true },
     );
-  const disabled = busy || parseError !== null || keep.isPending;
+  const disabled = busy || stepsError !== null || keep.isPending;
   const keptErrors = (doc.data?.issues ?? []).filter((i) => i.level === "error");
 
   return (
@@ -182,6 +194,11 @@ export function Workspace() {
           {parseError ? (
             <div className="banner" role="alert" data-testid="toml-error">
               The TOML does not parse, so step edits are blocked until it does: {parseError}
+            </div>
+          ) : null}
+          {otherError ? (
+            <div className="banner" role="alert" data-testid="steps-error">
+              The steps cannot be drawn: {otherError}
             </div>
           ) : null}
           {editError ? (
@@ -227,6 +244,11 @@ export function Workspace() {
                   loading={impact.isFetching}
                   error={impact.isError ? message(impact.error) : null}
                   pending={keep.isPending || busy}
+                  stepLabel={step?.label ?? null}
+                  stepChanged={step?.state === "changed"}
+                  onDiscardStep={() => {
+                    if (step && saved !== undefined) void onEdit("revert", step.key, { baseline_toml: saved });
+                  }}
                   onDiscard={() => {
                     setDraft(null);
                     keep.reset();

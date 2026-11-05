@@ -1833,13 +1833,15 @@ export interface components {
         };
         /** StepEdit */
         StepEdit: {
+            /** Baseline Toml */
+            baseline_toml?: string | null;
             /** Key */
             key: string;
             /**
              * Op
              * @enum {string}
              */
-            op: "add" | "remove" | "set" | "choose" | "site";
+            op: "add" | "remove" | "set" | "choose" | "site" | "revert";
             /** Params */
             params?: {
                 [key: string]: unknown;

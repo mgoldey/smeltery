@@ -6,7 +6,7 @@ type Step = Schemas["StepOut"];
 type Catalog = Schemas["CatalogOut"];
 type MethodInfo = Schemas["MethodOut"];
 export type EditOp = Schemas["StepEdit"]["op"];
-export type EditExtra = { params?: Record<string, unknown>; site?: Schemas["SiteSpec"] };
+export type EditExtra = { params?: Record<string, unknown>; site?: Schemas["SiteSpec"]; baseline_toml?: string };
 type Site = { q: number; atom: number; from_atom: number; distance: number };
 
 function Flow({ items, steps, dir }: { items: Step["inputs"]; steps: Step[]; dir: "from" | "to" }) {

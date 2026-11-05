@@ -20,15 +20,20 @@ export async function pipelineForRun(idx: number, runs: RunSummary[]): Promise<s
   const run = runs.find((r) => r.idx === idx);
   if (!run) throw new Error(`no run ${idx}`);
   const name = pipelineName(run);
+  // Made earlier (and maybe edited since): reopen it. Only a 404 means "make it"; the create's own refusals
+  // (a recorded input missing from the run directory, 409) are shown as they are.
+  const got = await api.GET("/api/pipelines/{name}", { params: { path: { name } } });
+  if (got.response.ok) return name;
+  if (got.response.status !== 404) throw new ApiError(got.response.status, reason(got.error, got.response));
   const made = await api.POST("/api/pipelines", { body: { name, from_run: idx } });
   if (made.response.ok) return name;
-  if (made.response.status === 409) {
-    // Taken: it is this run's pipeline, made earlier (and maybe edited since). Open that.
-    await unwrap(api.GET("/api/pipelines/{name}", { params: { path: { name } } }));
-    return name;
-  }
-  const e = made.error as { detail?: unknown; reason?: unknown } | undefined;
-  throw new ApiError(made.response.status, String(e?.detail ?? e?.reason ?? made.response.statusText));
+  throw new ApiError(made.response.status, reason(made.error, made.response));
+}
+
+function reason(error: unknown, response: Response): string {
+  const e = error as { detail?: unknown; reason?: unknown } | undefined;
+  const r = e?.detail ?? e?.reason;
+  return typeof r === "string" ? r : r !== undefined ? JSON.stringify(r) : `${response.status} ${response.statusText}`;
 }
 
 /** Open the workspace on the pipeline that made run `idx`, optionally on one step. */
