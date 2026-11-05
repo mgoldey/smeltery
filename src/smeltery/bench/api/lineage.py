@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from smeltery.gui import results as R
+
 from . import models as M
 from .common import run
 
@@ -15,9 +17,21 @@ router = APIRouter(prefix="/api", tags=["lineage"])
 QUANTITY = "dE_int"
 
 
-#: Stage names `smeltery run` logs (cli.py `_log`/`_stage`) whose tier is recorded under another name. A stage not here
-#: that has a tier (`docking`, `forcefield`, the measurement tier) is recorded under its own name.
-STAGE_TIER = {"poses": "paired_poses", "xtb": "gfn2"}
+def stage_tier() -> dict[str, str]:
+    """{stage name `smeltery run` logs: the tier name it records}, from the registry's `MethodSpec.tier`. A method
+    logs under its key, its section (`poses` for paired_poses) or its gate key (`xtb` for gfn2), so each of those
+    names maps to its tier. A stage not here records no tier, or is looked up under its own name."""
+    from smeltery.methods import registry
+
+    out: dict[str, str] = {}
+    for s in registry().values():
+        if s.tier is None:
+            continue
+        for name in {s.key, s.section, s.gate_key} - {None}:
+            assert name is not None
+            if out.setdefault(name, s.tier) != s.tier:
+                raise ValueError(f"stage name {name!r} names two tiers: {out[name]!r} and {s.tier!r}")
+    return out
 
 
 def no_tier() -> frozenset[str]:
@@ -29,15 +43,16 @@ def no_tier() -> frozenset[str]:
 
 
 def _steps(res: dict, tiers: list[dict]) -> tuple[list[M.LineageStep], list[str]]:
-    """Steps joined to `rec.tiers` through STAGE_TIER. Settings are None when the stage should have a tier but the
+    """Steps joined to `rec.tiers` through `stage_tier()`. Settings are None when the stage should have a tier but the
     record has none; that stage is named in the returned `missing` list."""
     by_name = {t.get("name"): t for t in tiers if isinstance(t, dict)}
     tierless = no_tier()
+    names = stage_tier()
     steps: list[M.LineageStep] = []
     missing: list[str] = []
 
     def add(stage: str, kind: str, seconds: float | None) -> None:
-        tier = by_name.get(STAGE_TIER.get(stage, stage))
+        tier = by_name.get(names.get(stage, stage))
         if tier is not None:
             settings: dict[str, Any] | None = dict(tier)
         elif stage in tierless:
@@ -68,10 +83,13 @@ def run_lineage(request: Request, idx: int, candidate: str) -> M.Lineage:
     pp = res.get("per_pose") or {}
     if dde is None or QUANTITY not in pp.get(candidate, {}) or QUANTITY not in pp.get(r.parent, {}):
         raise HTTPException(status_code=409, detail=f"{candidate!r}: no recorded {QUANTITY} poses or paired ΔΔE")
-    vals, pvals = pp[candidate][QUANTITY], pp[r.parent][QUANTITY]
+    try:  # paired by original pose index: after a pairwise drop the parent has poses this analogue does not
+        paired = R.paired_poses(r, candidate, QUANTITY)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     poses = [
-        M.LineagePose(pose=i, value=v, parent_value=p, difference=v - p)
-        for i, (v, p) in enumerate(zip(vals, pvals, strict=True))
+        M.LineagePose(pose=t["pose"], value=t["value"], parent_value=t["parent_value"], difference=t["paired"])
+        for t in paired
     ]
     tiers = rec.get("tiers") or []
     steps, missing = _steps(res, tiers)

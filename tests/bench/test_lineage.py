@@ -116,3 +116,17 @@ def test_a_registered_stage_without_a_tier_is_not_missing(run_dir, client_for):
     steps = {s["stage"]: s for s in j["steps"]}
     assert steps["lineage_probe"]["settings"] == {}
     assert "steps.lineage_probe.settings" not in j["missing"]
+
+
+def test_stage_names_map_to_tiers_from_the_registry():
+    """`poses` and `xtb` are logged under the method's section and gate key; the tier name is MethodSpec.tier."""
+    from smeltery.bench.api.lineage import stage_tier
+    from smeltery.methods import MethodSpec, register, unregister
+
+    names = stage_tier()
+    assert names["poses"] == "paired_poses" and names["xtb"] == "gfn2" and names["docking"] == "docking"
+    register(MethodSpec("tier_probe", "Probe", "check", "gate", step="checks", order=67, tier="probe_tier"))
+    try:
+        assert stage_tier()["tier_probe"] == "probe_tier"
+    finally:
+        unregister("tier_probe")
