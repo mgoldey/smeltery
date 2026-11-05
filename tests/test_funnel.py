@@ -172,8 +172,10 @@ def test_missing_or_malformed_build_stamp_falls_back_to_installed_metadata(monke
 
 
 def test_a_wheel_installed_from_a_file_is_pinned_by_the_wheel_not_left_unknown(monkeypatch, tmp_path):
-    """A built wheel (a CI artifact, say) names no commit, so the record says which wheel and stops there. It used
-    to fall through every branch and report UNKNOWN, which reads as "no provenance" rather than "no commit"."""
+    """An UNSTAMPED wheel: the record says which wheel and stops there, rather than falling through every branch
+    and reporting UNKNOWN, which reads as "no provenance" rather than "no commit". A real ferric CI wheel does
+    carry its commit in `ferric.__build__` (verified: the 81f411c wheel stamps it), and that path is preferred, so
+    this is the fallback for a wheel built without the stamp."""
     import json as _json
     import sys
     import types

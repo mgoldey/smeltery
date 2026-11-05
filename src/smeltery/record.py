@@ -79,8 +79,10 @@ def _distribution_identity(name: str, ident: dict) -> dict:
         ident["dirty"] = None if st is None else bool(st)
         ident["provenance"] = "INFERRED from the local source directory's current git state"
     elif "archive_info" in du and ident["source"]:
-        # A built wheel installed from a path or URL (a CI artifact, say). The file names no commit, so the hash
-        # pip recorded is the only identity there is: it pins the artifact without claiming to know its source.
+        # A built wheel installed from a path or URL. Reached only when the wheel carries NO build stamp: ferric's
+        # own CI wheels stamp `ferric.__build__` with the commit, which the caller prefers, and `direct_url.json`
+        # records how this machine installed the file (often a local path) rather than where it was built. Without
+        # a stamp the hash pip recorded is the only identity there is: it pins the artifact, claiming no more.
         h = (du["archive_info"] or {}).get("hash") or (du["archive_info"] or {}).get("hashes", {}).get("sha256")
         name = Path(unquote(urlparse(ident["source"]).path)).name
         ident["dirty"] = False
