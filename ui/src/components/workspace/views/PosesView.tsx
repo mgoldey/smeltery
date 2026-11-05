@@ -30,10 +30,11 @@ export function NotRun({ step, shows }: { step: string; shows: string }) {
 }
 
 /** The pairs of a run's `results.pose_maps`, read once per run. */
-export function usePoseMaps(idx: number) {
+export function usePoseMaps(idx: number | null) {
   return useQuery({
     queryKey: ["pose_maps", idx],
     queryFn: () => getJson<{ maps: Record<string, number[][]> }>(`/api/runs/${idx}/pose_maps`),
+    enabled: idx !== null,
   });
 }
 
@@ -59,13 +60,13 @@ export function CorePose({ idx, candidate, pose, label }: { idx: number; candida
 export function coreCaption(n: number | undefined, candidate: string, parent: string): string {
   if (candidate === parent) return `${parent} is the parent: every atom is drawn solid.`;
   if (!n) return "This run did not record which atoms the analogue shares with the parent, so every atom is drawn solid.";
-  return `${n} atoms of ${candidate} are copied exactly from the parent's pose and drawn solid; the other atoms are outlined as lines. The parent's pose is shown muted.`;
+  return `${n} atoms of ${candidate} are copied exactly from the parent's pose and drawn solid; the other atoms are small and translucent. The parent's pose is shown muted.`;
 }
 
 /** Step 3: the poses, one ligand at a time. Needs a run record, not an SCF. */
 export function PosesView({ sourceRun }: StepViewProps) {
   const detail = useRunDetail(sourceRun);
-  const maps = usePoseMaps(sourceRun ?? 0);
+  const maps = usePoseMaps(sourceRun);
   const [candidate, setCandidate] = useState<string | null>(null);
   const [pose, setPose] = useState(0);
   if (sourceRun === null) return <NotRun step="poses" shows="each ligand's poses in the site, the atoms shared with the parent solid" />;

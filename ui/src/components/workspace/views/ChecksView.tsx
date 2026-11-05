@@ -9,6 +9,7 @@ type GateRow = {
   failed_checks: string[];
   strain_kcal: number | null;
   over_strain: boolean | null;
+  checked: boolean;
   ok: boolean;
 };
 type Gates = { ran: string[]; max_strain_kcal: number | null; rows: GateRow[] };
@@ -33,10 +34,12 @@ export function ChecksView({ sourceRun }: StepViewProps) {
     );
   }
   const failing = g.rows.filter((r) => !r.ok).length;
+  const unchecked = g.rows.filter((r) => !r.checked).length;
   return (
     <div data-view="checks">
       <p className="lede" data-testid="checks-summary">
-        {failing === 0 ? `All ${g.rows.length} poses pass.` : `${failing} of ${g.rows.length} poses fail.`} Gates that ran:{" "}
+        {failing === 0 && unchecked === 0 ? `All ${g.rows.length} poses pass.` : `${failing} of ${g.rows.length} poses fail.`}
+        {unchecked > 0 ? ` ${unchecked} not checked: strain is recorded but no limit judges it.` : ""} Gates that ran:{" "}
         {g.ran.join(", ")}.
         {g.max_strain_kcal === null ? " Strain is recorded, with no limit set." : ` Strain limit ${g.max_strain_kcal} kcal/mol.`}
       </p>
@@ -56,8 +59,8 @@ export function ChecksView({ sourceRun }: StepViewProps) {
               <td>{r.candidate}</td>
               <td className="num">{r.pose}</td>
               <td>
-                <span className="status" data-state={r.ok ? "succeeded" : "failed"}>
-                  {r.ok ? "pass" : "fail"}
+                <span className="status" data-state={!r.checked ? "cancelled" : r.ok ? "succeeded" : "failed"}>
+                  {!r.checked ? "not checked" : r.ok ? "pass" : "fail"}
                 </span>
               </td>
               <td>

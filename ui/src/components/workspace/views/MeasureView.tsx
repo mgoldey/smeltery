@@ -9,24 +9,29 @@ import { CorePose, getJson, NotRun, useRunDetail } from "./PosesView";
 type Picked = { candidate: string; pose: number };
 type CalcLines = { file: string | null; lines: Record<string, unknown>[] };
 type ClickEvent = { points: { customdata?: unknown[] }[] };
-type PlotDiv = HTMLElement & { on?: (name: string, fn: (e: ClickEvent) => void) => void };
+export type PlotDiv = HTMLElement & { on?: (name: string, fn: (e: ClickEvent) => void) => void };
 
-/** Plotly attaches `.on` once it has drawn; wait for it, then listen for clicks on a point. */
+/**
+ * Listen for `plotly_click` on the plot inside `host`. Plotly attaches `.on` once it has drawn, and the plot is a new
+ * element when the figure is refetched (a theme change), so this binds to whichever element is there now and again
+ * to the next one. `state.el` is the element already bound.
+ */
+export function bindClicks(host: HTMLElement | null, state: { el: PlotDiv | null }, onPick: (p: Picked) => void): void {
+  const el = host?.querySelector<PlotDiv>("[data-figure]") ?? null;
+  if (!el || typeof el.on !== "function" || el === state.el) return;
+  state.el = el;
+  el.on("plotly_click", (e) => {
+    const d = e.points[0]?.customdata;
+    if (d && typeof d[0] === "string" && typeof d[1] === "number") onPick({ candidate: d[0], pose: d[1] });
+  });
+}
+
 function useClicks(host: React.RefObject<HTMLDivElement | null>, onPick: (p: Picked) => void) {
   const handler = useRef(onPick);
   handler.current = onPick;
   useEffect(() => {
-    let bound = false;
-    const timer = window.setInterval(() => {
-      const el = host.current?.querySelector<PlotDiv>("[data-figure]");
-      if (!el || typeof el.on !== "function" || bound) return;
-      bound = true;
-      el.on("plotly_click", (e) => {
-        const d = e.points[0]?.customdata;
-        if (d && typeof d[0] === "string" && typeof d[1] === "number") handler.current({ candidate: d[0], pose: d[1] });
-      });
-      window.clearInterval(timer);
-    }, 100);
+    const state: { el: PlotDiv | null } = { el: null };
+    const timer = window.setInterval(() => bindClicks(host.current, state, (p) => handler.current(p)), 100);
     return () => window.clearInterval(timer);
   }, [host]);
 }

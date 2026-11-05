@@ -7,9 +7,10 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from fastapi import APIRouter, HTTPException, Request
+from molviewspec.nodes import RepresentationTypeT, validate_state_tree
 from pydantic import BaseModel
 from rdkit import Chem
 
@@ -195,7 +196,7 @@ def _core_atoms(r: R.Run, candidate: str) -> list[int]:
 
 def _core_solid(scene: dict[str, Any], core: list[int]) -> dict[str, Any]:
     """The same MolViewSpec state with the candidate drawn as two components: its core atoms in the representation
-    the scene already gave it (solid), every other atom as thin lines (outlined). Nothing but the candidate's
+    the scene already gave it (solid), every other atom small and translucent (outlined). Nothing but the candidate's
     structure node changes; the colours, parent, receptor and field are as `pose_scene` built them."""
     out = json.loads(json.dumps(scene))
 
@@ -217,10 +218,23 @@ def _core_solid(scene: dict[str, Any], core: list[int]) -> dict[str, Any]:
     others["params"]["selector"] = "all"
     for rep in others["children"]:
         if rep.get("kind") == "representation":
-            rep["params"] = {"type": "line"}
+            rep["params"] = {"type": "ball_and_stick", "size_factor": 0.35}
+            rep["children"] = [*rep.get("children", []), {"kind": "opacity", "params": {"opacity": 0.4}}]
     others["children"] = [c for c in others["children"] if c.get("kind") != "focus"]
     node["children"].append(others)
+    validate_state_tree(json.dumps(out))
+    _check_representations(out["root"])  # an unknown type fails here, not as a blank viewer
     return out
+
+
+def _check_representations(node: dict[str, Any]) -> None:
+    """molviewspec's State model leaves representation params loose, so check the type against its own Literal."""
+    if node.get("kind") == "representation" and node["params"]["type"] not in get_args(RepresentationTypeT):
+        raise ValueError(
+            f"representation type {node['params']['type']!r} is not one of {get_args(RepresentationTypeT)}"
+        )
+    for ch in node.get("children", []):
+        _check_representations(ch)
 
 
 class PoseMaps(BaseModel):
@@ -244,6 +258,8 @@ class GateRow(BaseModel):
     strain_kcal: float | None
     #: Strain above `max_strain_kcal`; None when no threshold is configured (strain is then only recorded).
     over_strain: bool | None
+    #: False when neither gate judged this pose (no PoseBusters verdict, no strain limit): not a pass.
+    checked: bool
     ok: bool
 
 
@@ -282,6 +298,7 @@ def run_gates(request: Request, idx: int) -> Gates:
                     failed_checks=list(v["failed_checks"]) if v else [],
                     strain_kcal=s,
                     over_strain=over,
+                    checked=passed is not None or over is not None,
                     ok=passed is not False and over is not True,
                 )
             )

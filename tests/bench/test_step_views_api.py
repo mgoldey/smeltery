@@ -62,6 +62,18 @@ def test_without_a_threshold_strain_is_recorded_not_judged(client_for, run_dir):
     assert all(r["over_strain"] is None and r["posebusters"] is None and r["ok"] for r in rows)
 
 
+def test_a_pose_no_gate_judged_is_not_checked_rather_than_a_pass(client_for, run_dir):
+    _edit(run_dir, lambda rec: rec["results"].update(gates={"strain_kcal": GATES["strain_kcal"]}))
+    c, _ = client_for(run_dir)
+    assert all(r["checked"] is False for r in c.get("/api/runs/0/gates").json()["rows"])
+
+    def limit(rec):
+        rec["inputs"]["gates"]["max_strain_kcal"] = 5.0
+
+    _edit(run_dir, limit)
+    assert all(r["checked"] is True for r in c.get("/api/runs/0/gates").json()["rows"])
+
+
 def test_a_run_whose_gates_were_off_has_no_rows(client_for, run_dir):
     c, _ = client_for(run_dir)
     g = c.get("/api/runs/0/gates").json()
@@ -118,8 +130,37 @@ def test_core_draws_the_mapped_atoms_solid_and_the_rest_as_lines(client_for, run
     solid, rest = _structure_components(scene)
     assert solid["params"]["selector"] == [{"atom_index": a} for a in sorted({m[0] for m in maps})]
     assert solid["children"][0]["params"]["type"] == "ball_and_stick"
-    assert rest["params"]["selector"] == "all" and rest["children"][0]["params"]["type"] == "line"
+    assert rest["params"]["selector"] == "all" and rest["children"][0]["params"] == {
+        "type": "ball_and_stick",
+        "size_factor": 0.35,
+    }
     assert [x["kind"] for x in rest["children"]] == ["representation"]
+
+
+def test_the_core_scene_validates_against_molviewspecs_schema(client_for, run_dir):
+    """Data source: molviewspec's own State model and its RepresentationTypeT, which has no "line"."""
+    from typing import get_args
+
+    import pytest
+    from molviewspec.nodes import RepresentationTypeT, validate_state_tree
+
+    from smeltery.bench.api.runs import _check_representations
+
+    c, _ = client_for(run_dir)
+    scene = c.get("/api/runs/0/scene", params={"candidate": "4-F", "pose": 1, "core": True}).json()
+    validate_state_tree(json.dumps(scene))
+    _check_representations(scene["root"])
+    types = {
+        r["params"]["type"]
+        for comp in _structure_components(scene)
+        for r in comp["children"]
+        if r["kind"] == "representation"
+    }
+    assert types == {"ball_and_stick"} <= set(get_args(RepresentationTypeT))
+    (_, rest) = _structure_components(scene)
+    rest["children"][0]["params"]["type"] = "line"
+    with pytest.raises(ValueError, match="'line'"):
+        _check_representations(scene["root"])
 
 
 def test_core_on_the_parent_changes_nothing(client_for, run_dir):
