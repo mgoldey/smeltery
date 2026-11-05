@@ -119,7 +119,7 @@ def ferric(tmp_path, monkeypatch):
     d.mkdir()
     monkeypatch.setenv("FAKE_FERRIC", str(d / "cfg.json"))
     fake = Fake(d)
-    monkeypatch.setitem(sys.modules, "ferric", fake_ferric.install())
+    monkeypatch.setitem(sys.modules, "ferric", fake_ferric.make())
     return fake
 
 

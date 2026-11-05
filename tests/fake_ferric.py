@@ -83,9 +83,17 @@ def run_rhf(mol, bs, point_charges=None, **kw):
     return types.SimpleNamespace(converged=bool(ok), iterations=7, energy=e)
 
 
-def install() -> types.ModuleType:
+def make() -> types.ModuleType:
+    """The fake module, not installed: a test installs it with `monkeypatch.setitem(sys.modules, "ferric", make())`,
+    which restores the real ferric afterwards."""
     mod = types.ModuleType("ferric")
     mod.BasisSet, mod.Molecule, mod.run_rhf = BasisSet, Molecule, run_rhf  # type: ignore[attr-defined]
+    return mod
+
+
+def install() -> types.ModuleType:
+    """Put the fake in `sys.modules` for good: only for a score child process, never in the test process."""
+    mod = make()
     sys.modules["ferric"] = mod
     return mod
 
