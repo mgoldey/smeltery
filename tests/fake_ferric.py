@@ -4,8 +4,13 @@ The same module serves the test process (`install()` puts it in `sys.modules`) a
 runner spawns (run as a script: it installs itself, then calls `smeltery.temporal_run.child_main`), so a plain run and
 a Temporal run compute the same numbers. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
 
-    {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "hang" | "hang_once" | "crash"}, "dir": "<scratch dir>",
+    {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "false_unless:<kwarg>" | "hang" | "hang_once" | "crash"},
+     "dir": "<scratch dir>",
      "build": {"git_sha": "...", "dirty": false}}   # optional: what `ferric.__build__` reports
+
+"false_unless:<kwarg>" is the false convergence ferric had before 455b8fbad: with no level shift the SCF does not
+converge; with a level shift but without `<kwarg>` it "converges" 0.8 Ha above the true energy; with `<kwarg>` it
+converges to the true energy.
 
 `<label>` is the xyz comment line ("ethanol pose 0"), `<leg>` "vacuum" or "field". Every completed SCF appends a line
 to `<dir>/calls.jsonl`; every started one appends its pid to `<dir>/pids`. "hang" sleeps for 10 minutes; "hang_once"
@@ -79,6 +84,10 @@ def run_rhf(mol, bs, point_charges=None, **kw):
         ok = False
     elif rule.startswith("needs:"):
         ok = rule.split(":", 1)[1] in kw
+    elif rule.startswith("false_unless:"):
+        ok = "level_shift" in kw
+        if ok and rule.split(":", 1)[1] not in kw:
+            e += 0.8
     if d is not None:
         _append(d / "calls.jsonl", json.dumps({"label": mol.label, "leg": leg, "kw": kw, "pid": os.getpid()}) + "\n")
     return types.SimpleNamespace(converged=bool(ok), iterations=7, energy=e)

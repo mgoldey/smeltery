@@ -258,6 +258,37 @@ def test_the_ladder_climbs_when_an_scf_does_not_converge(ferric):
     assert tier.settings()["remedies"] == [{"level_shift": 0.5}, {"max_iter": 500, "soscf": True, "diis": "adiis"}]
 
 
+def test_a_rung_converging_above_an_energy_already_reached_is_refused(ferric):
+    """Rung 1 "converges" 0.8 Ha above rung 0's last energy (ferric before 455b8fbad): that is no RHF minimum, so
+    the ladder records it as not converged and climbs to rung 2, whose value is the one used."""
+    ferric.set("m pose 0", "vacuum", "false_unless:soscf")
+    tier = FieldInteraction(remedies=[{"level_shift": 0.5}, {"level_shift": 1.0, "soscf": True}])
+    c = _water()
+    tier.run([c], {"field": [PointCharge(1.0, (3.0, 0.0, 0.0))]})
+    assert c.per_pose["scf_rung"] == [2.0]
+    vac = [r for r in tier.calc_log if r["leg"] == "vacuum"]
+    assert [(r["rung"], r["converged"]) for r in vac] == [(0, False), (1, False), (2, True)]
+    assert vac[1]["engine_converged"] is True and "false convergence" in vac[1]["refused"]
+    assert vac[1]["energy_hartree"] - vac[0]["energy_hartree"] == pytest.approx(0.8)
+    assert vac[2]["energy_hartree"] == pytest.approx(vac[0]["energy_hartree"])
+
+
+def test_a_logged_false_convergence_is_a_failed_rung_on_resume():
+    """A converged line written before the check existed (tonight's danuglipron log) is judged on reading: the leg
+    resumes on the next rung. A converged line at or below the earlier energies is kept."""
+    base = {"candidate": "c", "pose": 0, "leg": "vacuum", "field_model": None}
+    rows = [
+        {**base, "rung": 0, "converged": False, "energy_hartree": -2293.0235},
+        {**base, "rung": 1, "converged": True, "energy_hartree": -2292.2060},
+        {**base, "pose": 1, "rung": 0, "converged": False, "energy_hartree": -10.0},
+        {**base, "pose": 1, "rung": 1, "converged": True, "energy_hartree": -10.00005},
+    ]
+    st = temporal_run.leg_state(rows)
+    bad, good = st[("c", 0, "vacuum", None)], st[("c", 1, "vacuum", None)]
+    assert bad["converged"] is None and bad["failed"] == {0, 1} and bad["next_rung"] == 2 and not bad["final"]
+    assert good["converged"]["rung"] == 1 and good["final"]
+
+
 def test_every_rung_failing_still_raises_and_logs_every_scf(ferric):
     ferric.set("m pose 0", "vacuum", "never")
     tier = FieldInteraction(remedies=[{"level_shift": 0.5}])
@@ -448,6 +479,30 @@ def test_a_pose_failing_every_rung_is_dropped_pairwise(ferric, tmp_path, queue):
     want = [de("propanol", i) - de("ethanol", i) for i in (2, 3)]
     assert res["paired_ddE"]["propanol"]["n"] == 2
     assert res["paired_ddE"]["propanol"]["per_pose"] == pytest.approx(want, abs=1e-9)
+
+
+@needs_server
+def test_a_temporal_leg_converging_falsely_climbs_and_the_line_says_why(ferric, tmp_path, queue):
+    cfg = _config(
+        tmp_path,
+        n_poses=2,
+        extra="\n[field_interaction]\nremedies = [{level_shift = 0.5}, {level_shift = 1.0, soscf = true}]\n",
+    )
+    ferric.set("propanol pose 1", "vacuum", "false_unless:soscf")
+    out = tmp_path / "out"
+    try:
+        with worker(queue):
+            assert main(["run", str(cfg), "--out", str(out), "--temporal", "--task-queue", queue]) == 0
+    finally:
+        _terminate(out)
+    res = _record(out)["results"]
+    assert res["per_pose"]["propanol"]["scf_rung"] == [0.0, 2.0]
+    vac = sorted(
+        (r for r in _rows(out) if r.get("candidate") == "propanol" and r.get("pose") == 1 and r.get("leg") == "vacuum"),
+        key=lambda r: r["rung"],
+    )
+    assert [(r["rung"], r["converged"]) for r in vac] == [(0, False), (1, False), (2, True)]
+    assert vac[1]["engine_converged"] is True and "false convergence" in vac[1]["refused"]
 
 
 @needs_server

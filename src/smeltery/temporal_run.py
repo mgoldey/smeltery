@@ -260,9 +260,22 @@ def dedupe(rows: list[dict]) -> tuple[list[dict], int]:
 
 
 def leg_state(rows: list[dict]) -> dict[tuple, dict]:
-    """Per leg identity: the converged line (if any), the rungs that failed, the last outcome line, the next rung."""
+    """Per leg identity: the converged line (if any), the rungs that failed, the last outcome line, the next rung.
+    A line whose convergence the ladder refuses (`refuse_false_convergence`, against the leg's lower rungs) counts
+    as a failed rung, whenever it was written."""
+    from .tiers import refuse_false_convergence
+
     out: dict[tuple, dict] = {}
+    scfs: dict[tuple, list[dict]] = {}
     for r in rows:
+        if "outcome" not in r:
+            scfs.setdefault(_ident(r), []).append(r)
+    judged = {
+        id(r): refuse_false_convergence(r, [e for e in legs if int(e["rung"]) < int(r["rung"])])
+        for legs in scfs.values()
+        for r in legs
+    }
+    for r in (judged.get(id(r), r) for r in rows):
         st = out.setdefault(_ident(r), {"converged": None, "failed": set(), "outcome": None})
         if "outcome" in r:
             st["outcome"] = r
@@ -780,6 +793,8 @@ if TEMPORAL_AVAILABLE:
 
         @activity.defn(name="pipeline_score")
         async def score(self, inp: ScoreInput) -> ScoreResult:
+            from .tiers import refuse_false_convergence
+
             try:
                 check_config(inp.config, inp.config_sha)
             except ValueError as e:
@@ -787,14 +802,18 @@ if TEMPORAL_AVAILABLE:
             digest = _work(inp.out)["digest"]
             ident = (inp.candidate, inp.pose, inp.leg, inp.field_model)
             rows, _ = read_rows(inp.out, digest)
-            row = next((r for r in rows if "outcome" not in r and _ident(r) == ident and r["rung"] == inp.rung), None)
+            mine = [r for r in rows if "outcome" not in r and _ident(r) == ident]
+            earlier = [r for r in mine if r["rung"] < inp.rung]
+            row = next((r for r in mine if r["rung"] == inp.rung), None)
             cpu = 0.0
             if row is None:  # not already logged by an attempt whose completion was lost
                 started = utc_now()
                 got = await _heartbeating(lambda: self._child(inp), inp.timeout_s or None)
                 row = scf_row(inp, got, digest, started)
-                append_row(inp.out, row)
                 cpu = got["seconds"]
+                row = refuse_false_convergence(row, earlier)  # logged as the ladder judged it
+                append_row(inp.out, row)
+            row = refuse_false_convergence(row, earlier)  # a line logged before this check existed, too
             if not row["converged"]:
                 where = "vacuum" if inp.field_model is None else f"field {inp.field_model}"
                 raise ApplicationError(

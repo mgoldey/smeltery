@@ -523,6 +523,18 @@ class PairedPoses:
         return out
 
 
+class _NotConverged:
+    """An engine result the ladder refused: `converged` is False whatever the engine said; the rest is the engine's."""
+
+    def __init__(self, res) -> None:
+        self._res = res
+
+    converged = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._res, name)
+
+
 def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seconds: float) -> dict:
     """One `calc_log` line: a single SCF, logged whether or not it converged."""
     return {
@@ -533,6 +545,32 @@ def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seco
         "iterations": int(result.iterations),
         "energy_hartree": float(energy),
         "seconds": float(seconds),
+    }
+
+
+#: How far (Hartree) a rung's "converged" energy may sit above the lowest energy an earlier rung of the same leg
+#: reached before the convergence is refused. Every SCF iterate is the energy of a real determinant, so the RHF
+#: minimum cannot lie above one already reached; a rung that stops there has settled on a wrong state (ferric before
+#: 455b8fbad: ADIIS with a level shift "converged" in 3 iterations, 0.8 Ha high). 1e-4 Ha is 0.06 kcal/mol.
+FALSE_CONVERGENCE_HARTREE = 1e-4
+
+
+def refuse_false_convergence(row: dict, earlier: list[dict]) -> dict:
+    """`row` (a `calc_log` line) as the ladder must treat it: a converged line whose energy lies more than
+    `FALSE_CONVERGENCE_HARTREE` above the lowest energy of `earlier` (the same leg's lines at lower rungs) becomes
+    not converged, keeping what the engine said under `engine_converged` and why under `refused`."""
+    if not row.get("converged"):
+        return row
+    lows = [float(r["energy_hartree"]) for r in earlier if r.get("energy_hartree") is not None]
+    if not lows or float(row["energy_hartree"]) <= min(lows) + FALSE_CONVERGENCE_HARTREE:
+        return row
+    low = min(lows)
+    return {
+        **row,
+        "converged": False,
+        "engine_converged": True,
+        "refused": f"false convergence: {float(row['energy_hartree']):.6f} Ha is "
+        f"{float(row['energy_hartree']) - low:.4f} Ha above {low:.6f} Ha, which an earlier rung of this leg reached",
     }
 
 
@@ -690,12 +728,16 @@ class FieldInteraction:
 
     def _climb(self, ferric, mol, bs, charges, cand: str, pose: int, leg: str):
         """One leg up the ladder until it converges or the rungs run out; every SCF logged. Returns (result, rung)."""
+        earlier: list[dict] = []
         for rung in range(self.n_rungs):
             res, secs = self.scf(ferric, mol, bs, charges, rung)
-            self.calc_log.append({**_calc_entry(cand, pose, leg, res, res.energy, secs), "rung": rung})
-            if res.converged:
+            row = {**_calc_entry(cand, pose, leg, res, res.energy, secs), "rung": rung}
+            row = refuse_false_convergence(row, earlier)
+            self.calc_log.append(row)
+            if row["converged"]:
                 return res, rung
-        return res, rung
+            earlier.append(row)
+        return _NotConverged(res), rung
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         for cand in candidates:
