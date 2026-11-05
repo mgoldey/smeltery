@@ -829,3 +829,10 @@ def test_with_no_worker_polling_the_wait_says_so(ferric, tmp_path, queue):
     finally:
         _terminate(out)
     assert any("no worker is polling" in s and "smeltery temporal-worker" in s for s in said)
+
+
+def test_planning_one_candidate_of_a_remeasuring_config_is_allowed(ferric, tmp_path, half, capsys):
+    """--plan runs no SCF, so the partial-run refusal does not apply to it."""
+    cfg = _config(tmp_path, extra="\n[half_field]\n")
+    assert main(["run", str(cfg), "--plan", "--only-candidate", "propanol"]) == 0
+    assert "plan OK" in capsys.readouterr().out

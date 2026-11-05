@@ -1680,7 +1680,8 @@ def main(argv: list[str] | None = None) -> int:
         elif explicit_out:  # a combine writes its record into OUT
             _guard_out(args.out, None)
         cfg = load_config(args.config)
-        if args.only_candidate is not None or args.combine:
+        # --plan runs no SCF, so planning one candidate of such a config is fine
+        if (args.only_candidate is not None and not args.plan) or args.combine:
             from .temporal_run import remeasuring_analyses
 
             again = remeasuring_analyses(cfg)
