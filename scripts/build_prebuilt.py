@@ -10,6 +10,7 @@ posebusters extras and pdb2pqr30 on PATH; the benzoic pipelines need only the ba
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -37,13 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     if existing and not args.force:
         print(f"refusing to overwrite existing run(s): {', '.join(existing)} (use --force)", file=sys.stderr)
         return 2
+    # The running interpreter's bin directory goes first, so .venv/bin/python uses .venv's pdb2pqr30.
+    env = dict(os.environ, PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""))
+    print(f"pdb2pqr30: {shutil.which('pdb2pqr30', path=env['PATH'])}", flush=True)
     for name in names:
         folder = PREBUILT / name
         print(f"== {name}: needs {NEEDS[name]}", flush=True)
         tmp = folder / "run.new"
         shutil.rmtree(tmp, ignore_errors=True)
         cmd = [sys.executable, "-m", "smeltery", "run", str(folder / "pipeline.toml"), "--out", str(tmp)]
-        if subprocess.run(cmd, check=False).returncode != 0:
+        if subprocess.run(cmd, check=False, env=env).returncode != 0:
             shutil.rmtree(tmp, ignore_errors=True)
             print(f"{name}: run failed; any existing run/ is kept", file=sys.stderr)
             return 1
