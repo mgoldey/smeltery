@@ -17,7 +17,13 @@ from pydantic import BaseModel, Field
 
 from smeltery.gui.config_text import ConfigTextError, apply
 from smeltery.gui.pipeline import Pipeline
-from smeltery.gui.scenes import CHARGE_NEGATIVE, CHARGE_POSITIVE, CHARGE_ZERO, data_uri
+from smeltery.gui.scenes import (
+    CANDIDATE_CARBON,
+    CHARGE_NEGATIVE,
+    CHARGE_POSITIVE,
+    CHARGE_ZERO,
+    data_uri,
+)
 from smeltery.pocket.loader import PDB2PQR, load_pocket
 
 from . import models as M
@@ -25,9 +31,6 @@ from .common import ports
 from .pipelines import EditedText, _parse_or_400, _patch, _workspace_defaults
 
 router = APIRouter(prefix="/api/pipelines", tags=["active_site"])
-
-CUTOFF_COLOR = "#808080"
-LIGAND_COLOR = "#33a02c"
 
 
 class PocketPreviewRequest(BaseModel):
@@ -79,7 +82,7 @@ def _scene(field: list, center: Xyz | None, cutoff: float | None, ligand: tuple[
         text, sel = ligand
         expr = ComponentExpression(label_comp_id=sel["res"], auth_asym_id=sel.get("chain"), auth_seq_id=sel.get("num"))
         lig = builder.download(url=data_uri(text.encode())).parse(format="pdb").model_structure(ref="reference_ligand")
-        lig.component(selector=expr).representation(type="ball_and_stick").color(color=LIGAND_COLOR)
+        lig.component(selector=expr).representation(type="ball_and_stick").color(color=CANDIDATE_CARBON)
     prims = builder.primitives(opacity=0.8, ref="field")
     for pc in field:
         q = float(pc.q)
@@ -92,7 +95,7 @@ def _scene(field: list, center: Xyz | None, cutoff: float | None, ligand: tuple[
         )
     if center is not None and cutoff is not None:
         ring = builder.primitives(opacity=0.08, ref="cutoff")
-        ring.sphere(center=center, radius=cutoff, color=CUTOFF_COLOR, tooltip=f"pocket_cutoff {cutoff:g} A")
+        ring.sphere(center=center, radius=cutoff, color=CHARGE_ZERO, tooltip=f"pocket_cutoff {cutoff:g} A")
     return json.loads(builder.get_state(title="Active site").dumps(indent=None))
 
 

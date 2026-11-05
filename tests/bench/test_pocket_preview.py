@@ -145,3 +145,19 @@ def test_an_incomplete_choice_is_400_naming_what_is_missing(client_for):
     c, _ = client_for()
     r = c.post("/api/pipelines/active_site", json={"toml": _blank(c), "choice": "structure", "spec": "x.pdb"})
     assert r.status_code == 400 and "pocket_cutoff" in r.json()["detail"]
+
+
+@pytest.mark.skipif(not (Path(__file__).resolve().parents[1] / "data" / "gly3.pqr").exists(), reason="no fixture")
+def test_a_relative_pocket_file_resolves_against_the_saved_pipeline_folder(client_for, monkeypatch, tmp_path):
+    c, _ = client_for()
+    text = _blank(c)
+    folder = Path(c.get("/api/pipelines/p").json()["folder"])
+    pqr = Path(__file__).resolve().parents[1] / "data" / "gly3.pqr"
+    (folder / "pocket.pqr").write_text(pqr.read_text())
+    monkeypatch.chdir(tmp_path)  # the server cwd is NOT the pipeline folder
+    assert "[pocket]" in text
+    toml = text.replace("[pocket]", '[pocket]\nfile = "pocket.pqr"', 1)
+    ok = c.post("/api/pipelines/pocket_preview", json={"toml": toml, "pipeline": "p"})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["n_charges"] == len(load_pocket(pqr))
+    assert c.post("/api/pipelines/pocket_preview", json={"toml": toml}).status_code == 400  # no pipeline: cwd
