@@ -14,7 +14,8 @@ smeltery bench ROOT [--study pkg.module] [--port 8765] [--open]
 ```
 
 ROOT is searched recursively for run records (`run-*.json`). Bench keeps its own state (comments,
-decisions, campaigns, attached artefacts, task logs) under `ROOT/.smeltery/bench/`. `--study`
+decisions, campaigns, attached artefacts, task logs, method defaults) under `ROOT/.smeltery/bench/`;
+pipelines are folders under `ROOT/pipelines/`. `--study`
 names a study by Python module path and may be repeated.
 
 From a source checkout the UI must be built first; without it `smeltery bench` exits 2 and says so:
@@ -28,11 +29,185 @@ and drawn by Plotly; structures are drawn by Mol* from MolViewSpec scenes the AP
 depictions and atom picking use RDKit.js. The pipeline exists only as TOML, carried through
 `smeltery.gui.pipeline.Pipeline`; every view of it is derived from that text.
 
-## Areas and pages
+## The workspace
 
-**Bench** (`/bench`) is the home page. It lists the runs under ROOT with each one's verdict, the
-work panel (running and finished tasks, their logs, cancel), campaign notebooks, and the
-configured studies.
+The pipeline is the page. A pipeline is a folder `ROOT/pipelines/<name>/` holding `config.toml`
+(the same file `smeltery run` reads) and the input files it names. The TOML text is the only
+state: every form in the workspace writes lines into it, and nothing about a pipeline exists only
+in the browser.
+
+### Starting
+
+The Bench home page (`/bench`) lists the runs under ROOT, the pipelines in the workspace, the work
+panel (running and finished tasks, their logs, cancel), campaign notebooks and configured studies.
+A pipeline starts in one of three ways. Names are lower case letters, digits, `-` and `_`.
+
+- **Start from a working pipeline.** Four pipelines ship with smeltery. Each is copied into the
+  workspace as your own pipeline, with the input files its config reads and a finished example run,
+  so the result, the views and the provenance can be read before anything is changed. The packaged
+  original is never written to, and the config is copied exactly (workspace defaults are not applied).
+  - `benzoic-rhf`: benzoic acid and two para analogues (4-F, 4-Cl) in a clamp of two +1 charges,
+    ranked by field-interaction RHF. Re-running needs only the base install.
+  - `benzoic-pbe`: the same clamp ranked with KS-DFT (PBE). Re-running needs only the base install.
+  - `docking`: ethanol docked with Vina into a committed pentapeptide pocket; propanol and butanol
+    paired to its poses, gated by PoseBusters and MMFF strain, then ranked by RHF. Re-running needs
+    the `docking` and `posebusters` extras and `pdb2pqr30` on PATH.
+  - `structure`: the structure-first path. A PDB file is prepared for Vina, the pocket field is cut
+    around a stated centre, then the `docking` pipeline runs. Same requirements as `docking`.
+- **A blank pipeline.** Give a campaign name, a parent (name and SMILES) and one or more analogues.
+  The pipeline gets paired poses, a pocket, the RHF measurement and the cut, with the workspace
+  defaults of the Methods tab copied in. It is not runnable yet: the pocket needs charges or a file
+  and the cut needs `keep`, and the steps say so.
+- **A pipeline from a run.** "Start from run" copies the `config.toml` that run kept, with the input
+  files it copied, exactly. For a run that has no `config.toml` (made before runs kept one) the
+  pipeline is rebuilt from the run record: candidates, parent, the cut's `keep` and `z`, a floor
+  that came from the config, and the gates that ran. The record holds pocket charges as positions,
+  not as the atom sites that placed them, so hand-placed sites are not recovered and the workspace
+  says so. The source run is never changed; running the new pipeline makes a new run directory.
+
+A run's Pipeline tab opens (and the first time creates) the pipeline that made that run.
+
+### The drawn pipeline
+
+The workspace (`/pipelines/<name>`) draws the steps in the order `smeltery run` executes them:
+Active site, Ligands, Paired poses, Pose checks, ΔE_int, Cut. Steps can be added and removed, never
+reordered, and the ranked quantity is always ΔE_int. Each step shows one state:
+
+- **ready**: nothing to report.
+- **needs input**: `Pipeline.check()` reports an error on this step; the error is shown on this step
+  only, in the check's own words.
+- **off**: an optional step (the pose checks, docking) that this pipeline does not place.
+- **changed**: the draft differs from the kept config in this step's methods or settings.
+- **result will change**: a later step that is placed, after the first changed step. Its output
+  depends on the edit, so it would differ in a new run.
+
+Issues that belong to no step are listed above the drawing.
+
+### Editing a step
+
+Selecting a step opens its panel:
+
+- **Inputs**: what flows in from which step and what the step gives to the next.
+- **Method**: where a step offers a choice (RHF or KS-DFT; the three ways of giving an active site)
+  the choice, and every setting of the placed methods with a one-line explanation taken from the
+  method's own definition. A setting that differs from the kept config shows its previous value and
+  can be reset; a setting that differs from the workspace default says so.
+- **View**: what the step produced (below).
+- **Impact**, a strip under the panel: wall time, memory per calculation against the budget, free
+  memory against `require_free_gb`, which steps change, whether the edit makes a new input digest
+  (a new run recomputes every step; nothing is cached), and where the poses behind the estimates came
+  from. These come from the measurement tier's `estimate_cost` and `estimate_memory`, the same
+  memory facts `smeltery run --plan` prints, and `Pipeline.check()`. They are computed without docking
+  or an SCF, from poses placed by RDKit, or from the source run's poses when nothing upstream of the
+  poses changed. When poses do not exist yet the strip says "cannot say until poses exist" and offers
+  **Preview poses**, which runs `smeltery run --plan` on the kept config as a task. Memory is a
+  per-calculation figure; a long run has been measured holding about 11 GB against a prediction of about 2 GB, so leave headroom beyond it.
+- The lines the edit writes to the config, as a diff, and the TOML pane beside the steps.
+
+Edits are a **draft** until you press **Keep**, which saves the text as the pipeline's `config.toml`.
+**Discard** restores the selected step to the kept text, and **Discard all** drops every edit. Keep
+writes the config even while it has errors, because some changes take several edits (switching
+the active site to a structure also needs docking). Only **Run** is blocked: it runs the kept
+config, is disabled while the kept config has an error (each one is listed, in the CLI's own words)
+or the draft has edits that are not kept. Saving over a config that changed on disk since you
+opened it is refused rather than overwritten.
+
+Step edits change only the lines they touch, so comments, ordering and layout in the TOML survive.
+The TOML pane edits the same text directly; if it does not parse, step edits stay blocked until it
+does and the error names the line.
+
+**Run** copies every input file the config reads into the run directory and runs from there (see
+Provenance). The run directory defaults to a dated folder under `ROOT/out/`.
+
+### What each step's view shows
+
+1. **Active site**, three ways to give it, each editable:
+   - a protein structure (`[structure]`): a local `.pdb` (a PDB id or accession only with network
+     allowed), its hash and origin, chains and HETATM groups, a reference ligand or a centre and the
+     `pocket_cutoff`. "Use as active site" writes `[structure]` and turns docking on;
+   - a prepared pocket file with a receptor and box (`[pocket] file` with `[docking]`);
+   - hand-placed charges: click two atoms of the parent to place a charge.
+   For the first two the view builds the point-charge field without docking or an SCF, draws it in 3D
+   with the cutoff sphere and the reference ligand, and states the charge count, the net charge and
+   the nearest charge to the centre. A `.pdb` needs `pdb2pqr30` to assign charges; if it is missing
+   the view says so. Hand-placed charges are placed on the parent's pose when the pipeline runs, so
+   there is nothing to preview. Switching away from hand-placed charges asks before dropping them.
+2. **Ligands**: the campaign, parent and analogues, editable (add, remove, rename, change a SMILES,
+   choose the parent; removing the parent is refused). Each is checked before anything runs, with
+   RDKit only: the SMILES parses, its formal charge, the electron count at that charge (the
+   closed-shell RHF and DFT tiers cannot run an odd count), whether STO-3G covers its elements, and
+   the core it shares with the parent, highlighted. ferric's bundled STO-3G stops at argon, so a
+   ligand with Br or I is flagged as uncovered, and it would fail at the SCF. The core search is the
+   one `smeltery run` uses, with the same time limit; a timeout is reported as a problem, not as
+   "no core".
+3. **Paired poses**: each ligand's poses in the site, with the atoms copied exactly from the parent
+   (the core) drawn apart from the atoms placed fresh. Needs a run to show.
+4. **Pose checks**: a pass, fail or "not checked" for every pose, with the failed PoseBusters
+   criteria and the MMFF strain in kcal/mol. A pose is "not checked" when neither gate judged it,
+   for example strain recorded with no limit set; that is not a pass. `smeltery run` evaluates every
+   gate on every pose before failing the stage, so the failures can be read.
+5. **ΔE_int**: every pose of every ligand as a marker. Clicking one shows that pose in the field
+   and each ligand's value there; the SCF log lines of that pose are one click away.
+6. **Cut**: the forest plot and resolved matrix of the Results page.
+
+A view that needs a run says plainly that the step has not run. It never shows an estimate in place
+of a result.
+
+### RHF or KS-DFT
+
+The ΔE_int step offers `[field_interaction]` (RHF, the default) or `[field_dft_interaction]` (KS-DFT:
+`functional`, `basis`, `memory_budget_gb`, `require_free_gb`, ...). A config selects one, never both;
+choosing one in the step removes the other. The memory check counts basis functions for STO-3G only:
+with another basis, or an element outside the STO-3G table, memory is "cannot say" and the run will
+not refuse on it. `smeltery run CONFIG --plan` prints the same memory estimate (largest pose, basis
+functions, GB against the budget, free memory against `require_free_gb`) without running an SCF.
+
+## The Methods tab
+
+`/methods` lists every method a pipeline can place. For each: what it measures (or "nothing" for a
+method that prepares, refuses or decides), its cost model and memory model, with their limits written
+out (for example "memory is modelled for STO-3G only"), its systematic floor in kcal/mol or
+"unmeasured", the pipelines in this workspace that place it, and a table of every setting with its
+built-in default, a workspace default and what the setting does.
+
+A workspace default is **copied** into a step when the method is added to a pipeline, and the step
+then holds the value explicitly in its config. A config never refers to workspace defaults, so
+changing one reaches no existing pipeline and a run can always be redone from its own directory.
+Defaults are stored as plain TOML in `ROOT/.smeltery/bench/methods.toml`, one table per method; a
+hand-broken file is reported with its line. Pipelines copied from a prebuilt pipeline or a run
+get no workspace defaults. The pocket sites are a per-pipeline setting and have no default.
+
+## Provenance and lineage
+
+A run started with `--out OUT` (as Bench's Run does) leaves a self-contained directory:
+
+- `run-<digest>.json`, the record, which carries the smeltery source commit and whether the tree
+  was dirty (read from the checkout at run time, not the version stamped at install), the ferric build,
+  the host, the start time, and the wall time of every step.
+- `config.toml`, the config as run, with each input path rewritten to the copy below.
+- `inputs/<sha256>/<name>` for every file the config reads (the structure file, pocket file,
+  docking receptor, decisions file), and `inputs/manifest.json` mapping each copy to the source it
+  came from. A PDB id is not a file and is left as it is. The record names the config and each input
+  by sha256, so the directory re-runs after the originals move.
+- `calcs.jsonl`: one line per SCF (candidate, pose, leg, converged, iterations, energy, seconds).
+  A run whose SCF fails still leaves the calculations that finished.
+- `gates.json`, only when a gate rejected a pose and the run stopped (exit 3): every pose's result.
+- the pose SDFs, and for `--plan --out`, `plan.json` with the input digest, estimated seconds and memory.
+
+Without `--out` nothing is staged and the record goes to `out/`.
+
+To trace a number, press Trace beside a candidate on the Results page. The lineage panel shows the
+per-pose values the paired ΔΔE averages (candidate, parent, difference), then what made them: each
+step's settings and seconds, the pocket field (charge count and how it was cut), the engine build, the
+smeltery commit, the input digest, the config file and its hash, the calculation log and when the run
+started. "Open the pipeline that made this" opens the run's pipeline in the workspace, and "Change a
+setting and re-run" opens it at the ΔE_int step. The panel only joins fields the record holds. A run
+made before these were recorded shows "not recorded for this run" for each missing item; nothing is
+filled in.
+
+## Other areas
+
+**Methods** (`/methods`) is described above.
 
 - `/studies/{module}`: a study's step graph and, for each condition and step, whether the
   result is cached or still to run.
@@ -49,9 +224,7 @@ bar shows the campaign, input digest and verdict.
 - `poses`: each candidate's poses in the pocket (Mol*), with the per-pose energies.
 - `structure`: open a local PDB (or a PDB id when network access is allowed), its hash and
   origin, what preparation drops, drawn in 3D.
-- `pipeline`: the pipeline editor. Stages and knobs are edited as forms or as TOML in place; every
-  issue is listed at once. Pocket sites are placed by clicking two atoms of the parent. The
-  provisional result shows what changes before anything runs. Launch starts the run as a task.
+- `pipeline`: opens the workspace on the pipeline that made this run (see above).
 - `decisions`: keep, reject or hold each candidate with a reason from the core's vocabulary;
   the core refuses, for example, a within-tie choice that has no note.
 - `proposals`: candidates proposed for review. A proposal starts no work.
@@ -76,13 +249,20 @@ change without that regeneration fails CI.
 
 - `/healthz`, `/api/whoami`
 - runs: `/api/runs`, `/api/runs/{idx}` and its `verdict`, `ddE`, `resolved`, `per_pose`,
-  `figures/{name}`, `scene`, `pose_atoms`, `decisions`, `comments`, `proposals`, `snapshot`;
-  `/api/compare`; `/api/decisions/vocabulary`, `/api/proposals`, `/api/proposals/vocabulary`
-- work: `/api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; `/api/catalog`,
-  `/api/methods/{key}`; `/api/pipeline/{check,edit,site,from_run,launch}`; `/api/provisional`;
+  `figures/{name}`, `scene`, `pose_maps`, `pose_atoms`, `gates`, `calcs`, `lineage`, `decisions`,
+  `comments`, `proposals`, `snapshot`; `/api/compare`; `/api/decisions/vocabulary`,
+  `/api/proposals`, `/api/proposals/vocabulary`
+- workspace pipelines: `/api/pipelines` (list, create from a prebuilt, a run or blank),
+  `/api/pipelines/{name}` (read, save with a base hash), `/api/pipelines/{name}/launch`,
+  `/api/pipelines/{name}/preview`; on the draft text: `/api/pipelines/steps`, `/edit`, `/impact`,
+  `/ligands`, `/ligands/edit`, `/pocket_preview`, `/active_site`; `/api/prebuilt`
+- methods: `/api/methods` (list with workspace defaults), `PUT /api/methods/{key}` (set them);
+  `/api/catalog`, `GET /api/methods/{key}`
+- work: `/api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; the earlier pipeline
+  routes `/api/pipeline/{check,edit,site,from_run,launch}` and `/api/provisional`;
   `/api/structure`, `/api/structure/text`, `/api/structure/{sha}.pdb`
-- notebook: `/api/campaigns`, `/api/campaigns/{id}/entries`; `/api/studies`,
-  `/api/studies/{module}/dag`, `/api/studies/{module}/cells`
+- notebook: `/api/campaigns`, `/api/campaigns/{id}`, `/api/campaigns/{id}/entries`;
+  `/api/studies`, `/api/studies/{module}/dag`, `/api/studies/{module}/cells`
 
 Every other path serves the app.
 
@@ -96,6 +276,8 @@ Every other path serves the app.
 6. CommentStore - `SqliteCommentStore` (anchored threads)
 7. ProjectStore - `SqliteProjectStore` (campaigns, append-only entries)
 8. TaskQueue - `SubprocessTaskQueue` / `TemporalTaskQueue`
+9. PipelineStore - `FilesystemPipelineStore` (`ROOT/pipelines/<name>/`; saves are checked against the hash of the text they were based on)
+10. MethodDefaults - `FilesystemMethodDefaults` (`ROOT/.smeltery/bench/methods.toml`)
 
 ## Layering
 

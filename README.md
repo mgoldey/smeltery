@@ -55,6 +55,16 @@ For a GUI, `smeltery.gui` presents the tiers as a hierarchy of methods and lets 
 compiles to a `smeltery run` config: [docs/gui.md](docs/gui.md). A review of the tools for viewing results and choosing
 candidates, with a plan: [docs/gui-review.md](docs/gui-review.md).
 
+## Bench
+
+`smeltery bench ROOT` serves a local web app (install with the `bench` extra). It draws a pipeline
+as its six steps (active site, ligands, paired poses, pose checks, ΔE_int, cut), lets you edit each
+step in place with what the edit costs shown before you keep it, checks ligands before anything runs,
+and traces any ΔΔE back to the settings, inputs and calculations that made it. It starts from four
+prebuilt pipelines with finished example runs, a blank pipeline, or a pipeline copied from a run. The
+pipeline is the TOML file `smeltery run` reads; Bench does not schedule work or bound memory. Details
+and limits: [docs/bench.md](docs/bench.md).
+
 ## The end-to-end path, and long work
 
 One command per step from a target to something shareable, for an end user or an ELN
@@ -63,7 +73,7 @@ integration: [docs/golden-path.md](docs/golden-path.md).
 ```bash
 smeltery golden init --out myrun.toml --parent lead --parent-smiles "..."
 smeltery run myrun.toml --plan          # poses, pocket, parity, digest; no SCF
-smeltery run myrun.toml --out out/myrun
+smeltery run myrun.toml --out out/myrun   # --out makes a self-contained run directory: config.toml + inputs/
 smeltery golden open out/myrun          # GUI + Avogadro 2 (--report, --no-gui, --no-avogadro)
 smeltery golden bundle out/myrun -o myrun-bundle.zip
 ```
@@ -132,6 +142,12 @@ explicitly while `FieldInteraction`'s systematic floor is unmeasured, and the re
 says so. Measured 2026-10-10 on one pinned core (`taskset -c`), box load about 12:
 6 min 55 s wall, 403 s CPU, 181 MB peak (ferric `b22183b`). This is a slice of the
 campaign path: structure and prep are not wired in.
+
+With `--out OUT` the run directory is self-contained: `OUT/config.toml` is the config as run, every
+input file it reads (structure, pocket, docking receptor, decisions) is copied to
+`OUT/inputs/<sha256>/` and the config points at the copies, and the record, a per-SCF log
+(`calcs.jsonl`), per-step seconds and the smeltery source commit sit beside them. A run directory can
+be re-run after the originals move. Without `--out` nothing is copied.
 
 With a `[docking]` section the parent is docked with Vina and the analogues are paired to its docked poses
 (`examples/mwe_docking.toml`, needs the `docking` and `posebusters` extras); `[gates]` runs PoseBusters, an MMFF
