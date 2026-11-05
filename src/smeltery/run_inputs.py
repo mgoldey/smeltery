@@ -10,12 +10,23 @@ from pathlib import Path
 
 from smeltery.gui.config_text import ConfigTextError, set_value
 
-INPUT_PATHS: tuple[tuple[str, str], ...] = (
-    ("structure", "spec"),
-    ("pocket", "file"),
-    ("docking", "receptor"),
-    ("decisions", "file"),
-)
+#: Input files the config names outside any method's section: the decisions JSON (an input of the Ligands step).
+_OTHER_INPUT_PATHS: tuple[tuple[str, str], ...] = (("decisions", "file"),)
+
+
+def input_paths() -> tuple[tuple[str, str], ...]:
+    """(table, key) of every config value that may name an input file: each registration's `file_knobs` under its
+    section (`smeltery.methods.registry()`, in catalog order), then the decisions file."""
+    from smeltery.methods import registry
+
+    own = tuple((s.section, k) for s in registry().values() if s.section is not None for k in s.file_knobs)
+    return own + _OTHER_INPUT_PATHS
+
+
+def __getattr__(name: str):
+    if name == "INPUT_PATHS":  # derived on every read, so a registration made later is staged
+        return input_paths()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _sha256(path: Path) -> str:
@@ -37,7 +48,7 @@ def _manifest(out_dir: Path) -> dict[str, dict]:
 
 
 def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[str, dict]]:
-    """Copy each `INPUT_PATHS` value that names an existing file (relative paths resolve against `config_dir`, as
+    """Copy each `input_paths()` value that names an existing file (relative paths resolve against `config_dir`, as
     `smeltery run` does) to `out_dir/inputs/<sha256>/<basename>` and return the config text with that value rewritten
     to the relative path `inputs/<sha256>/<basename>`, plus `{"pocket.file": {"source", "sha256", "copy"}, ...}`.
     A value that is not a file (a PDB id for `structure.spec`) is left alone and not listed.
@@ -51,7 +62,7 @@ def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[
     known = _manifest(out_dir)
     cfg = tomllib.loads(text)
     staged: dict[str, dict] = {}
-    for table, key in INPUT_PATHS:
+    for table, key in input_paths():
         value = cfg.get(table, {}).get(key) if isinstance(cfg.get(table), dict) else None
         if not isinstance(value, str):
             continue

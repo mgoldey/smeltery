@@ -7,8 +7,10 @@ PROVIDES to later ones, and the knobs it takes, typed so a form can be generated
 
 Nothing here invents a capability. A tier `smeltery run` cannot run yet (`surface_esp`, `qmmm`, `rescoring`,
 and `docking` used as a ranker) is in the catalog so the hierarchy is complete, with `wired=False` and the
-reason; `smeltery.gui.pipeline` refuses to place it. Knob names are the config's own keys, and
-`tests/test_gui_catalog.py` fails if a section's knobs drift from what `smeltery.cli` accepts.
+reason; `smeltery.gui.pipeline` refuses to place it. Knob names are the config's own keys.
+
+No method is listed here: `catalog()` is one `Method` per registration in `smeltery.methods.registry()` (today's
+methods are `smeltery.methods.builtin`), and the CLI validates each section against the same registration.
 """
 
 from __future__ import annotations
@@ -76,27 +78,6 @@ _RUNG_FROM = {
 }
 _PHASE_OF_RUNG = {rung: phase for (phase, _), rung in _RUNG_FROM.items()}
 _RIGOUR_OF_RUNG = {rung: rigour for (_, rigour), rung in _RUNG_FROM.items()}
-
-#: What each method measures. Methods sharing a value here are rigour-comparable; methods with
-#: different values are not, however convenient a single ranking would be. `None` (or absent) means
-#: the stage measures nothing -- it prepares, refuses or decides.
-#:
-#: The three entries that are not `dE_int` are the point: a funnel aiming at candidates worth
-#: synthesising needs affinity AND buildability AND safety, and those are different quantities that
-#: must not be collapsed into one order.
-_QUANTITY_OF: dict[str, str] = {
-    "forcefield": "dE_int",
-    "gfn2": "dE_int",
-    "field_interaction": "dE_int",
-    "field_dft_interaction": "dE_int",
-    "qmmm": "dE_int",
-    "surface_esp": "esp",
-    "docking": "docking_score",
-    "rescoring": "docking_score",
-    "designability": "designability",
-    "posebusters": "pose_validity",
-    "strain": "strain",
-}
 
 #: What a stage does to the candidate list. Matches the `kind` of `smeltery.cli` stage-log entries, plus
 #: `measure` (adds a quantity, removes no one) and `rank` (the one stage that removes candidates).
@@ -254,7 +235,10 @@ class Method:
         from PBE are the same quantity at different rigour; `designability` is a different question
         and is not a cheaper or worse anything.
         """
-        return _QUANTITY_OF.get(self.key)
+        from ..methods import registry
+
+        spec = registry().get(self.key)
+        return spec.quantity if spec is not None else None
 
     def comparable_rigour(self, other: Method) -> bool:
         """Can these two be ordered by rigour at all?
@@ -351,88 +335,21 @@ def floor_status(method: Method) -> str:
     return "measured" if any(v is not None for v in facts["floors"].values()) else "UNMEASURED"
 
 
-#: What the two SCF-convergence knobs and the iteration cap mean, shared by the RHF and KS-DFT tiers.
-_SCF_HELP = {
-    "energy_conv": "SCF energy convergence threshold given to ferric for both SCFs of every pose",
-    "density_conv": "SCF density convergence threshold given to ferric for both SCFs of every pose",
-    "max_iter": "SCF iteration cap; unset keeps ferric's own limit, and an SCF that does not converge is an error",
-}
-
-
-def _cost_dft() -> str:
-    from .. import cost
-    from ..tiers import FieldDftInteraction
-
-    t = FieldDftInteraction()
-    ref = cost.PBE_REFERENCE
-    return (
-        f"measured {t.functional} reference ({ref.n_atoms} atoms, {ref.n_basis_functions} bf: "
-        f"{cost.PBE_REFERENCE_VACUUM_SECONDS:g} s vacuum + {cost.PBE_REFERENCE_FIELD_SECONDS:g} s in field) scaled by "
-        f"nbf^2 x XC grid points; {t.functional} at {t.basis.upper()} only, otherwise cannot say; "
-        "a LOWER BOUND for slower-converging chemistry"
-    )
-
-
-def _cost_rhf() -> str:
-    from .. import cost
-
-    cal = cost.rhf_calibration()
-    return (
-        f"measured {cal.reference_name} reference ({cal.reference_nbf} bf, {cal.reference_seconds:.3g} s per pose, "
-        f"vacuum plus field RHF) scaled by (basis functions / {cal.reference_nbf})^{cal.exponent:.2f}; "
-        f"{cal.basis.upper()} only, otherwise cannot say; assumes the reference's SCF iteration count"
-    )
-
-
-def _cost_gfn2() -> str:
-    from ..tiers import Gfn2
-
-    return f"{Gfn2().estimate_cost([])['kind']}; estimate_cost counts the runs, not seconds"
-
-
-def _cost_forcefield() -> str:
-    from ..tiers import ForceField
-
-    return f"cannot say: {ForceField().estimate_cost([])['basis']}"
-
-
-def _memory_dft() -> str:
-    from ..tiers import FieldDftInteraction
-
-    t = FieldDftInteraction()
-    return (
-        f"peak resident GB of the largest pose (AO cache + packed RI tensor), checked against memory_budget_gb "
-        f"(default {t.memory_budget_gb:g}) before the first SCF; basis functions are counted for "
-        f"{t.basis.upper()} only, otherwise cannot say"
-    )
-
-
-#: What each method's code can say about its wall time and memory. Every number is read from the code that owns it
-#: (the calibration in `smeltery.cost`, the tier's own estimator), so the text cannot drift from the model; only the
-#: surrounding wording lives here. A method with no model says "cannot say".
-_COST_MODEL = {
-    "docking": lambda: "cannot say: no Vina timing is recorded in smeltery, so estimate_cost gives no prediction",
-    "paired_poses": lambda: (
-        "cannot say: estimate_cost gives no prediction (no recorded timing for its RDKit embeddings "
-        "and common-core search)"
-    ),
-    "forcefield": _cost_forcefield,
-    "gfn2": _cost_gfn2,
-    "field_interaction": _cost_rhf,
-    "field_dft_interaction": _cost_dft,
-}
-_MEMORY_MODEL = {"field_dft_interaction": _memory_dft}
-
-
 def cost_model(key: str) -> str:
-    """How `key`'s wall time is estimated, or 'cannot say: ...'. A stage with no tier has no model."""
-    f = _COST_MODEL.get(key)
+    """How `key`'s wall time is estimated (its registration's `cost_model`), or 'cannot say: ...'."""
+    from ..methods import registry
+
+    spec = registry().get(key)
+    f = spec.cost_model if spec is not None else None
     return f() if f else "cannot say: no cost model for this stage"
 
 
 def memory_model(key: str) -> str:
-    """How `key`'s memory is estimated, or 'cannot say: ...'."""
-    f = _MEMORY_MODEL.get(key)
+    """How `key`'s memory is estimated (its registration's `memory_model`), or 'cannot say: ...'."""
+    from ..methods import registry
+
+    spec = registry().get(key)
+    f = spec.memory_model if spec is not None else None
     return f() if f else "cannot say: no memory model for this stage"
 
 
@@ -442,258 +359,55 @@ def measured_floor(m: Method) -> float | None:
     return float(values[0]) if values else None
 
 
+def method_from_spec(spec, also_exclusive: tuple[str, ...] = ()) -> Method:
+    """The catalog's view of a registration (`smeltery.methods.MethodSpec`). `also_exclusive` are the methods that
+    name this one as exclusive (exclusion is symmetric; each registration states only its own side)."""
+    params = tuple(spec.params) or (params_from_dataclass(spec.knobs) if spec.knobs is not None else ())
+    exclusive = tuple(spec.exclusive) + tuple(k for k in also_exclusive if k not in spec.exclusive)
+    return Method(
+        spec.key,
+        spec.label,
+        spec.rung,
+        spec.role,
+        needs=tuple(spec.needs),
+        provides=tuple(spec.provides),
+        params=params,
+        section=spec.section,
+        gate_key=spec.gate_key,
+        tier=spec.tier,
+        required=spec.required,
+        implicit=spec.implicit,
+        wired=spec.wired,
+        why_unwired=spec.why_unwired,
+        extras=tuple(spec.extras),
+        exclusive=exclusive,
+        summary=spec.summary,
+    )
+
+
 def _build() -> dict[str, Method]:
-    from ..tiers import FieldDftInteraction, FieldInteraction, PairedPoses
+    from ..methods import registry
 
-    methods = [
-        Method(
-            "structure",
-            "Target structure",
-            "input",
-            "prep",
-            provides=("receptor", "field"),
-            section="structure",
-            exclusive=("pocket",),
-            extras=("docking",),
-            summary="A .pdb, PDB id or AFDB accession, prepared into a receptor and a point-charge field.",
-            params=(
-                Param("spec", "str", required=True, help="a .pdb path, a PDB id or (afdb) a UniProt accession"),
-                Param("provider", "choice", "pdb", choices=("pdb", "afdb"), help="afdb is PREDICTED: recorded"),
-                Param("allow_network", "bool", False, help="fetch an id or accession; a local file never is"),
-                Param("center", "vec3", optional=True, help="box centre, Angstrom; or reference_ligand"),
-                Param("reference_ligand", "str", optional=True, help="HETATM RES[:CHAIN[:RESNUM]]; or center"),
-                Param("pocket_cutoff", "float", required=True, help="Angstrom; no default: truncation is not monotone"),
-                Param("chains", "str_list", optional=True, help="protein chains to keep (default all)"),
-            ),
-        ),
-        Method(
-            "pocket",
-            "Pocket field",
-            "input",
-            "field",
-            needs=("poses",),
-            provides=("field",),
-            section="pocket",
-            exclusive=("structure",),
-            summary="Point charges: a .pdb/.pqr file in the receptor's frame, or sites placed on the parent's pose 0.",
-            params=(
-                Param("file", "path", optional=True, help="a .pdb (via pdb2pqr30) or .pqr; or site"),
-                Param("site", "sites", optional=True, help="charges `distance` A beyond parent atom `atom`"),
-            ),
-        ),
-        Method(
-            "docking",
-            "Dock the parent (Vina)",
-            "geometry",
-            "search",
-            needs=("receptor",),
-            provides=("parent_poses",),
-            section="docking",
-            tier="docking",
-            extras=("docking",),
-            summary="Vina search for the PARENT only; analogues are paired to its poses, never docked.",
-            params=(
-                Param("receptor", "path", optional=True, help="prepared .pdbqt; comes from [structure] if present"),
-                Param("box_center", "vec3", optional=True, help="A, receptor frame; from [structure] if present"),
-                Param("box_size", "vec3", (24.0, 24.0, 24.0), help="Angstrom"),
-                Param("seeds", "int_list", help="independent ETKDG embeddings; the budget lever", optional=True),
-                Param(
-                    "exhaustiveness",
-                    "int",
-                    optional=True,
-                    help="Vina effort per seed (default 4); more moved redock RMSD less than seed noise: add seeds",
-                ),
-                Param(
-                    "n_poses",
-                    "int",
-                    optional=True,
-                    help="docked poses kept per seed; the seeds are pooled and analogues are paired to them",
-                ),
-            ),
-        ),
-        Method(
-            "paired_poses",
-            "Paired poses",
-            "geometry",
-            "pair",
-            provides=("poses",),
-            section="poses",
-            tier="paired_poses",
-            required=True,
-            summary="Analogue pose i copies parent pose i's common core exactly, so pose noise cancels in ddE.",
-            params=params_from_dataclass(
-                PairedPoses,
-                {
-                    "n_poses": "ETKDG poses of the parent; not used when the parent is docked",
-                    "relax_unmapped": "MMFF-relax only the substituent; needed to pass PoseBusters",
-                    "seed": "seed for the parent's ETKDG embeddings and their rigid jitter; a new seed draws new poses",
-                    "jitter_deg": "largest random rotation (deg) per parent pose, as docked spread; unused if docked",
-                    "jitter_ang": "largest random shift (A) per parent pose, mimicking docked spread; unused if docked",
-                    "min_core_heavy": "fewest heavy atoms the common core may have; a smaller core refuses the pair",
-                    "mcs_timeout_s": "seconds the core search may take; timing out refuses (10 is short for drugs)",
-                },
-            ),
-        ),
-        Method(
-            "parity",
-            "Electron parity",
-            "check",
-            "gate",
-            needs=("poses",),
-            implicit=True,
-            summary="Refuses an odd electron count: the field-interaction tier is closed-shell RHF.",
-        ),
-        Method(
-            "posebusters",
-            "PoseBusters",
-            "check",
-            "gate",
-            needs=("poses",),
-            gate_key="posebusters",
-            extras=("posebusters",),
-            summary="Every pose must pass; a failure stops the run, it never drops a candidate silently.",
-        ),
-        Method(
-            "forcefield",
-            "MMFF94 energy and strain",
-            "empirical",
-            "recorded",
-            needs=("poses",),
-            gate_key="forcefield",
-            tier="forcefield",
-            summary="Recorded per pose; a gate only when max_strain_kcal is set.",
-            params=(Param("max_strain_kcal", "float", optional=True, help="kcal/mol; reject any pose above it"),),
-        ),
-        Method(
-            "rescoring",
-            "Rescoring",
-            "empirical",
-            "measure",
-            needs=("poses",),
-            tier="rescoring",
-            wired=False,
-            why_unwired="rank-only scores (is_delta_g=False) cannot be differenced; smeltery run has no stage for it",
-        ),
-        Method(
-            "gfn2",
-            "GFN2-xTB in the field",
-            "semiempirical",
-            "recorded",
-            needs=("poses", "field"),
-            gate_key="xtb",
-            tier="gfn2",
-            summary="A gate on ionization state and gross failure, never a ranker (xtb-vs-DFT Spearman 0.011).",
-        ),
-        Method(
-            "field_interaction",
-            "Field interaction (ferric RHF)",
-            "ab_initio",
-            "measure",
-            needs=("poses", "field"),
-            provides=("dE_int",),
-            section="field_interaction",
-            tier="field_interaction",
-            required=True,
-            summary="dE_int = E(in field) - E(vacuum) per pose: a difference, so it compares across formulas.",
-            params=params_from_dataclass(
-                FieldInteraction,
-                {
-                    "basis": "ferric basis set name",
-                    **_SCF_HELP,
-                },
-            ),
-            # Required, but satisfied by its alternative: a pipeline measures dE_int with RHF or with KS-DFT.
-            exclusive=("field_dft_interaction",),
-        ),
-        Method(
-            "field_dft_interaction",
-            "Field interaction (ferric PBE + D3)",
-            "ab_initio",
-            "measure",
-            needs=("poses", "field"),
-            provides=("dE_int",),
-            section="field_dft_interaction",
-            tier="field_dft_interaction",
-            params=params_from_dataclass(
-                FieldDftInteraction,
-                {
-                    "basis": "ferric basis set name; the memory check counts basis functions for STO-3G only",
-                    "functional": "libxc name ferric accepts; D3(BJ) is added separately, not by a -D3 suffix",
-                    "memory_budget_gb": "refuse before the first SCF if the largest pose is predicted not to fit",
-                    "require_free_gb": "refuse unless this much memory is actually free (unset: no check)",
-                    **_SCF_HELP,
-                    "check_memory": "false skips the pre-SCF memory check, so memory_budget_gb is not enforced",
-                },
-            ),
-            summary=(
-                "The same dE_int as field_interaction, from KS-DFT instead of RHF. D3(BJ) is "
-                "reported separately and cancels in dE_int at fixed geometry."
-            ),
-            exclusive=("field_interaction",),
-        ),
-        Method(
-            "surface_esp",
-            "Surface ESP",
-            "ab_initio",
-            "measure",
-            needs=("poses",),
-            tier="surface_esp",
-            wired=False,
-            why_unwired="a library tier; smeltery run has no stage for it",
-        ),
-        Method(
-            "qmmm",
-            "QM/MM single point",
-            "embedded_qm",
-            "measure",
-            needs=("poses",),
-            tier="qmmm",
-            wired=False,
-            why_unwired="needs MM parameters and a QM partition of a whole-structure pose; not in smeltery run",
-        ),
-        Method(
-            "designability",
-            "Designability (property drift, SA)",
-            "designable",
-            "measure",
-            # Descriptors of the SMILES, so it needs no pose and no field: the parent comes from the run itself.
-            tier="designability",
-            wired=False,
-            why_unwired="a library tier; smeltery run has no stage for it",
-            summary=(
-                "Drift from the parent in MW, logP, TPSA, QED and synthetic accessibility. "
-                "A counterweight to dE_int, which rewards added atoms; it gates nothing."
-            ),
-        ),
-        Method(
-            "cut",
-            "Paired cut",
-            "decision",
-            "rank",
-            needs=("dE_int",),
-            provides=("survivors",),
-            section="cut",
-            required=True,
-            summary="Ranks paired ddE against the parent; never orders what the uncertainty cannot separate.",
-            params=(
-                Param("keep", "int", required=True, help="analogues to keep (1..number of analogues)"),
-                Param("z", "float", 2.0, help="resolution in standard errors"),
-                Param("floor", "float", optional=True, help="kcal/mol; required while the tier's floor is unmeasured"),
-            ),
-        ),
-    ]
-    return {m.key: m for m in methods}
+    specs = registry()
+    out = {}
+    for k, spec in specs.items():
+        also = tuple(o.key for o in specs.values() if k in o.exclusive)
+        out[k] = method_from_spec(spec, also)
+    return out
 
 
-_CATALOG: dict[str, Method] | None = None
+_CATALOG: tuple[int, dict[str, Method]] | None = None  # (registry version, catalog)
 
 
 def catalog() -> dict[str, Method]:
-    """{key: Method}, in hierarchy order (by rung, then the order `smeltery run` executes them)."""
+    """{key: Method}, in hierarchy order (by rung, then the order `smeltery run` executes them): one per
+    registration in `smeltery.methods.registry()`."""
     global _CATALOG
-    if _CATALOG is None:
-        _CATALOG = _build()
-    return dict(_CATALOG)
+    from ..methods import version
+
+    if _CATALOG is None or _CATALOG[0] != version():
+        _CATALOG = (version(), _build())
+    return dict(_CATALOG[1])
 
 
 def method(key: str) -> Method:

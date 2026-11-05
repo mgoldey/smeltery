@@ -126,6 +126,7 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from rdkit import Chem
@@ -134,36 +135,58 @@ from .cost import available_memory_gb
 from .decisions import DecisionSet
 from .funnel import cut, paired_delta, tier_floor, unpaired_delta
 from .gates import PoseGateError, check_candidate_poses, require_passing_poses
+from .methods import Analysis, FieldSource, Measure, MethodSpec, PoseSource, active, active_hooks, by_slot, registry
 from .model import Candidate, PointCharge
 from .pocket import load_pocket
 from .pocket.loader import file_digest
 from .record import RunRecord
 from .tiers import FieldDftInteraction, FieldInteraction, ForceField, Gfn2, PairedPoses, _net_charge
 
-TOP_KEYS = {
-    "campaign",
-    "parent",
-    "candidates",
-    "poses",
-    "pocket",
-    "field_interaction",
-    "field_dft_interaction",
-    "cut",
-    "docking",
-    "gates",
-    "structure",
-    "decisions",
-}
+#: Top-level keys that are inputs of the pipeline, not a method's section (the Ligands step, and the gate switches).
+OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions"}
 DECISIONS_KEYS = {"file"}
-STRUCTURE_KEYS = {"spec", "provider", "allow_network", "center", "reference_ligand", "pocket_cutoff", "chains"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
-POCKET_KEYS = {"site", "file"}
-DOCKING_KEYS = {"receptor", "box_center", "box_size", "seeds", "exhaustiveness", "n_poses"}
-GATE_KEYS = {"posebusters", "forcefield", "xtb"}
-GATE_OPTION_KEYS = {"max_strain_kcal"}  # explicit rejection thresholds; absent = recorded only
-CUT_KEYS = {"keep", "z", "floor"}
 QUANTITY = "dE_int"
 POSES_DIR = "poses"
+
+
+def top_keys() -> set[str]:
+    """Every key a config may have at the top level: the pipeline's own, plus each registered method's section."""
+    return OWN_TOP_KEYS | {s.section for s in registry().values() if s.section is not None}
+
+
+def section_keys(key: str) -> set[str]:
+    """The knobs method `key`'s config section accepts (its registration's `knobs` dataclass or `params`)."""
+    return set(registry()[key].knob_names())
+
+
+def gate_keys() -> set[str]:
+    """The switches under `[gates]`: each registered gate method's `gate_key`."""
+    return {s.gate_key for s in registry().values() if s.gate_key is not None}
+
+
+def gate_option_keys() -> set[str]:
+    """Explicit rejection thresholds under `[gates]` (absent = recorded only): the gate methods' own knobs."""
+    return {k for s in registry().values() if s.gate_key is not None for k in s.knob_names()}
+
+
+#: Names that used to be hand-written sets, now derived from the method registry on every read.
+_DERIVED = {
+    "TOP_KEYS": top_keys,
+    "GATE_KEYS": gate_keys,
+    "GATE_OPTION_KEYS": gate_option_keys,
+    "STRUCTURE_KEYS": lambda: section_keys("structure"),
+    "POCKET_KEYS": lambda: section_keys("pocket"),
+    "DOCKING_KEYS": lambda: section_keys("docking"),
+    "CUT_KEYS": lambda: section_keys("cut"),
+    "POSE_SECTIONS": lambda: pose_sections(),
+}
+
+
+def __getattr__(name: str):
+    if name in _DERIVED:
+        return _DERIVED[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class ConfigError(ValueError):
@@ -208,7 +231,7 @@ class Plan:
             "parent": self.parent.name,
             "cut": {"keep": self.cfg["cut"]["keep"], "z": self.cfg["cut"].get("z", 2.0)},
             "floor": {"value": self.floor, "source": self.floor_source},
-            "gates": {k: bool(gates.get(k, False)) for k in sorted(GATE_KEYS)},
+            "gates": {k: bool(gates.get(k, False)) for k in sorted(gate_keys())},
             **self.extra_inputs,
         }
         if "max_strain_kcal" in gates:  # only when set, so configs from before this knob keep their digests
@@ -252,8 +275,12 @@ def load_config(path: Path) -> dict:
 
 
 def validate_config(cfg: dict) -> dict:
-    _check_keys("the top level", cfg, TOP_KEYS)
-    for key in ("campaign", "parent", "candidates", "cut"):
+    """Check a config (as `tomllib` parses it); return it unchanged or raise ConfigError naming the first problem.
+
+    The top-level keys and every method section's rules come from the method registry: each registration's
+    `validate`, or the generic section check (`_validate_section`) for one that declares only its knobs."""
+    _check_keys("the top level", cfg, top_keys())
+    for key in ("campaign", "parent", "candidates"):
         if key not in cfg:
             raise ConfigError(f"missing required key {key!r}")
     cands = cfg["candidates"]
@@ -264,7 +291,46 @@ def validate_config(cfg: dict) -> dict:
     for name, smi in cands.items():
         if not isinstance(smi, str) or Chem.MolFromSmiles(smi) is None:
             raise ConfigError(f"candidate {name!r}: unparseable SMILES {smi!r}")
-    poses_cfg = _knobs(cfg, "poses", PairedPoses)
+    for spec in registry().values():
+        if spec.validate is not None:
+            spec.validate(cfg)
+        else:
+            _validate_section(spec, cfg)
+    measures = [s for s in by_slot("measure") if s.section in cfg]
+    if len(measures) > 1:
+        names = " and ".join(f"[{s.section}]" for s in measures)
+        raise ConfigError(f"{names} each choose how dE_int is measured; keep one")
+    for slot in ("pose_source", "field_source"):
+        hooks = active_hooks(slot, cfg)
+        if len(hooks) > 1:
+            raise ConfigError(f"{' and '.join(f'[{s.section}]' for s in hooks)} are each a {slot}; keep one")
+    _validate_gates(cfg)
+    _validate_decisions(cfg)
+    return cfg
+
+
+def _exclusive_with(spec: MethodSpec) -> list[MethodSpec]:
+    """The methods that cannot share a config with `spec`: those it names, and those that name it."""
+    reg = registry()
+    keys = list(spec.exclusive) + [o.key for o in reg.values() if spec.key in o.exclusive]
+    return [reg[k] for k in dict.fromkeys(keys) if k in reg]
+
+
+def _validate_section(spec: MethodSpec, cfg: dict) -> None:
+    """The generic rules of a method section: a table, of the method's knobs only, beside no exclusive method's."""
+    if spec.section is None or spec.section not in cfg:
+        return
+    got = cfg[spec.section]
+    if not isinstance(got, dict):
+        raise ConfigError(f"[{spec.section}] must be a table")
+    _check_keys(f"[{spec.section}]", got, set(spec.knob_names()))
+    for other in _exclusive_with(spec):
+        if other.section is not None and other.section in cfg:
+            raise ConfigError(f"[{spec.section}] ({spec.label}) cannot be combined with [{other.section}]; keep one")
+
+
+def _validate_measurement(cfg: dict) -> None:
+    """[field_interaction] (RHF) or [field_dft_interaction] (KS-DFT): tier knobs, and at most one of them."""
     _knobs(cfg, "field_interaction", FieldInteraction)
     _knobs(cfg, "field_dft_interaction", FieldDftInteraction)
     if "field_interaction" in cfg and "field_dft_interaction" in cfg:
@@ -272,21 +338,35 @@ def validate_config(cfg: dict) -> dict:
             "[field_interaction] (RHF) and [field_dft_interaction] (KS-DFT) both choose how dE_int is measured; "
             "keep one"
         )
-    _validate_structure(cfg)
-    _validate_docking(cfg, poses_cfg)
-    _validate_gates(cfg)
-    _validate_decisions(cfg)
+
+
+def _validate_cut(cfg: dict) -> None:
+    if "cut" not in cfg:
+        raise ConfigError("missing required key 'cut'")
     cut_cfg = cfg["cut"]
-    _check_keys("[cut]", cut_cfg, CUT_KEYS)
-    n_analogues = len(cands) - 1
+    if not isinstance(cut_cfg, dict):
+        raise ConfigError("[cut] must be a table")
+    _check_keys("[cut]", cut_cfg, section_keys("cut"))
+    n_analogues = len(cfg["candidates"]) - 1
     if not isinstance(cut_cfg.get("keep"), int) or not 1 <= cut_cfg["keep"] <= n_analogues:
         raise ConfigError(f"[cut] keep must be an integer in 1..{n_analogues} (the number of analogues)")
+
+
+def _validate_pocket(cfg: dict) -> None:
+    """[pocket]: a file or point-charge sites, unless the field comes from elsewhere ([structure], or another
+    registered field source)."""
     pocket = cfg.get("pocket", {})
-    if "structure" in cfg:
+    elsewhere = ["structure"] if "structure" in cfg else []
+    elsewhere += [s.section for s in active_hooks("field_source", cfg) if s.key != "pocket" and s.section]
+    if elsewhere:
         if pocket:
-            raise ConfigError("[pocket] cannot be combined with [structure]: the field comes from the structure")
-        return cfg
-    _check_keys("[pocket]", pocket, POCKET_KEYS)
+            raise ConfigError(
+                f"[pocket] cannot be combined with [{elsewhere[0]}]: the field comes from [{elsewhere[0]}]"
+            )
+        return
+    if not isinstance(pocket, dict):
+        raise ConfigError("[pocket] must be a table")
+    _check_keys("[pocket]", pocket, section_keys("pocket"))
     sites = pocket.get("site", [])
     if "file" in pocket:
         if sites:
@@ -302,7 +382,6 @@ def validate_config(cfg: dict) -> dict:
         missing = sorted(SITE_KEYS - set(s))
         if missing:
             raise ConfigError(f"[[pocket.site]] #{i} is missing {missing}")
-    return cfg
 
 
 def _validate_structure(cfg: dict) -> None:
@@ -311,7 +390,7 @@ def _validate_structure(cfg: dict) -> None:
     s = cfg["structure"]
     if not isinstance(s, dict):
         raise ConfigError("[structure] must be a table")
-    _check_keys("[structure]", s, STRUCTURE_KEYS)
+    _check_keys("[structure]", s, section_keys("structure"))
     if not isinstance(s.get("spec"), str) or not s["spec"]:
         raise ConfigError("[structure] spec is required: a .pdb path, a PDB id or (provider afdb) a UniProt accession")
     if s.get("provider", "pdb") not in ("pdb", "afdb"):
@@ -336,14 +415,15 @@ def _validate_structure(cfg: dict) -> None:
         raise ConfigError("[structure] chains must be a non-empty list of one-letter chain ids")
 
 
-def _validate_docking(cfg: dict, poses_cfg: dict) -> None:
+def _validate_docking(cfg: dict) -> None:
+    poses_cfg = cfg.get("poses", {}) if isinstance(cfg.get("poses", {}), dict) else {}
     structure = "structure" in cfg
     if "docking" not in cfg and not structure:
         return
     d = cfg.get("docking", {})
     if not isinstance(d, dict):
         raise ConfigError("[docking] must be a table")
-    _check_keys("[docking]", d, DOCKING_KEYS)
+    _check_keys("[docking]", d, section_keys("docking"))
     if structure:
         clash = sorted({"receptor", "box_center"} & set(d))
         if clash:
@@ -436,8 +516,9 @@ def _validate_gates(cfg: dict) -> None:
     g = cfg.get("gates", {})
     if not isinstance(g, dict):
         raise ConfigError("[gates] must be a table")
-    _check_keys("[gates]", g, GATE_KEYS | GATE_OPTION_KEYS)
-    bad = sorted(k for k, v in g.items() if k in GATE_KEYS and not isinstance(v, bool))
+    switches = gate_keys()
+    _check_keys("[gates]", g, switches | gate_option_keys())
+    bad = sorted(k for k, v in g.items() if k in switches and not isinstance(v, bool))
     if bad:
         raise ConfigError(f"[gates] {bad} must be true or false")
     if "max_strain_kcal" in g:
@@ -728,6 +809,50 @@ def _prepare_structure(cfg: dict, out_dir: Path | None, fetch, log: list, extra:
     return prepared
 
 
+def _hook_inputs(cfg: dict, extra: dict) -> None:
+    """Each hook-bearing method the config uses puts its section into the inputs (so the digest moves with its
+    knobs), with every file knob replaced by the file's sha256 (so a staged copy digests the same). Builtins carry
+    no hook, so configs that use only them keep their digests."""
+    for spec in registry().values():
+        if spec.hook is None or spec.section is None or not active(spec, cfg):
+            continue
+        section = json.loads(json.dumps(cfg.get(spec.section, {}), sort_keys=True, default=str))
+        for k in spec.file_knobs:
+            v = section.get(k)
+            if isinstance(v, str) and _resolve(cfg, v).is_file():
+                section[k] = {"name": Path(v).name, "sha256": file_digest(_resolve(cfg, v))}
+        extra[spec.key] = section
+
+
+def _hook_poses(spec: MethodSpec, cfg: dict, parent: Candidate, ctx: dict) -> None:
+    """A `pose_source` hook gives the parent's poses; the analogues are then paired to them."""
+    hook = cast(PoseSource, spec.hook)
+
+    def run():
+        got = list(hook.parent_poses(cfg, parent, ctx))
+        if not got:
+            raise StageError(f"stage {spec.key!r} failed: it gave no parent pose")
+        parent.poses = got
+
+    _stage(spec.key, run, ctx["log"])
+    if not any(e["stage"] == spec.key for e in ctx["log"]):
+        _log(ctx["log"], spec.key, f"{spec.label}: {len(parent.poses)} parent pose(s)", 1, 1, "search")
+
+
+def _hook_field(spec: MethodSpec, cfg: dict, parent: Candidate, ctx: dict):
+    """A `field_source` hook gives the point charges (a `PocketField` keeps its provenance in the record)."""
+    hook = cast(FieldSource, spec.hook)
+    field = _stage(spec.key, lambda: hook.field(cfg, parent, ctx), ctx["log"])
+    if not len(field):
+        raise StageError(f"stage {spec.key!r} failed: it gave no point charges")
+    if getattr(field, "provenance", None) is not None:
+        ctx["extra"].setdefault(spec.key, {})["field"] = dict(field.provenance)
+    if not any(e["stage"] == spec.key for e in ctx["log"]):
+        n = len(cfg["candidates"])
+        _log(ctx["log"], spec.key, f"{spec.label}: {len(field)} point charges", n, n, "field")
+    return field
+
+
 def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     """Everything before the field-interaction SCFs: structure prep, docking, pairing, pocket, parity, gates, floor.
 
@@ -741,10 +866,18 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     extra: dict = {}
     _STAGE_SECONDS.clear()
     before = []
+    _hook_inputs(cfg, extra)
+    ctx = {"log": log, "extra": extra, "out_dir": out_dir, "before_poses": before}
     docked = "docking" in cfg or "structure" in cfg
     prepared = _prepare_structure(cfg, out_dir, fetch, log, extra) if "structure" in cfg else None
     if docked:
         before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra, prepared), log))
+    sources = active_hooks("pose_source", cfg)
+    if sources and docked:
+        raise ConfigError(f"[{sources[0].section}] gives the parent's poses; so does docking: keep one")
+    for spec in sources:  # validate_config allows at most one
+        _hook_poses(spec, cfg, parent, ctx)
+        docked = True  # the parent's poses are given; analogues are paired to them
     poses = PairedPoses(parent_poses_given=docked, **cfg.get("poses", {}))
     _stage("poses", lambda: poses.run(cands, {"parent": parent}))
     _log(
@@ -755,12 +888,17 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
         len(cands),
         "pair",
     )
-    field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared), log)
+    fields = active_hooks("field_source", cfg)
+    if fields:  # validate_config allows at most one, and not beside [pocket] or [structure]
+        field, pocket_path = _hook_field(fields[0], cfg, parent, ctx), None
+    else:
+        field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared), log)
     _stage("parity", lambda: _check_parity(cands))
     gate_results: dict = {}
     after = _run_gates(cfg, cands, field, pocket_path, log, gate_results)
     tier = measurement_tier(cfg)
-    tier.field_provenance = getattr(field, "provenance", None)  # what run() will record, so plan and run digests agree
+    if hasattr(tier, "field_provenance"):  # what run() will record, so plan and run digests agree
+        tier.field_provenance = getattr(field, "provenance", None)
     try:
         floor, source = tier_floor(tier, QUANTITY), f"tier {tier.name} systematic_floor"
     except ValueError as e:
@@ -775,7 +913,11 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
 
 
 def measurement_tier(cfg: dict) -> FieldInteraction | FieldDftInteraction:
-    """The tier that measures dE_int: `[field_dft_interaction]` selects KS-DFT, otherwise RHF (the default)."""
+    """The tier that measures dE_int: a registered `measure` hook whose section is in the config, else
+    `[field_dft_interaction]` selects KS-DFT, otherwise RHF (the default)."""
+    hooks = active_hooks("measure", cfg)
+    if hooks:  # validate_config allows at most one measurement section
+        return cast(Measure, hooks[0].hook).tier(cfg)
     if "field_dft_interaction" in cfg:
         return FieldDftInteraction(**cfg["field_dft_interaction"])
     return FieldInteraction(**cfg.get("field_interaction", {}))
@@ -884,7 +1026,19 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
     if plan.decisions_in is not None:
         results["decisions_in"] = dict(plan.decisions_in)
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
+    if not partial:  # an analysis reads the whole measurement; a combine of the partials runs it
+        for spec in active_hooks("analysis", plan.cfg):
+            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log})
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
+
+
+def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict) -> None:
+    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`."""
+    hook = cast(Analysis, spec.hook)
+    got = _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+    if not isinstance(got, dict):
+        raise StageError(f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}")
+    rec.results[spec.key] = {**(rec.results.get(spec.key) or {}), **got}
 
 
 def pose_file_name(candidate: str) -> str:
@@ -1161,20 +1315,24 @@ def describe_memory(plan: Plan) -> list[str]:
     return lines
 
 
-#: The config sections that decide the poses; an edit outside them leaves every pose where it was.
-POSE_SECTIONS = ("structure", "pocket", "docking", "candidates", "parent", "poses", "decisions")
+def pose_sections() -> tuple[str, ...]:
+    """The config sections that decide the poses; an edit outside them leaves every pose where it was: the sections
+    of the methods on the input and geometry rungs (`smeltery.methods.registry()`), and the pipeline's own
+    candidates, parent and decisions."""
+    own = tuple(s.section for s in registry().values() if s.section is not None and s.rung in ("input", "geometry"))
+    return (*own, "candidates", "parent", "decisions")
 
 
 def poses_key(cfg: dict, base: Path) -> str:
     """A hash of everything upstream of the poses in a raw config (`tomllib` output). A file the config names is
     hashed by content, so a run's staged copy (`inputs/<sha>/name`) and the original path give the same key."""
-    from .run_inputs import INPUT_PATHS
+    from .run_inputs import input_paths
 
     parts: dict = {}
-    for sec in POSE_SECTIONS:
+    for sec in pose_sections():
         if sec in cfg:
             parts[sec] = json.loads(json.dumps(cfg[sec], sort_keys=True, default=str))
-    for table, key in INPUT_PATHS:
+    for table, key in input_paths():
         v = parts.get(table, {}).get(key) if isinstance(parts.get(table), dict) else None
         if isinstance(v, str):
             f = Path(v) if Path(v).is_absolute() else Path(base) / v

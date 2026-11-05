@@ -13,16 +13,32 @@ from typing import Literal
 from .catalog import method
 from .pipeline import Issue, Pipeline
 
-#: (key, label, catalog methods the step offers). Ligands holds the campaign, parent, candidates and decisions,
-#: which are inputs of the pipeline and not methods.
-STEPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("active_site", "Active site", ("structure", "pocket", "docking")),
-    ("ligands", "Ligands", ()),  # campaign, parent, candidates, decisions
-    ("poses", "Paired poses", ("paired_poses",)),
-    ("checks", "Pose checks", ("posebusters", "forcefield", "gfn2")),
-    ("measure", "ΔE_int", ("field_interaction", "field_dft_interaction")),
-    ("cut", "Cut", ("cut",)),
+#: (key, label) of the six steps, in data-flow order. Ligands holds the campaign, parent, candidates and decisions,
+#: which are inputs of the pipeline and not methods; which methods each other step offers is its registrations'
+#: `step` (`step_table`).
+STEP_LABELS: tuple[tuple[str, str], ...] = (
+    ("active_site", "Active site"),
+    ("ligands", "Ligands"),  # campaign, parent, candidates, decisions
+    ("poses", "Paired poses"),
+    ("checks", "Pose checks"),
+    ("measure", "ΔE_int"),
+    ("cut", "Cut"),
 )
+
+
+def step_table() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """(key, label, catalog methods the step offers), from each wired registration's `step`, in catalog order."""
+    from ..methods import registry
+
+    specs = [s for s in registry().values() if s.wired]
+    return tuple((key, label, tuple(s.key for s in specs if s.step == key)) for key, label in STEP_LABELS)
+
+
+def __getattr__(name: str):
+    if name == "STEPS":  # derived on every read, so a registration made later is in its step
+        return step_table()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 State = Literal["ready", "needs_input", "off", "changed", "stale"]
 
@@ -94,16 +110,16 @@ def _step_signature(p: Pipeline, key: str, methods: tuple[str, ...]):
     return sig
 
 
-def _home(issue: Issue) -> int | None:
-    """The ONE step an issue is shown on (index into STEPS), or None for the pipeline as a whole: by its stage if
-    that is a placed-able method; else the first step whose method key it quotes; else Ligands when it is about
-    the campaign, parent or candidates."""
+def _home(issue: Issue, table: tuple[tuple[str, str, tuple[str, ...]], ...]) -> int | None:
+    """The ONE step an issue is shown on (index into `table`, the `step_table()`), or None for the pipeline as a
+    whole: by its stage if that is a placed-able method; else the first step whose method key it quotes; else
+    Ligands when it is about the campaign, parent or candidates."""
     if issue.stage is not None:
-        for i, (_, _, methods) in enumerate(STEPS):
+        for i, (_, _, methods) in enumerate(table):
             if issue.stage in methods:
                 return i
         return None
-    for i, (_, _, methods) in enumerate(STEPS):
+    for i, (_, _, methods) in enumerate(table):
         if any(f"'{m}'" in issue.message for m in methods):
             return i
     if any(w in issue.message for w in ("campaign", "parent", "candidates")):
@@ -128,10 +144,11 @@ def steps(p: Pipeline, baseline: Pipeline | None = None, defaults: dict | None =
     `defaults` is `{method_key: {param_name: value}}`, the workspace's defaults, shown beside each knob."""
     defaults = defaults or {}
     issues = p.check()
-    home = [_home(x) for x in issues]
+    table = step_table()
+    home = [_home(x, table) for x in issues]
     views: list[StepView] = []
     first_changed: int | None = None
-    for i, (key, label, methods) in enumerate(STEPS):
+    for i, (key, label, methods) in enumerate(table):
         placed = [m for m in methods if m in p.keys()]
         chosen = placed[0] if placed else None
         here = [x for x, h in zip(issues, home) if h == i]

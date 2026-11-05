@@ -18,20 +18,20 @@ from dataclasses import dataclass, field
 
 from .catalog import Method, catalog, method
 
-#: The order `smeltery run` executes stages in (`smeltery.cli.build_plan` then `run_plan`).
-EXECUTION_ORDER: tuple[str, ...] = (
-    "structure",
-    "docking",
-    "paired_poses",
-    "pocket",
-    "parity",
-    "posebusters",
-    "forcefield",
-    "gfn2",
-    "field_interaction",
-    "field_dft_interaction",
-    "cut",
-)
+
+def execution_order() -> tuple[str, ...]:
+    """The order `smeltery run` executes stages in (`smeltery.cli.build_plan` then `run_plan`), from each
+    registration's `order` (`smeltery.methods.execution_order`)."""
+    from ..methods import execution_order as _order
+
+    return _order()
+
+
+def __getattr__(name: str):
+    if name == "EXECUTION_ORDER":  # derived on every read, so a registration made later is in it
+        return execution_order()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 #: Measured quantity the cut ranks (`smeltery.cli.QUANTITY`).
 QUANTITY = "dE_int"
@@ -202,7 +202,8 @@ class Pipeline:
             provided |= set(m.provides)
             if k == "docking":
                 provided.add("parent_poses")
-        placed = [k for k in known if k in EXECUTION_ORDER]
+        order = execution_order()
+        placed = [k for k in known if k in order]
         runs = sorted(placed, key=_exec_rank)
         if placed != runs and not issues:
             issues.append(Issue("note", None, "smeltery run executes these in the order " + " -> ".join(runs)))
@@ -250,10 +251,20 @@ class Pipeline:
         return out
 
     def _tier_floor(self) -> float | None:
-        """The systematic floor of whichever tier this pipeline measures dE_int with."""
-        from ..tiers import FieldDftInteraction, FieldInteraction
+        """The systematic floor of whichever tier this pipeline measures dE_int with: the placed method of the
+        `measure` slot, else the required one (what `smeltery.cli.measurement_tier` picks)."""
+        from ..methods import by_slot
+        from ..tier_registry import registered_tiers
 
-        tier = FieldDftInteraction() if "field_dft_interaction" in self.keys() else FieldInteraction()
+        measures = by_slot("measure")
+        placed = [s for s in measures if s.key in self.keys()]
+        spec = (placed or [s for s in measures if s.required])[0]
+        if spec.tier is None:
+            return None
+        try:
+            tier = registered_tiers()[spec.tier]()
+        except Exception:  # a tier that needs constructor inputs cannot say; the cut's floor must be explicit
+            return None
         return tier.systematic_floor(QUANTITY)
 
     def _validator(self) -> list[Issue]:
@@ -372,7 +383,8 @@ class Pipeline:
 
 
 def _exec_rank(key: str) -> int:
-    return EXECUTION_ORDER.index(key) if key in EXECUTION_ORDER else len(EXECUTION_ORDER)
+    order = execution_order()
+    return order.index(key) if key in order else len(order)
 
 
 def _artefact(a: str) -> str:

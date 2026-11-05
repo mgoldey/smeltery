@@ -410,7 +410,7 @@ def _patch(target: dict, before: dict, after: dict) -> None:
 def _revert(p: Pipeline, step: str, kept: Pipeline) -> None:
     """Put step `step` of `p` back as it is in `kept`: the methods it places and their knobs (or, for Ligands, the
     campaign, parent, candidates and decisions). Every other step keeps its draft edits."""
-    offered = {k: methods for k, _, methods in step_model.STEPS}
+    offered = {k: methods for k, _, methods in step_model.step_table()}
     if step not in offered:
         raise ValueError(f"no step {step!r}; steps: {list(offered)}")
     methods = offered[step]
