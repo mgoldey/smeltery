@@ -4,7 +4,7 @@ The same module serves the test process (`install()` puts it in `sys.modules`) a
 runner spawns (run as a script: it installs itself, then calls `smeltery.temporal_run.child_main`), so a plain run and
 a Temporal run compute the same numbers. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
 
-    {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "hang" | "hang_once"}, "dir": "<scratch dir>"}
+    {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "hang" | "hang_once" | "crash"}, "dir": "<scratch dir>"}
 
 `<label>` is the xyz comment line ("ethanol pose 0"), `<leg>` "vacuum" or "field". Every completed SCF appends a line
 to `<dir>/calls.jsonl`; every started one appends its pid to `<dir>/pids`. "hang" sleeps for 10 minutes; "hang_once"
@@ -71,6 +71,8 @@ def run_rhf(mol, bs, point_charges=None, **kw):
         for q, x, y, z in point_charges:
             dist = np.linalg.norm(mol.xyz - np.array([x, y, z]) / 1.8897261246, axis=1)
             e += -0.02 * q * float(np.sum(1.0 / (dist + 1.0)))
+    if rule == "crash":
+        raise RuntimeError("fake engine crashed")
     ok = True
     if rule == "never":
         ok = False

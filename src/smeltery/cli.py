@@ -117,7 +117,7 @@ same OUT and staged config resume the same workflow; finished SCFs are read back
 down it exits 2 naming the docker command; it never falls back to an in-process run.
 
     [run]
-    scf_timeout_s = 14400       # one score's start-to-close timeout under --temporal (not an input: no digest change)
+    scf_timeout_s = 14400       # bounds one SCF leg (one rung) under --temporal (not an input: no digest change)
     [field_interaction]
     remedies = [{level_shift = 0.5}, {max_iter = 300, soscf = true}]  # tried in order when an SCF does not converge
 
@@ -165,7 +165,7 @@ from .tiers import (
 OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions", "run"}
 #: `[run]`: how the run executes, not what it measures (not an input: it never moves the digest).
 RUN_KEYS = {"scf_timeout_s"}
-#: `[run] scf_timeout_s` default: one SCF score (both legs, one rung) is ended after this long under `--temporal`.
+#: `[run] scf_timeout_s` default: one SCF leg (vacuum or field, one rung) is ended after this long under `--temporal`.
 SCF_TIMEOUT_S = 14400
 DECISIONS_KEYS = {"file"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
@@ -344,7 +344,7 @@ def validate_config(cfg: dict) -> dict:
 
 
 def _validate_run(cfg: dict) -> None:
-    """[run]: execution settings. `scf_timeout_s` (seconds, > 0) bounds one SCF score under `--temporal`."""
+    """[run]: execution settings. `scf_timeout_s` (seconds, > 0) bounds one SCF leg (one rung) under `--temporal`."""
     if "run" not in cfg:
         return
     r = cfg["run"]
@@ -1556,7 +1556,8 @@ def _stage_config(config: Path, out_dir: Path, temporal: bool = False) -> tuple[
     staged, inputs = stage_inputs(text, config.resolve().parent, out_dir)
     _guard_out(out_dir, hashlib.sha256(staged.encode()).hexdigest(), temporal)
     dest = out_dir / "config.toml"
-    dest.write_text(staged)
+    if not dest.is_file() or dest.read_text() != staged:  # an unchanged config is not rewritten (a live run reads it)
+        dest.write_text(staged)
     return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
 
 

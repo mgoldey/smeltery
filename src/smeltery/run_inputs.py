@@ -80,8 +80,10 @@ def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[
         text = set_value(text, f"{table}.{key}", rel)
         staged[f"{table}.{key}"] = {"source": source, "sha256": digest, "copy": rel}
         known[rel] = {"source": source, "sha256": digest}
-    if staged:
-        (Path(out_dir) / MANIFEST).write_text(json.dumps(known, indent=2, sort_keys=True))
+    if staged:  # rewritten only when it changes: re-staging an identical config touches nothing
+        manifest, body = Path(out_dir) / MANIFEST, json.dumps(known, indent=2, sort_keys=True)
+        if not manifest.is_file() or manifest.read_text() != body:
+            manifest.write_text(body)
     check = tomllib.loads(text)  # set_value does not re-read its output
     for dotted, info in staged.items():
         table, key = dotted.split(".")

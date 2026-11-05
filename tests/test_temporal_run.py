@@ -410,11 +410,12 @@ def test_a_pose_failing_every_rung_is_dropped_pairwise(ferric, tmp_path, queue):
     assert res["pose_index"] == {"ethanol": [1, 2, 3], "propanol": [2, 3]}
     drops = {(d["candidate"], d["pose"]): d for d in res["dropped_poses"]}
     assert set(drops) == {("ethanol", 0), ("propanol", 1)}
-    assert drops[("ethanol", 0)]["rungs_tried"] == {"field": [0, 1]}
+    assert drops[("ethanol", 0)]["rungs_tried"] == [0, 1] and drops[("ethanol", 0)]["leg"] == "field"
     assert drops[("ethanol", 0)]["outcome"] == "not_converged"
     assert drops[("ethanol", 0)]["dropped_with"] == ["ethanol", "propanol"]
     assert drops[("propanol", 1)]["dropped_with"] == ["ethanol", "propanol"]
-    assert drops[("propanol", 1)]["rungs_tried"] == {"vacuum": [0, 1]}
+    assert drops[("propanol", 1)]["rungs_tried"] == [0, 1] and drops[("propanol", 1)]["leg"] == "vacuum"
+    assert drops[("propanol", 1)]["field_model"] is None
     assert res["per_pose"]["ethanol"]["scf_rung"] == [0.0, 1.0, 0.0]
     # every SCF is in the log with its rung; a converged leg was not recomputed on the next rung
     scf = [r for r in _rows(out) if "outcome" not in r]
@@ -460,10 +461,10 @@ def test_a_killed_worker_resumes_without_recomputing(ferric, tmp_path, queue):
 
 
 @needs_server
-def test_a_timed_out_scf_is_killed_and_an_error_refuses_the_record_until_rerun(ferric, tmp_path, queue):
-    """A hanging SCF is ended at `[run] scf_timeout_s` (its child killed, no row written) and retried; after three
-    attempts it is an infrastructure error, which is not a measurement: finalize refuses. Running again reschedules
-    it (and only it)."""
+def test_a_timed_out_leg_is_killed_recorded_not_retried_and_rescheduled_by_a_rerun(ferric, tmp_path, queue):
+    """A hanging SCF is ended at `[run] scf_timeout_s`: its child killed, no row written, not retried (outcome
+    "timeout" with its rung and seconds). finalize refuses, naming the remedy; a rerun with a longer timeout (same
+    input digest) reschedules that leg only."""
     from temporalio.client import WorkflowFailureError
 
     out = tmp_path / "out"
@@ -474,21 +475,81 @@ def test_a_timed_out_scf_is_killed_and_an_error_refuses_the_record_until_rerun(f
             with pytest.raises(WorkflowFailureError) as e:
                 _finish(inp, queue)
             msg = str(e.value.cause.cause)
-            assert "not chemistry" in msg and "propanol pose 1 field (primary)" in msg
+            assert "propanol pose 1 field (primary) timed out after 2 s at rung 0" in msg
+            assert "Raise [run] scf_timeout_s (it does not change the input digest) and run the same command" in msg
             time.sleep(0.5)
             hung = [c for c in ferric.pids() if not any(x["pid"] == c for x in ferric.calls())]
-            assert len(hung) == 3 and not any(_alive(p) for p in hung)  # three attempts, every child killed
+            assert len(hung) == 1 and not _alive(hung[0])  # one attempt, its child killed
             assert ("propanol pose 1", "field") not in {(c["label"], c["leg"]) for c in ferric.calls()}
             assert not list(out.glob("run-*.json"))
-            errors = [r for r in _rows(out) if r.get("outcome") == "error"]
-            assert len(errors) == 1 and ("Timeout" in errors[0]["error"] or "timed out" in errors[0]["error"])
+            (t,) = [r for r in _rows(out) if "outcome" in r]
+            assert t["outcome"] == "timeout" and t["rung"] == 0 and t["seconds"] == 2.0
             n_before = len(ferric.calls())
             ferric.set("propanol pose 1", "field", None)
-            s = _finish(inp, queue)
-            assert len(ferric.calls()) == n_before + 1  # only the failed leg ran again
-            assert Path(s.record).is_file() and "dropped_poses" not in _record(out)["results"]
+            longer = _staged(_config(tmp_path, extra="\n[run]\nscf_timeout_s = 60\n", name="c2.toml"), out)
+            s = _finish(longer, queue)
+            assert len(ferric.calls()) == n_before + 1  # only the timed-out leg ran again
+            assert s.digest == _record(out)["input_digest"] and "dropped_poses" not in _record(out)["results"]
     finally:
         _terminate(out)
+
+
+@needs_server
+def test_a_leg_that_keeps_failing_is_an_error_after_three_attempts_naming_its_last_line(ferric, tmp_path, queue):
+    from temporalio.client import WorkflowFailureError
+
+    out = tmp_path / "out"
+    inp = _staged(_config(tmp_path), out, workers=2)
+    ferric.set("ethanol pose 1", "vacuum", "crash")
+    try:
+        with worker(queue, workers=2):
+            with pytest.raises(WorkflowFailureError) as e:
+                _finish(inp, queue)
+        msg = str(e.value.cause.cause)
+        assert "ethanol pose 1 vacuum:" in msg and "RuntimeError: fake engine crashed" in msg
+        assert "rescheduled (chemistry failures are not)" in msg
+        assert sum(1 for p in ferric.pids()) - len(ferric.calls()) == 3  # three attempts
+        # its pose's field leg was not run: the vacuum leg failed
+        assert ("ethanol pose 1", "field") not in {(c["label"], c["leg"]) for c in ferric.calls()}
+        (o,) = [r for r in _rows(out) if "outcome" in r]
+        assert o["outcome"] == "error" and o["leg"] == "vacuum"
+    finally:
+        _terminate(out)
+
+
+@needs_server
+def test_a_vacuum_leg_failing_every_rung_skips_its_field_legs_and_is_one_drop(ferric, tmp_path, queue, half):
+    out = tmp_path / "out"
+    cfg = _config(tmp_path, n_poses=3, extra="\n[half_field]\n")
+    ferric.set("propanol pose 1", "vacuum", "never")
+    try:
+        with worker(queue):
+            assert main(["run", str(cfg), "--out", str(out), "--temporal", "--task-queue", queue]) == 0
+    finally:
+        _terminate(out)
+    assert ("propanol pose 1", "field") not in {(c["label"], c["leg"]) for c in ferric.calls()}
+    res = _record(out)["results"]
+    (d,) = res["dropped_poses"]
+    assert (d["candidate"], d["pose"], d["leg"], d["field_model"]) == ("propanol", 1, "vacuum", None)
+    assert res["pose_index"] == {"ethanol": [0, 1, 2], "propanol": [0, 2]}
+    (measured,) = half[1].summaries
+    assert measured["HALF"]["propanol"][1] is None
+
+
+def test_a_log_from_before_per_leg_scores_is_refused_cleanly(tmp_path):
+    old = {"candidate": "a", "pose": 0, "field_model": "primary", "outcome": "not_converged", "digest": "d" * 12}
+    (tmp_path / "calcs.jsonl").write_text(json.dumps(old) + "\n")
+    with pytest.raises(ValueError, match=r"before per-leg scores \(7bdaebc\).*use a fresh --out"):
+        temporal_run.read_rows(tmp_path, "d" * 64)
+
+
+def test_restaging_an_unchanged_config_writes_nothing(tmp_path):
+    cfg, out = _config(tmp_path), tmp_path / "out"
+    cli._stage_config(cfg, out)
+    stamps = {p: p.stat().st_mtime_ns for p in out.rglob("*") if p.is_file()}
+    time.sleep(0.05)
+    cli._stage_config(cfg, out)
+    assert {p: p.stat().st_mtime_ns for p in out.rglob("*") if p.is_file()} == stamps
 
 
 @needs_server

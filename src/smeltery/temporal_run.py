@@ -60,6 +60,7 @@ try:
     from temporalio import activity, workflow
     from temporalio.common import RetryPolicy
     from temporalio.exceptions import ActivityError, ApplicationError
+    from temporalio.exceptions import TimeoutError as TimeoutError_
 
     TEMPORAL_AVAILABLE = True
 except ImportError:  # pragma: no cover - the `temporal` extra is not installed
@@ -80,8 +81,13 @@ RESULT_PREFIX = "SMELTERY_SCORE_RESULT "
 SCF_NOT_CONVERGED = "ScfNotConverged"
 CLASH_REFUSED = "ClashRefused"
 CONFIG_CHANGED = "ConfigChanged"
-#: Outcomes that are measurements (final); anything else is retried by a resumed run, and blocks finalize.
+#: Outcomes that are measurements (final); anything else ("timeout", "error") is rescheduled by a resumed run, and
+#: blocks finalize.
 FINAL_OUTCOMES = ("not_converged", "clash_refused")
+TIMEOUT = "Timeout"
+#: The server's start-to-close timeout is the leg's own limit plus this margin, so the activity's local timeout (which
+#: kills the child and reports "Timeout", non-retryable) always fires first; a server-side timeout would be retried.
+SERVER_TIMEOUT_MARGIN_S = 120.0
 LEGS = ("vacuum", "field")
 
 
@@ -123,6 +129,7 @@ class ScoreInput:
     out: str = ""
     config: str = ""
     config_sha: str = ""
+    timeout_s: float = 0.0  # `[run] scf_timeout_s`: the activity ends the leg (and its child) after this long
 
 
 @dataclass
@@ -202,6 +209,12 @@ def read_rows(out: str | Path, digest: str) -> tuple[list[dict], int]:
             torn += 1
             continue
         rows.append(r)
+    old = [r for r in rows if "leg" not in r]
+    if old:
+        raise ValueError(
+            f"{p} is the log of a --temporal run from before per-leg scores (7bdaebc): {len(old)} of its outcome "
+            "line(s) name no leg, so its scores cannot be read back leg by leg; use a fresh --out"
+        )
     foreign = [r for r in rows if r.get("digest") != digest[:12]]
     if foreign:
         got = sorted({str(r.get("digest")) for r in foreign})
@@ -345,14 +358,24 @@ def prepare_sync(inp: RunInput) -> PrepareResult:
     os.replace(tmp, out / WORK_DIR / WORK_FILE)
     state = leg_state(dedupe(rows)[0])
     pending, done = [], 0
+    limit = scf_timeout_s(cfg)
     for ident in legs_of(plan, models):
         st = state.get(ident)
         if st is not None and st["final"]:
             done += 1
             continue
+        if ident[2] == "field" and vacuum_failed(state, ident[0], ident[1]):
+            done += 1  # its pose's vacuum failed every rung: the field legs are not run
+            continue
         rung = 0 if st is None else int(st["next_rung"])
-        pending.append(ScoreInput(*ident, rung, inp.out, inp.config, inp.config_sha))
-    return PrepareResult(pending, done + len(pending), done, plan.tier.n_rungs, scf_timeout_s(cfg), digest)
+        pending.append(ScoreInput(*ident, rung, inp.out, inp.config, inp.config_sha, limit))
+    return PrepareResult(pending, done + len(pending), done, plan.tier.n_rungs, limit, digest)
+
+
+def vacuum_failed(state: dict, candidate: str, pose: int) -> bool:
+    """The pose's vacuum leg is a chemistry failure (every rung): its field legs give no value and are not run."""
+    st = state.get((candidate, pose, "vacuum", None))
+    return st is not None and st["converged"] is None and st["final"]
 
 
 def _work(out: str) -> dict:
@@ -391,25 +414,72 @@ def child_main(argv: list[str]) -> int:
     """`python -m smeltery.temporal_run _score '<ScoreInput json>'`: print the leg's result on a marked line."""
     try:
         got = scf_child(ScoreInput(**json.loads(argv[-1])))
-    except Exception as e:  # reported to the parent on stderr; the exit code says it failed
-        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+    except Exception:  # reported to the parent on stderr (its last line names the exception); exit code 1
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
         return 1
     print(RESULT_PREFIX + json.dumps(got), flush=True)
     return 0
 
 
-def _die_with_parent() -> None:
-    """In the child, before exec: SIGKILL when the worker dies, so no orphan keeps burning CPU (Linux)."""
-    try:
-        import ctypes
+_PRCTL: list = []  # [libc.prctl or None], loaded once, in the parent
 
-        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
-    except Exception:  # not Linux: the process group kill on cancel still applies
-        pass
+
+def _die_with_parent_hook():
+    """A preexec_fn that only calls prctl(PR_SET_PDEATHSIG, SIGKILL): the child is killed when the worker dies, so no
+    orphan keeps burning CPU (Linux). libc is loaded here, once, in the parent; None where there is no prctl (the
+    process group kill on cancel still applies)."""
+    if not _PRCTL:
+        try:
+            import ctypes
+
+            _PRCTL.append(ctypes.CDLL("libc.so.6", use_errno=True).prctl)
+        except Exception:
+            _PRCTL.append(None)
+    prctl, sig = _PRCTL[0], int(signal.SIGKILL)
+    if prctl is None:
+        return None
+
+    def hook() -> None:
+        prctl(1, sig)  # PR_SET_PDEATHSIG
+
+    return hook
 
 
 def child_command() -> list[str]:
     return [sys.executable, "-m", "smeltery.temporal_run", "_score"]
+
+
+def _refusal(blocked: list[tuple[tuple, dict | None]]) -> str:
+    """Why finalize will not write the record: timed-out legs (the remedy is a longer timeout) and other failures
+    that are not chemistry (each with its last error line). Both are rescheduled by running the command again."""
+
+    def name(k) -> str:
+        c, i, leg, m = k
+        return f"{c} pose {i} {leg}{'' if m is None else f' ({m})'}"
+
+    timeouts = [(k, o) for k, o in blocked if (o or {}).get("outcome") == "timeout"]
+    others = [(k, o) for k, o in blocked if (o or {}).get("outcome") != "timeout"]
+    parts = []
+    if timeouts:
+        legs = "; ".join(
+            f"{name(k)} timed out after {float(o.get('seconds') or 0):g} s at rung {o.get('rung')}"
+            for k, o in timeouts[:10]
+        )
+        parts.append(
+            f"{len(timeouts)} SCF leg(s) timed out: {legs}. Raise [run] scf_timeout_s (it does not change the input "
+            "digest) and run the same command again"
+        )
+    if others:
+        legs = "; ".join(
+            f"{name(k)}: {o['error'] if o else 'no outcome (the run was interrupted)'}" for k, o in others[:10]
+        )
+        parts.append(
+            f"{len(others)} SCF leg(s) failed for a reason that is not chemistry: {legs}. Run the same command "
+            "again: they are rescheduled (chemistry failures are not)"
+        )
+    return "the run is not finished: " + ". ".join(parts) + "."
 
 
 def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
@@ -438,45 +508,52 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     primary = work["primary"]
     models = list(work["fields"])
     idents = legs_of(plan, models)
-    blocked = [(k, (state.get(k) or {}).get("outcome")) for k in idents if not (state.get(k) or {}).get("final", False)]
+    blocked = [
+        (k, (state.get(k) or {}).get("outcome"))
+        for k in idents
+        if not (state.get(k) or {}).get("final", False)
+        and not (k[2] == "field" and not (state.get((k[0], k[1], "vacuum", None)) or {}).get("converged"))
+    ]  # a field leg after an unconverged vacuum leg was not run: the vacuum leg is what is reported
     if blocked:
-        names = "; ".join(
-            f"{c} pose {i} {leg}{'' if m is None else f' ({m})'}: "
-            + (o["error"] if o else "no outcome (the run was interrupted)")
-            for (c, i, leg, m), o in blocked[:10]
-        )
-        raise ValueError(
-            f"{len(blocked)} SCF leg(s) failed for a reason that is not chemistry, so the run is not finished: "
-            f"{names}. Run the same command again: they are rescheduled (chemistry failures are not)."
-        )
+        raise ValueError(_refusal(blocked))
 
-    def leg(c, i, legname, m):
-        st = state[(c, i, legname, m)]
-        return st["converged"], st
+    def drop(c: str, i: int, legname: str, model: str | None, st: dict) -> None:
+        o = st.get("outcome") or {}
+        dropped.append(
+            {
+                "candidate": c,
+                "pose": i,
+                "leg": legname,
+                "field_model": model,
+                "reason": o.get("error"),
+                "outcome": o.get("outcome"),
+                "rungs_tried": o.get("rungs_tried", []),
+            }
+        )
 
     values: dict[str, dict[str, list]] = {m: {} for m in models}
     rung_of: dict[str, list] = {}
     dropped: list[dict] = []
     failed: dict[str, set[int]] = {c.name: set() for c in plan.candidates}
+    for c in plan.candidates:  # a vacuum leg failing every rung is one drop, whatever the field models
+        for i in range(len(c.poses)):
+            vst = state[(c.name, i, "vacuum", None)]
+            if vst["converged"] is None:
+                drop(c.name, i, "vacuum", None, vst)
+                failed[c.name].add(i)
     for model in models:
         for c in plan.candidates:
             vals = []
             for i in range(len(c.poses)):
-                vac, vst = leg(c.name, i, "vacuum", None)
-                fld, fst = leg(c.name, i, "field", model)
-                if vac is None or fld is None:
-                    bad = [(n, st) for n, row, st in (("vacuum", vac, vst), ("field", fld, fst)) if row is None]
+                vac = state[(c.name, i, "vacuum", None)]["converged"]
+                if vac is None:
                     vals.append(None)
-                    dropped.append(
-                        {
-                            "candidate": c.name,
-                            "pose": i,
-                            "field_model": model,
-                            "reason": "; ".join(f"{n}: {(st['outcome'] or {}).get('error')}" for n, st in bad),
-                            "outcome": (bad[0][1]["outcome"] or {}).get("outcome"),
-                            "rungs_tried": {n: (st["outcome"] or {}).get("rungs_tried", []) for n, st in bad},
-                        }
-                    )
+                    continue
+                fst = state[(c.name, i, "field", model)]
+                fld = fst["converged"]
+                if fld is None:
+                    vals.append(None)
+                    drop(c.name, i, "field", model, fst)
                     if model == primary:
                         failed[c.name].add(i)
                     continue
@@ -494,7 +571,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
                 gone = failed[c.name] | failed[parent.name]
                 pose_index[c.name] = [i for i in range(len(c.poses)) if i not in gone]
         for d in dropped:
-            if d["field_model"] == primary:
+            if d["field_model"] in (primary, None):
                 d["dropped_with"] = (
                     [c.name for c in plan.candidates]
                     if d["candidate"] == parent.name
@@ -538,12 +615,15 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
 
 if TEMPORAL_AVAILABLE:
 
-    async def _heartbeating(coro_fn):
-        """Await `coro_fn()` (a task), heartbeating every quarter of the heartbeat timeout, and end it at the
-        start-to-close timeout here too (the server's timeout alone would leave the work running in this worker)."""
+    async def _heartbeating(coro_fn, limit: float | None = None):
+        """Await `coro_fn()` (a task), heartbeating every quarter of the heartbeat timeout, and end it after `limit`
+        seconds (else the start-to-close timeout) here: the server's timeout alone would leave the work running in
+        this worker. A timeout is non-retryable ("Timeout", details: the seconds reached): it is recorded, not
+        retried, and the remedy is a longer `[run] scf_timeout_s`."""
         info = activity.info()
         every = max(0.5, (info.heartbeat_timeout.total_seconds() / 4) if info.heartbeat_timeout else 30.0)
-        limit = info.start_to_close_timeout.total_seconds() if info.start_to_close_timeout else None
+        if not limit:
+            limit = info.start_to_close_timeout.total_seconds() if info.start_to_close_timeout else None
         t0 = time.monotonic()
         task = asyncio.ensure_future(coro_fn())
         activity.heartbeat("start")
@@ -551,7 +631,9 @@ if TEMPORAL_AVAILABLE:
             while True:
                 left = None if limit is None else limit - (time.monotonic() - t0)
                 if left is not None and left <= 0:
-                    raise ApplicationError(f"timed out after {limit:g} s", type="Timeout")
+                    raise ApplicationError(
+                        f"timed out after {limit:g} s", {"seconds": float(limit)}, type=TIMEOUT, non_retryable=True
+                    )
                 done, _ = await asyncio.wait({task}, timeout=every if left is None else min(every, left))
                 if done:
                     return task.result()
@@ -589,7 +671,7 @@ if TEMPORAL_AVAILABLE:
             row = next((r for r in rows if "outcome" not in r and _ident(r) == ident and r["rung"] == inp.rung), None)
             cpu = 0.0
             if row is None:  # not already logged by an attempt whose completion was lost
-                got = await _heartbeating(lambda: self._child(inp))
+                got = await _heartbeating(lambda: self._child(inp), inp.timeout_s or None)
                 from types import SimpleNamespace
 
                 from .tiers import _calc_entry
@@ -619,7 +701,7 @@ if TEMPORAL_AVAILABLE:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 start_new_session=True,
-                preexec_fn=_die_with_parent,
+                preexec_fn=_die_with_parent_hook(),
             )
             try:
                 out, err = await proc.communicate()
@@ -628,8 +710,9 @@ if TEMPORAL_AVAILABLE:
                 await proc.wait()
                 raise
             if proc.returncode != 0:
-                tail = err.decode(errors="replace").strip().splitlines()[-3:]
-                raise ApplicationError(f"score child exited {proc.returncode}: {' | '.join(tail)}", type="ChildFailed")
+                tail = err.decode(errors="replace").strip().splitlines()
+                last = tail[-1] if tail else "(no stderr)"
+                raise ApplicationError(f"score child exited {proc.returncode}: {last}", type="ChildFailed")
             lines = [ln for ln in out.decode(errors="replace").splitlines() if ln.startswith(RESULT_PREFIX)]
             if not lines:
                 raise ApplicationError("score child printed no result", type="ChildFailed")
@@ -670,16 +753,30 @@ if TEMPORAL_AVAILABLE:
             self._progress.update(total=prep.n_total, done=prep.n_done, phase="score")
             sem = asyncio.Semaphore(max(1, inp.workers))
 
-            async def one(u: ScoreInput) -> None:
+            async def one(u: ScoreInput) -> bool:
                 async with sem:
                     self._progress["running"] += 1
                     try:
-                        await self._climb(inp, prep, u)
+                        return await self._climb(inp, prep, u)
                     finally:
                         self._progress["running"] -= 1
                         self._progress["done"] += 1
 
-            await asyncio.gather(*(one(u) for u in prep.pending))
+            poses: dict[tuple[str, int], list[ScoreInput]] = {}
+            for u in prep.pending:
+                poses.setdefault((u.candidate, u.pose), []).append(u)
+
+            async def pose(legs: list[ScoreInput]) -> None:
+                """The vacuum leg first: a pose whose vacuum leg failed gives no value, so its field legs do not run
+                (a rerun schedules them if the vacuum leg's failure was not chemistry)."""
+                vac = [u for u in legs if u.leg == "vacuum"]
+                fields = [u for u in legs if u.leg != "vacuum"]
+                if vac and not await one(vac[0]):
+                    self._progress["done"] += len(fields)
+                    return
+                await asyncio.gather(*(one(u) for u in fields))
+
+            await asyncio.gather(*(pose(legs) for legs in poses.values()))
             self._progress["phase"] = "finalize"
             summary = await workflow.execute_activity(
                 "pipeline_finalize",
@@ -692,9 +789,11 @@ if TEMPORAL_AVAILABLE:
             self._progress["phase"] = "done"
             return summary
 
-        async def _climb(self, inp: RunInput, prep: PrepareResult, u: ScoreInput) -> None:
+        async def _climb(self, inp: RunInput, prep: PrepareResult, u: ScoreInput) -> bool:
+            """The leg up the ladder; True when it converged. A failure is recorded as an outcome line."""
             tried: list[int] = list(range(u.rung))
             outcome, error = "not_converged", "every rung of the remedy ladder was tried before this run resumed"
+            extra: dict = {}
             for rung in range(u.rung, prep.n_rungs):
                 tried.append(rung)
                 try:
@@ -702,22 +801,29 @@ if TEMPORAL_AVAILABLE:
                         "pipeline_score",
                         dataclasses.replace(u, rung=rung),
                         result_type=ScoreResult,
-                        start_to_close_timeout=timedelta(seconds=prep.scf_timeout_s),
+                        start_to_close_timeout=timedelta(seconds=prep.scf_timeout_s + SERVER_TIMEOUT_MARGIN_S),
                         heartbeat_timeout=timedelta(seconds=inp.heartbeat_s),
                         retry_policy=RetryPolicy(
                             initial_interval=timedelta(seconds=5),
                             maximum_attempts=3,
-                            non_retryable_error_types=[SCF_NOT_CONVERGED, CLASH_REFUSED, CONFIG_CHANGED],
+                            non_retryable_error_types=[SCF_NOT_CONVERGED, CLASH_REFUSED, CONFIG_CHANGED, TIMEOUT],
                         ),
                     )
-                    return
+                    return True
                 except ActivityError as e:
                     cause = e.cause
                     kind = getattr(cause, "type", None)
                     error = f"{type(cause or e).__name__}: {cause or e}"[:400]
                     if kind == SCF_NOT_CONVERGED:
                         continue  # chemistry: the next rung, never a retry of this one
-                    outcome = "clash_refused" if kind == CLASH_REFUSED else "error"
+                    if kind == TIMEOUT or isinstance(cause, TimeoutError_):
+                        details = list(getattr(cause, "details", None) or [])
+                        seconds = (
+                            (details[0] or {}).get("seconds") if details and isinstance(details[0], dict) else None
+                        )
+                        outcome, extra = "timeout", {"rung": rung, "seconds": seconds or prep.scf_timeout_s}
+                    else:
+                        outcome = "clash_refused" if kind == CLASH_REFUSED else "error"
                     break
             self._progress["failed"] += 1
             row = {
@@ -729,10 +835,12 @@ if TEMPORAL_AVAILABLE:
                 "rungs_tried": tried,
                 "error": error,
                 "digest": prep.digest[:12],
+                **extra,
             }
             await workflow.execute_activity(
                 "pipeline_record_outcome", args=[inp.out, row], start_to_close_timeout=timedelta(minutes=2)
             )
+            return False
 
 
 def kill_group(pid: int) -> None:
