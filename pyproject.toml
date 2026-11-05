@@ -115,7 +115,7 @@ source = "vcs"
 packages = ["src/smeltery"]
 # The built Bench UI is gitignored (it is build output), and hatch leaves ignored files out by default; `artifacts`
 # puts it back. CI and release run `npm run build` in ui/ before building the wheel.
-artifacts = ["src/smeltery/bench/web/**"]
+artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
