@@ -340,3 +340,28 @@ def test_a_config_without_the_section_keeps_its_digest():
 @needs_pdb2pqr
 def test_the_section_is_an_input(plan):
     assert plan.inputs["charge_sensitivity"] == {"models": ["CHARMM"]}
+
+
+@needs_pdb2pqr
+def test_a_bug_is_not_recorded_as_a_measured_outcome(plan, monkeypatch):
+    """An AttributeError in our own code (here, the tier) propagates: neither a failed pose nor an error row."""
+    from smeltery.cli import StageError
+
+    h = registry()["charge_sensitivity"].hook
+    monkeypatch.setattr(h, "measure", None)
+
+    class BuggyTier(FieldTier):
+        def run(self, candidates, ctx):
+            raise AttributeError("'NoneType' object has no attribute 'energy'")
+
+    plan.tier = BuggyTier()
+    with pytest.raises(StageError, match="AttributeError"):
+        run_plan(plan, measure=field_measure)
+
+    def buggy_summary(*a, **k):
+        raise KeyError("paired_ddE")
+
+    plan.tier = FieldTier()
+    monkeypatch.setattr(h, "summarize", buggy_summary)
+    with pytest.raises(StageError, match="KeyError"):
+        run_plan(plan, measure=field_measure)

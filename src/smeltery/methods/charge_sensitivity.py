@@ -15,8 +15,9 @@ Interface (the Temporal runner, task D4, calls the first two; `run` is the seria
   for the parent on either side) is dropped from both, and each model's entry lists the dropped poses and counts them.
 * `extra_models(cfg) -> list[str]`: the models the section asks for, without pdb2pqr (for counting SCFs at --plan).
 * `run(plan, rec, ctx)`: per model, its field, then every pose under it (serially; an SCF that does not converge is
-  recorded as None with its error, not retried), then `summarize`. Merged into `results.charge_sensitivity`. It
-  never raises: a model whose field or measurement fails is recorded as `{"error": ..., "stage": ...}`.
+  recorded as None with its error, not retried), then `summarize`. Merged into `results.charge_sensitivity`. A field
+  that cannot be built (`FIELD_FAILURES`) is recorded as `{"error": ..., "stage": "field"}`; any other exception is
+  a bug and propagates.
 
 SCF log contract: each extra-model calc row is the tier's own row (so it keeps a `rung` if the tier wrote one) plus
 `"pose"` and `"field_model": <model>`, kept in `results.charge_sensitivity[model]["calcs"]`. The runner's output
@@ -33,11 +34,21 @@ import copy
 import dataclasses
 import inspect
 import math
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import MethodSpec, register
+
+#: The failures building an extra field that are outcomes, not bugs: pdb2pqr exiting non-zero (CalledProcessError),
+#: pdb2pqr missing or broken (Pdb2PqrUnavailableError, a RuntimeError), the pocket file unreadable or gone (OSError),
+#: and the ValueErrors `extra_field` / `load_pocket` raise by design (a changed digest, a field pdb2pqr did not
+#: charge, a PQR with no charges). Anything else is our bug and propagates.
+FIELD_FAILURES: tuple[type[BaseException], ...] = (subprocess.CalledProcessError, RuntimeError, OSError, ValueError)
+#: The failures of one pose's SCF that are outcomes: the tiers raise RuntimeError for an SCF that did not converge
+#: (and its subclasses for a refused pose or a memory refusal). Anything else propagates.
+POSE_FAILURES: tuple[type[BaseException], ...] = (RuntimeError,)
 
 QUANTITY = "dE_int"
 #: The force fields `pdb2pqr --ff` accepts (pdb2pqr 3.x).
@@ -267,7 +278,7 @@ class ChargeSensitivity:
                 try:
                     tier.run([one], {"field": fld})
                     vals.append(_finite(one.per_pose[QUANTITY][0]))
-                except Exception as e:  # an SCF that did not converge (or any failure): recorded, not retried
+                except POSE_FAILURES as e:  # an SCF that did not converge: recorded, not retried
                     vals.append(None)
                     failures.setdefault(c.name, {})[str(i)] = f"{type(e).__name__}: {e}"
                 # the row keeps any rung the tier wrote; field_model says which pocket it ran in
@@ -278,21 +289,19 @@ class ChargeSensitivity:
         return values, failures, calcs
 
     def run(self, plan: Any, rec: Any, ctx: dict) -> dict:
-        """Never raises: the primary measurement is already done, so a model whose field cannot be built, or whose
-        measurement or summary fails, is recorded as `{model: {"error": ..., "stage": ...}}` and the run keeps its
-        record."""
+        """The expected failures do not cost the run its record (the primary measurement is done): a field that cannot
+        be built (`FIELD_FAILURES`) is recorded as `{model: {"error": ..., "stage": "field"}}`, an SCF that does not
+        converge (`POSE_FAILURES`) as a None pose with its error. Anything else is a bug in this code and propagates,
+        with its traceback, rather than being recorded as a measured outcome."""
         out: dict[str, dict] = {}
         for model in self.extra_models(plan.cfg):
-            stage = "field"
             try:
                 fld = self.extra_field(plan, model)
-                stage = "measure"
-                measured, failures, calcs = self._measure_field(plan, model, fld)
-                stage = "summary"
-                entry = self.summarize(plan, rec, {model: measured})[model]
-            except Exception as e:
-                out[model] = {"error": f"{type(e).__name__}: {e}", "stage": stage}
+            except FIELD_FAILURES as e:
+                out[model] = {"error": f"{type(e).__name__}: {e}", "stage": "field"}
                 continue
+            measured, failures, calcs = self._measure_field(plan, model, fld)
+            entry = self.summarize(plan, rec, {model: measured})[model]
             entry["field"] = dict(getattr(fld, "provenance", {}) or {})
             entry["failures"] = failures
             if calcs:

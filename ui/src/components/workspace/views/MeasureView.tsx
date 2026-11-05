@@ -51,8 +51,13 @@ export function SensitivityTable({ models, unit, parent }: { models: Record<stri
               <tr key={model} data-model={model} data-error="true">
                 <td>{model}</td>
                 <td colSpan={4}>
-                  not measured: {m.error}
-                  {m.stage ? ` (at ${m.stage})` : ""}
+                  <div className="issue" data-level="warning">
+                    <span className="issue-level">warning</span>
+                    <span>
+                      not measured: {m.error}
+                      {m.stage ? ` (at ${m.stage})` : ""}
+                    </span>
+                  </div>
                 </td>
               </tr>
             ) : (
