@@ -78,6 +78,15 @@ def _distribution_identity(name: str, ident: dict) -> dict:
         st = _git(path, "status", "--porcelain", "--untracked-files=no")
         ident["dirty"] = None if st is None else bool(st)
         ident["provenance"] = "INFERRED from the local source directory's current git state"
+    elif "archive_info" in du and ident["source"]:
+        # A built wheel installed from a path or URL (a CI artifact, say). The file names no commit, so the hash
+        # pip recorded is the only identity there is: it pins the artifact without claiming to know its source.
+        h = (du["archive_info"] or {}).get("hash") or (du["archive_info"] or {}).get("hashes", {}).get("sha256")
+        name = Path(unquote(urlparse(ident["source"]).path)).name
+        ident["dirty"] = False
+        ident["provenance"] = f"INFERRED from the installed wheel {name}" + (
+            f" ({h})" if h else " (pip recorded no hash)"
+        )
     return ident
 
 

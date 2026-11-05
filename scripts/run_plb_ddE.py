@@ -181,8 +181,9 @@ def basis_gaps(symbols, basis: str) -> list[str]:
         xyz = f"{1 + n_h}\n\n{el} 0 0 0\n" + "".join(f"H {x} 0 {z}\n" for x, z in ((0.0, 1.3), (1.1, -0.7))[:n_h])
         try:
             ferric.run_rhf(ferric.Molecule.from_xyz_string(xyz, charge=0), bs, max_iter=1)
-        except Exception as exc:  # only the basis-coverage failure counts as a gap
-            if "basis" in str(exc).lower():
+        except Exception as exc:  # a coverage failure, from either side: no shells, or an element ferric cannot read
+            why = str(exc).lower()
+            if "basis" in why or "unknown element" in why:
                 gaps.append(el)
     return gaps
 

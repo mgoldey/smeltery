@@ -171,6 +171,31 @@ def test_missing_or_malformed_build_stamp_falls_back_to_installed_metadata(monke
         assert ident["provenance"].startswith(("VERIFIED", "INFERRED", "UNKNOWN")), build
 
 
+def test_a_wheel_installed_from_a_file_is_pinned_by_the_wheel_not_left_unknown(monkeypatch, tmp_path):
+    """A built wheel (a CI artifact, say) names no commit, so the record says which wheel and stops there. It used
+    to fall through every branch and report UNKNOWN, which reads as "no provenance" rather than "no commit"."""
+    import json as _json
+    import sys
+    import types
+
+    from smeltery import record as rec
+
+    monkeypatch.setitem(sys.modules, "ferric", types.ModuleType("ferric"))  # no __build__: force the fallback
+
+    class _Dist:
+        version = "0.1.0.dev0"
+
+        def read_text(self, name):
+            url = "file:///tmp/wheels/ferric-0.1.0.dev0-cp312-cp312-manylinux_2_28_x86_64.whl"
+            return _json.dumps({"url": url, "archive_info": {"hashes": {"sha256": "abc123"}}})
+
+    monkeypatch.setattr(rec.metadata, "distribution", lambda name: _Dist())
+    ident = rec.ferric_identity()
+    assert ident["provenance"].startswith("INFERRED from the installed wheel ferric-0.1.0.dev0")
+    assert "abc123" in ident["provenance"]
+    assert ident["commit"] is None and ident["dirty"] is False  # a wheel is not a working tree
+
+
 @pytest.mark.needs_ferric
 def test_identity_is_never_unknown_whenever_ferric_is_importable(monkeypatch):
     from smeltery import ferric_identity
