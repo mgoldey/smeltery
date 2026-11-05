@@ -42,7 +42,7 @@ The Bench home page (`/bench`) lists the runs under ROOT, the pipelines in the w
 panel (running and finished tasks, their logs, cancel), campaign notebooks and configured studies.
 A pipeline starts in one of three ways. Names are lower case letters, digits, `-` and `_`.
 
-- **Start from a working pipeline.** Four pipelines ship with smeltery. Each is copied into the
+- **Start from a working pipeline.** Five pipelines ship with smeltery. Each is copied into the
   workspace as your own pipeline, with the input files its config reads and a finished example run,
   so the result, the views and the provenance can be read before anything is changed. The packaged
   original is never written to, and the config is copied exactly (workspace defaults are not applied).
@@ -52,6 +52,20 @@ A pipeline starts in one of three ways. Names are lower case letters, digits, `-
   - `docking`: ethanol docked with Vina into a committed pentapeptide pocket; propanol and butanol
     paired to its poses, gated by PoseBusters and MMFF strain, then ranked by RHF. Re-running needs
     the `docking` and `posebusters` extras and `pdb2pqr30` on PATH.
+  - `danuglipron-halogen`: the danuglipron halogen campaign as a pipeline: 12 F/Cl/CH3 analogues of
+    danuglipron at four aromatic sites, paired to poses from a bound conformer (`[bound_pose]`, the
+    cryo-EM conformer plus seeded jitters) in the 7LCJ pocket, ranked by field-interaction RHF/STO-3G,
+    with a remedy ladder for SCFs that do not converge and a `[charge_sensitivity]` check (AMBER
+    against CHARMM). Re-running needs `pdb2pqr30` and is a long Temporal run (see
+    [temporal-runs.md](temporal-runs.md)). It ships two runs:
+    - `imported/`: the 2026-10-16 result of this campaign, **imported** rather than re-run. An
+      imported run is a record converted from an original result file (kept beside it under
+      `imported/original/`) by an importer; nothing the original lacks is invented. Keys the original
+      did not record are listed in `results.not_recorded`, and Bench shows those keys as not recorded
+      (views that need them say so) instead of leaving them blank or filling them in. The import is
+      UNRANKED at the declared 1.26 kcal/mol floor.
+    - `run/`: the pipeline's own run, made with `smeltery run --temporal`: a long Temporal run (hours
+      of SCFs on several workers), not something to repeat casually.
   - `structure`: the structure-first path. A PDB file is prepared for Vina, the pocket field is cut
     around a stated centre, then the `docking` pipeline runs. Same requirements as `docking`.
 - **A blank pipeline.** Give a campaign name, a parent (name and SMILES) and one or more analogues.
@@ -177,6 +191,8 @@ Defaults are stored as plain TOML in `ROOT/.smeltery/bench/methods.toml`, one ta
 hand-broken file is reported with its line. Pipelines copied from a prebuilt pipeline or a run
 get no workspace defaults. The pocket sites are a per-pipeline setting and have no default.
 
+To add a method to the catalog, see [methods.md](methods.md).
+
 ## Provenance and lineage
 
 A run started with `--out OUT` (as Bench's Run does) leaves a self-contained directory:
@@ -189,8 +205,18 @@ A run started with `--out OUT` (as Bench's Run does) leaves a self-contained dir
   docking receptor, decisions file), and `inputs/manifest.json` mapping each copy to the source it
   came from. A PDB id is not a file and is left as it is. The record names the config and each input
   by sha256, so the directory re-runs after the originals move.
-- `calcs.jsonl`: one line per SCF (candidate, pose, leg, converged, iterations, energy, seconds).
-  A run whose SCF fails still leaves the calculations that finished.
+- `calcs.jsonl`: one line per SCF: candidate, pose, leg (`vacuum` or `field`), converged, iterations,
+  energy_hartree, seconds, and always `field_model` and `rung`. `field_model` names the pocket's
+  charge model (the pdb2pqr force field of the primary pocket, else `primary`; an extra model from
+  `[charge_sensitivity]` carries its own name; a `--temporal` vacuum leg, shared by every model, has
+  `null`). `rung` is the remedy-ladder rung that produced the value (0 without a ladder). Lines
+  written by a `--temporal` run also carry `digest`, the first 12 characters of the input digest;
+  such a run can also leave `outcome` lines for a leg that did not produce a value (`not_converged`,
+  `clash_refused`, `timeout` or `error`, with the error and rungs tried). The record's
+  `results.calcs` gives `file`, `n` (lines), `primary` (the primary field model) and `by_model`
+  (SCF lines per field model, with `shared_vacuum` for the vacuum legs; outcome lines are not
+  counted). A run whose SCF fails still leaves the calculations that finished. See
+  [temporal-runs.md](temporal-runs.md).
 - `gates.json`, only when a gate rejected a pose and the run stopped (exit 3): every pose's result.
 - the pose SDFs, and for `--plan --out`, `plan.json` with the input digest, estimated seconds and memory.
 
