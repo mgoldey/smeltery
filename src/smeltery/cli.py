@@ -872,6 +872,8 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
             "funnel": funnel_counts(plan, res),
         }
     results["candidate_order"] = [c.name for c in plan.candidates]
+    # (analogue atom, parent atom) pairs copied exactly from the parent's pose: the core a view draws solid
+    results["pose_maps"] = {k: [list(p) for p in v] for k, v in plan.poses.scaffold_maps.items()}
     results["per_pose"], results["units"] = per_pose_results(plan)
     results["field"] = [[float(c.q), *(float(v) for v in c.xyz_ang)] for c in plan.field]
     results["receptor"] = (

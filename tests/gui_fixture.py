@@ -47,6 +47,18 @@ def _poses(smiles: str, seed: int) -> Chem.Mol:
     return mol
 
 
+def _pose_maps() -> dict[str, list[list[int]]]:
+    """(analogue atom, parent atom) per analogue, as PairedPoses.scaffold_maps: the parent's heavy atoms matched into
+    each analogue (SMILES-with-H order puts heavy atoms first, so these indices are the SDF's)."""
+    core = Chem.MolFromSmiles(CANDIDATES[PARENT])
+    out = {}
+    for name, smi in CANDIDATES.items():
+        if name != PARENT:
+            match = Chem.AddHs(Chem.MolFromSmiles(smi)).GetSubstructMatch(core)
+            out[name] = [[a, p] for p, a in enumerate(match)]
+    return out
+
+
 def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
     """Write a contract-shaped OUT directory under `root` and return it. `unranked=True` sets keep=2, which falls
     inside the {4-Cl, 4-Br} tie group, so the cut is UNRANKED."""
@@ -143,6 +155,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
             ],
             "per_pose": per_pose,
             "candidate_order": list(CANDIDATES),
+            "pose_maps": _pose_maps(),
             "units": {"dE_int": "kcal/mol"},
             "poses": poses,
             "field": FIELD,

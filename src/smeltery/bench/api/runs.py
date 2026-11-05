@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 from rdkit import Chem
 
 from smeltery.bench.verdict import verdict_of
@@ -23,6 +24,7 @@ from smeltery.gui.views.compare import compare_figure, comparison_caption
 from smeltery.gui.views.forest import forest_figure
 from smeltery.gui.views.matrix import matrix_figure
 from smeltery.gui.views.per_pose import per_pose_figure
+from smeltery.gui.views.per_pose_values import per_pose_values_figure
 from smeltery.project import Proposal, make_entry_id
 
 from . import models as M
@@ -138,7 +140,7 @@ def run_per_pose(request: Request, idx: int, quantity: str = QUANTITY) -> list[M
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
-FIGURES = ("forest", "matrix", "per_pose")
+FIGURES = ("forest", "matrix", "per_pose", "per_pose_values")
 #: The colour scheme a figure is drawn for. Python owns the palette for both (smeltery.gui.views._style).
 Theme = Literal["light", "dark"]
 
@@ -164,11 +166,13 @@ def _figure(request: Request, idx: int, name: str) -> dict[str, Any]:
         pp = R.per_pose_table(r, QUANTITY)
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    if name == "per_pose_values":
+        return _plain(per_pose_values_figure(pp, r, QUANTITY))
     return _plain(per_pose_figure(pp, r, quantity=QUANTITY, unit=_unit(r), rows=table))
 
 
 @router.get("/runs/{idx}/scene")
-def run_scene(request: Request, idx: int, candidate: str, pose: int = 0) -> dict[str, Any]:
+def run_scene(request: Request, idx: int, candidate: str, pose: int = 0, core: bool = False) -> dict[str, Any]:
     r = run(request, idx)
     if not r.has_pose_output:
         raise HTTPException(status_code=409, detail="this run record predates pose output; it has no poses to show")
@@ -177,7 +181,147 @@ def run_scene(request: Request, idx: int, candidate: str, pose: int = 0) -> dict
         raise HTTPException(status_code=400, detail=f"no candidate {candidate!r}")
     if not 0 <= pose < n:
         raise HTTPException(status_code=400, detail=f"pose {pose} out of range: {candidate} has {n} poses")
-    return pose_scene(r, candidate, pose)
+    scene = pose_scene(r, candidate, pose)
+    atoms = _core_atoms(r, candidate) if core else None
+    return _core_solid(scene, atoms) if atoms else scene
+
+
+def _core_atoms(r: R.Run, candidate: str) -> list[int]:
+    """The candidate's atoms copied exactly from the parent's pose, from `results.pose_maps` (pairs of analogue atom,
+    parent atom). Empty for the parent and for a record written before pose maps."""
+    maps = r.record["results"].get("pose_maps") or {}
+    return sorted({int(pair[0]) for pair in maps.get(candidate, [])})
+
+
+def _core_solid(scene: dict[str, Any], core: list[int]) -> dict[str, Any]:
+    """The same MolViewSpec state with the candidate drawn as two components: its core atoms in the representation
+    the scene already gave it (solid), every other atom as thin lines (outlined). Nothing but the candidate's
+    structure node changes; the colours, parent, receptor and field are as `pose_scene` built them."""
+    out = json.loads(json.dumps(scene))
+
+    def structure(node: dict[str, Any]) -> dict[str, Any] | None:
+        if node.get("kind") == "structure" and node.get("ref") == "candidate":
+            return node
+        for ch in node.get("children", []):
+            found = structure(ch)
+            if found:
+                return found
+        return None
+
+    node = structure(out["root"])
+    if node is None:
+        return out
+    (solid,) = [c for c in node["children"] if c.get("kind") == "component"]
+    solid["params"]["selector"] = [{"atom_index": i} for i in core]
+    others = json.loads(json.dumps(solid))
+    others["params"]["selector"] = "all"
+    for rep in others["children"]:
+        if rep.get("kind") == "representation":
+            rep["params"] = {"type": "line"}
+    others["children"] = [c for c in others["children"] if c.get("kind") != "focus"]
+    node["children"].append(others)
+    return out
+
+
+class PoseMaps(BaseModel):
+    """`results.pose_maps`: per analogue, (analogue atom, parent atom) pairs copied exactly from the parent's pose."""
+
+    maps: dict[str, list[list[int]]]
+
+
+@router.get("/runs/{idx}/pose_maps", response_model=PoseMaps)
+def run_pose_maps(request: Request, idx: int) -> PoseMaps:
+    """Empty for a record written before pose maps were kept; the Poses view then cannot tell core from the rest."""
+    return PoseMaps(maps=record(request, idx).get("results", {}).get("pose_maps") or {})
+
+
+class GateRow(BaseModel):
+    candidate: str
+    pose: int
+    #: PoseBusters' verdict for the pose; None when that gate did not run for this candidate.
+    posebusters: bool | None
+    failed_checks: list[str]
+    strain_kcal: float | None
+    #: Strain above `max_strain_kcal`; None when no threshold is configured (strain is then only recorded).
+    over_strain: bool | None
+    ok: bool
+
+
+class Gates(BaseModel):
+    """`results.gates` as one row per (candidate, pose). `raw` is the record's own dict, unchanged."""
+
+    ran: list[str]
+    max_strain_kcal: float | None
+    rows: list[GateRow]
+    raw: dict[str, Any]
+
+
+@router.get("/runs/{idx}/gates", response_model=Gates)
+def run_gates(request: Request, idx: int) -> Gates:
+    raw = record(request, idx)
+    results = raw.get("results", {})
+    gates: dict[str, Any] = results.get("gates") or {}
+    limit = (raw.get("inputs", {}).get("gates") or {}).get("max_strain_kcal")
+    pb: dict[str, Any] = gates.get("posebusters") or {}
+    strain: dict[str, list[float]] = gates.get("strain_kcal") or {}
+    order = list(results.get("candidate_order") or [*pb, *(c for c in strain if c not in pb)])
+    rows = []
+    for name in order:
+        verdicts = (pb.get(name) or {}).get("poses")
+        n = max(len(verdicts or []), len(strain.get(name, [])))
+        for i in range(n):
+            v = verdicts[i] if verdicts is not None and i < len(verdicts) else None
+            s = float(strain[name][i]) if name in strain and i < len(strain[name]) else None
+            over = None if limit is None or s is None else s > float(limit)
+            passed = None if v is None else bool(v["passed"])
+            rows.append(
+                GateRow(
+                    candidate=name,
+                    pose=i,
+                    posebusters=passed,
+                    failed_checks=list(v["failed_checks"]) if v else [],
+                    strain_kcal=s,
+                    over_strain=over,
+                    ok=passed is not False and over is not True,
+                )
+            )
+    return Gates(ran=sorted(gates), max_strain_kcal=None if limit is None else float(limit), rows=rows, raw=gates)
+
+
+class CalcLines(BaseModel):
+    """The SCF log lines of one pose: every line of the run's calc log whose candidate and pose match."""
+
+    file: str | None
+    lines: list[dict[str, Any]]
+
+
+@router.get("/runs/{idx}/calcs", response_model=CalcLines)
+def run_calcs(request: Request, idx: int, candidate: str, pose: int) -> CalcLines:
+    """Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
+    written. 409 when the run kept no SCF log."""
+    raw = record(request, idx)
+    calcs = (raw.get("results") or {}).get("calcs")
+    if not calcs:
+        raise HTTPException(status_code=409, detail="this run kept no SCF log")
+    out_dir = Path(row(request, idx)["path"]).parent.resolve()
+    path = (out_dir / str(calcs["file"])).resolve()
+    if out_dir not in path.parents:
+        raise HTTPException(status_code=409, detail=f"the SCF log {calcs['file']!r} is outside the run directory")
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise HTTPException(status_code=409, detail=f"cannot read the SCF log {path}: {e}") from e
+    lines = []
+    for x in text.splitlines():
+        if not x.strip():
+            continue
+        try:
+            d = json.loads(x)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("candidate") == candidate and d.get("pose") == pose:
+            lines.append(d)
+    return CalcLines(file=str(calcs["file"]), lines=lines)
 
 
 @router.get("/runs/{idx}/pose_atoms", response_model=M.PoseAtoms)
