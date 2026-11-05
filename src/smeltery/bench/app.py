@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import active_site, ligands, lineage, methods, notebook, pipelines, runs, work
+from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
 
 #: Where `npm run build` (in ui/) writes the app. Build output: never edited or committed.
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -105,6 +105,7 @@ def create_app(
     app.include_router(active_site.router)
     app.include_router(ligands.router)
     app.include_router(pipelines.router)
+    app.include_router(prebuilt.router)
     app.include_router(methods.router)
     app.include_router(notebook.router)
 

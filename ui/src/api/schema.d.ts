@@ -486,6 +486,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/prebuilt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Prebuilt */
+        get: operations["list_prebuilt_api_prebuilt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/proposals": {
         parameters: {
             query?: never;
@@ -2004,6 +2021,16 @@ export interface components {
                 [key: string]: number[][];
             };
         };
+        /** Prebuilt */
+        Prebuilt: {
+            /** About */
+            about: string;
+            /** Name */
+            name: string;
+            /** Needs */
+            needs: string;
+            verdict: components["schemas"]["Verdict"];
+        };
         /** PreviewStarted */
         PreviewStarted: {
             /** Task */
@@ -3482,6 +3509,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prebuilt_api_prebuilt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prebuilt"][];
                 };
             };
         };

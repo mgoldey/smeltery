@@ -8,6 +8,7 @@ only Run is blocked by them.
 from __future__ import annotations
 
 import re
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any, Literal
@@ -27,6 +28,7 @@ from smeltery.gui.pipeline import Pipeline
 from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, smeltery_command
 from . import models as M
+from . import prebuilt as prebuilt_api
 from .common import ports, record, row
 from .work import pipeline_from_run, pipeline_issues
 
@@ -270,11 +272,18 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
     if len(given) != 1:
         raise HTTPException(status_code=400, detail="give exactly one of from_run, from_prebuilt, blank")
     store = _store(request)
-    if body.from_prebuilt is not None:
-        raise HTTPException(status_code=400, detail=f"unknown prebuilt pipeline {body.from_prebuilt!r}")
     notes: list[str] = []
     files: dict[str, Path] = {}
-    if body.blank is not None:
+    staging: tempfile.TemporaryDirectory[str] | None = None
+    if body.from_prebuilt is not None:
+        if prebuilt_api.folder(body.from_prebuilt) is None:
+            raise HTTPException(status_code=400, detail=f"unknown prebuilt pipeline {body.from_prebuilt!r}")
+        # R15: the config is copied EXACTLY, no workspace defaults. The example run goes in as run/, so the run store
+        # (which scans the Bench root) lists it and the UI can open the workspace with ?run=<its index>.
+        text = prebuilt_api.config_text(body.from_prebuilt)
+        staging = tempfile.TemporaryDirectory(prefix="smeltery-prebuilt-")
+        files = prebuilt_api.materialise(prebuilt_api.copy_plan(body.from_prebuilt), Path(staging.name))
+    elif body.blank is not None:
         b = body.blank
         try:
             text = dumps(
@@ -296,6 +305,9 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except FileExistsError:
         return JSONResponse(status_code=409, content={"reason": f"pipeline {body.name} already exists"})
+    finally:
+        if staging is not None:
+            staging.cleanup()
     return _doc(made, notes)
 
 

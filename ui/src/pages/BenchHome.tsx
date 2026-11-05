@@ -35,6 +35,23 @@ export function BenchHome() {
       navigate(`/pipelines/${d.name}?run=${fromRun}`);
     },
   });
+  const prebuilt = useQuery({ queryKey: ["prebuilt"], queryFn: () => unwrap(api.GET("/api/prebuilt")) });
+  const [prebuiltName, setPrebuiltName] = useState<Record<string, string>>({});
+  const startPrebuilt = useMutation({
+    mutationFn: async (p: string) => {
+      const name = (prebuiltName[p] ?? p).trim();
+      const made = await unwrap(api.POST("/api/pipelines", { body: { name, from_prebuilt: p } }));
+      // The example run was copied into the new pipeline's folder, so the run store lists it: find its index now.
+      const list = await unwrap(api.GET("/api/runs"));
+      const mine = list.find((r) => r.path.includes(`/pipelines/${made.name}/run/`));
+      return { name: made.name, idx: mine?.idx ?? null };
+    },
+    onSuccess: ({ name, idx }) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+      navigate(`/pipelines/${name}?${idx === null ? "" : `run=${idx}&`}step=measure`);
+    },
+  });
   const [blank, setBlank] = useState({ name: "", campaign: "", parent: "", parentSmiles: "", analogues: "" });
   const analogues = parseAnalogues(blank.analogues);
   const blankReady =
@@ -136,6 +153,38 @@ export function BenchHome() {
             ) : (
               <p className="empty-state">No pipelines yet. Start one from a run below, or open a run's Pipeline tab.</p>
             )}
+            <div role="group" aria-labelledby="prebuilt-h">
+              <h3 id="prebuilt-h">Start from a working pipeline</h3>
+              {prebuilt.isError ? (
+                <div className="banner" role="alert">
+                  Working pipelines could not be listed: {prebuilt.error.message}
+                </div>
+              ) : (
+                <ul>
+                  {(prebuilt.data ?? []).map((p) => (
+                    <li key={p.name} data-prebuilt={p.name}>
+                      <strong className="mono">{p.name}</strong>{" "}
+                      <span className="status" data-state={p.verdict.state}>
+                        {p.verdict.state === "UNRANKED" ? "does not resolve" : p.verdict.state}
+                      </span>
+                      <div>{p.about}</div>
+                      <div className="lede">{p.needs}</div>
+                      <label htmlFor={`prebuilt-name-${p.name}`}>Name of your copy</label>{" "}
+                      <input
+                        id={`prebuilt-name-${p.name}`}
+                        className="mono"
+                        value={prebuiltName[p.name] ?? p.name}
+                        onChange={(e) => setPrebuiltName((m) => ({ ...m, [p.name]: e.target.value }))}
+                      />{" "}
+                      <button type="button" disabled={startPrebuilt.isPending} onClick={() => startPrebuilt.mutate(p.name)}>
+                        Start from {p.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {startPrebuilt.isError ? <p className="field-error">{startPrebuilt.error.message}</p> : null}
+            </div>
             <form
               className="controls"
               aria-label="New pipeline"
