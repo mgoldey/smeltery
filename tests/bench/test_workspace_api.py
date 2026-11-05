@@ -64,6 +64,11 @@ def test_steps_mark_the_edited_step_its_old_value_and_the_later_steps(client_for
     assert n["value"] == 8 and n["changed_from"] == 6 and n["help"]
     assert steps["measure"]["state"] == "stale" and steps["cut"]["state"] == "stale"
     assert steps["active_site"]["state"] == "ready" and steps["checks"]["state"] == "off"
+    assert body["ligands"] == {
+        "campaign": "benzoic",
+        "parent": "benzoic",
+        "candidates": {"benzoic": "OC(=O)c1ccccc1", "4-F": "OC(=O)c1ccc(F)cc1"},
+    }
     # the diff is the real line diff of the text, comment kept
     changed = [d for d in body["diff"] if d["sign"] != " "]
     assert changed == [
@@ -108,7 +113,7 @@ def test_steps_carry_the_workspace_default_beside_each_value(client_for):
 def test_a_toml_that_is_not_a_pipeline_is_an_issue_not_a_500(client_for):
     c, _ = client_for()
     body = _steps(c, 'campaign = "x"\ncandidates = 3\n')
-    assert body["steps"] == [] and body["pipeline_issues"][0]["level"] == "error"
+    assert body["steps"] == [] and body["ligands"] is None and body["pipeline_issues"][0]["level"] == "error"
 
 
 # ------------------------------------------------------------------------------------------------ edits
@@ -150,6 +155,7 @@ def test_removing_a_method_removes_its_lines(client_for):
     c, _ = client_for()
     added = _edit(c, HAND, "add", "gfn2").json()["toml"]
     assert "xtb = true" in added
+    assert _by_key(_steps(c, added))["checks"]["placed"] == ["gfn2"]
     back = _edit(c, added, "remove", "gfn2").json()["toml"]
     assert "xtb = true" not in back and "# poses per ligand" in back
 

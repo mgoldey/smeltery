@@ -85,6 +85,7 @@ class StepParam(BaseModel):
     kind: str
     changed_from: Any = Field(description="the baseline's value when it differs, else null")
     workspace_default: Any = Field(description="the Methods tab's default for this knob, null when none is set")
+    choices: list[Any] = []  # a `choice` knob's options, from the catalog
 
 
 class StepLink(BaseModel):
@@ -100,6 +101,7 @@ class StepOut(BaseModel):
     inputs: list[StepLink]
     gives: list[StepLink]
     methods: list[str]
+    placed: list[str]  # the offered methods this draft places, in the step's order
     chosen: str | None
     params: list[StepParam]
     issues: list[M.Issue]
@@ -110,8 +112,15 @@ class DiffLine(BaseModel):
     line: str
 
 
+class Ligands(BaseModel):
+    campaign: str
+    parent: str
+    candidates: dict[str, str]
+
+
 class StepsOut(BaseModel):
     steps: list[StepOut]
+    ligands: Ligands | None = Field(description="what the Ligands step holds; null when the text is not a pipeline")
     pipeline_issues: list[M.Issue] = Field(description="issues that belong to no one step: shown above the drawing")
     diff: list[DiffLine] = Field(description="the line diff from baseline_toml to toml, context lines included")
 
@@ -333,7 +342,7 @@ def pipeline_steps(request: Request, body: StepsRequest) -> StepsOut:
     base = _parse_or_400(body.baseline_toml) if body.baseline_toml is not None else None
     diff = [DiffLine(sign=s, line=ln) for s, ln in diff_lines(body.baseline_toml or body.toml, body.toml)]
     if p is None:
-        return StepsOut(steps=[], pipeline_issues=_issues(body.toml), diff=diff)
+        return StepsOut(steps=[], ligands=None, pipeline_issues=_issues(body.toml), diff=diff)
     views = step_model.steps(p, base, _workspace_defaults(request))
     out = [
         StepOut(
@@ -344,13 +353,19 @@ def pipeline_steps(request: Request, body: StepsRequest) -> StepsOut:
             inputs=[StepLink(step=d["from"], text=d["text"]) for d in v.inputs],
             gives=[StepLink(step=d["to"], text=d["text"]) for d in v.gives],
             methods=v.methods,
+            placed=[m for m in v.methods if m in p.keys()],
             chosen=v.chosen,
-            params=[StepParam(**x) for x in v.params],
+            params=[StepParam(**x, choices=list(method(x["method"]).param(x["name"]).choices)) for x in v.params],
             issues=[_issue(x) for x in v.issues],
         )
         for v in views
     ]
-    return StepsOut(steps=out, pipeline_issues=[_issue(x) for x in step_model.pipeline_issues(p, views)], diff=diff)
+    ligands = Ligands(
+        campaign=str(p.campaign), parent=str(p.parent), candidates={k: str(v) for k, v in p.candidates.items()}
+    )
+    return StepsOut(
+        steps=out, ligands=ligands, pipeline_issues=[_issue(x) for x in step_model.pipeline_issues(p, views)], diff=diff
+    )
 
 
 def _patch(target: dict, before: dict, after: dict) -> None:
