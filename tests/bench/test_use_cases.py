@@ -187,3 +187,31 @@ def test_launch_run_writes_the_given_text_not_a_regenerated_one(tmp_path, pipeli
         pipeline, out_dir=tmp_path / "out", text=text
     )
     assert (tmp_path / "out" / "config.toml").read_text() == text
+
+
+def test_launch_refuses_a_live_temporal_out_before_writing_anything(tmp_path, pipeline, monkeypatch):
+    """`smeltery run`'s guard runs in Launch too, before OUT/config.toml or any staged input is written."""
+    import smeltery.temporal_run as temporal_run
+    from smeltery.bench.use_cases.launch_run import LiveRunRefused
+
+    asked = []
+
+    def refuse(out, sha, temporal):
+        asked.append((out, temporal))
+        return "a Temporal run is still running"
+
+    monkeypatch.setattr(temporal_run, "guard_out", refuse)
+    q, out = FakeTaskQueue(), tmp_path / "out"
+    uc = LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock())
+    with pytest.raises(LiveRunRefused, match="still running"):
+        uc.execute(pipeline, out=out)
+    assert asked == [(out, False)] and not out.exists() and q.submitted == []
+
+
+def test_relaunching_an_unchanged_config_does_not_rewrite_it(tmp_path, pipeline):
+    q, out = FakeTaskQueue(), tmp_path / "out"
+    uc = LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock())
+    uc.execute(pipeline, out=out)
+    before = (out / "config.toml").stat().st_mtime_ns
+    uc.execute(pipeline, out=out)
+    assert (out / "config.toml").stat().st_mtime_ns == before

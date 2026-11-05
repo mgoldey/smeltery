@@ -640,3 +640,35 @@ def test_the_record_keeps_the_scaffold_maps_as_pose_maps():
     assert set(maps) == {"propanol", "butanol"} and all(maps.values())
     assert rec.results["pose_maps"] == {k: [list(p) for p in v] for k, v in maps.items()}
     assert json.loads(rec.to_json())["results"]["pose_maps"] == rec.results["pose_maps"]
+
+
+def test_stage_seconds_belong_to_their_own_plan(tmp_path):
+    """Two plans (two runs on one worker) keep their own stage seconds: running one never moves the other's."""
+    import time
+
+    from smeltery import cli
+
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(BASE)
+    a = build_plan(load_config(cfg))
+    b = build_plan(load_config(cfg))
+    assert a.stage_seconds is not b.stage_seconds and "poses" in a.stage_seconds
+
+    def slow(p):
+        time.sleep(0.5)
+        for c in p.candidates:
+            c.per_pose["dE_int"] = [0.0] * len(c.poses)
+
+    def fast(p):
+        for c in p.candidates:
+            c.per_pose["dE_int"] = [0.0] * len(c.poses)
+
+    rec_b, _ = run_plan(b, measure=slow)
+    rec_a, _ = run_plan(a, measure=fast)
+
+    def measured(rec):
+        (row,) = [r for r in rec.results["funnel"] if r["kind"] == "measure"]
+        return row["seconds"]
+
+    assert measured(rec_b) >= 0.5 and measured(rec_a) < 0.25
+    assert cli._STAGE_SECONDS.get() is a.stage_seconds  # the plan last run is the current one

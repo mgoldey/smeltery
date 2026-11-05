@@ -131,3 +131,33 @@ def test_an_unknown_candidate_name_is_a_config_error_with_a_message(tmp_path, ca
     assert rc == 2
     err = capsys.readouterr().err
     assert "nope" in err
+
+
+@pytest.mark.needs_ferric
+def test_combine_refuses_a_partial_of_other_inputs_or_another_staged_config(tmp_path, capsys):
+    """A combine states one config: a partial measured with other inputs (its input digest is not the one this config
+    gives it) is refused, and so are partials that staged different configs (results.config sha256)."""
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(SMALL)
+    out = tmp_path / "out"
+    _run_all_partials(cfg, out)
+    good = {p: p.read_text() for p in out.glob("partial-*.json")}
+    other = tmp_path / "other.toml"
+    other.write_text(SMALL.replace("z = 2.0", "z = 3.0"))  # [cut] z is an input: another digest
+    assert main(["run", str(other), "--out", str(out), "--only-candidate", "butanol"]) == 0
+    assert main(["run", str(cfg), "--out", str(out), "--combine"]) == 2
+    err = capsys.readouterr().err
+    assert "partial-butanol.json was measured with other inputs" in err and "re-run that partial" in err
+    assert not list(out.glob("run-*.json"))
+    for p, text in good.items():
+        p.write_text(text)
+    # same inputs, but one partial staged another config file (a comment differs): which config is the record's?
+    p = out / "partial-propanol.json"
+    data = json.loads(p.read_text())
+    data["results"]["config"]["sha256"] = "f" * 64
+    p.write_text(json.dumps(data))
+    assert main(["run", str(cfg), "--out", str(out), "--combine"]) == 2
+    err = capsys.readouterr().err
+    assert "the partials staged different configs" in err and "partial-propanol.json: ffffffffffff" in err
+    p.write_text(good[p])
+    assert main(["run", str(cfg), "--out", str(out), "--combine"]) == 0

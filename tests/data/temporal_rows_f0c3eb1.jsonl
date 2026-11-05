@@ -1,0 +1,3 @@
+{"candidate": "parent", "pose": 3, "leg": "vacuum", "converged": true, "iterations": 36, "energy_hartree": -1839.0237205992034, "seconds": 741.9206357750008, "field_model": null, "rung": 0, "digest": "ccb0c68648fe"}
+{"candidate": "parent", "pose": 2, "leg": "vacuum", "converged": true, "iterations": 42, "energy_hartree": -1839.0237205958565, "seconds": 793.1698247140012, "field_model": null, "rung": 0, "digest": "ccb0c68648fe"}
+{"candidate": "parent", "pose": 0, "leg": "vacuum", "converged": true, "iterations": 48, "energy_hartree": -1839.0237205977091, "seconds": 799.1765054969983, "field_model": null, "rung": 0, "digest": "ccb0c68648fe"}

@@ -22,6 +22,10 @@ def uses_temporal(task_queue) -> bool:
     return isinstance(task_queue, TemporalTaskQueue)
 
 
+class LiveRunRefused(ValueError):
+    """OUT holds a Temporal run that is still running (or whose server cannot say): nothing was written into it."""
+
+
 class LaunchRun:
     def __init__(self, task_queue, run_store, artifact_store, identity, clock, root: Path | str | None = None):
         self.root = Path(root) if root is not None else Path.cwd()  # the Bench root: where relative paths start
@@ -47,12 +51,17 @@ class LaunchRun:
         if out_dir is None:
             out_dir = out if out is not None else Path("out")
         out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
         # relative paths resolve against `config_dir` (the folder the config lives in, as `smeltery run` does);
         # None means the Bench root
         base = Path(config_dir) if config_dir is not None else self.root
-        staged, _ = stage_inputs(text if text is not None else pipeline.to_toml(), base, out_dir)
-        (out_dir / "config.toml").write_text(staged)
+        source = text if text is not None else pipeline.to_toml()
+        self._guard(out_dir, source, base, temporal=command is None and uses_temporal(self.task_queue))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        staged, _ = stage_inputs(source, base, out_dir)
+        dest = out_dir / "config.toml"
+        # an unchanged config is not rewritten (a live run reads it)
+        if not dest.is_file() or dest.read_text() != staged:
+            dest.write_text(staged)
         if command is None:
             command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
             if uses_temporal(self.task_queue):  # the run itself is then a durable workflow, not one long process
@@ -64,6 +73,17 @@ class LaunchRun:
             note=f"user={self.identity.current()} time={self.clock.now().isoformat()}",
         )
         return task_id
+
+    @staticmethod
+    def _guard(out_dir: Path, text: str, base: Path, temporal: bool) -> None:
+        """`smeltery run`'s own guard, before anything is written into OUT: a live Temporal run there is refused,
+        unless this launch is `--temporal` with the same staged config (the CLI then attaches to it)."""
+        from smeltery.cli import staged_sha256
+        from smeltery.temporal_run import guard_out
+
+        why = guard_out(out_dir, lambda: staged_sha256(text, base), temporal)
+        if why:
+            raise LiveRunRefused(why)
 
     def execute(self, *a, **kw):
         return self.run(*a, **kw)

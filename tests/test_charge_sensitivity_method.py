@@ -214,6 +214,31 @@ def test_a_pose_missing_on_either_side_is_dropped_from_both():
     assert out["paired_ddE"]["c"]["n"] == 2 and out["paired_ddE"]["a"]["n"] == 1
 
 
+def test_after_a_pose_drop_the_two_models_pair_the_same_original_poses():
+    """The run dropped the parent's pose 0 (its primary field leg failed): per_pose holds only original poses 1 and 2,
+    `pose_index` says so, and the extra model's values keep all three original poses. Pose i under AMBER must pair
+    with pose i under CHARMM; hand-computed below."""
+    p = _Plan(["p", "a", "b"])
+    rec = RunRecord(
+        "t",
+        {},
+        [],
+        {
+            "per_pose": {"p": {"dE_int": [10.0, 20.0]}, "a": {"dE_int": [11.0, 23.0]}, "b": {"dE_int": [12.0, 18.0]}},
+            "pose_index": {"p": [1, 2], "a": [1, 2], "b": [1, 2]},
+            "candidate_order": ["p", "a", "b"],
+        },
+    )
+    measured = {"CHARMM": {"p": [100.0, 30.0, 40.0], "a": [101.0, 31.0, 44.0], "b": [99.0, 33.0, 38.0]}}
+    out = cs_mod.ChargeSensitivity().summarize(p, rec, measured)["CHARMM"]
+    # a: AMBER poses 1, 2 -> (11-10, 23-20) = (1, 3), mean 2; CHARMM poses 1, 2 -> (31-30, 44-40) = (1, 4), mean 2.5
+    assert out["paired_ddE"]["a"] == {"primary": 2.0, "model": 2.5, "delta": 0.5, "n": 2}
+    # b: AMBER (2, -2), mean 0; CHARMM (33-30, 38-40) = (3, -2), mean 0.5
+    assert out["paired_ddE"]["b"] == {"primary": 0.0, "model": 0.5, "delta": 0.5, "n": 2}
+    # pose 0 is the parent's drop, reported once; no analogue lost a pose of its own
+    assert out["parent_dropped_poses"] == [0] and out["dropped_poses"] == {} and out["n_dropped"] == 1
+
+
 def test_fewer_than_two_comparable_analogues_is_recorded_not_raised():
     p = _Plan(["p", "a", "b"])
     primary = {"p": {"dE_int": [0.0]}, "a": {"dE_int": [1.0]}, "b": {"dE_int": [2.0]}}

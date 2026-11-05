@@ -4,7 +4,8 @@ The same module serves the test process (`install()` puts it in `sys.modules`) a
 runner spawns (run as a script: it installs itself, then calls `smeltery.temporal_run.child_main`), so a plain run and
 a Temporal run compute the same numbers. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
 
-    {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "hang" | "hang_once" | "crash"}, "dir": "<scratch dir>"}
+    {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "hang" | "hang_once" | "crash"}, "dir": "<scratch dir>",
+     "build": {"git_sha": "...", "dirty": false}}   # optional: what `ferric.__build__` reports
 
 `<label>` is the xyz comment line ("ethanol pose 0"), `<leg>` "vacuum" or "field". Every completed SCF appends a line
 to `<dir>/calls.jsonl`; every started one appends its pid to `<dir>/pids`. "hang" sleeps for 10 minutes; "hang_once"
@@ -88,7 +89,16 @@ def make() -> types.ModuleType:
     which restores the real ferric afterwards."""
     mod = types.ModuleType("ferric")
     mod.BasisSet, mod.Molecule, mod.run_rhf = BasisSet, Molecule, run_rhf  # type: ignore[attr-defined]
+    mod.__getattr__ = _module_getattr  # type: ignore[attr-defined]
     return mod
+
+
+def _module_getattr(name: str):
+    """`ferric.__build__` is read from the config's "build" (absent: no stamp), at each access, so a test can change
+    the build between SCFs."""
+    if name == "__build__":
+        return _cfg().get("build")
+    raise AttributeError(name)
 
 
 def install() -> types.ModuleType:

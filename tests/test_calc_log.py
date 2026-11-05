@@ -74,9 +74,13 @@ def test_a_failed_scf_leaves_its_log(tmp_path):
     assert any(r["converged"] is False for r in rows)
 
 
-def _synthetic_partial(out, name, rows):
-    """What `--only-candidate NAME` leaves: partial-NAME.json naming a calcs-NAME.jsonl (ferric-free)."""
-    from smeltery.cli import calc_file_name
+def _synthetic_partial(out, name, rows, cfg):
+    """What `--only-candidate NAME` leaves: partial-NAME.json naming a calcs-NAME.jsonl (ferric-free), with the input
+    digest that config gives the partial (a combine refuses a partial of other inputs)."""
+    from smeltery.cli import build_plan, calc_file_name, load_config, partial_digest
+
+    plan = build_plan(load_config(cfg))
+    digest = partial_digest(plan, plan.parent.name, name)
 
     calcs = None
     if rows is not None:
@@ -84,7 +88,8 @@ def _synthetic_partial(out, name, rows):
         (out / f).write_text("".join(json.dumps(r) + "\n" for r in rows))
         calcs = {"file": f, "n": len(rows)}
     pp = {"dE_int": [0.0, 0.1] if name == "ethanol" else [1.0, 1.1]}
-    (out / f"partial-{name}.json").write_text(json.dumps({"results": {"per_pose": {name: pp}, "calcs": calcs}}))
+    rec = {"input_digest": digest, "results": {"per_pose": {name: pp}, "calcs": calcs}}
+    (out / f"partial-{name}.json").write_text(json.dumps(rec))
 
 
 def _row(cand, pose, leg):
@@ -111,8 +116,8 @@ def test_combine_merges_the_partial_logs_instead_of_overwriting(tmp_path):
     cfg.write_text(TINY)
     out = tmp_path / "out"
     out.mkdir()
-    _synthetic_partial(out, "ethanol", [_row("ethanol", 0, "vacuum"), _row("ethanol", 0, "field")])
-    _synthetic_partial(out, "propanol", [_row("propanol", 0, "vacuum")])
+    _synthetic_partial(out, "ethanol", [_row("ethanol", 0, "vacuum"), _row("ethanol", 0, "field")], cfg)
+    _synthetic_partial(out, "propanol", [_row("propanol", 0, "vacuum")], cfg)
     assert main(["run", str(cfg), "--out", str(out), "--combine"]) == 0
     assert len(_lines(out / "calcs.jsonl")) == 3
     rec = json.loads(next(out.glob("run-*.json")).read_text())
@@ -125,8 +130,8 @@ def test_combine_without_partial_logs_never_writes_an_empty_log_or_a_false_zero(
     cfg.write_text(TINY)
     out = tmp_path / "out"
     out.mkdir()
-    _synthetic_partial(out, "ethanol", None)
-    _synthetic_partial(out, "propanol", None)
+    _synthetic_partial(out, "ethanol", None, cfg)
+    _synthetic_partial(out, "propanol", None, cfg)
     (out / "calcs.jsonl").write_text('{"keep": "me"}\n')
     assert main(["run", str(cfg), "--out", str(out), "--combine"]) == 0
     assert (out / "calcs.jsonl").read_text() == '{"keep": "me"}\n'

@@ -24,6 +24,9 @@ router = APIRouter(prefix="/api", tags=["prebuilt"])
 NOT_INPUTS = {"pipeline.toml", "about.md", "run", "imported"}
 RUN_DIR = "run"
 IMPORTED_DIR = "imported"
+#: What a --temporal run keeps under its OUT while it runs (temporal_run.WORK_DIR, temporal_run.MARKER): its scratch
+#: and its live marker, not part of the example run. A copy carrying the marker would claim a workflow in the copy.
+NOT_RUN_FILES = ("temporal", "running.json")
 
 
 class Prebuilt(BaseModel):
@@ -63,12 +66,19 @@ def config_text(name: str) -> str:
     return f.joinpath("pipeline.toml").read_bytes().decode("utf-8")
 
 
+def _copied(rel: str) -> bool:
+    parts = rel.split("/")
+    if parts[0] == RUN_DIR:
+        return len(parts) > 1 and not any(p in NOT_RUN_FILES for p in parts[1:])
+    return parts[0] not in NOT_INPUTS
+
+
 def copy_plan(name: str) -> dict[str, Traversable]:
     """{relative path inside the new pipeline folder: packaged file}: the inputs where pipeline.toml reads them, and
-    the example run under `run/`."""
+    the example run under `run/` without a --temporal run's scratch (`temporal/`) or live marker (`running.json`)."""
     f = folder(name)
     assert f is not None
-    return {rel: node for rel, node in _walk(f) if rel.split("/")[0] not in NOT_INPUTS or rel.startswith(RUN_DIR + "/")}
+    return {rel: node for rel, node in _walk(f) if _copied(rel)}
 
 
 def _example_verdict(f: Traversable) -> M.Verdict:

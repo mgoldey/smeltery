@@ -10,9 +10,12 @@ Interface (the Temporal runner, task D4, calls the first two; `run` is the seria
 * `extra_fields(plan, ctx) -> dict[str, list[PointCharge]]`: model name -> the pocket charged by `pdb2pqr --ff=<model>`,
   each a `PocketField` whose provenance records the force field.
 * `summarize(plan, rec, measured) -> dict`: `measured[model][candidate]` is that candidate's per-pose dE_int under the
-  model (None for a failed or dropped pose). Returns `{model: {"paired_ddE", "sign_flips", "spearman", ...}}`, paired
-  against the primary per-pose values in `rec.results["per_pose"]`. Pairwise drop: a pose missing on either side (or
-  for the parent on either side) is dropped from both, and each model's entry lists the dropped poses and counts them.
+  model, by ORIGINAL pose index (None for a failed or dropped pose). Returns `{model: {"paired_ddE", "sign_flips",
+  "spearman", ...}}`, paired against the primary per-pose values in `rec.results["per_pose"]`. After a pairwise pose
+  drop those hold only each candidate's kept poses; `rec.results["pose_index"]` (each candidate's kept original
+  indices) maps them back first, so pose i under one model always pairs with pose i under the other. Pairwise drop: a
+  pose missing on either side (or for the parent on either side) is dropped from both, and each model's entry lists
+  the dropped poses (original indices) and counts them.
 * `extra_models(cfg) -> list[str]`: the models the section asks for, without pdb2pqr (for counting SCFs at --plan).
 * `run(plan, rec, ctx)`: per model, its field, then every pose under it (serially; an SCF that does not converge is
   recorded as None with its error, not retried), then `summarize`. Merged into `results.charge_sensitivity`. A field
@@ -175,7 +178,20 @@ class ChargeSensitivity:
         from ..model import Candidate
 
         results = rec.results
-        primary = {k: (v or {}).get(QUANTITY) for k, v in (results.get("per_pose") or {}).items()}
+        index = results.get("pose_index") or {}
+
+        def by_original(name: str, compact: list | None) -> list | None:
+            """The primary values at their original pose indices (None at a dropped pose): per_pose is compacted to the
+            kept poses after a pairwise drop, while `measured` keeps every original index."""
+            keep = index.get(name)
+            if keep is None or compact is None:
+                return compact
+            full: list = [None] * (max(keep) + 1 if keep else 0)
+            for k, i in enumerate(keep):
+                full[i] = compact[k] if k < len(compact) else None
+            return full
+
+        primary = {k: by_original(k, (v or {}).get(QUANTITY)) for k, v in (results.get("per_pose") or {}).items()}
         order = list(results.get("candidate_order") or [c.name for c in plan.candidates])
         parent = plan.parent.name
         smiles = {c.name: c.smiles for c in plan.candidates}
@@ -202,6 +218,8 @@ class ChargeSensitivity:
             excluded: list[str] = []
             n_par = max(len(par_a), len(par_b))
             parent_gone = [i for i in range(n_par) if at(par_a, i) is None or at(par_b, i) is None]
+            # poses the run itself dropped for the parent (so for every analogue): the parent's, not each analogue's
+            by_parent = set(range(n_par)) - set(index[parent]) if parent in index else set()
             for name in order:
                 if name == parent:
                     continue
@@ -209,7 +227,8 @@ class ChargeSensitivity:
                 n = max(len(a), len(b), len(par_a), len(par_b))
                 # pairwise: a pose missing on either side (the analogue's or the parent's) is dropped from both
                 keep = [i for i in range(n) if all(at(x, i) is not None for x in (a, b, par_a, par_b))]
-                own = [i for i in range(n) if at(a, i) is None or at(b, i) is None]  # its own missing poses
+                # its own missing poses
+                own = [i for i in range(n) if (at(a, i) is None or at(b, i) is None) and i not in by_parent]
                 if own:
                     dropped[name] = own
                 if not keep:

@@ -103,6 +103,22 @@ def sha256_file(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def code_identity() -> dict:
+    """The build this process runs: `{"ferric": {"git_sha", "dirty"}, "smeltery": {"commit", "dirty"}}` (ferric from
+    `ferric.__build__`, None where it has none; smeltery from its install, an editable one by its checkout's HEAD and
+    dirty flag). Every calcs.jsonl row an activity writes carries it, so finalize can say which code measured what."""
+    from .record import _ferric_build, smeltery_identity
+
+    fb = _ferric_build()
+    sm = smeltery_identity()
+    ferric = {"git_sha": fb["git_sha"], "dirty": bool(fb.get("dirty"))} if fb else {"git_sha": None, "dirty": None}
+    return {"ferric": ferric, "smeltery": {"commit": sm.get("commit"), "dirty": sm.get("dirty")}}
+
+
 # ------------------------------------------------------------------------------------------------ the data passed
 
 
@@ -383,7 +399,7 @@ def _work(out: str) -> dict:
 
 
 def scf_child(inp: ScoreInput) -> dict:
-    """One SCF leg, in the child process: {converged, iterations, energy_hartree, seconds}."""
+    """One SCF leg, in the child process: {converged, iterations, energy_hartree, seconds, build}."""
     import ferric
     import numpy as np
 
@@ -391,6 +407,7 @@ def scf_child(inp: ScoreInput) -> dict:
     from .tiers import FieldInteraction
 
     check_config(inp.config, inp.config_sha)
+    build = code_identity()  # read now, as near the import of the code that runs as can be
     work = _work(inp.out)
     tier = FieldInteraction(**work["tier"])  # the plan's tier knobs, as prepare built them: no config parsing here
     c = work["candidates"][inp.candidate]
@@ -407,7 +424,22 @@ def scf_child(inp: ScoreInput) -> dict:
         "iterations": int(res.iterations),
         "energy_hartree": float(res.energy),
         "seconds": float(secs),
+        "build": build,  # the child's: it imported the code that ran this SCF
     }
+
+
+def scf_row(inp: ScoreInput, got: dict, digest: str, started_utc: str) -> dict:
+    """The calcs.jsonl line of one SCF leg the child ran (`got`, `scf_child`'s dict): the tier's row, plus its field
+    model, rung, the run's input digest, when it started and the build that ran it."""
+    from types import SimpleNamespace
+
+    from .tiers import _calc_entry
+
+    res = SimpleNamespace(converged=got["converged"], iterations=got["iterations"])
+    row = _calc_entry(inp.candidate, inp.pose, inp.leg, res, got["energy_hartree"], got["seconds"])
+    row.update(field_model=inp.field_model, rung=inp.rung, digest=digest[:12])
+    row.update(started_utc=started_utc, build=got.get("build"))
+    return row
 
 
 def child_main(argv: list[str]) -> int:
@@ -482,12 +514,92 @@ def _refusal(blocked: list[tuple[tuple, dict | None]]) -> str:
     return "the run is not finished: " + ". ".join(parts) + "."
 
 
+UNRECORDED = "unrecorded"
+#: How the measurement step's seconds are counted under --temporal: every SCF's own seconds, summed over legs that ran
+#: in parallel (CPU-seconds at one thread per leg). Not wall time.
+SUMMED_CPU_SECONDS = "summed_cpu_seconds"
+
+
+def builds_of(rows: list[dict]) -> list[dict]:
+    """The distinct code identities across the log's rows, each with how many rows it wrote. Rows without one (written
+    before rows were stamped, f0c3eb1 and earlier) are one `{"identity": "unrecorded"}` entry."""
+    counts: dict[str, int] = {}
+    ids: dict[str, dict] = {}
+    for r in rows:
+        b = r.get("build")
+        key = json.dumps(b, sort_keys=True) if isinstance(b, dict) else UNRECORDED
+        counts[key] = counts.get(key, 0) + 1
+        if isinstance(b, dict):
+            ids[key] = b
+    out = [{"identity": "recorded", **ids[k], "n_rows": counts[k]} for k in sorted(ids)]
+    if UNRECORDED in counts:
+        out.append({"identity": UNRECORDED, "n_rows": counts[UNRECORDED]})
+    return out
+
+
+def _mixed_refusal(builds: list[dict]) -> str:
+    def name(b: dict) -> str:
+        f, m = b.get("ferric") or {}, b.get("smeltery") or {}
+
+        def one(sha, dirty) -> str:
+            return f"{str(sha)[:12] if sha else 'unstamped'}{' (dirty)' if dirty else ''}"
+
+        return f"ferric {one(f.get('git_sha'), f.get('dirty'))} + smeltery {one(m.get('commit'), m.get('dirty'))}"
+
+    known = [b for b in builds if b["identity"] != UNRECORDED]
+    each = "; ".join(f"{name(b)}: {b['n_rows']} row(s)" for b in known)
+    return (
+        f"calcs.jsonl was written by {len(known)} different builds ({each}): its SCFs are not one code's measurement. "
+        "Re-measure with one build (a fresh --out), or set [run] allow_mixed_builds = true to record the run as mixed "
+        "(results.builds lists every build and its rows)"
+    )
+
+
+def timing_of(rows: list[dict]) -> tuple[str | None, int, float]:
+    """(the earliest SCF row's start, how many SCF rows carry no start, the SCF rows' summed seconds)."""
+    scf = [r for r in rows if "outcome" not in r]
+    timed = sorted(r["started_utc"] for r in scf if isinstance(r.get("started_utc"), str))
+    return (timed[0] if timed else None), len(scf) - len(timed), sum(float(r.get("seconds") or 0.0) for r in scf)
+
+
+def _stamp_runner(rec, rows: list[dict], builds: list[dict]) -> None:
+    """What only the log knows about a --temporal run: that it ran under Temporal, which builds wrote its rows, when its
+    first SCF started, and its measurement's seconds (summed CPU-seconds, not wall time)."""
+    started, untimed, secs = timing_of(rows)
+    if started is not None:
+        rec.started_utc = started
+        source = "the earliest calcs.jsonl row's start"
+        if untimed:
+            source += f"; {untimed} earlier-format row(s) carry no start, so the run may have started earlier"
+    else:
+        source = "finalize's own clock: no calcs.jsonl row carries a start (all predate start stamping)"
+    rec.results["runner"] = "temporal"
+    rec.results["builds"] = builds
+    rec.results["timing"] = {
+        "started_utc_from": source,
+        "rows_without_start": untimed,
+        "measure_seconds": secs,
+        "measure_seconds_kind": SUMMED_CPU_SECONDS,
+    }
+    for row in rec.results.get("funnel") or []:
+        if row.get("kind") == "measure":
+            row["seconds"], row["seconds_kind"] = secs, SUMMED_CPU_SECONDS
+
+
+def clear_marker(out: str | Path, config_sha: str) -> None:
+    """Remove OUT/temporal/running.json when it names this run (its staged config): the run is over."""
+    marker = Path(out) / WORK_DIR / MARKER
+    with contextlib.suppress(OSError, ValueError):
+        if json.loads(marker.read_text()).get("config_sha") == config_sha:
+            marker.unlink()
+
+
 def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     """The run record, from the per-SCF log, exactly as a non-Temporal run builds it (`run_plan`, `write_outputs`).
     Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
     import numpy as np
 
-    from .cli import StageError, build_plan, load_config, run_plan, write_outputs
+    from .cli import StageError, allow_mixed_builds, build_plan, load_config, run_plan, write_outputs
     from .model import HARTREE_TO_KCAL
 
     out = Path(inp.out)
@@ -516,6 +628,9 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     ]  # a field leg after an unconverged vacuum leg was not run: the vacuum leg is what is reported
     if blocked:
         raise ValueError(_refusal(blocked))
+    builds = builds_of(rows)
+    if sum(1 for b in builds if b["identity"] != UNRECORDED) > 1 and not allow_mixed_builds(cfg):
+        raise ValueError(_mixed_refusal(builds))
 
     def drop(c: str, i: int, legname: str, model: str | None, st: dict) -> None:
         o = st.get("outcome") or {}
@@ -597,6 +712,8 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
         fn = getattr(spec.hook, "summarize", None)
         if fn is None:
             raise ValueError(f"[{spec.section}] has extra_fields but no summarize: --temporal cannot finish it")
+        # per ORIGINAL pose index (None where a pose was dropped); summarize maps the compacted primary values in
+        # rec.results["per_pose"] back to original indices through results.pose_index before pairing
         measured = {m: v for m, v in values.items() if work["model_owner"].get(m) == spec.key}
         got = fn(plan, rec, measured)
         if not isinstance(got, dict):
@@ -606,7 +723,9 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
         rec.results["dropped_poses"] = dropped
     if inp.config_info is not None:
         rec.results["config"] = inp.config_info
+    _stamp_runner(rec, rows, builds)
     path = write_outputs(plan, rec, out, calc_rows=rows)  # calcs.jsonl rewritten atomically, duplicates removed
+    clear_marker(out, inp.config_sha)
     n_scfs = sum(1 for r in rows if "outcome" not in r)
     return RunSummary(str(path), rec.input_digest, n_scfs, n_resumed, len(dropped), n_dup, torn, dropped)
 
@@ -671,14 +790,9 @@ if TEMPORAL_AVAILABLE:
             row = next((r for r in rows if "outcome" not in r and _ident(r) == ident and r["rung"] == inp.rung), None)
             cpu = 0.0
             if row is None:  # not already logged by an attempt whose completion was lost
+                started = utc_now()
                 got = await _heartbeating(lambda: self._child(inp), inp.timeout_s or None)
-                from types import SimpleNamespace
-
-                from .tiers import _calc_entry
-
-                res = SimpleNamespace(converged=got["converged"], iterations=got["iterations"])
-                row = _calc_entry(inp.candidate, inp.pose, inp.leg, res, got["energy_hartree"], got["seconds"])
-                row.update(field_model=inp.field_model, rung=inp.rung, digest=digest[:12])
+                row = scf_row(inp, got, digest, started)
                 append_row(inp.out, row)
                 cpu = got["seconds"]
             if not row["converged"]:
@@ -720,7 +834,7 @@ if TEMPORAL_AVAILABLE:
 
         @activity.defn(name="pipeline_record_outcome")
         async def record_outcome(self, out: str, row: dict) -> None:
-            await asyncio.to_thread(append_row, out, row)
+            await asyncio.to_thread(lambda: append_row(out, {**row, "build": code_identity()}))
 
         @activity.defn(name="pipeline_finalize")
         async def finalize(self, inp: RunInput, n_resumed: int) -> RunSummary:
@@ -941,7 +1055,9 @@ async def start_and_wait(
     while True:
         done, _ = await asyncio.wait({result}, timeout=poll_s)
         if done:
-            return result.result()
+            summary = result.result()
+            clear_marker(inp.out, inp.config_sha)  # finalize removed it too, unless this call wrote it after
+            return summary
         if not warned and time.monotonic() - t0 >= no_worker_after_s and await _pollers(client, task_queue) == 0:
             log(
                 f"no worker is polling task queue {task_queue!r}: start one with "
@@ -964,32 +1080,47 @@ def _host_of(client) -> str:
         return DEFAULT_HOST
 
 
-def guard_out(out: Path, staged_sha: str | None, temporal: bool) -> str | None:
+def guard_out(out: Path, staged_sha, temporal: bool, log=None) -> str | None:
     """A refusal message when OUT holds a Temporal run that is still running (re-staging its config would change what
-    its activities read), else None. `--temporal` with the same staged config attaches instead. A server that cannot
-    be reached is a refusal too: whether the run is live cannot be checked."""
+    its activities read), else None. Call it before writing anything into OUT. `--temporal` with the same staged
+    config attaches instead; `staged_sha` is that sha256, or a callable computing it (called only when it decides).
+    A server that cannot be reached is a refusal too: whether the run is live cannot be checked. A marker whose
+    workflow is not running (the server says so) is stale: it is removed, and `log` (stderr by default) says so."""
     marker = Path(out) / WORK_DIR / MARKER
     if not marker.is_file() or not TEMPORAL_AVAILABLE:
         return None
     m = json.loads(marker.read_text())
 
     async def status():
-        from temporalio.client import WorkflowExecutionStatus
+        from temporalio.service import RPCError, RPCStatusCode
 
         client = await connect(m.get("host") or DEFAULT_HOST)
-        d = await client.get_workflow_handle(m["workflow_id"]).describe()
-        return d.status == WorkflowExecutionStatus.RUNNING
+        try:
+            d = await client.get_workflow_handle(m["workflow_id"]).describe()
+        except RPCError as e:
+            if e.status == RPCStatusCode.NOT_FOUND:  # the server is up and has no such workflow
+                return "NOT_FOUND"
+            raise
+        return d.status
 
     try:
-        running = asyncio.run(status())
+        st = asyncio.run(status())
     except Exception as e:
         return (
             f"{out} holds a Temporal run (workflow {m['workflow_id']}) and its server cannot be asked whether it is "
             f"still running ({type(e).__name__}); start the server, or remove {marker} if you know the run is over"
         )
-    if not running:
+    from temporalio.client import WorkflowExecutionStatus
+
+    if st != WorkflowExecutionStatus.RUNNING:
+        with contextlib.suppress(OSError):
+            marker.unlink()
+        state = getattr(st, "name", str(st))
+        (log or (lambda s: print(s, file=sys.stderr)))(
+            f"note: removed a stale {marker} (workflow {m['workflow_id']} is {state}, not running)"
+        )
         return None
-    if temporal and staged_sha == m.get("config_sha"):
+    if temporal and (staged_sha() if callable(staged_sha) else staged_sha) == m.get("config_sha"):
         return None
     return (
         f"a Temporal run (workflow {m['workflow_id']}) is still running in {out}; re-staging its config would change "

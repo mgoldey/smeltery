@@ -13,11 +13,11 @@ NAMES = ["benzoic-pbe", "benzoic-rhf", "danuglipron-halogen", "docking", "struct
 PREBUILT = Path(__file__).resolve().parents[2] / "src" / "smeltery" / "prebuilt"
 
 
-def _tree(folder: Path) -> dict[str, str]:
+def _tree(folder: Path, skip: tuple[str, ...] = ()) -> dict[str, str]:
     return {
         str(p.relative_to(folder)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in sorted(folder.rglob("*"))
-        if p.is_file()
+        if p.is_file() and not set(p.relative_to(folder).parts) & set(skip)
     }
 
 
@@ -66,8 +66,8 @@ def test_starting_from_a_prebuilt_copies_it_and_leaves_it_alone(tmp_path):
         for f in (PREBUILT / n).iterdir():
             if f.name not in ("pipeline.toml", "about.md", "run", "imported"):
                 assert (folder / f.name).read_bytes() == f.read_bytes()
-        if (PREBUILT / n / "run").exists():
-            assert _tree(PREBUILT / n / "run") == _tree(folder / "run")
+        if (PREBUILT / n / "run").exists():  # the example run, without a --temporal run's scratch or live marker
+            assert _tree(PREBUILT / n / "run", skip=("temporal", "running.json")) == _tree(folder / "run")
         assert not (folder / "imported").exists()
         # edit the copy: save over it, then change its run directory
         put = c.put(f"/api/pipelines/my-{n}", json={"toml": doc["toml"] + "# edited\n", "base_sha256": doc["sha256"]})
@@ -104,3 +104,15 @@ def test_copy_plan_leaves_the_imported_record_behind():
     plan = copy_plan("danuglipron-halogen")
     assert not [r for r in plan if r.split("/")[0] == "imported"]
     assert {"7LCJ_pocket.pdb", "conf_00_cryo_em.xyz"} <= set(plan)
+
+
+def test_copy_plan_leaves_a_temporal_runs_scratch_and_live_marker_behind():
+    """A --temporal run keeps OUT/temporal/ (its poses and fields) and OUT/temporal/running.json (the workflow it
+    belongs to) while it runs: a copy holds the example run's record and log, never those."""
+    from smeltery.bench.api.prebuilt import _copied, copy_plan
+
+    assert _copied("run/calcs.jsonl") and _copied("run/run-abc.json") and _copied("run/inputs/x/y.pdb")
+    assert not _copied("run/temporal/work.json") and not _copied("run/temporal/running.json")
+    assert not _copied("run/running.json") and not _copied("imported/run-x.json") and not _copied("about.md")
+    for n in NAMES:
+        assert not [r for r in copy_plan(n) if "temporal" in r.split("/")[1:] or r.endswith("running.json")]

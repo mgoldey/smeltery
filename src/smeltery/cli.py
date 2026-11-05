@@ -127,6 +127,7 @@ Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed.
 from __future__ import annotations
 
 import argparse
+import contextvars
 import dataclasses
 import hashlib
 import json
@@ -164,7 +165,7 @@ from .tiers import (
 #: Top-level keys that are inputs of the pipeline, not a method's section (the Ligands step, and the gate switches).
 OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions", "run"}
 #: `[run]`: how the run executes, not what it measures (not an input: it never moves the digest).
-RUN_KEYS = {"scf_timeout_s"}
+RUN_KEYS = {"scf_timeout_s", "allow_mixed_builds"}
 #: `[run] scf_timeout_s` default: one SCF leg (vacuum or field, one rung) is ended after this long under `--temporal`.
 SCF_TIMEOUT_S = 14400
 DECISIONS_KEYS = {"file"}
@@ -245,6 +246,7 @@ class Plan:
     receptor_pdb: Path | None = None  # a receptor .pdb in the poses' frame, when one exists
     decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
     gate_results: dict = dataclasses.field(default_factory=dict)  # results["gates"]: per-pose gate results that ran
+    stage_seconds: dict = dataclasses.field(default_factory=dict)  # this plan's wall time per stage (`_stage`)
 
     @property
     def inputs(self) -> dict:
@@ -344,7 +346,8 @@ def validate_config(cfg: dict) -> dict:
 
 
 def _validate_run(cfg: dict) -> None:
-    """[run]: execution settings. `scf_timeout_s` (seconds, > 0) bounds one SCF leg (one rung) under `--temporal`."""
+    """[run]: execution settings. `scf_timeout_s` (seconds, > 0) bounds one SCF leg (one rung) under `--temporal`;
+    `allow_mixed_builds` (bool) lets a --temporal run whose SCFs ran under different builds be finalized."""
     if "run" not in cfg:
         return
     r = cfg["run"]
@@ -354,6 +357,14 @@ def _validate_run(cfg: dict) -> None:
     t = r.get("scf_timeout_s", SCF_TIMEOUT_S)
     if isinstance(t, bool) or not isinstance(t, (int, float)) or t <= 0:
         raise ConfigError(f"[run] scf_timeout_s must be a positive number of seconds, got {t!r}")
+    if not isinstance(r.get("allow_mixed_builds", False), bool):
+        raise ConfigError(f"[run] allow_mixed_builds must be true or false, got {r['allow_mixed_builds']!r}")
+
+
+def allow_mixed_builds(cfg: dict) -> bool:
+    """`[run] allow_mixed_builds`: a --temporal run whose calcs.jsonl rows name more than one (ferric, smeltery) build
+    is finalized (recorded as mixed in results.builds) instead of refused."""
+    return bool((cfg.get("run") or {}).get("allow_mixed_builds", False))
 
 
 def scf_timeout_s(cfg: dict) -> float:
@@ -586,7 +597,18 @@ def _validate_gates(cfg: dict) -> None:
             raise ConfigError("[gates] max_strain_kcal needs forcefield = true: it thresholds the MMFF94 strain")
 
 
-_STAGE_SECONDS: dict[str, float] = {}  # wall time per stage name, summed over its `_stage` calls; reset per plan
+#: Wall time per stage name, summed over its `_stage` calls: the dict of the plan being built or run in this context
+#: (`build_plan` starts a fresh one and keeps it on the plan; `run_plan` makes it current again). A context variable,
+#: not a module global, so two runs on one worker (threads copy the context) never write each other's seconds.
+_STAGE_SECONDS: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar("stage_seconds", default=None)
+
+
+def _stage_seconds() -> dict[str, float]:
+    d = _STAGE_SECONDS.get()
+    if d is None:
+        d = {}
+        _STAGE_SECONDS.set(d)
+    return d
 
 
 def _stage(name: str, fn, log: list | None = None):
@@ -596,6 +618,7 @@ def _stage(name: str, fn, log: list | None = None):
     inside `fn`) now, and those `_log` writes after the call returns.
     """
     t0 = time.perf_counter()
+    secs = _stage_seconds()
     try:
         return fn()
     except (ConfigError, StageError):
@@ -603,10 +626,10 @@ def _stage(name: str, fn, log: list | None = None):
     except Exception as e:
         raise StageError(f"stage {name!r} failed: {type(e).__name__}: {e}") from e
     finally:
-        _STAGE_SECONDS[name] = _STAGE_SECONDS.get(name, 0.0) + (time.perf_counter() - t0)
+        secs[name] = secs.get(name, 0.0) + (time.perf_counter() - t0)
         for e in log or []:
             if e["stage"] == name:
-                e["seconds"] = _STAGE_SECONDS[name]
+                e["seconds"] = secs[name]
 
 
 def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | None, kind: str, **extra) -> None:
@@ -622,7 +645,7 @@ def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | Non
         "candidates_in": n_in,
         "candidates_out": n_out,
         # wall time of that stage's `_stage` call(s); None when it was never timed (not "took 0 s")
-        "seconds": _STAGE_SECONDS.get(stage),
+        "seconds": _stage_seconds().get(stage),
     }
     log.append({**entry, **extra})
 
@@ -921,7 +944,8 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
     extra: dict = {}
-    _STAGE_SECONDS.clear()
+    stage_seconds: dict[str, float] = {}
+    _STAGE_SECONDS.set(stage_seconds)
     before = []
     _hook_inputs(cfg, extra)
     ctx = {"log": log, "extra": extra, "out_dir": out_dir, "before_poses": before}
@@ -966,6 +990,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
     plan.gate_results = gate_results
+    plan.stage_seconds = stage_seconds
     return plan
 
 
@@ -1001,7 +1026,7 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
                 "kind": "measure",
                 "candidates_in": n,
                 "candidates_out": n,
-                "seconds": _STAGE_SECONDS.get(plan.tier.name),  # wall time of the measurement `_stage` call
+                "seconds": plan.stage_seconds.get(plan.tier.name),  # wall time of the measurement `_stage` call
             }
         )
         rows.append(
@@ -1067,6 +1092,7 @@ def run_plan(
     and per_pose hold only those); an analogue then pairs with the parent's values at its own kept indices, and
     the record carries `results.pose_index`.
     """
+    _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
     if measure is None:
         _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
     else:
@@ -1552,21 +1578,63 @@ def _stage_config(config: Path, out_dir: Path, temporal: bool = False) -> tuple[
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"cannot read {config}: {e}") from e
     out_dir = Path(out_dir)
+    # the guard first: nothing is written into an OUT whose Temporal run is live
+    _guard_out(out_dir, lambda: staged_sha256(text, config.resolve().parent), temporal)
     out_dir.mkdir(parents=True, exist_ok=True)
     staged, inputs = stage_inputs(text, config.resolve().parent, out_dir)
-    _guard_out(out_dir, hashlib.sha256(staged.encode()).hexdigest(), temporal)
     dest = out_dir / "config.toml"
     if not dest.is_file() or dest.read_text() != staged:  # an unchanged config is not rewritten (a live run reads it)
         dest.write_text(staged)
     return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
 
 
-def _guard_out(out_dir: Path, staged_sha: str | None, temporal: bool = False) -> None:
+def staged_sha256(text: str, config_dir: Path) -> str:
+    """The sha256 of the config `stage_inputs` would write, computed by staging into a scratch directory: the staged
+    text names each input by content (`inputs/<sha>/<name>`), not by OUT, so it is the same text OUT would get."""
+    import tempfile
+
+    from .run_inputs import stage_inputs
+
+    with tempfile.TemporaryDirectory(prefix="smeltery-stage-") as tmp:
+        staged, _ = stage_inputs(text, Path(config_dir), Path(tmp))
+    return hashlib.sha256(staged.encode()).hexdigest()
+
+
+def _guard_out(out_dir: Path, staged_sha, temporal: bool = False) -> None:
     from .temporal_run import guard_out
 
     why = guard_out(Path(out_dir), staged_sha, temporal)
     if why:
         raise ConfigError(why)
+
+
+def partial_digest(plan: Plan, parent: str, name: str) -> str:
+    """The input digest `--only-candidate name` records for this config: the plan's inputs with only the parent and
+    `name` as candidates (a partial plan is built from exactly those), and the same tiers."""
+    from .record import digest
+
+    keep = {k: v for k, v in plan.inputs["candidates"].items() if k in (parent, name)}
+    return digest({"inputs": {**plan.inputs, "candidates": keep}, "tiers": plan.tiers})
+
+
+def _check_partials(plan: Plan, parent: str, recs: dict[Path, dict]) -> None:
+    """A combine joins partials of THIS config only: each partial's input digest is the one this plan gives its
+    candidate, and every partial staged the same config (results.config sha256). Else ConfigError."""
+    for p, r in recs.items():
+        name = p.name[len("partial-") : -len(".json")]
+        want = partial_digest(plan, parent, name)
+        if r.get("input_digest") != want:
+            raise ConfigError(
+                f"{p.name} was measured with other inputs (input_digest {str(r.get('input_digest'))[:12]}, this "
+                f"config gives {want[:12]}): a combine joins partials of one config; re-run that partial"
+            )
+    shas = {p.name: ((r.get("results") or {}).get("config") or {}).get("sha256") for p, r in recs.items()}
+    if len(set(shas.values())) > 1:
+        each = ", ".join(f"{k}: {str(v)[:12] if v else 'none'}" for k, v in sorted(shas.items()))
+        raise ConfigError(
+            f"the partials staged different configs ({each}): a combine record states one config; re-run the "
+            "partials from one staged config"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1748,8 +1816,10 @@ def main(argv: list[str] | None = None) -> int:
             per_candidate_values = {}
             parent_values = None
             partial_configs = []
+            recs = {p: json.loads(p.read_text()) for p in partials}
+            _check_partials(plan, cfg["parent"], recs)
             for p in partials:
-                recp = json.loads(p.read_text())
+                recp = recs[p]
                 partial_configs.append(recp["results"].get("config"))
                 pp = recp["results"]["per_pose"]
                 name = p.name[len("partial-") : -len(".json")]
@@ -1772,12 +1842,8 @@ def main(argv: list[str] | None = None) -> int:
                             c.per_pose[q] = list(v)
 
             rec, out = run_plan(plan, measure=measure)
-            # the partials staged the config; a combine carries it when they all agree
-            if (
-                partial_configs
-                and partial_configs[0] is not None
-                and all(c == partial_configs[0] for c in partial_configs)
-            ):
+            # the partials staged the config (_check_partials: all the same one); the combine carries it
+            if partial_configs and partial_configs[0] is not None:
                 rec.results["config"] = partial_configs[0]
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))

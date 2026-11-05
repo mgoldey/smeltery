@@ -91,11 +91,18 @@ class Fake:
     def __init__(self, d: Path):
         self.dir = d
         self.rules: dict[tuple[str, str], str] = {}
+        self.build: dict | None = None  # what `ferric.__build__` reports (None: no stamp)
         self.save()
 
     def save(self) -> None:
         cfg = {"rules": {f"{k[0]}|{k[1]}": v for k, v in self.rules.items()}, "dir": str(self.dir)}
+        if self.build is not None:
+            cfg["build"] = self.build
         (self.dir / "cfg.json").write_text(json.dumps(cfg))
+
+    def set_build(self, git_sha: str | None, dirty: bool = False) -> None:
+        self.build = None if git_sha is None else {"git_sha": git_sha, "dirty": dirty}
+        self.save()
 
     def set(self, label: str, leg: str, rule: str | None) -> None:
         if rule is None:
@@ -383,7 +390,18 @@ def test_a_temporal_run_records_what_a_plain_run_records(ferric, tmp_path, queue
     assert a["input_digest"] == b["input_digest"]
     ra, rb = results_without_timing(a["results"]), results_without_timing(b["results"])
     ca, cb = ra.pop("calcs"), rb.pop("calcs")
+    # what only the Temporal record states: its runner, the builds that wrote its rows, its timing's basis
+    assert rb.pop("runner") == "temporal"
+    (build,) = rb.pop("builds")
+    assert build["identity"] == "recorded" and build["n_rows"] == 8
+    assert build["smeltery"]["commit"] == b["smeltery"]["commit"]
+    timing = rb.pop("timing")
+    assert timing["rows_without_start"] == 0 and timing["measure_seconds_kind"] == "summed_cpu_seconds"
+    assert b["started_utc"] == min(r["started_utc"] for r in _rows(durable))
+    (measure,) = [r for r in rb["funnel"] if r["kind"] == "measure"]
+    assert measure.pop("seconds_kind") == "summed_cpu_seconds"
     assert ra == rb and ca["n"] == cb["n"] == 8
+    assert not (durable / "temporal" / "running.json").exists()  # a finished run leaves no live marker
     assert cb["by_model"] == {"primary": 4, "shared_vacuum": 4}
     rows = _rows(durable)
     assert {(r["leg"], r["field_model"]) for r in rows} == {("vacuum", None), ("field", "primary")}
@@ -592,6 +610,160 @@ def test_the_server_down_exits_2_naming_the_docker_command(ferric, tmp_path, cap
 def test_temporal_needs_an_out_dir(tmp_path, capsys):
     assert main(["run", str(_config(tmp_path)), "--temporal"]) == 2
     assert "--temporal needs --out" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------------------------------------ code identity
+
+#: Three rows copied verbatim from the live danuglipron run's calcs.jsonl (written at f0c3eb1/86822ab, before rows
+#: carried a build or a start): the format a finalize after the worker's restart must accept.
+LIVE_ROWS = Path(__file__).parent / "data" / "temporal_rows_f0c3eb1.jsonl"
+LEGACY = "legacy"
+
+
+def _live_format() -> set[str]:
+    rows = [json.loads(x) for x in LIVE_ROWS.read_text().splitlines() if x.strip()]
+    (keys,) = {frozenset(r) for r in rows}
+    return set(keys)
+
+
+def _score_in_process(inp, ferric, how) -> temporal_run.PrepareResult:
+    """Every leg `prepare` schedules, scored here (the fake engine, `scf_child`) and logged as the score activity logs
+    it (`scf_row`), no server. `how(k)` for the k-th leg: LEGACY logs it in the live run's row format (no build, no
+    start); a string is the fake ferric's git sha for that SCF."""
+    prep = temporal_run.prepare_sync(inp)
+    fmt = _live_format()
+    for k, u in enumerate(prep.pending):
+        mode = how(k)
+        ferric.set_build(None if mode == LEGACY else mode)
+        row = temporal_run.scf_row(u, temporal_run.scf_child(u), prep.digest, f"2026-11-05T08:{k:02d}:00Z")
+        if mode == LEGACY:
+            row = {key: v for key, v in row.items() if key in fmt}
+            assert set(row) == fmt
+        temporal_run.append_row(inp.out, row)
+    return prep
+
+
+def test_the_live_runs_rows_finalize_as_unrecorded_builds(ferric, tmp_path):
+    """The live OUT's rows carry no build and no start: finalize accepts them as "unrecorded", does not refuse, and
+    says its start is its own clock."""
+    assert _live_format() == {
+        "candidate", "pose", "leg", "converged", "iterations", "energy_hartree", "seconds", "field_model", "rung",
+        "digest",
+    }  # fmt: skip
+    out = tmp_path / "out"
+    inp = _staged(_config(tmp_path), out)
+    _score_in_process(inp, ferric, lambda k: LEGACY)
+    temporal_run.finalize_sync(inp)
+    rec = _record(out)
+    res = rec["results"]
+    assert res["runner"] == "temporal" and res["builds"] == [{"identity": "unrecorded", "n_rows": 8}]
+    assert res["timing"]["rows_without_start"] == 8 and "finalize's own clock" in res["timing"]["started_utc_from"]
+    secs = sum(r["seconds"] for r in _rows(out))
+    (measure,) = [r for r in res["funnel"] if r["kind"] == "measure"]
+    assert measure["seconds"] == pytest.approx(secs) and measure["seconds_kind"] == "summed_cpu_seconds"
+    assert res["timing"]["measure_seconds"] == pytest.approx(secs)
+
+
+def test_stamped_rows_beside_the_live_runs_unstamped_ones_finalize(ferric, tmp_path):
+    """The live run after the worker's restart: earlier rows unstamped, later ones stamped with one build."""
+    out = tmp_path / "out"
+    inp = _staged(_config(tmp_path), out)
+    _score_in_process(inp, ferric, lambda k: LEGACY if k < 3 else "a" * 40)
+    temporal_run.finalize_sync(inp)
+    rec = _record(out)
+    recorded, unrecorded = rec["results"]["builds"]
+    assert unrecorded == {"identity": "unrecorded", "n_rows": 3}
+    assert recorded["identity"] == "recorded" and recorded["n_rows"] == 5
+    assert recorded["ferric"] == {"git_sha": "a" * 40, "dirty": False}
+    assert set(recorded["smeltery"]) == {"commit", "dirty"}
+    # the earliest STAMPED row's start, and the record says earlier rows had none
+    assert rec["started_utc"] == "2026-11-05T08:03:00Z"
+    assert "3 earlier-format row(s) carry no start" in rec["results"]["timing"]["started_utc_from"]
+    assert all("build" in r and "started_utc" in r for r in _rows(out)[3:])  # the rewrite keeps the stamps
+
+
+def test_two_builds_refuse_finalize_unless_mixed_builds_are_allowed(ferric, tmp_path):
+    out = tmp_path / "out"
+    inp = _staged(_config(tmp_path), out)
+    _score_in_process(inp, ferric, lambda k: "a" * 40 if k < 4 else "b" * 40)
+    with pytest.raises(ValueError, match=r"2 different builds .*ferric aaaaaaaaaaaa.*ferric bbbbbbbbbbbb.*"
+                                         r"allow_mixed_builds = true"):  # fmt: skip
+        temporal_run.finalize_sync(inp)
+    assert not list(out.glob("run-*.json"))
+    allowed = _staged(_config(tmp_path, extra="\n[run]\nallow_mixed_builds = true\n", name="c2.toml"), out)
+    temporal_run.finalize_sync(allowed)  # [run] is not an input: the same digest, the same rows
+    builds = _record(out)["results"]["builds"]
+    assert [(b["ferric"]["git_sha"][0], b["n_rows"]) for b in builds] == [("a", 4), ("b", 4)]
+
+
+def test_allow_mixed_builds_is_validated():
+    import tomllib
+
+    base = tomllib.loads(TINY.format(n_poses=2))
+    with pytest.raises(ConfigError, match="allow_mixed_builds must be true or false"):
+        validate_config({**base, "run": {"allow_mixed_builds": "yes"}})
+
+
+@needs_server
+def test_a_temporal_run_with_two_builds_exits_3(ferric, tmp_path, queue, capsys):
+    """Half the legs already logged by build b; the workflow scores the rest with build a: finalize refuses."""
+    cfg = _config(tmp_path)
+    out = tmp_path / "out"
+    inp = _staged(cfg, out)
+    prep = temporal_run.prepare_sync(inp)
+    for u in prep.pending[:4]:
+        ferric.set_build("b" * 40)
+        temporal_run.append_row(out, temporal_run.scf_row(u, temporal_run.scf_child(u), prep.digest, "x"))
+    ferric.set_build("a" * 40)
+    try:
+        with worker(queue):
+            assert main(["run", str(cfg), "--out", str(out), "--temporal", "--task-queue", queue]) == 3
+    finally:
+        _terminate(out)
+    assert "2 different builds" in capsys.readouterr().err and not list(out.glob("run-*.json"))
+
+
+# ------------------------------------------------------------------------------------------------ the live-run guard
+
+
+def test_nothing_is_written_into_out_before_the_guard_refuses(tmp_path, monkeypatch, capsys):
+    """The guard runs before staging: a refused run leaves OUT as it was (here: not even created)."""
+    asked = []
+    monkeypatch.setattr(temporal_run, "guard_out", lambda out, sha, temporal: asked.append(out) or "live run here")
+    (tmp_path / "dec.json").write_text("{}")
+    cfg = _config(tmp_path, extra='\n[decisions]\nfile = "dec.json"\n')
+    out = tmp_path / "out"
+    for argv in ([], ["--temporal"], ["--plan"]):
+        assert main(["run", str(cfg), "--out", str(out), *argv]) == 2
+        assert "live run here" in capsys.readouterr().err
+    assert len(asked) == 3 and not out.exists()
+
+
+@needs_server
+def test_a_stale_marker_is_removed_with_a_message(tmp_path, queue):
+    """A marker whose workflow the server does not know, or which is no longer running, is cleared, not a refusal."""
+    from temporalio.common import WorkflowIDConflictPolicy
+
+    out = tmp_path / "out"
+    marker = out / "temporal" / "running.json"
+    marker.parent.mkdir(parents=True)
+    said: list[str] = []
+    marker.write_text(json.dumps({"workflow_id": f"smeltery-run-nope-{uuid.uuid4().hex}", "host": HOST}))
+    assert temporal_run.guard_out(out, "x", False, log=said.append) is None
+    assert not marker.exists() and "removed a stale" in said[-1] and "NOT_FOUND" in said[-1]
+    wid = f"smeltery-run-test-{uuid.uuid4().hex[:12]}"
+
+    async def start_and_terminate():
+        client = await temporal_run.connect(HOST)
+        h = await client.start_workflow(
+            "PipelineRunWorkflow", id=wid, task_queue=queue, id_conflict_policy=WorkflowIDConflictPolicy.FAIL
+        )
+        await h.terminate("test")
+
+    asyncio.run(start_and_terminate())
+    marker.write_text(json.dumps({"workflow_id": wid, "host": HOST, "config_sha": "x"}))
+    assert temporal_run.guard_out(out, "y", False, log=said.append) is None
+    assert not marker.exists() and "TERMINATED" in said[-1]
 
 
 # ------------------------------------------------------------------------------------------------ extra fields
