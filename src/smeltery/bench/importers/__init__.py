@@ -4,7 +4,10 @@ An importer is a pair: `detect(record)` says whether a parsed record has the sha
 `convert(record, original)` returns the contract-shaped record. `import_run` copies the original BYTE FOR BYTE
 under `out_dir/original/`, writes the converted record as `out_dir/run-<digest12>.json`, and returns its path.
 The converted record names what it came from in `results.imported` and lists the contract keys the original
-could not supply in `results.not_recorded`; nothing the original lacks is invented.
+could not supply in `results.not_recorded`: `results` keys bare, `inputs` keys prefixed "inputs.". The original's
+`inputs` and `tiers` are kept unchanged, so its `input_digest` still hashes them. A value an importer derives for a
+key the original lacks is never written in place: it goes under `results.imported.derived["<inputs|results>.<key>"]`
+as `{"value": ..., "from": "..."}`, and `smeltery.gui.results.contract_record` lays it over the record for viewers.
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from smeltery.gui.results import CONTRACT_INPUTS
 
 #: Every `results` key a viewer may read (`smeltery.gui.results`), plus the ones a run writes beside them.
 CONTRACT_KEYS = (
@@ -77,7 +82,11 @@ def import_run(original: Path, out_dir: Path) -> Path:
         "original": f"original/{original.name}",
         "sha256": hashlib.sha256(raw).hexdigest(),
     }
-    results["not_recorded"] = [k for k in CONTRACT_KEYS if k not in results]
+    if converted["inputs"] != record["inputs"] or converted["input_digest"] != record["input_digest"]:
+        raise ValueError(f"{importer.name}: the converted record must keep the original's inputs and input_digest")
+    results["not_recorded"] = [k for k in CONTRACT_KEYS if k not in results] + [
+        f"inputs.{k}" for k in CONTRACT_INPUTS if k not in record["inputs"]
+    ]
     out_dir = Path(out_dir)
     (out_dir / "original").mkdir(parents=True, exist_ok=True)
     shutil.copyfile(original, out_dir / "original" / original.name)

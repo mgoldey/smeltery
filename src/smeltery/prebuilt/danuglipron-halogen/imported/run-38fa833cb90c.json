@@ -13,7 +13,7 @@
   },
   "input_digest": "38fa833cb90caef6cb53c98b3825364e106cc0db8948032a31aa77ca3b0994b1",
   "inputs": {
-    "candidates": {
+    "analogues": {
       "bnz-C34-CH3": "Cc1c(C#N)ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c1F",
       "bnz-C34-Cl": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1Cl",
       "bnz-C34-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1F",
@@ -23,14 +23,23 @@
       "bzim-C9-CH3": "Cc1cc2nc(CN3CCC(c4cccc(OCc5ccc(C#N)cc5F)n4)CC3)n(C[C@@H]3CCO3)c2cc1C(=O)O",
       "bzim-C9-Cl": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(Cl)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
       "bzim-C9-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(F)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
-      "parent": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
       "pyr-C28-CH3": "Cc1cc(OCc2ccc(C#N)cc2F)nc(C2CCN(Cc3nc4ccc(C(=O)O)cc4n3C[C@@H]3CCO3)CC2)c1",
       "pyr-C28-Cl": "N#Cc1ccc(COc2cc(Cl)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
       "pyr-C28-F": "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
     },
-    "cut": {
-      "keep": 3,
-      "z": 2.0
+    "campaign_summary": {
+      "CH3_sem": [
+        1.0,
+        3.5
+      ],
+      "n": 12,
+      "n_sign_flips": 4,
+      "rho": [
+        0.78,
+        0.9997
+      ],
+      "self_anchor": 0.31,
+      "spearman": 0.664
     },
     "dropped_pose_indices": {
       "indices": [
@@ -38,12 +47,8 @@
       ],
       "reason": "plan amendment A1 (docs/benchmarks/danuglipron_halogen_plan.md)"
     },
-    "floor": {
-      "source": "1.26 kcal/mol, docs/limits.md L6 (cdk2; L11 tyk2 is 0.67), a lower bound from other targets",
-      "value": 1.26
-    },
     "ionization": "neutral acid (the SMILES given carries no formal charge)",
-    "parent": "parent",
+    "parent": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
     "pocket": {
       "center_ang": null,
       "cutoff_ang": null,
@@ -54,6 +59,7 @@
       "pdb2pqr_ff": "AMBER",
       "pdb2pqr_version": "pdb2pqr 3.7.1"
     },
+    "pocket_charge_model_b": null,
     "sites": {
       "bnz-C34": 34,
       "bnz-C36": 36,
@@ -62,21 +68,6 @@
     }
   },
   "results": {
-    "candidate_order": [
-      "parent",
-      "bnz-C34-CH3",
-      "bnz-C34-Cl",
-      "bnz-C34-F",
-      "bnz-C36-CH3",
-      "bnz-C36-Cl",
-      "bnz-C36-F",
-      "bzim-C9-CH3",
-      "bzim-C9-Cl",
-      "bzim-C9-F",
-      "pyr-C28-CH3",
-      "pyr-C28-Cl",
-      "pyr-C28-F"
-    ],
     "cut": {
       "groups": [
         [
@@ -99,32 +90,90 @@
       "survivors": null,
       "unranked": true
     },
-    "funnel": [
-      {
-        "candidates_in": 13,
-        "candidates_out": 13,
-        "kind": "measure",
-        "seconds": null,
-        "stage": "field_interaction"
-      },
-      {
-        "candidates_in": 12,
-        "candidates_out": null,
-        "kind": "rank",
-        "stage": "cut",
-        "unranked": true
-      }
-    ],
     "imported": {
       "derived": {
-        "inputs.cut": "the cut(keep=3, z=2.0) call (line 583) of the example script that wrote this record, named in this importer's docstring; the record's cut note says keep=3",
-        "results.funnel": "counts from paired_ddE_amber (12 analogues) plus the parent, and results.cut"
+        "inputs.candidates": {
+          "from": "the original's inputs.parent (SMILES) under the name 'parent', then its inputs.analogues",
+          "value": {
+            "bnz-C34-CH3": "Cc1c(C#N)ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c1F",
+            "bnz-C34-Cl": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1Cl",
+            "bnz-C34-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1F",
+            "bnz-C36-CH3": "Cc1cc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)cc1C#N",
+            "bnz-C36-Cl": "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1Cl",
+            "bnz-C36-F": "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1F",
+            "bzim-C9-CH3": "Cc1cc2nc(CN3CCC(c4cccc(OCc5ccc(C#N)cc5F)n4)CC3)n(C[C@@H]3CCO3)c2cc1C(=O)O",
+            "bzim-C9-Cl": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(Cl)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
+            "bzim-C9-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(F)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
+            "parent": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
+            "pyr-C28-CH3": "Cc1cc(OCc2ccc(C#N)cc2F)nc(C2CCN(Cc3nc4ccc(C(=O)O)cc4n3C[C@@H]3CCO3)CC2)c1",
+            "pyr-C28-Cl": "N#Cc1ccc(COc2cc(Cl)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
+            "pyr-C28-F": "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+          }
+        },
+        "inputs.cut": {
+          "from": "the cut(keep=3, z=2.0) call (line 583) of the example script that wrote this record, named in this importer's docstring; the record's cut note says keep=3",
+          "value": {
+            "keep": 3,
+            "z": 2.0
+          }
+        },
+        "inputs.floor": {
+          "from": "the original's results.declared_floor (value and source)",
+          "value": {
+            "source": "1.26 kcal/mol, docs/limits.md L6 (cdk2; L11 tyk2 is 0.67), a lower bound from other targets",
+            "value": 1.26
+          }
+        },
+        "inputs.parent": {
+          "from": "this importer's name for the parent: the original's inputs.parent is the parent's SMILES",
+          "value": "parent"
+        },
+        "results.candidate_order": {
+          "from": "the parent, then the original's inputs.analogues in their recorded order",
+          "value": [
+            "parent",
+            "bnz-C34-CH3",
+            "bnz-C34-Cl",
+            "bnz-C34-F",
+            "bnz-C36-CH3",
+            "bnz-C36-Cl",
+            "bnz-C36-F",
+            "bzim-C9-CH3",
+            "bzim-C9-Cl",
+            "bzim-C9-F",
+            "pyr-C28-CH3",
+            "pyr-C28-Cl",
+            "pyr-C28-F"
+          ]
+        },
+        "results.funnel": {
+          "from": "counts from the original's paired_ddE_amber (12 analogues) plus the parent, and its results.cut",
+          "value": [
+            {
+              "candidates_in": 13,
+              "candidates_out": 13,
+              "kind": "measure",
+              "seconds": null,
+              "stage": "field_interaction"
+            },
+            {
+              "candidates_in": 12,
+              "candidates_out": null,
+              "kind": "rank",
+              "stage": "cut",
+              "unranked": true
+            }
+          ]
+        }
       },
       "importer": "paired_amber_2026_10",
+      "input_digest": "the original record's input_digest, the hash of its inputs and tiers, which this record keeps unchanged; derived values are not in inputs and are not hashed",
       "original": "original/danuglipron-halogen-38fa833cb90c.json",
       "sha256": "ecd8ae8c1490f4a0ede328f656591899a7070d018513c25fc4b2839075cd5742"
     },
     "not_recorded": [
+      "funnel",
+      "candidate_order",
       "stages",
       "per_pose",
       "units",
@@ -132,7 +181,10 @@
       "field",
       "receptor",
       "calcs",
-      "config"
+      "config",
+      "inputs.candidates",
+      "inputs.cut",
+      "inputs.floor"
     ],
     "paired_ddE": {
       "bnz-C34-CH3": {

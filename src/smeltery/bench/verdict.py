@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from smeltery.gui.results import _RESULT_KEYS
+from smeltery.gui.results import _RESULT_KEYS, contract_record
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,8 @@ class Verdict:
 
 
 def verdict_of(record: dict) -> Verdict:
+    if isinstance(record, dict):
+        record = contract_record(record)  # an imported record's derived floor and funnel
     results = record.get("results", {}) if isinstance(record, dict) else {}
     if not isinstance(results, dict):
         results = {}

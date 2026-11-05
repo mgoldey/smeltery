@@ -50,7 +50,45 @@ def test_unpaired_sem_and_cut_groups_equal_the_originals(imported):
     assert got["unpaired_sem"] == {k: v["unpaired_sem"] for k, v in original["criterion_3_pairing"].items()}
     assert got["cut"]["groups"] == original["cut"]["groups"]
     assert got["cut"]["survivors"] is None and got["cut"]["unranked"] is True
-    assert set(got["imported"]["derived"]) == {"inputs.cut", "results.funnel"}
+    assert set(got["imported"]["derived"]) == {
+        "inputs.parent",
+        "inputs.candidates",
+        "inputs.floor",
+        "inputs.cut",
+        "results.funnel",
+        "results.candidate_order",
+    }
+    assert all(set(d) == {"value", "from"} for d in got["imported"]["derived"].values())
+
+
+def test_the_original_inputs_are_kept_and_its_digest_still_hashes_them(imported):
+    from smeltery.record import digest
+
+    path, _ = imported
+    original = json.loads(ORIGINAL.read_text())
+    got = json.loads(path.read_text())
+    assert got["inputs"] == original["inputs"] and got["tiers"] == original["tiers"]  # nothing renamed or dropped
+    assert "pocket_charge_model_b" in got["inputs"] and "campaign_summary" in got["inputs"]
+    assert got["input_digest"] == original["input_digest"] == digest({"inputs": got["inputs"], "tiers": got["tiers"]})
+    assert "original" in got["results"]["imported"]["input_digest"]
+    # derived values are only under results.imported.derived, never written in place
+    assert "funnel" not in got["results"] and "candidate_order" not in got["results"]
+    assert {"inputs.candidates", "inputs.cut", "inputs.floor"} <= set(got["results"]["not_recorded"])
+    assert "inputs.parent" not in got["results"]["not_recorded"]  # the original has one (a SMILES)
+
+
+def test_the_contract_view_lays_the_derived_values_over_the_record(imported):
+    from smeltery.gui.results import contract_record
+
+    path, _ = imported
+    raw = json.loads(path.read_text())
+    view = contract_record(raw)
+    derived = raw["results"]["imported"]["derived"]
+    assert view["inputs"]["cut"] == {"keep": 3, "z": 2.0} and view["inputs"]["parent"] == "parent"
+    assert view["results"]["funnel"] == derived["results.funnel"]["value"]
+    assert raw["inputs"]["parent"] != "parent" and "cut" not in raw["inputs"]  # the record itself is untouched
+    plain = {"inputs": {}, "results": {}}
+    assert contract_record(plain) is plain
 
 
 def test_the_original_is_byte_identical_after_import(imported):
@@ -69,7 +107,7 @@ def test_the_committed_import_is_the_importers_output(imported):
 def test_missing_keys_are_listed_not_invented(imported):
     path, _ = imported
     results = json.loads(path.read_text())["results"]
-    missing = {"per_pose", "units", "poses", "field", "receptor", "stages", "calcs", "config"}
+    missing = {"per_pose", "units", "poses", "field", "receptor", "stages", "calcs", "config", "funnel"}
     assert missing <= set(results["not_recorded"])
     assert not missing & set(results)
     assert not set(results["not_recorded"]) & set(results)
