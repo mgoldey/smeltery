@@ -533,6 +533,48 @@ def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seco
     }
 
 
+#: `run_rhf` knobs a remedy rung may override, with their types: they change how the SCF reaches its solution, not
+#: which solution it reports.
+REMEDY_KEYS: dict[str, type] = {"max_iter": int, "diis": bool, "diis_size": int, "level_shift": float, "soscf": bool}
+#: Knobs a remedy may NOT override, and why: each changes the quantity being measured, so a value from that rung
+#: would not be the same measurement as a value from rung 0.
+REMEDY_REFUSED: dict[str, str] = {
+    "energy_conv": "a looser energy threshold changes the precision of the reported energy",
+    "density_conv": "a looser density threshold changes the precision of the reported energy",
+    "smearing": "fractional occupations change the state whose energy is reported",
+}
+
+
+def check_remedies(remedies) -> list[dict]:
+    """The remedy ladder as a list of plain dicts, or ValueError naming the first bad rung.
+
+    Rung 0 is the tier's own settings; rung k (k >= 1) is rung 0 with `remedies[k - 1]` applied on top."""
+    if not isinstance(remedies, (list, tuple)):
+        raise ValueError("remedies must be a list of tables of run_rhf knob overrides")
+    out = []
+    for k, r in enumerate(remedies, start=1):
+        if not isinstance(r, dict) or not r:
+            raise ValueError(f"remedies rung {k} must be a non-empty table of run_rhf knob overrides")
+        for key, v in r.items():
+            if key in REMEDY_REFUSED:
+                raise ValueError(
+                    f"remedies rung {k} overrides {key!r}: {REMEDY_REFUSED[key]}, so a value from that rung would "
+                    f"not be the same quantity; allowed overrides: {sorted(REMEDY_KEYS)}"
+                )
+            if key not in REMEDY_KEYS:
+                raise ValueError(f"remedies rung {k}: unknown override {key!r}; allowed: {sorted(REMEDY_KEYS)}")
+            want = REMEDY_KEYS[key]
+            ok = isinstance(v, bool) if want is bool else (isinstance(v, (int, float)) and not isinstance(v, bool))
+            if want is int and ok:
+                ok = isinstance(v, int) and v >= 1
+            if want is float and ok:
+                ok = v >= 0
+            if not ok:
+                raise ValueError(f"remedies rung {k}: {key} = {v!r} is not a valid {want.__name__}")
+        out.append({key: (float(v) if REMEDY_KEYS[key] is float else v) for key, v in r.items()})
+    return out
+
+
 @dataclass
 class FieldInteraction:
     """ΔE_int = E_RHF(in point-charge field) − E_RHF(vacuum), per pose, in kcal/mol.
@@ -540,19 +582,29 @@ class FieldInteraction:
     Both energies are at the same geometry, so the difference is the field's
     interaction energy including the electronic polarization it induces. Unlike
     a total energy, it is comparable between molecules of different formula.
+
+    `remedies` is a ladder for a non-converged SCF: each rung a dict of `run_rhf` overrides (`REMEDY_KEYS`), tried
+    in order when the SCF before it did not converge (`result.converged`). Each leg (vacuum, field) of a pose climbs
+    on its own; the pose's value records the higher of its two legs' rungs in `per_pose["scf_rung"]`, and each SCF
+    its own rung in the calc log. Empty (the default) is exactly the tier without a ladder: same settings, same
+    record.
     """
 
     basis: str = "sto-3g"
     energy_conv: float = 1e-10
     density_conv: float = 1e-8
     max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
+    remedies: list[dict] = field(default_factory=list)
     name: str = "field_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
     #: One dict per SCF of the last `run` (candidate, pose, leg, converged, iterations, energy_hartree, seconds).
     calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        self.remedies = check_remedies(self.remedies)
+
     def settings(self) -> dict:
-        return {
+        s = {
             "method": "RHF",
             "basis": self.basis,
             "energy_conv": self.energy_conv,
@@ -561,14 +613,19 @@ class FieldInteraction:
             "engine": "ferric",
             "field": self.field_provenance,
         }
+        if self.remedies:  # only when set, so configs without a ladder keep their digests
+            s["remedies"] = [dict(r) for r in self.remedies]
+        return s
 
     def produces(self) -> dict[str, str]:
+        if self.remedies:
+            return {"dE_int": "kcal/mol", "scf_rung": "rung"}
         return {"dE_int": "kcal/mol"}
 
     def systematic_floor(self, quantity: str) -> float | None:
-        if quantity != "dE_int":
+        if quantity not in self.produces():
             raise _unknown_quantity(self, quantity)
-        return None  # charge-model / basis sensitivity not yet measured
+        return None  # dE_int: charge-model / basis sensitivity not yet measured; scf_rung is a count, not ranked
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
         """Measured reference time scaled by nbf^p (see `smeltery.cost`); None outside what was measured."""
@@ -599,6 +656,41 @@ class FieldInteraction:
             f"(fit on calibration set), reference iteration count assumed; {cal.machine}",
         }
 
+    @property
+    def n_rungs(self) -> int:
+        """Rung 0 (the base settings) plus one per remedy."""
+        return 1 + len(self.remedies)
+
+    def rung_kwargs(self, rung: int) -> dict:
+        """The `run_rhf` keyword arguments of `rung`: the base settings, then remedy `rung` on top."""
+        if not 0 <= rung < self.n_rungs:
+            raise ValueError(f"rung {rung} outside the ladder 0..{self.n_rungs - 1}")
+        kw: dict = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
+        if self.max_iter is not None:
+            kw["max_iter"] = self.max_iter
+        if rung:
+            kw.update(self.remedies[rung - 1])
+        return kw
+
+    def scf(self, ferric, mol, bs, charges, rung: int):
+        """One SCF of one leg at `rung` (`charges` None = vacuum); returns (result, wall seconds)."""
+        kw = self.rung_kwargs(rung)
+        t0 = time.perf_counter()
+        res = ferric.run_rhf(mol, bs, **kw) if charges is None else ferric.run_rhf(mol, bs, point_charges=charges, **kw)
+        return res, time.perf_counter() - t0
+
+    def _climb(self, ferric, mol, bs, charges, cand: str, pose: int, leg: str):
+        """One leg up the ladder until it converges or the rungs run out; every SCF logged. Returns (result, rung)."""
+        for rung in range(self.n_rungs):
+            res, secs = self.scf(ferric, mol, bs, charges, rung)
+            entry = _calc_entry(cand, pose, leg, res, res.energy, secs)
+            if self.remedies:
+                entry["rung"] = rung
+            self.calc_log.append(entry)
+            if res.converged:
+                return res, rung
+        return res, rung
+
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         for cand in candidates:
             require_passing_poses(cand, ctx)
@@ -610,24 +702,19 @@ class FieldInteraction:
         bs = ferric.BasisSet.bundled(self.basis)
         self.calc_log = []
         for cand in candidates:
-            vals = []
+            vals, rungs = [], []
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
                 mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
-                kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
-                if self.max_iter is not None:
-                    kw["max_iter"] = self.max_iter
-                t0 = time.perf_counter()
-                vac = ferric.run_rhf(mol, bs, **kw)
-                t1 = time.perf_counter()
-                fld = ferric.run_rhf(mol, bs, point_charges=charges, **kw)
-                t2 = time.perf_counter()
-                for leg, res, secs in (("vacuum", vac, t1 - t0), ("field", fld, t2 - t1)):
-                    self.calc_log.append(_calc_entry(cand.name, i, leg, res, res.energy, secs))
+                vac, vr = self._climb(ferric, mol, bs, None, cand.name, i, "vacuum")
+                fld, fr = self._climb(ferric, mol, bs, charges, cand.name, i, "field")
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
+                rungs.append(float(max(vr, fr)))
             cand.per_pose["dE_int"] = vals
+            if self.remedies:
+                cand.per_pose["scf_rung"] = rungs
 
 
 def _dft_energy(result) -> float:

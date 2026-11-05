@@ -282,6 +282,7 @@ _NOT_KNOBS = {
     "parent_poses_given",
     "analogue_poses_given",
     "known_cores",
+    "remedies",  # a list of tables (the SCF remedy ladder): set in the config, no form widget
 }
 _TYPE_KIND = {"int": "int", "float": "float", "bool": "bool", "str": "str"}
 
