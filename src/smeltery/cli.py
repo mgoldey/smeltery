@@ -1369,8 +1369,10 @@ def main(argv: list[str] | None = None) -> int:
             plan = build_plan(cfg, out_dir=args.out)
             per_candidate_values = {}
             parent_values = None
+            partial_configs = []
             for p in partials:
                 recp = json.loads(p.read_text())
+                partial_configs.append(recp["results"].get("config"))
                 pp = recp["results"]["per_pose"]
                 name = p.name[len("partial-") : -len(".json")]
                 if name in pp:
@@ -1392,6 +1394,13 @@ def main(argv: list[str] | None = None) -> int:
                             c.per_pose[q] = list(v)
 
             rec, out = run_plan(plan, measure=measure)
+            # the partials staged the config; a combine carries it when they all agree
+            if (
+                partial_configs
+                and partial_configs[0] is not None
+                and all(c == partial_configs[0] for c in partial_configs)
+            ):
+                rec.results["config"] = partial_configs[0]
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
             print(format_table(plan, out))

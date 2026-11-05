@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
+from golden_path import results_without_timing
 
 from smeltery.cli import main
 
@@ -91,6 +92,7 @@ def test_split_then_combine_gives_the_same_record_as_one_process(tmp_path):
     for o in (a, b):
         for k in ("started_utc", "finished_utc"):
             o.pop(k, None)
+        o["results"] = results_without_timing(o["results"])  # wall-clock seconds differ between two runs
     assert a == b
 
 
