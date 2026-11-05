@@ -7,10 +7,13 @@ centroid, `jitter_ang` shift), mimicking the spread of docked poses. The analogu
 `[poses]` exactly as to docked ones (`PairedPoses(parent_poses_given=True)`: the MCS core copied from parent pose i).
 
 `skip_first` builds `n_poses + skip_first` poses and drops the first `skip_first` before pairing, so `n_poses` poses
-are kept. The parent's kept poses are those the danuglipron example (`examples/danuglipron_halogen.py
---skip-first-poses`) kept; its analogues' substituent atoms are not, because the example dropped AFTER pairing and the
-pairing seeds pose i's fresh substituent embedding with `seed + i` (the mapped core is an exact copy either way).
-With `skip_first = 0` the poses are the example's, atom for atom.
+are kept and the dropped ones are never paired, embedded or relaxed. The hook writes `first_pose_index = skip_first`
+and `n_poses` into `[poses]`, so each kept analogue pose embeds its substituent with the seed it had in the undropped
+ensemble (`[poses] seed + first_pose_index + i`) and the poses tier records the real pose count. The kept poses are
+then those the danuglipron example (`examples/danuglipron_halogen.py --skip-first-poses`) kept, atom for atom.
+
+Two seeds: `[bound_pose] seed` draws the parent's rigid jitters; `[poses] seed` seeds the analogues' substituent
+embeddings. The example used 20261005 for both.
 
 The `file` is a file knob: `smeltery run` stages it under `OUT/inputs/` and the input digest carries its sha256.
 """
@@ -142,7 +145,16 @@ class BoundPose:
             raise FileNotFoundError(f"[bound_pose] file {k.file!r}: no such file ({path})")
         bound = bound_pose_in_smiles_order(path, parent.smiles)
         poses = bound_pose_ensemble(bound, k.n_poses + k.skip_first, k.seed, k.jitter_deg, k.jitter_ang)
+        # the pairing that follows reads [poses]: it seeds kept pose i as the (skip_first + i)-th, and records the count
+        cfg["poses"] = {**cfg.get("poses", {}), **_pairing_knobs(k)}
         return poses[k.skip_first :]
+
+
+def _pairing_knobs(k: BoundPoseKnobs) -> dict:
+    """What `[bound_pose]` sets in `[poses]`: the real pose count (a `[poses] n_poses` plays no part beside given
+    parent poses, so it is overwritten and the record states the count paired), and the pose index offset when poses
+    are dropped."""
+    return {"n_poses": k.n_poses, **({"first_pose_index": k.skip_first} if k.skip_first else {})}
 
 
 def _validate(cfg: dict) -> None:
@@ -175,6 +187,12 @@ def _validate(cfg: dict) -> None:
         v = s.get(key, 0.0)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
             raise cli.ConfigError(f"[bound_pose] {key} must be a number >= 0, got {v!r}")
+    poses = cfg.get("poses", {})
+    want = _pairing_knobs(BoundPoseKnobs(**s)).get("first_pose_index", 0)
+    if (
+        isinstance(poses, dict) and poses.get("first_pose_index", want) != want
+    ):  # a planned config carries [bound_pose]'s
+        raise cli.ConfigError(f"[poses] first_pose_index is set by [bound_pose] skip_first (to {want}); leave it out")
 
 
 def register_methods() -> None:
@@ -200,11 +218,21 @@ def register_methods() -> None:
             summary="The parent's poses from a bound conformer: pose 0 as bound, poses 1.. seeded rigid jitters of it.",
             params=(
                 Param("file", "path", required=True, help="XYZ of the bound parent in the field's frame, with H"),
-                Param("seed", "int", required=True, help="seed of the rigid jitters; a new seed draws new poses"),
+                Param(
+                    "seed",
+                    "int",
+                    required=True,
+                    help="seed of the parent's rigid jitters; [poses] seed seeds the analogue embeddings",
+                ),
                 Param("n_poses", "int", 6, help="parent poses kept: the bound conformer plus n_poses - 1 jitters"),
                 Param("jitter_deg", "float", 15.0, help="largest random rotation (deg) of a jittered pose"),
                 Param("jitter_ang", "float", 0.5, help="largest random shift (A) of a jittered pose"),
-                Param("skip_first", "int", 0, help="leading poses built and then dropped before pairing"),
+                Param(
+                    "skip_first",
+                    "int",
+                    0,
+                    help="leading poses built, then dropped before pairing; 1 drops the bound conformer itself",
+                ),
             ),
         )
     )

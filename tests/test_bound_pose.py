@@ -98,12 +98,25 @@ def test_atom_order_is_the_parent_smiles_with_h_and_pose_0_is_the_file_unaltered
     assert sorted((s, *map(float, x)) for s, x in zip(pose.symbols, pose.coords_ang, strict=True)) == from_file
 
 
-def test_skip_first_drops_leading_poses_before_pairing():
+def test_skip_first_drops_leading_poses_and_keeps_the_rest_as_they_were():
+    """The example dropped AFTER pairing; dropping before must give the same kept poses, analogues included."""
     plan = build_plan(_cfg(n_poses=3, skip_first=1))
-    parent = next(c for c in plan.candidates if c.name == "parent")
-    want = [np.array(p) for p in PARENT["poses"][1:]]  # built 4, dropped the bound conformer itself
-    assert len(parent.poses) == 3 and all(np.array_equal(a, b) for a, b in zip(_coords(parent), want, strict=True))
-    assert all(len(c.poses) == 3 for c in plan.candidates)
+    for name, ref in REF["candidates"].items():  # built 4, dropped the bound conformer itself
+        got = next(c for c in plan.candidates if c.name == name)
+        want = [np.array(p) for p in ref["poses"][1:]]
+        assert len(got.poses) == 3, name
+        assert all(np.array_equal(a, b) for a, b in zip(_coords(got), want, strict=True)), name
+    settings = next(t for t in plan.tiers if t["name"] == "paired_poses")
+    assert settings["n_poses"] == 3 and settings["first_pose_index"] == 1  # the record states what was paired
+    validate_config(plan.cfg)  # a planned config still validates
+    with pytest.raises(ConfigError, match="first_pose_index"):
+        validate_config({**_cfg(skip_first=1), "poses": {"first_pose_index": 2}})
+
+
+def test_the_poses_tier_records_the_pose_count_it_paired():
+    plan = build_plan(_cfg())
+    settings = next(t for t in plan.tiers if t["name"] == "paired_poses")
+    assert settings["n_poses"] == 4 and "first_pose_index" not in settings
 
 
 def test_exclusive_with_docking_and_needs_its_file_and_seed():

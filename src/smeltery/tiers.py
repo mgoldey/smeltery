@@ -257,6 +257,9 @@ class PairedPoses:
     parent_poses_given: bool = False
     relax_unmapped: bool = False
     analogue_poses_given: bool = False
+    #: Index of the first pose in the ensemble it was cut from: analogue pose i embeds its unmapped atoms with seed
+    #: `seed + first_pose_index + i`, so poses kept after dropping leading ones are the poses they were before the drop.
+    first_pose_index: int = 0
     #: Known scaffold cores: analogue name -> list of (analogue HEAVY atom, parent HEAVY atom) pairs.
     #: Supplied by a caller that knows the correspondence by construction (`ScaffoldGrowth` pins the
     #: scaffold, measured at 0.045-0.059 A RMSD with every element symbol and all 43/43 internal bonds
@@ -287,7 +290,7 @@ class PairedPoses:
                 "relax_unmapped",
                 "analogue_poses_given",
             )
-        }
+        } | ({"first_pose_index": self.first_pose_index} if self.first_pose_index else {})  # 0: digests unchanged
 
     def produces(self) -> dict[str, str]:
         return {}  # writes poses, no per_pose quantity
@@ -458,7 +461,7 @@ class PairedPoses:
             if len(mapping) == amol.GetNumAtoms():
                 xyz = np.zeros((amol.GetNumAtoms(), 3))
             else:
-                cid = AllChem.EmbedMolecule(amol, randomSeed=self.seed + i)
+                cid = AllChem.EmbedMolecule(amol, randomSeed=self.seed + self.first_pose_index + i)
                 if cid < 0:
                     raise RuntimeError(f"{cand.name}: could not embed pose {i}")
                 ref = Chem.Mol(pmol)

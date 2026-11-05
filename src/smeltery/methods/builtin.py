@@ -201,6 +201,7 @@ def builtin_specs() -> list[MethodSpec]:
                     "jitter_ang": "largest random shift (A) per parent pose, mimicking docked spread; unused if docked",
                     "min_core_heavy": "fewest heavy atoms the common core may have; a smaller core refuses the pair",
                     "mcs_timeout_s": "seconds the core search may take; timing out refuses (10 is short for drugs)",
+                    "first_pose_index": "index of pose 0 in the ensemble it was cut from; offsets the analogue seeds",
                 },
             ),
         ),
