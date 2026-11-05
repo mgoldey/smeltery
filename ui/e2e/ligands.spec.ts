@@ -24,7 +24,7 @@ test("add, rename, change a SMILES and pick the parent write the text; removing 
   await page.getByLabel("New candidate SMILES").fill("OC(=O)c1ccc(C)cc1");
   await page.getByRole("button", { name: "Add candidate" }).click();
   await expect(row(page, "4-Me")).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Pipeline TOML" })).toContainText('"4-Me"');
+  await expect(page.getByRole("textbox", { name: "Pipeline TOML" })).toContainText(/"?4-Me"? = /);
 
   const smiles = page.getByLabel("SMILES of 4-Me");
   await smiles.fill("OC(=O)c1ccc(CC)cc1");
@@ -47,7 +47,7 @@ test("add, rename, change a SMILES and pick the parent write the text; removing 
   await expect(page.getByTestId("ligands-error")).toContainText("parent");
   await expect(row(page, "benzoic")).toBeVisible();
 
-  await row(page, "4-F").getByRole("radio").check();
+  await row(page, "4-F").getByRole("radio").click();
   await expect(row(page, "4-F")).toHaveAttribute("data-parent", "true");
   await page.getByRole("button", { name: "Remove benzoic" }).click();
   await expect(row(page, "benzoic")).toHaveCount(0);
