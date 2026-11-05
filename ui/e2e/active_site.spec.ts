@@ -9,7 +9,7 @@ const siteCount = (t: string) =>
 /** Click "Use as active site", answering the drop-charges confirmation when the fixture pipeline has sites. */
 async function useStructure(page: Page) {
   const view = page.locator('[data-view="active_site"]');
-  await useStructure(page);
+  await view.getByRole("button", { name: "Use as active site" }).click();
   const yes = view.getByRole("button", { name: /^Drop \d+ and switch$/ });
   if (await yes.isVisible({ timeout: 500 }).catch(() => false))
     await yes.click();

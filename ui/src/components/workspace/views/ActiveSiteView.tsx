@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, reasonOf } from "../../../api/http";
 import type { Schemas } from "../../../api/client";
 import { MolstarViewer } from "../../MolstarViewer";
@@ -89,6 +89,7 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   const sites = (toml.match(/^\[\[pocket\.site\]\]/gm) ?? []).length;
   const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
   const [way, setWay] = useState<Choice>(current);
+  useEffect(() => setWay(current), [current]);
 
   /** A switch that would drop hand-placed charges waits for a yes, saying how many go. */
   const ask = (body: Record<string, unknown>) => {
