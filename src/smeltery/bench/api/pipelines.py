@@ -10,21 +10,50 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from smeltery.bench.ports.pipeline_store import PipelineFile, StaleWrite
 from smeltery.gui._toml import dumps
 from smeltery.gui.config_text import ConfigTextError
 from smeltery.gui.pipeline import Pipeline
 
+from ..use_cases.impact import SourceRun, as_dict, impact
+from ..use_cases.launch_run import smeltery_command
 from . import models as M
 from .common import ports, record, row
 from .work import pipeline_from_run, pipeline_issues
 
 router = APIRouter(prefix="/api", tags=["pipelines"])
+
+
+class ImpactRequest(BaseModel):
+    toml: str
+    baseline_toml: str
+    source_run: int | None = None
+    name: str | None = None  # the saved pipeline: its folder resolves relative paths and holds `preview/`
+
+
+class ImpactSeconds(BaseModel):
+    value: float | None
+    basis: str
+
+
+class Impact(BaseModel):
+    seconds: ImpactSeconds
+    memory: dict[str, Any]  # `smeltery.cli.memory_estimate`, or {"verdict": "cannot say", "basis": ...}
+    changes: list[str]
+    new_digest: bool
+    poses_from: Literal["computed", "source run", "none"]
+    issues: list[M.Issue]
+    preview_task: str | None
+
+
+class PreviewStarted(BaseModel):
+    task: str
 
 
 def _validate(text: str) -> Pipeline | None:
@@ -162,3 +191,48 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
     except FileExistsError:
         return JSONResponse(status_code=409, content={"reason": f"pipeline {body.name} already exists"})
     return _doc(made, notes)
+
+
+def _preview_task(request: Request, name: str) -> str | None:
+    """The id of this pipeline's preview that is queued or running, newest first."""
+    live = [
+        t for t in ports(request).task_queue.list() if t.name == f"preview {name}" and t.status in ("queued", "running")
+    ]
+    return live[-1].id if live else None
+
+
+@router.post("/pipelines/impact", response_model=Impact)
+def pipeline_impact(request: Request, body: ImpactRequest) -> Any:
+    """What the edit costs, without running docking or an SCF: estimates from RDKit-placed poses, from the source
+    run's poses when nothing upstream of them changed, or "cannot say"."""
+    for text in (body.toml, body.baseline_toml):
+        try:
+            _validate(text)
+        except ConfigTextError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    base = Path(ports(request).settings.root)
+    preview_dir = None
+    task = None
+    if body.name is not None:
+        folder = _get(request, body.name).folder
+        base, preview_dir, task = folder, folder / "preview", _preview_task(request, body.name)
+    source = None
+    if body.source_run is not None:
+        source = SourceRun(Path(row(request, body.source_run)["path"]).parent, record(request, body.source_run))
+    return as_dict(
+        impact(body.toml, body.baseline_toml, base, source=source, preview_dir=preview_dir, preview_task=task)
+    )
+
+
+@router.post("/pipelines/{name}/preview", response_model=PreviewStarted, status_code=201)
+def pipeline_preview(request: Request, name: str) -> Any:
+    """Submit `smeltery run config.toml --plan --out <folder>/preview`: poses, digest, seconds and memory, no SCF."""
+    folder = _get(request, name).folder
+    queue = ports(request).task_queue
+    tid = queue.submit(
+        f"preview {name}",
+        [*smeltery_command(), "run", str(folder / "config.toml"), "--plan", "--out", str(folder / "preview")],
+        cwd=str(folder),
+        note=f"user={ports(request).identity.current()}",
+    )
+    return PreviewStarted(task=tid)

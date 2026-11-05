@@ -1082,17 +1082,38 @@ def _describe_plan(plan: Plan, digest: str) -> str:
     )
 
 
-def describe_memory(plan: Plan) -> list[str]:
-    """What `--plan` says about memory: the measurement tier's own prediction (the one its pre-SCF check uses, so
-    the plan and the run cannot disagree), what the machine has free now, and what each would refuse."""
+def memory_estimate(plan) -> dict:
+    """The memory facts `--plan` and Bench's impact both state, structured. `plan` needs only `.tier` and
+    `.candidates`. `estimate` is the measurement tier's own `estimate_memory` dict (the one its pre-SCF check
+    uses, so the plan and the run cannot disagree) or None when the tier has no model; `verdict` is "fits",
+    "does not fit", "cannot say" (the model cannot count this basis or element: never "fits") or "no model"."""
     tier = plan.tier
-    estimate = getattr(tier, "estimate_memory", None)
-    if estimate is None:
-        return [f"memory: {tier.name} has no memory model; nothing is checked before its SCFs"]
-    mem = estimate(plan.candidates)
-    enforced = getattr(tier, "check_memory", True)
-    if "total_gb" not in mem:  # the model cannot count this basis or element: "cannot say", never "fits"
-        lines = [f"memory ({tier.name}, per calculation): cannot say ({mem['basis']}); the run will not refuse on it"]
+    fn = getattr(tier, "estimate_memory", None)
+    mem = fn(plan.candidates) if fn is not None else None
+    if mem is None:
+        verdict = "no model"
+    elif "total_gb" not in mem:
+        verdict = "cannot say"
+    else:
+        verdict = "fits" if mem["fits_budget"] else "does not fit"
+    return {
+        "tier": tier.name,
+        "estimate": mem,
+        "free_gb": available_memory_gb(),
+        "require_free_gb": getattr(tier, "require_free_gb", None),
+        "check_memory": bool(getattr(tier, "check_memory", True)),
+        "verdict": verdict,
+    }
+
+
+def describe_memory(plan: Plan) -> list[str]:
+    """What `--plan` says about memory: `memory_estimate`, as text."""
+    m = memory_estimate(plan)
+    name, mem, enforced = m["tier"], m["estimate"], m["check_memory"]
+    if mem is None:
+        return [f"memory: {name} has no memory model; nothing is checked before its SCFs"]
+    if m["verdict"] == "cannot say":
+        lines = [f"memory ({name}, per calculation): cannot say ({mem['basis']}); the run will not refuse on it"]
     else:
         verdict = (
             "fits"
@@ -1102,13 +1123,12 @@ def describe_memory(plan: Plan) -> list[str]:
             else "does NOT fit (check_memory = false, so the run will start anyway and may spill to disk)"
         )
         lines = [
-            f"memory ({tier.name}, per calculation): the largest pose ({mem['n_atoms']} atoms, "
+            f"memory ({name}, per calculation): the largest pose ({mem['n_atoms']} atoms, "
             f"{mem['n_basis_functions']} basis functions) needs {mem['total_gb']:.2f} GB "
             f"(AO cache {mem['ao_cache_gb']:.2f} + RI tensor {mem['ri_tensor_gb']:.2f}); "
             f"budget {mem['budget_gb']:g} GB: {verdict}"
         ]
-    free = available_memory_gb()
-    need = getattr(tier, "require_free_gb", None)
+    free, need = m["free_gb"], m["require_free_gb"]
     have = "unknown (no /proc/meminfo)" if free is None else f"{free:.1f} GB available now"
     if need is None:
         lines.append(f"machine: {have}; require_free_gb unset, so free memory is not checked")
@@ -1121,6 +1141,43 @@ def describe_memory(plan: Plan) -> list[str]:
         "so leave the machine headroom beyond it)"
     )
     return lines
+
+
+#: The config sections that decide the poses; an edit outside them leaves every pose where it was.
+POSE_SECTIONS = ("structure", "pocket", "docking", "candidates", "parent", "poses", "decisions")
+
+
+def poses_key(cfg: dict, base: Path) -> str:
+    """A hash of everything upstream of the poses in a raw config (`tomllib` output). A file the config names is
+    hashed by content, so a run's staged copy (`inputs/<sha>/name`) and the original path give the same key."""
+    from .run_inputs import INPUT_PATHS
+
+    parts: dict = {}
+    for sec in POSE_SECTIONS:
+        if sec in cfg:
+            parts[sec] = json.loads(json.dumps(cfg[sec], sort_keys=True, default=str))
+    for table, key in INPUT_PATHS:
+        v = parts.get(table, {}).get(key) if isinstance(parts.get(table), dict) else None
+        if isinstance(v, str):
+            f = Path(v) if Path(v).is_absolute() else Path(base) / v
+            if f.is_file():
+                parts[table][key] = {"sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+
+
+def write_plan_preview(plan: Plan, digest: str, out_dir: Path, config: Path) -> None:
+    """`--plan --out OUT`: OUT/plan.json (`digest`, `seconds` = the measurement tier's `estimate_cost`, `memory`,
+    `poses_key`, `poses`) and the pose SDFs under OUT/poses/. No SCF ran; Bench's impact reads these."""
+    poses = write_pose_sdfs(plan, {"per_pose": {c.name: {} for c in plan.candidates}}, out_dir)
+    raw = tomllib.loads(Path(config).read_text())  # the config as written: before decisions drop candidates
+    rec = {
+        "digest": digest,
+        "seconds": plan.tier.estimate_cost(plan.candidates),
+        "memory": memory_estimate(plan),
+        "poses_key": poses_key(raw, Path(config).resolve().parent),
+        "poses": poses,
+    }
+    (out_dir / "plan.json").write_text(json.dumps(rec, indent=2, sort_keys=True, default=str) + "\n")
 
 
 #: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.
@@ -1324,7 +1381,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
-            print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
+            digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
+            print(_describe_plan(plan, digest))
+            if explicit_out:
+                write_plan_preview(plan, digest, args.out, args.config)
             return 0
         rec, out = run_plan(plan)
         if config_info is not None:
