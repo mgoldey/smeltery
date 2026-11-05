@@ -12,6 +12,7 @@
   --ok: #2f6b3f;
   --bad: #9a2b1f;
   --pending: #7a6420;
+  --changed: #fff3cf; /* a draft value not yet kept */
   /* Data colours, copied from smeltery.gui.scenes. Used only for data, never for decoration. */
   --charge-positive: #2166ac;
   --charge-negative: #b2182b;
@@ -33,6 +34,7 @@
     --ok: #79b98a;
     --bad: #e08a7e;
     --pending: #d1b56a;
+    --changed: #3a3118;
     --charge-positive: #2166ac;
     --charge-negative: #b2182b;
     --candidate: #33a02c;

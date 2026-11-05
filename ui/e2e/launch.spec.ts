@@ -1,18 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
-import { expect, IDX, test } from "./bench";
+import { expect, newPipeline, openWorkspace, test } from "./bench";
 
 test("Run pipeline is disabled while a blocking issue remains", async ({ page }) => {
-  await page.goto(`/run/${IDX.a_resolved}/pipeline`);
+  await openWorkspace(page, (await newPipeline(page)).name, "active_site");
   // The run's pocket sites cannot be recovered from its record, so the starting pipeline has no charge yet.
-  await expect(page.getByRole("region", { name: "Issues" }).locator('.issue[data-level="error"]').first()).toBeVisible();
+  await expect(page.locator('[data-panel="active_site"] .issue[data-level="error"]').first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Run pipeline" })).toBeDisabled();
 });
 
 test("a clean pipeline launches: the task runs smeltery on OUT/config.toml, and the config is that pipeline", async ({ page }) => {
-  await page.goto(`/run/${IDX.a_resolved}/pipeline`);
+  await openWorkspace(page, (await newPipeline(page)).name, "active_site");
   await page.locator('[data-atom-index="3"]').click();
   await page.locator('[data-atom-index="4"]').click();
   await page.getByRole("button", { name: "Place site" }).click();
+  await expect(page.getByTestId("toml-pane")).toContainText("[[pocket.site]]");
+  await page.getByRole("region", { name: "Impact" }).getByRole("button", { name: "Keep" }).click();
   const run = page.getByRole("button", { name: "Run pipeline" });
   await expect(run).toBeEnabled({ timeout: 15_000 });
   const toml = (await page.getByTestId("toml-pane").innerText()).trim();

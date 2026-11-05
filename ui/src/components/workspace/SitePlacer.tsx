@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { api, unwrap } from "../../../api/client";
-import { AtomPicker } from "../../../components/AtomPicker";
-import { MolstarViewer } from "../../../components/MolstarViewer";
-import { provisionalScene } from "../../../components/scenes";
+import { api, unwrap } from "../../api/client";
+import { AtomPicker } from "../AtomPicker";
+import { MolstarViewer } from "../MolstarViewer";
+import { provisionalScene } from "../scenes";
 
 /**
  * Place a pocket charge by clicking two atoms of the parent: the site atom, then the atom it points away from. The

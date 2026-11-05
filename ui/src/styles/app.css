@@ -81,21 +81,54 @@ label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0
 .controls label { margin-top: 0; }
 .pairing { margin: 8px 0 0; }
 
-/* Pipeline editor */
-.pipeline-grid { display: grid; grid-template-columns: 300px 1fr; gap: 28px; align-items: start; }
-.palette { border-right: 1px solid var(--hairline); padding-right: 18px; }
-.palette .rung h3 { font-size: 12px; font-weight: 600; text-transform: none; color: var(--ink-muted); margin: 16px 0 4px; }
-.palette ul { list-style: none; margin: 0 0 6px; padding: 0; }
-.palette .quantity-label { font-size: 12px; color: var(--ink-muted); padding: 2px 0; }
-.palette .method { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: baseline; padding: 3px 0; }
-.palette .method button { padding: 2px 6px; font-size: 12px; }
-.palette .unwired { grid-column: 2; font-size: 12px; color: var(--ink-muted); }
-.stages { list-style: decimal; padding-left: 22px; margin: 0; }
-.stage { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hairline); }
-.stage.selected { background: var(--sunken); }
-.stage-rung { color: var(--ink-muted); font-size: 12px; }
-.stage-actions { display: flex; gap: 4px; }
-.stage-actions button { padding: 2px 8px; font-size: 12px; }
+/* Workspace: the pipeline drawn, one step edited in place, the TOML beside */
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 24px; align-items: start; }
+.workspace-side { position: sticky; top: 0; }
+.workspace-side h2 { margin-top: 0; }
+.drawing { display: flex; align-items: stretch; gap: 0; list-style: none; margin: 0; padding: 10px; border: 1px solid var(--hairline); background: var(--panel); border-radius: 6px 6px 0 0; overflow-x: auto; }
+.drawing li { display: flex; align-items: stretch; }
+.drawing li + li::before { content: "→"; align-self: center; color: var(--ink-muted); padding: 0 6px; }
+.drawing button { min-width: 92px; text-align: left; border-radius: 6px; padding: 6px 9px; display: flex; flex-direction: column; gap: 1px; }
+.drawing button[aria-current="step"] { border: 2px solid var(--accent); background: var(--sunken); }
+.drawing .n { font-size: 11px; color: var(--ink-muted); }
+.drawing .t { font-weight: 600; }
+.drawing .s { font-size: 11px; color: var(--ink-muted); }
+.drawing [data-state="needs_input"] .s { color: var(--bad); }
+.drawing [data-state="changed"] .s { color: var(--accent); }
+.drawing [data-state="stale"] .s { color: var(--pending); }
+.step-panel { border: 1px solid var(--hairline); border-top: 0; background: var(--panel); }
+.step-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--hairline); }
+.step-head h2 { margin: 0; font-size: 14px; }
+.step-head .say { color: var(--ink-muted); flex: 1; }
+.step-cols { display: grid; grid-template-columns: 0.75fr 1.5fr 0.75fr; }
+.step-cols > section { padding: 12px 14px; min-width: 0; margin: 0; }
+.step-cols > section + section { border-left: 1px solid var(--hairline); }
+.step-cols h3 { font-size: 11px; letter-spacing: 0.02em; color: var(--ink-muted); margin: 0 0 6px; font-weight: 600; text-transform: uppercase; }
+.flow-item { border: 1px solid var(--hairline); border-radius: 4px; padding: 6px 8px; margin: 0 0 6px; background: var(--ground); }
+.flow-item .from { font-size: 11px; color: var(--ink-muted); }
+.method-choice { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.method-choice button { font-size: 12px; padding: 3px 9px; }
+.method-choice button[aria-pressed="true"] { border: 2px solid var(--accent); }
+.method-block h4 { font-size: 13px; margin: 10px 0 2px; display: flex; gap: 8px; align-items: baseline; }
+.method-block h4 button { font-size: 12px; padding: 1px 8px; font-weight: 400; }
+.param { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 8px; align-items: start; padding: 5px 0; border-bottom: 1px solid var(--hairline); }
+.param label { margin: 0; padding-top: 4px; color: var(--ink); font-size: 12px; }
+.param input, .param select { width: 100%; font-size: 12px; padding: 2px 6px; }
+.param .help { grid-column: 1 / -1; font-size: 12px; color: var(--ink-muted); }
+.param.changed { background: var(--changed); margin: 0 -6px; padding: 5px 6px; border-radius: 4px; }
+.param .was, .param .ws-default { display: block; font-size: 11px; color: var(--pending); margin-top: 2px; }
+.param .ws-default { color: var(--ink-muted); }
+.param .was button { font-size: 11px; }
+.step-issues { margin-top: 10px; }
+.impact-strip { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; padding: 8px 14px; border: 1px solid var(--hairline); border-top: 0; font-size: 12.5px; background: var(--sunken); }
+.impact-strip .grow { flex: 1; }
+.impact-strip .warn { color: var(--pending); }
+.impact-strip .bad { color: var(--bad); }
+.impact-strip .basis { color: var(--ink-muted); }
+.config-diff { background: var(--ground); border: 1px solid var(--hairline); border-radius: 4px; padding: 6px 8px; margin: 8px 0 0; white-space: pre-wrap; }
+.config-diff [data-sign="+"] { color: var(--ok); }
+.config-diff [data-sign="-"] { color: var(--bad); text-decoration: line-through; }
+.config-diff [data-sign=" "] { color: var(--ink-muted); }
 .issues { list-style: none; padding: 0; margin: 0; }
 .issue { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--hairline); }
 .issue-level { font-weight: 600; min-width: 56px; }
@@ -104,9 +137,6 @@ label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0
 .issue[data-level="note"] .issue-level { color: var(--ink-muted); }
 .toml-editor { border: 1px solid var(--hairline); background: var(--panel); min-height: 220px; font-size: 12.5px; }
 .toml-editor .cm-editor { min-height: 220px; }
-.knobs > div { margin-bottom: 6px; }
-.knobs input { width: 100%; }
-.palette .unwired-mark { font-size: 12px; color: var(--ink-muted); text-align: center; }
 .toml-editor .cm-scroller { font-family: "IBM Plex Mono", ui-monospace, monospace; line-height: 1.5; }
 .toml-editor .cm-gutters { background: var(--sunken); color: var(--ink-muted); border-right: 1px solid var(--hairline); }
 .banner.note { border-left-color: var(--accent); }
@@ -162,3 +192,5 @@ pre.log { background: var(--sunken); border: 1px solid var(--hairline); padding:
 fieldset.attach { border: 1px solid var(--hairline); margin: 10px 0; padding: 8px 12px; max-width: 64ch; }
 label.check { display: block; color: var(--ink); font-size: 14px; margin: 4px 0; }
 .absent { color: var(--ink-muted); font-style: italic; }
+.config-h { font-size: 13px; margin: 14px 0 4px; }
+.step-wide { padding: 0 14px 12px; border-top: 1px solid var(--hairline); }

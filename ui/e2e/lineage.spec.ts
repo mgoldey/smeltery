@@ -53,3 +53,27 @@ test("tracing another candidate switches the panel to it", async ({ page }) => {
   await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
   await expect(page.getByRole("complementary", { name: "Lineage" })).toContainText(name);
 });
+
+test("the lineage opens the pipeline that made the number, and 'change a setting' opens its ΔE_int step", async ({ page }) => {
+  const table = await get<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+  const name = table.rows[0]!.candidate;
+  await page.goto(`/run/${IDX.a_resolved}/results`);
+  await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
+  const panel = page.getByRole("complementary", { name: "Lineage" });
+  await panel.getByRole("button", { name: "Open the pipeline that made this" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pipelines/[a-z0-9_-]+\\?run=${IDX.a_resolved}$`));
+  const pipeline = new URL(page.url()).pathname.split("/").pop()!;
+  // Data source: the pipeline the API now holds was made from this run (its campaign and candidates).
+  const doc = await get<{ toml: string }>(page, `/api/pipelines/${pipeline}`);
+  const run = await get<{ campaign: string }>(page, `/api/runs/${IDX.a_resolved}`);
+  expect(doc.toml).toContain(`campaign = "${run.campaign}"`);
+  expect(doc.toml).toContain(name);
+
+  await page.goto(`/run/${IDX.a_resolved}/results`);
+  await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
+  await panel.getByRole("button", { name: "Change a setting and re-run" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pipelines/${pipeline}\\?run=${IDX.a_resolved}&step=measure$`));
+  const measure = page.getByRole("navigation", { name: "Pipeline steps" }).locator('[data-step="measure"]');
+  await expect(measure).toHaveAttribute("aria-current", "step");
+  await expect(page.locator('[data-panel="measure"]')).toBeVisible();
+});

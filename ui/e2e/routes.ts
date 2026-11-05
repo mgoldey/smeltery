@@ -1,4 +1,4 @@
-import { IDX } from "./bench";
+import { IDX, PIPELINE } from "./bench";
 
 /** Every page of the app, by fixture. A page's feature adds it here so the accessibility checks cover it.
  * Evaluated when tests are collected, so it uses IDX, not .fixture.json (which the server writes later). */
@@ -17,6 +17,7 @@ export function routes(): string[] {
     "/studies/bench.study_dag_fixture",
     "/compare",
     "/methods",
+    `/pipelines/${PIPELINE}`,
     `/report/${IDX.a_resolved}`,
     `/report/${IDX.c_incomplete}`,
     "/no/such/page",

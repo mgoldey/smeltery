@@ -279,6 +279,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Edit
+         * @description One step edit applied to the user's text: only the lines the edit changes are written, comments and layout
+         *     stay (`config_text.apply`). Workspace defaults are copied into a method when it is added.
+         */
+        post: operations["pipeline_edit_api_pipelines_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Impact
+         * @description What the edit costs, without running docking or an SCF: estimates from RDKit-placed poses, from the source
+         *     run's poses when nothing upstream of them changed, or "cannot say".
+         */
+        post: operations["pipeline_impact_api_pipelines_impact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Steps
+         * @description The draft drawn as its six steps, each with its knobs, its state against the kept text, and its issues.
+         */
+        post: operations["pipeline_steps_api_pipelines_steps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/{name}": {
         parameters: {
             query?: never;
@@ -291,6 +353,47 @@ export interface paths {
         /** Put Pipeline */
         put: operations["put_pipeline_api_pipelines__name__put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/launch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Launch
+         * @description Run the KEPT config: inputs staged into OUT by hash, relative paths resolved against the pipeline's folder.
+         *     Refused, with the number of errors and each one, while `Pipeline.check()` reports an error.
+         */
+        post: operations["pipeline_launch_api_pipelines__name__launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Preview
+         * @description Submit `smeltery run config.toml --plan --out <folder>/preview`: poses, digest, seconds and memory, no SCF.
+         */
+        post: operations["pipeline_preview_api_pipelines__name__preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -977,6 +1080,21 @@ export interface components {
             /** User */
             user: string;
         };
+        /** DiffLine */
+        DiffLine: {
+            /** Line */
+            line: string;
+            /**
+             * Sign
+             * @description "+" added, "-" removed, " " unchanged context
+             */
+            sign: string;
+        };
+        /** EditedText */
+        EditedText: {
+            /** Toml */
+            toml: string;
+        };
         /** EntryIn */
         EntryIn: {
             /**
@@ -1020,6 +1138,67 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** Impact */
+        Impact: {
+            /** Changes */
+            changes: string[];
+            /** Issues */
+            issues: components["schemas"]["Issue"][];
+            memory: components["schemas"]["ImpactMemory"];
+            /** New Digest */
+            new_digest: boolean;
+            /**
+             * Poses From
+             * @enum {string}
+             */
+            poses_from: "computed" | "source run" | "none";
+            /** Preview Task */
+            preview_task: string | null;
+            seconds: components["schemas"]["ImpactSeconds"];
+        };
+        /**
+         * ImpactMemory
+         * @description `smeltery.cli.memory_estimate`'s shape, in every case; `estimate` is None when it cannot say.
+         */
+        ImpactMemory: {
+            /** Basis */
+            basis: string | null;
+            /** Check Memory */
+            check_memory: boolean;
+            /** Estimate */
+            estimate: {
+                [key: string]: unknown;
+            } | null;
+            /** Free Gb */
+            free_gb: number | null;
+            /** Require Free Gb */
+            require_free_gb: number | null;
+            /** Tier */
+            tier: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "fits" | "does not fit" | "cannot say" | "no model";
+        };
+        /** ImpactRequest */
+        ImpactRequest: {
+            /** Baseline Toml */
+            baseline_toml: string;
+            /** Name */
+            name?: string | null;
+            /** Source Run */
+            source_run?: number | null;
+            /** Toml */
+            toml: string;
+        };
+        /** ImpactSeconds */
+        ImpactSeconds: {
+            /** Basis */
+            basis: string;
+            /** Value */
+            value: number | null;
+        };
         /** Issue */
         Issue: {
             /**
@@ -1038,6 +1217,17 @@ export interface components {
             out?: string | null;
             /** Toml */
             toml: string;
+        };
+        /** Ligands */
+        Ligands: {
+            /** Campaign */
+            campaign: string;
+            /** Candidates */
+            candidates: {
+                [key: string]: string;
+            };
+            /** Parent */
+            parent: string;
         };
         /**
          * Lineage
@@ -1372,6 +1562,11 @@ export interface components {
             /** Run */
             run: number;
         };
+        /** PipelineLaunch */
+        PipelineLaunch: {
+            /** Out */
+            out?: string | null;
+        };
         /** PipelinePut */
         PipelinePut: {
             /** Base Sha256 */
@@ -1435,6 +1630,11 @@ export interface components {
             source: string;
             /** Symbols */
             symbols: string[];
+        };
+        /** PreviewStarted */
+        PreviewStarted: {
+            /** Task */
+            task: string;
         };
         /** Problem */
         Problem: {
@@ -1602,6 +1802,23 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** SiteSpec */
+        SiteSpec: {
+            /** Atom */
+            atom: number;
+            /**
+             * Distance
+             * @default 3
+             */
+            distance: number;
+            /** From Atom */
+            from_atom: number;
+            /**
+             * Q
+             * @default 1
+             */
+            q: number;
+        };
         /** Snapshot */
         Snapshot: {
             /**
@@ -1613,6 +1830,112 @@ export interface components {
             path: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** StepEdit */
+        StepEdit: {
+            /** Key */
+            key: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "add" | "remove" | "set" | "choose" | "site";
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            } | null;
+            site?: components["schemas"]["SiteSpec"] | null;
+            /** Toml */
+            toml: string;
+        };
+        /** StepLink */
+        StepLink: {
+            /** Step */
+            step: string | null;
+            /** Text */
+            text: string;
+        };
+        /** StepOut */
+        StepOut: {
+            /** Chosen */
+            chosen: string | null;
+            /** Gives */
+            gives: components["schemas"]["StepLink"][];
+            /** Inputs */
+            inputs: components["schemas"]["StepLink"][];
+            /** Issues */
+            issues: components["schemas"]["Issue"][];
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Methods */
+            methods: string[];
+            /** Params */
+            params: components["schemas"]["StepParam"][];
+            /** Placed */
+            placed: string[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "needs_input" | "off" | "changed" | "stale";
+            /** Summary */
+            summary: string;
+        };
+        /** StepParam */
+        StepParam: {
+            /**
+             * Changed From
+             * @description the baseline's value when it differs, else null
+             */
+            changed_from: unknown;
+            /**
+             * Choices
+             * @default []
+             */
+            choices: unknown[];
+            /** Default */
+            default: unknown;
+            /** Help */
+            help: string;
+            /** Kind */
+            kind: string;
+            /** Method */
+            method: string;
+            /** Name */
+            name: string;
+            /** Value */
+            value: unknown;
+            /**
+             * Workspace Default
+             * @description the Methods tab's default for this knob, null when none is set
+             */
+            workspace_default: unknown;
+        };
+        /** StepsOut */
+        StepsOut: {
+            /**
+             * Diff
+             * @description the line diff from baseline_toml to toml, context lines included
+             */
+            diff: components["schemas"]["DiffLine"][];
+            /** @description what the Ligands step holds; null when the text is not a pipeline */
+            ligands: components["schemas"]["Ligands"] | null;
+            /**
+             * Pipeline Issues
+             * @description issues that belong to no one step: shown above the drawing
+             */
+            pipeline_issues: components["schemas"]["Issue"][];
+            /** Steps */
+            steps: components["schemas"]["StepOut"][];
+        };
+        /** StepsRequest */
+        StepsRequest: {
+            /** Baseline Toml */
+            baseline_toml?: string | null;
+            /** Toml */
+            toml: string;
         };
         /** StructureInfo */
         StructureInfo: {
@@ -2344,6 +2667,123 @@ export interface operations {
             };
         };
     };
+    pipeline_edit_api_pipelines_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedText"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_impact_api_pipelines_impact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImpactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Impact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_steps_api_pipelines_steps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepsOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_pipeline_api_pipelines__name__get: {
         parameters: {
             query?: never;
@@ -2406,6 +2846,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_launch_api_pipelines__name__launch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineLaunch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_preview_api_pipelines__name__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewStarted"];
                 };
             };
             /** @description Validation Error */

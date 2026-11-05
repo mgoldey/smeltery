@@ -13,6 +13,16 @@ export function BenchHome() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => unwrap(api.GET("/api/pipelines")) });
+  const [pipeName, setPipeName] = useState("");
+  const [fromRun, setFromRun] = useState("");
+  const newPipeline = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: Number(fromRun) } })),
+    onSuccess: (d) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      navigate(`/pipelines/${d.name}?run=${fromRun}`);
+    },
+  });
   const create = useMutation({
     mutationFn: () => unwrap(api.POST("/api/campaigns", { body: { name, description: "" } })),
     onSuccess: (c) => {
@@ -67,6 +77,54 @@ export function BenchHome() {
                 </tbody>
               </table>
             )}
+          </section>
+          <section aria-labelledby="pipelines-h">
+            <h2 id="pipelines-h">Pipelines</h2>
+            {pipelines.isError ? (
+              <div className="banner" role="alert">
+                Pipelines could not be listed: {pipelines.error.message}
+              </div>
+            ) : pipelines.data && pipelines.data.length ? (
+              <ul>
+                {pipelines.data.map((n) => (
+                  <li key={n}>
+                    <Link className="mono" to={`/pipelines/${n}`}>
+                      {n}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">No pipelines yet. Start one from a run below, or open a run's Pipeline tab.</p>
+            )}
+            <form
+              className="controls"
+              aria-label="New pipeline"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (pipeName.trim() && fromRun !== "") newPipeline.mutate();
+              }}
+            >
+              <div>
+                <label htmlFor="pipeline-name">Pipeline name</label>
+                <input id="pipeline-name" className="mono" value={pipeName} onChange={(e) => setPipeName(e.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="pipeline-from">Start from run</label>
+                <select id="pipeline-from" value={fromRun} onChange={(e) => setFromRun(e.target.value)}>
+                  <option value="">choose a run</option>
+                  {(runs.data ?? []).map((r) => (
+                    <option key={r.idx} value={String(r.idx)}>
+                      {r.idx}: {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" disabled={newPipeline.isPending || !pipeName.trim() || fromRun === ""}>
+                New pipeline
+              </button>
+            </form>
+            {newPipeline.isError ? <p className="field-error">{newPipeline.error.message}</p> : null}
           </section>
           <WorkPanel selected={task} onSelect={setTask} />
           <section aria-labelledby="campaigns-h">

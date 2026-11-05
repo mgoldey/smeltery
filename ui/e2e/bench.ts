@@ -1,4 +1,4 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,10 @@ export function fixture(): Fixture {
  * Usable when tests are collected, before the server has written .fixture.json; shell.spec.ts checks them. */
 export const IDX = { a_resolved: 0, b_unranked: 1, c_incomplete: 2, d_floor: 3, e_noposes: 4 } as const;
 
+/** The pipeline serve_fixture.py makes from run a_resolved at start, for pages that only read it (axe, theme).
+ * Tests that edit a pipeline make their own, so this one stays as made. */
+export const PIPELINE = "e2e";
+
 export function run(name: keyof typeof IDX): FixtureRun {
   const r = fixture().runs.find((x) => x.name === name);
   if (!r) throw new Error(`no fixture run ${name}`);
@@ -53,3 +57,38 @@ export const test = base.extend<{ noExternal: string[] }>({
 });
 
 export { expect };
+
+let made = 0;
+
+/** A fresh workspace pipeline made from run a_resolved (and, given `edit`, its text rewritten and kept), so a test
+ * that edits a pipeline never sees another test's edits. Returns its name and kept text. */
+export async function newPipeline(
+  page: Page,
+  edit?: (text: string) => string,
+): Promise<{ name: string; toml: string }> {
+  const name = `w-${Date.now().toString(36)}-${made++}`;
+  const r = await page.request.post("/api/pipelines", { data: { name, from_run: IDX.a_resolved } });
+  expect(r.status(), await r.text()).toBe(201);
+  let doc = (await r.json()) as { toml: string; sha256: string };
+  if (edit) {
+    const put = await page.request.put(`/api/pipelines/${name}`, { data: { toml: edit(doc.toml), base_sha256: doc.sha256 } });
+    expect(put.status(), await put.text()).toBe(200);
+    doc = (await put.json()) as { toml: string; sha256: string };
+  }
+  return { name, toml: doc.toml };
+}
+
+/** Open a pipeline in the workspace on one step, and wait for the drawing. */
+export async function openWorkspace(page: Page, name: string, step?: string) {
+  await page.goto(`/pipelines/${name}?run=${IDX.a_resolved}${step ? `&step=${step}` : ""}`);
+  await expect(page.getByRole("navigation", { name: "Pipeline steps" }).locator("[data-step]")).toHaveCount(6);
+}
+
+/** Replace everything in the TOML pane with `text`, as typing would. */
+export async function replaceToml(page: Page, text: string) {
+  const pane = page.getByRole("textbox", { name: "Pipeline TOML" });
+  await pane.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("Delete");
+  await page.keyboard.insertText(text);
+}

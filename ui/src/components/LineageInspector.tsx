@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "../api/client";
+import { useOpenRunPipeline } from "./workspace/openFromRun";
 
 type Lineage = Schemas["Lineage"];
 const ABSENT = "not recorded for this run";
@@ -87,6 +88,7 @@ export function LineageInspector({ idx, candidate, onClose }: { idx: number; can
       unwrap(api.GET("/api/runs/{idx}/lineage", { params: { path: { idx }, query: { candidate } } })),
   });
   const l = q.data;
+  const open = useOpenRunPipeline(idx);
   return (
     <aside className="inspector" aria-label="Lineage">
       <h2 style={{ marginTop: 0 }}>{candidate}</h2>
@@ -118,6 +120,15 @@ export function LineageInspector({ idx, candidate, onClose }: { idx: number; can
             </tbody>
           </table>
           <MadeBy l={l} />
+          <p className="controls">
+            <button type="button" disabled={open.isPending} onClick={() => open.mutate({})}>
+              Open the pipeline that made this
+            </button>
+            <button type="button" disabled={open.isPending} onClick={() => open.mutate({ step: "measure" })}>
+              Change a setting and re-run
+            </button>
+          </p>
+          {open.isError ? <p className="field-error">{open.error.message}</p> : null}
         </>
       ) : null}
       <button type="button" onClick={onClose}>

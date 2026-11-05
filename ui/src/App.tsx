@@ -9,7 +9,7 @@ import { Decisions } from "./pages/run/Decisions";
 import { Proposals } from "./pages/run/Proposals";
 import { Study } from "./pages/Study";
 import { Overview } from "./pages/run/Overview";
-import { Pipeline } from "./pages/run/Pipeline";
+import { RunPipeline, Workspace } from "./pages/run/Workspace";
 import { Poses } from "./pages/run/Poses";
 import { Results } from "./pages/run/Results";
 import { Structure } from "./pages/run/Structure";
@@ -25,12 +25,13 @@ export function App() {
       <Route path="/campaigns/:id" element={<Notebook />} />
       <Route path="/compare" element={<Compare />} />
       <Route path="/methods" element={<Methods />} />
+      <Route path="/pipelines/:name" element={<Workspace />} />
       <Route path="/run/:idx" element={<RunLayout />}>
         <Route index element={<Navigate to="results" replace />} />
         <Route path="results" element={<Results />} />
         <Route path="poses" element={<Poses />} />
         <Route path="structure" element={<Structure />} />
-        <Route path="pipeline" element={<Pipeline />} />
+        <Route path="pipeline" element={<RunPipeline />} />
         <Route path="decisions" element={<Decisions />} />
         <Route path="proposals" element={<Proposals />} />
         <Route path="overview" element={<Overview />} />

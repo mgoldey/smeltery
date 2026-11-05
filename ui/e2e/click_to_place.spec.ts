@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, IDX, test } from "./bench";
+import { expect, IDX, newPipeline, openWorkspace, test } from "./bench";
 
 async function parentOf(page: Page) {
   return ((await (await page.request.get(`/api/runs/${IDX.a_resolved}`)).json()) as { parent: string }).parent;
@@ -13,7 +13,7 @@ test("the anchor: every depicted atom is the element the run's pose file has at 
       symbols: string[];
     }
   ).symbols;
-  await page.goto(`/run/${IDX.a_resolved}/pipeline`);
+  await openWorkspace(page, (await newPipeline(page)).name, "active_site");
   const atoms = page.locator("[data-atom-index]");
   await expect(atoms).toHaveCount(fromSdf.length);
   const depicted = await atoms.evaluateAll((els) =>
@@ -23,7 +23,7 @@ test("the anchor: every depicted atom is the element the run's pose file has at 
 });
 
 test("clicking two atoms and confirming writes one [[pocket.site]] with those indices", async ({ page }) => {
-  await page.goto(`/run/${IDX.a_resolved}/pipeline`);
+  await openWorkspace(page, (await newPipeline(page)).name, "active_site");
   const pane = page.getByTestId("toml-pane");
   await expect(pane).toContainText("[cut]");
   const before = ((await pane.innerText()).match(/\[\[pocket\.site\]\]/g) ?? []).length;
@@ -43,7 +43,7 @@ test("clicking two atoms and confirming writes one [[pocket.site]] with those in
 });
 
 test("atoms are keyboard operable, and the provisional 3D view is labelled and loaded", async ({ page }) => {
-  await page.goto(`/run/${IDX.a_resolved}/pipeline`);
+  await openWorkspace(page, (await newPipeline(page)).name, "active_site");
   const a = page.locator('[data-atom-index="5"]');
   await a.focus();
   await page.keyboard.press("Enter");
