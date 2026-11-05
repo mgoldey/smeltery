@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindClicks, type PlotDiv, type Sensitivity, sensitivityFailures, sensitivityRows } from "./MeasureView";
+import { bindClicks, dropLine, type PlotDiv, type Sensitivity, sensitivityFailures, sensitivityRows } from "./MeasureView";
 
 /** A model's entry with the response's defaults filled in. */
 const ms = (m: Partial<Sensitivity>): Sensitivity => ({
@@ -33,8 +33,8 @@ describe("bindClicks", () => {
     host.append(first);
     bindClicks(host, state, (p) => picks.push(p));
     bindClicks(host, state, (p) => picks.push(p)); // the next tick: no second listener
-    first.fire({ points: [{ customdata: ["4-F", 3, -1, 2] }] });
-    expect(picks).toEqual([{ candidate: "4-F", pose: 3 }]);
+    first.fire({ points: [{ customdata: ["4-F", 3, -1, 2, 1] }] }); // pose 3 is 4-F's record 1 after a drop
+    expect(picks).toEqual([{ candidate: "4-F", pose: 3, position: 1 }]);
 
     first.remove(); // a theme switch unmounts the plot and draws it on a new div
     const second = plot();
@@ -42,8 +42,8 @@ describe("bindClicks", () => {
     bindClicks(host, state, (p) => picks.push(p));
     second.fire({ points: [{ customdata: ["benzoic", 0, -1, null] }] });
     expect(picks).toEqual([
-      { candidate: "4-F", pose: 3 },
-      { candidate: "benzoic", pose: 0 },
+      { candidate: "4-F", pose: 3, position: 1 },
+      { candidate: "benzoic", pose: 0, position: 0 },
     ]);
   });
   it("waits while Plotly has not yet attached .on", () => {
@@ -97,5 +97,25 @@ describe("sensitivityFailures", () => {
       { chargeModel: "CHARMM", candidate: "4-Cl", pose: 2, error: "RuntimeError: b" },
     ]);
     expect(sensitivityRows(models)).toEqual([]);
+  });
+});
+
+describe("dropLine", () => {
+  it("names the pose, the leg, the reason, the rungs tried and whose ddE lost it", () => {
+    expect(
+      dropLine({
+        candidate: "4-Br",
+        pose: 2,
+        leg: "vacuum",
+        field_model: null,
+        reason: "SCF did not converge",
+        outcome: "not_converged",
+        rungs_tried: [0, 1],
+        dropped_with: ["benzoic", "4-Br"],
+      }),
+    ).toBe("4-Br pose 2 (vacuum leg): SCF did not converge; rungs tried 0, 1; dropped from benzoic, 4-Br");
+    expect(dropLine({ candidate: "a", pose: 0, leg: "field", field_model: "CHARMM", outcome: "timeout", rungs_tried: [] })).toBe(
+      "a pose 0 (field leg, CHARMM): timeout",
+    );
   });
 });

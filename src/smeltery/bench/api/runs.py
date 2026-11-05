@@ -352,21 +352,37 @@ def run_gates(request: Request, idx: int) -> Gates:
 
 
 class CalcLines(BaseModel):
-    """The SCF log lines of one pose: every line of the run's calc log whose candidate and pose match."""
+    """The SCF log lines of one pose: every line of the run's calc log whose candidate and original pose match."""
 
     file: str | None
+    #: the original pose index the lines were matched on (the log's own `pose`)
+    pose: int
     lines: list[dict[str, Any]]
+
+
+def _original_pose(raw: dict, candidate: str, pose: int) -> int:
+    """The original pose index of record `pose` of `candidate`: `results.pose_index[candidate][pose]` after a pairwise
+    drop, else `pose` itself. The calc log is written before any drop, so it is keyed by the original index."""
+    index = ((raw.get("results") or {}).get("pose_index") or {}).get(candidate)
+    if index is None:
+        return pose
+    if not 0 <= pose < len(index):
+        raise HTTPException(status_code=400, detail=f"pose {pose} out of range: {candidate} kept {len(index)} poses")
+    return int(index[pose])
 
 
 @router.get("/runs/{idx}/calcs", response_model=CalcLines)
 def run_calcs(request: Request, idx: int, candidate: str, pose: int, field_model: str | None = None) -> CalcLines:
     """Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
     written, of one field model: `field_model`, else the run's primary one (`results.calcs.primary`). A line naming
-    no model (a run from before models were recorded) is the primary's. 409 when the run kept no SCF log."""
+    no model (a run from before models were recorded) is the primary's. `pose` is the record's place in the
+    candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
+    409 when the run kept no SCF log."""
     raw = record(request, idx)
     calcs = (raw.get("results") or {}).get("calcs")
     if not calcs:
         raise HTTPException(status_code=409, detail="this run kept no SCF log")
+    pose = _original_pose(raw, candidate, pose)
     out_dir = Path(row(request, idx)["path"]).parent.resolve()
     path = (out_dir / str(calcs["file"])).resolve()
     if out_dir not in path.parents:
@@ -389,7 +405,40 @@ def run_calcs(request: Request, idx: int, candidate: str, pose: int, field_model
             model = d.get("field_model", primary)
             if want is None or model is None or model == want:  # None: a --temporal vacuum leg, shared by all
                 lines.append(d)
-    return CalcLines(file=str(calcs["file"]), lines=lines)
+    return CalcLines(file=str(calcs["file"]), pose=pose, lines=lines)
+
+
+class DroppedPose(BaseModel):
+    """One entry of `results.dropped_poses`: a leg that failed every rung, so its pose was dropped pairwise."""
+
+    candidate: str
+    #: the original pose index
+    pose: int
+    leg: str
+    #: None for a vacuum leg (shared by every field model)
+    field_model: str | None = None
+    reason: str | None = None
+    outcome: str | None = None
+    rungs_tried: list[int] = []
+    #: the candidates whose ddE lost this pose; absent for a drop under an extra charge model only
+    dropped_with: list[str] | None = None
+
+
+class PoseDrops(BaseModel):
+    """What a `--temporal` run dropped. `pose_index` is `results.pose_index` (empty: no pose was dropped, record `k`
+    is pose `k`)."""
+
+    pose_index: dict[str, list[int]]
+    dropped: list[DroppedPose]
+
+
+@router.get("/runs/{idx}/dropped_poses", response_model=PoseDrops)
+def run_dropped_poses(request: Request, idx: int) -> PoseDrops:
+    res = record(request, idx).get("results") or {}
+    return PoseDrops(
+        pose_index={k: [int(i) for i in v] for k, v in (res.get("pose_index") or {}).items()},
+        dropped=[DroppedPose.model_validate(d) for d in res.get("dropped_poses") or []],
+    )
 
 
 @router.get("/runs/{idx}/pose_atoms", response_model=M.PoseAtoms)

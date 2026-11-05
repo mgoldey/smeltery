@@ -77,7 +77,12 @@ class Resolved(BaseModel):
 
 class PerPoseRow(BaseModel):
     candidate: str
+    #: the ORIGINAL pose index, the pairing key (`results.pose_index` after a pairwise drop, else the position)
     pose: int
+    #: the pose's place in this candidate's per-pose values and SDF (what `/scene` and `/calcs` take)
+    position: int
+    #: the paired parent pose's place in the parent's per-pose values and SDF
+    parent_position: int
     value: float
     parent_value: float
     paired: float

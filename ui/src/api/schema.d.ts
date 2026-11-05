@@ -605,7 +605,9 @@ export interface paths {
          * Run Calcs
          * @description Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
          *     written, of one field model: `field_model`, else the run's primary one (`results.calcs.primary`). A line naming
-         *     no model (a run from before models were recorded) is the primary's. 409 when the run kept no SCF log.
+         *     no model (a run from before models were recorded) is the primary's. `pose` is the record's place in the
+         *     candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
+         *     409 when the run kept no SCF log.
          */
         get: operations["run_calcs_api_runs__idx__calcs_get"];
         put?: never;
@@ -683,6 +685,23 @@ export interface paths {
          * @description Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`.
          */
         post: operations["record_decision_api_runs__idx__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/dropped_poses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Dropped Poses */
+        get: operations["run_dropped_poses_api_runs__idx__dropped_poses_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1152,7 +1171,7 @@ export interface components {
         };
         /**
          * CalcLines
-         * @description The SCF log lines of one pose: every line of the run's calc log whose candidate and pose match.
+         * @description The SCF log lines of one pose: every line of the run's calc log whose candidate and original pose match.
          */
         CalcLines: {
             /** File */
@@ -1161,6 +1180,8 @@ export interface components {
             lines: {
                 [key: string]: unknown;
             }[];
+            /** Pose */
+            pose: number;
         };
         /** CampaignIn */
         CampaignIn: {
@@ -1333,6 +1354,31 @@ export interface components {
              * @description "+" added, "-" removed, " " unchanged context
              */
             sign: string;
+        };
+        /**
+         * DroppedPose
+         * @description One entry of `results.dropped_poses`: a leg that failed every rung, so its pose was dropped pairwise.
+         */
+        DroppedPose: {
+            /** Candidate */
+            candidate: string;
+            /** Dropped With */
+            dropped_with?: string[] | null;
+            /** Field Model */
+            field_model?: string | null;
+            /** Leg */
+            leg: string;
+            /** Outcome */
+            outcome?: string | null;
+            /** Pose */
+            pose: number;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Rungs Tried
+             * @default []
+             */
+            rungs_tried: number[];
         };
         /** EditedText */
         EditedText: {
@@ -1924,10 +1970,14 @@ export interface components {
             candidate: string;
             /** Paired */
             paired: number;
+            /** Parent Position */
+            parent_position: number;
             /** Parent Value */
             parent_value: number;
             /** Pose */
             pose: number;
+            /** Position */
+            position: number;
             /** Value */
             value: number;
         };
@@ -2099,6 +2149,19 @@ export interface components {
             source: string;
             /** Symbols */
             symbols: string[];
+        };
+        /**
+         * PoseDrops
+         * @description What a `--temporal` run dropped. `pose_index` is `results.pose_index` (empty: no pose was dropped, record `k`
+         *     is pose `k`).
+         */
+        PoseDrops: {
+            /** Dropped */
+            dropped: components["schemas"]["DroppedPose"][];
+            /** Pose Index */
+            pose_index: {
+                [key: string]: number[];
+            };
         };
         /**
          * PoseMaps
@@ -3985,6 +4048,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_dropped_poses_api_runs__idx__dropped_poses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoseDrops"];
                 };
             };
             /** @description Validation Error */

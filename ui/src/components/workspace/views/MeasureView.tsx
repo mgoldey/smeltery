@@ -113,7 +113,9 @@ export function SensitivityTable({ models, unit, parent }: { models: Record<stri
   );
 }
 
-type Picked = { candidate: string; pose: number };
+/** `pose` is the original pose index (the pairing key, the plot's x); `position` the record's place in that ligand's SDF. */
+type Picked = { candidate: string; pose: number; position: number };
+export type DroppedPose = components["schemas"]["DroppedPose"];
 type CalcLines = { file: string | null; lines: Record<string, unknown>[] };
 type ClickEvent = { points: { customdata?: unknown[] }[] };
 export type PlotDiv = HTMLElement & { on?: (name: string, fn: (e: ClickEvent) => void) => void };
@@ -129,8 +131,36 @@ export function bindClicks(host: HTMLElement | null, state: { el: PlotDiv | null
   state.el = el;
   el.on("plotly_click", (e) => {
     const d = e.points[0]?.customdata;
-    if (d && typeof d[0] === "string" && typeof d[1] === "number") onPick({ candidate: d[0], pose: d[1] });
+    if (d && typeof d[0] === "string" && typeof d[1] === "number")
+      onPick({ candidate: d[0], pose: d[1], position: typeof d[4] === "number" ? d[4] : d[1] });
   });
+}
+
+/** One line per dropped leg: which pose, which leg, why, the rungs tried and whose ddE lost it. */
+export function dropLine(d: DroppedPose): string {
+  const leg = d.field_model ? `${d.leg} leg, ${d.field_model}` : `${d.leg} leg`;
+  const rungs = d.rungs_tried?.length ? `; rungs tried ${d.rungs_tried.join(", ")}` : "";
+  const lost = d.dropped_with?.length ? `; dropped from ${d.dropped_with.join(", ")}` : "";
+  return `${d.candidate} pose ${d.pose} (${leg}): ${d.reason ?? d.outcome ?? "no value"}${rungs}${lost}`;
+}
+
+/** `results.dropped_poses`: poses whose SCF failed every rung, dropped pairwise. Nothing when none was. */
+export function DroppedPoses({ dropped }: { dropped: DroppedPose[] | undefined }) {
+  if (!dropped?.length) return null;
+  return (
+    <section aria-label="Dropped poses" data-testid="dropped-poses">
+      <h4>Dropped poses</h4>
+      <p className="lede">
+        These poses gave no value after every SCF remedy. Each is dropped from the ligand and from the poses it is paired with, so
+        the ligands below have fewer points; the x axis keeps each pose's original index.
+      </p>
+      <ul>
+        {dropped.map((d) => (
+          <li key={`${d.candidate}/${d.pose}/${d.leg}/${d.field_model ?? ""}`}>{dropLine(d)}</li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function useClicks(host: React.RefObject<HTMLDivElement | null>, onPick: (p: Picked) => void) {
@@ -167,10 +197,15 @@ export function MeasureView({ sourceRun }: StepViewProps) {
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/charge_sensitivity", { params: { path: { idx } } })),
     enabled: sourceRun !== null,
   });
+  const drops = useQuery({
+    queryKey: ["dropped_poses", idx],
+    queryFn: () => unwrap(api.GET("/api/runs/{idx}/dropped_poses", { params: { path: { idx } } })),
+    enabled: sourceRun !== null,
+  });
   const log = useQuery({
-    queryKey: ["calcs", idx, picked?.candidate, picked?.pose],
+    queryKey: ["calcs", idx, picked?.candidate, picked?.position],
     queryFn: () =>
-      getJson<CalcLines>(`/api/runs/${idx}/calcs?candidate=${encodeURIComponent(picked?.candidate ?? "")}&pose=${picked?.pose ?? 0}`),
+      getJson<CalcLines>(`/api/runs/${idx}/calcs?candidate=${encodeURIComponent(picked?.candidate ?? "")}&pose=${picked?.position ?? 0}`),
     enabled: sourceRun !== null && picked !== null && showLog,
   });
   useClicks(host, (p) => {
@@ -188,6 +223,7 @@ export function MeasureView({ sourceRun }: StepViewProps) {
     <div data-view="measure">
       <p className="lede">Each marker is one pose of one ligand. Click a marker to see that pose and every ligand's value at it.</p>
       <div ref={host}>{figure.data ? <PlotlyFigure figure={figure.data} name="per_pose_values" /> : <p className="lede">Loading the measurements.</p>}</div>
+      <DroppedPoses dropped={drops.data?.dropped} />
       <SensitivityTable models={sensitivity.data?.models} unit={unit} parent={parent} />
       {picked ? (
         <section aria-label="Selected pose" data-testid="picked" data-candidate={picked.candidate} data-pose={picked.pose}>
@@ -237,7 +273,7 @@ export function MeasureView({ sourceRun }: StepViewProps) {
               <p className="lede">Loading the SCF log.</p>
             )
           ) : null}
-          <CorePose idx={sourceRun} candidate={picked.candidate} pose={picked.pose} label="measure step" />
+          <CorePose idx={sourceRun} candidate={picked.candidate} pose={picked.position} label="measure step" />
         </section>
       ) : null}
     </div>

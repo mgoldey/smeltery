@@ -22,7 +22,7 @@ from collections.abc import Callable
 import numpy as np
 from rdkit import Chem
 
-from .results import Run, _verified_bytes, pose_output
+from .results import Run, _verified_bytes, pose_indices, pose_output
 
 #: Receptor residues with any atom this close (Angstrom) to the candidate's pose are drawn as ball-and-stick.
 NEAR_ANGSTROM = 5.0
@@ -61,6 +61,17 @@ def _pose_coords(sdf: str, pose: int, what: str) -> np.ndarray:
     return mols[pose].GetConformer().GetPositions()
 
 
+def _parent_position(run: Run, candidate: str, pose: int) -> int:
+    """The parent's SDF record paired with record `pose` of `candidate`: the same ORIGINAL pose index. After a
+    pairwise drop (`results.pose_index`) the two SDFs hold different poses at the same position."""
+    poses = run.record["results"]["poses"]
+    orig = pose_indices(run, candidate, int(poses[candidate]["n_poses"]))[pose]
+    at = pose_indices(run, run.parent, int(poses[run.parent]["n_poses"]))
+    if orig not in at:
+        raise ValueError(f"{candidate!r} pose {orig} has no parent pose: the parent's pose {orig} was dropped")
+    return at.index(orig)
+
+
 def _near_residues(pdb: str, ligand: np.ndarray, cutoff: float) -> list[tuple[str, int, str]]:
     """(chain, resSeq, iCode) of receptor residues with an atom within `cutoff` of any ligand atom."""
     near: dict[tuple[str, int, str], None] = {}
@@ -91,7 +102,8 @@ def pose_scene(
 ) -> dict:
     """A MolViewSpec state as a JSON-ready dict (builder `.get_state()`, then `json.loads`): the receptor as cartoon
     plus ball-and-stick for residues within 5 A of the ligand, when the run has one; the candidate's pose `pose`
-    (element colours, green carbons); the parent's pose `pose` in muted grey, translucent, when `with_parent` and
+    (element colours, green carbons; `pose` is the record's place in the candidate's SDF); the parent's pose paired
+    with it (the same original pose index, `results.pose_index`) in muted grey, translucent, when `with_parent` and
     the candidate is not the parent; the field charges as spheres, blue positive and red negative, radius growing
     with |q|, tooltip giving q. The camera focuses the candidate.
 
@@ -131,7 +143,11 @@ def pose_scene(
 
     if with_parent and candidate != run.parent:
         _, parent_url = url(poses[run.parent], f"poses of parent {run.parent!r}")
-        par = builder.download(url=parent_url).parse(format="sdf").model_structure(block_index=pose, ref="parent")
+        par = (
+            builder.download(url=parent_url)
+            .parse(format="sdf")
+            .model_structure(block_index=_parent_position(run, candidate, pose), ref="parent")
+        )
         par.component(selector="all").representation(type="ball_and_stick", size_factor=0.8).color(
             color=PARENT_COLOR
         ).opacity(opacity=PARENT_OPACITY)

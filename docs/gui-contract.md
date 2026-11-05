@@ -19,11 +19,44 @@ Added under `record.results`. None of these feed `input_digest`, which hashes in
 | `field` | `[[q, x, y, z], ...]` | The pocket point charges, with positions in Angstrom, in the poses' frame. |
 | `receptor` | `{"file": str, "sha256": hex}` or `null` | A receptor `.pdb` in the poses' frame, when one exists: `structure/receptor.pdb`, or the `[pocket] file` when it is a `.pdb`. A path outside `OUT` is stored as the absolute path. |
 | `decisions_in` | `{"file": str, "sha256": hex, "excluded": [name, ...]}` or absent | Only when `[decisions]` was given (section 3). |
+| `pose_maps` | `{analogue: [[analogue_atom, parent_atom], ...]}` | Atoms of each analogue copied exactly from the parent's pose (0-based, pose-SDF atom order). Absent in records written before pose maps. |
+| `calcs` | `{"file": str, "n": int, "primary": str, "by_model": {model: int}}` or `null` | The per-SCF log beside the record (`calcs.jsonl`, or `calcs-<candidate>.jsonl` for a `--only-candidate` partial), its line count, the primary field model's name, and the lines per field model. `null` for a combine of partials that kept no log: no SCF count is known. Rows below. |
+| `pose_index` | `{candidate: [original_pose, ...]}` or absent | Only after a pairwise pose drop (`--temporal`). Every candidate, parent included, lists the ORIGINAL index of each pose it kept, in order: `per_pose[c][q][k]` and SDF record `k` are original pose `pose_index[c][k]`. Absent means identity (record `k` is pose `k`). |
+| `dropped_poses` | `[{"candidate", "pose", "leg", "field_model", "reason", "outcome", "rungs_tried", "dropped_with"?}, ...]` or absent | Only when a `--temporal` leg failed every rung. `pose` is the original index; `leg` is `"vacuum"` or `"field"`; `field_model` is `null` for a vacuum leg (shared by every model); `reason` is the last error text, `outcome` e.g. `"not_converged"`, `rungs_tried` the remedy rungs run (`[0, 1]`). `dropped_with` (the candidates whose ddE lost the pose: every candidate for a parent pose, else `[parent, candidate]`) is present for a primary-model or vacuum drop only; a drop under an extra charge model is that model's alone (`charge_sensitivity`). |
+| `charge_sensitivity` | `{model: {...}}` or absent | Only with `[charge_sensitivity]`: per extra charge model, `primary_model`, `paired_ddE` (`{analogue: {"primary", "model", "delta", "n"}}`), `sign_flips`, `spearman`, `floor`, `n`, `n_dropped`, `dropped_poses` (`{analogue: [original_pose, ...]}`), `parent_dropped_poses` (`[original_pose, ...]`), `excluded`, `failures` (`{candidate: {pose: error}}`), `field` (the model's pocket provenance), `note`, and `calcs` (`{"n": int}`: its SCF lines are in `calcs.jsonl` under `field_model = <model>`). A model that could not be measured is `{"error": str, "stage": "field" \| "measure" \| "summary"}`. |
+| `config` | `{"file": "config.toml", "sha256": hex, "inputs": {...}}` or absent | The config as staged into `OUT` with an explicit `--out`, its digest, and the input files copied under `OUT/inputs/`. |
+| `imported` | `{"importer": str, "original": "original/<file>", "sha256": hex, "input_digest": str, "derived": {...}}` or absent | Only in a record brought in by `smeltery.bench.importers` (section 1.1). |
+| `not_recorded` | `[key, ...]` or absent | Only in an imported record: the contract keys the original lacks, `results` keys bare (`"per_pose"`) and `inputs` keys prefixed (`"inputs.cut"`). |
+
+At the record's top level, `smeltery` is `{"version", "source", "commit", "dirty", "provenance"}` (which smeltery
+source ran; an editable install reports the checkout's HEAD and `dirty`; `provenance` says whether that was VERIFIED
+or INFERRED), or `null` in a record written before it was kept. `ferric` has the same shape for the engine.
+
+### The SCF log (`calcs`)
+
+One JSON object per line. An SCF line: `candidate`, `pose` (the ORIGINAL pose index: the log is written before any
+drop), `leg` (`"vacuum"` or `"field"`), `converged`, `iterations`, `energy_hartree`, `seconds`, `field_model` (`null`
+on a `--temporal` vacuum leg, which every field model shares), `rung` (0 without a remedy ladder). A `--temporal` line
+also has `digest` (the first 12 hex of `input_digest`), `started_utc` and `build`. A `--temporal` outcome line (a leg
+that gave no value) has `candidate`, `pose`, `leg`, `field_model`, `outcome` (`"not_converged"`, `"timeout"`,
+`"clash_refused"`, `"error"`), `rungs_tried`, `error` and `digest`, and no `converged`. Bench's
+`GET /api/runs/{idx}/calcs?candidate=&pose=` takes `pose` as the record position and maps it through `pose_index`.
+
+### 1.1 Imported records
+
+An importer keeps the original's `inputs` and `tiers` unchanged (nothing renamed, dropped or added), so
+`input_digest` is the original's and still the hash of them; `results.imported.input_digest` says so. A value the
+importer derives for a key the original lacks is never written in place: it is
+`results.imported.derived["inputs.<key>" | "results.<key>"] = {"value": ..., "from": "<where it came from>"}`, and
+`smeltery.gui.results.contract_record(record)` lays those values over `inputs` and `results` for the viewers
+(`load_run` and Bench's verdict read through it). The original's file is copied byte for byte to `original/`.
 
 ### Pose SDFs
 
-- One SDF file per candidate. Record `i` is pose `i`. The poses are paired by index: analogue pose `i` is built on
-  parent pose `i`.
+- One SDF file per candidate. Record `k` is pose `k`, unless the run dropped poses: then record `k` is original pose
+  `results.pose_index[candidate][k]`, which `smeltery_pose_index` also states. The poses are paired by ORIGINAL index:
+  analogue pose `i` is built on parent pose `i`, and after a drop the two records holding pose `i` may sit at different
+  positions in the two files.
 - Atom order is the candidate's SMILES with explicit hydrogens (`Chem.AddHs(Chem.MolFromSmiles(smiles))`), the same
   order as `Pose.symbols`. Bonds come from the SMILES, never perceived from coordinates.
 - Molecule name: `<candidate> pose <i>`. Properties on each record:
@@ -68,9 +101,16 @@ def resolved_matrix(run: Run) -> tuple[list[str], list[list[bool]]]: ...
 # Names in ddE_table order. [i][j] is smeltery.funnel.resolved(m_i, m_j, run.z, run.floor), and False on the
 # diagonal. Uses the funnel's own predicate: the GUI never decides more than the cut did.
 
+def pose_indices(run: Run, name: str, n: int) -> list[int]: ...
+# The original pose index of each of `name`'s n recorded poses: results.pose_index[name], else 0..n-1.
+
 def per_pose_table(run: Run, quantity: str = "dE_int") -> list[dict]: ...
-# One row per (analogue, pose): candidate, pose, value, parent_value, paired (value - parent_value).
+# One row per (analogue, kept pose), cut order: candidate, pose (ORIGINAL index, the pairing key), position (its place
+# in the analogue's per_pose list and SDF), parent_position (the paired parent pose's place in the parent's), value,
+# parent_value, paired (value - parent_value). Paired through pose_index, so an analogue-only drop is no error.
 # Raises KeyError naming the quantities present if `quantity` was not recorded.
+
+def dropped_poses(run: Run) -> list[dict]: ...  # results.dropped_poses, unchanged ([] when none)
 
 def funnel_rows(run: Run) -> list[dict]: ...  # results.funnel, unchanged
 
@@ -79,8 +119,8 @@ def pose_sdf(run: Run, candidate: str) -> str: ...  # the SDF text; checks its s
 # smeltery.gui.scenes
 def pose_scene(run: Run, candidate: str, pose: int, *, with_parent: bool = True) -> dict: ...
 # A MolViewSpec state as a JSON-ready dict (molviewspec builder `.get_state()`, then `json.loads`): the receptor
-# as cartoon plus ball-and-stick within 5 A of the ligand, when there is one; the candidate's pose `pose`; the
-# parent's pose `pose` in a muted colour when with_parent; and the field charges as spheres, coloured by sign.
+# as cartoon plus ball-and-stick within 5 A of the ligand, when there is one; the candidate's SDF record `pose`; the
+# parent's pose paired with it (same original index, via pose_index) in a muted colour when with_parent; and the field charges as spheres, coloured by sign.
 # molviewspec is imported inside the function, so `smeltery.gui` still imports without it.
 ```
 

@@ -13,30 +13,41 @@ SYMBOLS = ("circle", "square", "diamond", "triangle-up", "x", "cross", "star", "
 def per_pose_values_figure(table: list[dict], run, quantity: str = "dE_int"):
     """`table` is `results.per_pose_table(run, quantity)`, whose analogue order (the cut's) is the legend's. Every
     y is a number from the record's `results.per_pose`: the parent's directly, each analogue's from `table`.
-    `customdata` of each point is `[candidate, pose, value, paired]` (paired is None for the parent), which is
-    what the browser's click handler reads."""
+    `customdata` of each point is `[candidate, pose, value, paired, position]` (paired is None for the parent),
+    which is what the browser's click handler reads. x and `pose` are the ORIGINAL pose index, so after a pairwise
+    pose drop a ligand's points stay over the poses they are; `position` is the pose's place in that ligand's SDF."""
     import plotly.graph_objects as go
+
+    from smeltery.gui.results import pose_indices
 
     results = run.record["results"]
     unit = results.get("units", {}).get(quantity, "")
     kept = set(run.survivors) if run.survivors is not None else None
     parent_values = results["per_pose"][run.parent][quantity]
-    ligands: list[tuple[str, list[float], list[float | None], str]] = [
-        (run.parent, list(parent_values), [None] * len(parent_values), INK)
+    ligands: list[tuple[str, list[int], list[float], list[float | None], str]] = [
+        (
+            run.parent,
+            pose_indices(run, run.parent, len(parent_values)),
+            list(parent_values),
+            [None] * len(parent_values),
+            INK,
+        )
     ]
     for name in dict.fromkeys(t["candidate"] for t in table):
-        rows = sorted((t for t in table if t["candidate"] == name), key=lambda t: t["pose"])
+        rows = sorted((t for t in table if t["candidate"] == name), key=lambda t: t["position"])
         colour = NEUTRAL if kept is None else KEPT if name in kept else NOT_KEPT
-        ligands.append((name, [t["value"] for t in rows], [t["paired"] for t in rows], colour))
+        ligands.append(
+            (name, [t["pose"] for t in rows], [t["value"] for t in rows], [t["paired"] for t in rows], colour)
+        )
     fig = go.Figure()
-    for k, (name, values, paired, colour) in enumerate(ligands):
+    for k, (name, poses, values, paired, colour) in enumerate(ligands):
         fig.add_scatter(
-            x=list(range(len(values))),
+            x=poses,
             y=values,
             mode="markers",
             name=name if name != run.parent else f"{name} (parent)",
             marker={"size": 10, "color": colour, "symbol": SYMBOLS[k % len(SYMBOLS)]},
-            customdata=[[name, i, v, p] for i, (v, p) in enumerate(zip(values, paired, strict=True))],
+            customdata=[[name, i, v, p, at] for at, (i, v, p) in enumerate(zip(poses, values, paired, strict=True))],
             hovertemplate=f"{name} pose %{{x}}<br>{quantity} %{{y:.3f}}<extra></extra>",
         )
     label = f"{quantity} ({unit})" if unit else quantity
