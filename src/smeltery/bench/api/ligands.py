@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import tomllib
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, NoReturn
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -171,7 +171,7 @@ def ligands_check(body: LigandsRequest) -> LigandsOut:
     )
 
 
-def _refuse(detail: str):
+def _refuse(detail: str) -> NoReturn:
     raise HTTPException(status_code=400, detail=detail)
 
 
