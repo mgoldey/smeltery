@@ -1681,6 +1681,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--workers", type=int, default=2, help="with --temporal: scores run at once")
     run.add_argument("--host", default="127.0.0.1:7233", help="with --temporal: the Temporal server")
     run.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline", help="with --temporal")
+    me = sub.add_parser("methods", help="every method's config section, knobs and defaults, as TOML")
+    me.add_argument("--out", help="write one <key>.toml per method plus index.toml into this directory")
+    me.add_argument("--only", help="one method key, e.g. field_interaction")
     pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
     pw.add_argument("--workers", type=int, default=2, help="SCFs at once, one child process each (memory-bound)")
     pw.add_argument(
@@ -1693,6 +1696,23 @@ def main(argv: list[str] | None = None) -> int:
         from smeltery.golden import main as _golden_main
 
         return _golden_main(argv[1:])
+    if getattr(args, "command", None) == "methods":
+        from smeltery.methods import registry
+        from smeltery.methods.usage import all_methods_toml, method_toml, write_methods_toml
+
+        if args.only:
+            spec = registry().get(args.only)
+            if spec is None:
+                print(f"no method {args.only!r}; one of: {', '.join(sorted(registry()))}", file=sys.stderr)
+                return 2
+            print(method_toml(spec), end="")
+            return 0
+        if args.out:
+            paths = write_methods_toml(args.out)
+            print(f"wrote {len(paths)} file(s) to {args.out}: index.toml and one per method")
+            return 0
+        print(all_methods_toml(), end="")
+        return 0
     if getattr(args, "command", None) == "task-worker":
         from smeltery.tasks import TEMPORAL_AVAILABLE, worker_activities, worker_workflows
 

@@ -51,6 +51,22 @@ An analysis that re-measures under other fields (`--temporal` support) also defi
 {model: [PointCharge]}` and `summarize(plan, rec, measured) -> dict`, and optionally `extra_models(cfg)` to count SCFs
 at `--plan`; see [temporal-runs.md](temporal-runs.md) and `[charge_sensitivity]` below.
 
+## Reading what a method accepts
+
+`smeltery methods` prints every registered method as a commented TOML block: its config section, every knob with
+its type, default and help, what it needs and provides, which methods it is refused beside, and any extra it needs
+installed. The text is derived from the registration, so it cannot drift from the code.
+
+```bash
+smeltery methods                                 # all of them, in execution order
+smeltery methods --only field_interaction        # one
+smeltery methods --out docs/methods/             # index.toml plus one file per method
+```
+
+Each block is valid TOML and is meant to be pasted into a pipeline config: a knob that must be set is already
+there, one that is optional is a comment. For a whole config built this way, see
+[worked-example.md](worked-example.md).
+
 ## Discovery
 
 Every module in `smeltery/methods/` (other than `builtin` and names starting `_`) that defines `register_methods()` is
