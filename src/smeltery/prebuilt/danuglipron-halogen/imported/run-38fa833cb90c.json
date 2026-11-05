@@ -116,6 +116,10 @@
       }
     ],
     "imported": {
+      "derived": {
+        "inputs.cut": "examples/danuglipron_halogen.py:583 cut(keep=3, z=2.0); the record's cut note says keep=3",
+        "results.funnel": "counts from paired_ddE_amber (12 analogues) plus the parent, and results.cut"
+      },
       "importer": "danuglipron_2026_10",
       "original": "original/danuglipron-halogen-38fa833cb90c.json",
       "sha256": "ecd8ae8c1490f4a0ede328f656591899a7070d018513c25fc4b2839075cd5742"

@@ -90,6 +90,12 @@ def pose_output(run: Run, key: str):
     try:
         return run.record["results"][key]
     except KeyError:
+        imported = run.record["results"].get("imported")
+        if isinstance(imported, dict):
+            raise ValueError(
+                f"{run.campaign}: this run was imported from {imported.get('importer')}, and results.{key} "
+                "was not recorded by the original run, so it cannot be shown"
+            ) from None
         raise ValueError(
             f"{run.campaign}: the run record has no results.{key}; it predates pose output "
             "(docs/gui-contract.md section 1) and must be re-run with this smeltery to show it"

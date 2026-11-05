@@ -21,8 +21,9 @@ from . import models as M
 router = APIRouter(prefix="/api", tags=["prebuilt"])
 
 #: Files of a prebuilt folder that are not pipeline inputs: the config (stored as config.toml), the blurb, the run.
-NOT_INPUTS = {"pipeline.toml", "about.md", "run"}
+NOT_INPUTS = {"pipeline.toml", "about.md", "run", "imported"}
 RUN_DIR = "run"
+IMPORTED_DIR = "imported"
 
 
 class Prebuilt(BaseModel):
@@ -71,8 +72,13 @@ def copy_plan(name: str) -> dict[str, Traversable]:
 
 
 def _example_verdict(f: Traversable) -> M.Verdict:
-    run = f.joinpath(RUN_DIR)
-    records = [c for c in run.iterdir() if c.name.startswith("run-") and c.name.endswith(".json")]
+    records: list[Traversable] = []
+    for sub in (RUN_DIR, IMPORTED_DIR):  # a folder with no run of its own shows its imported record's verdict
+        d = f.joinpath(sub)
+        if d.is_dir():
+            records = [c for c in d.iterdir() if c.name.startswith("run-") and c.name.endswith(".json")]
+            if records:
+                break
     v = verdict_of(json.loads(records[0].read_text())) if records else None
     if v is None:
         return M.Verdict(state="INCOMPLETE", winner=None, floor=None, missing=["run record"])

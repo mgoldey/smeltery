@@ -1,6 +1,7 @@
 """Prebuilt pipelines over HTTP: the list, and starting a workspace pipeline from one."""
 
 import hashlib
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,8 +10,16 @@ from bench.fakes import FakeIdentity, FakeTaskQueue, FixedClock
 from smeltery.bench.adapters.run_store import FilesystemRunStore
 from smeltery.bench.app import Settings, create_app
 
-NAMES = ["benzoic-pbe", "benzoic-rhf", "docking", "structure"]
+NAMES = ["benzoic-pbe", "benzoic-rhf", "danuglipron-halogen", "docking", "structure"]
 PREBUILT = Path(__file__).resolve().parents[2] / "src" / "smeltery" / "prebuilt"
+
+
+def _imported_state(name: str) -> str:
+    """The verdict of the folder's imported record, read from the file."""
+    from smeltery.bench.verdict import verdict_of
+
+    (rec,) = (PREBUILT / name / "imported").glob("run-*.json")
+    return verdict_of(json.loads(rec.read_text())).state
 
 
 def _tree(folder: Path) -> dict[str, str]:
@@ -45,6 +54,7 @@ def test_the_route_lists_all_four_with_their_two_lines_and_the_example_verdict(c
     assert {n: by[n]["verdict"]["state"] for n in NAMES} == {
         "benzoic-pbe": "RESOLVED",
         "benzoic-rhf": "RESOLVED",
+        "danuglipron-halogen": _imported_state("danuglipron-halogen"),
         "docking": "UNRANKED",
         "structure": "UNRANKED",
     }
@@ -63,9 +73,11 @@ def test_starting_from_a_prebuilt_copies_it_and_leaves_it_alone(tmp_path):
         folder = Path(doc["folder"])
         assert (folder / "config.toml").read_bytes() == (PREBUILT / n / "pipeline.toml").read_bytes()
         for f in (PREBUILT / n).iterdir():
-            if f.name not in ("pipeline.toml", "about.md", "run"):
+            if f.name not in ("pipeline.toml", "about.md", "run", "imported"):
                 assert (folder / f.name).read_bytes() == f.read_bytes()
-        assert _tree(PREBUILT / n / "run") == _tree(folder / "run")
+        if (PREBUILT / n / "run").exists():
+            assert _tree(PREBUILT / n / "run") == _tree(folder / "run")
+        assert not (folder / "imported").exists()
         # edit the copy: save over it, then change its run directory
         put = c.put(f"/api/pipelines/my-{n}", json={"toml": doc["toml"] + "# edited\n", "base_sha256": doc["sha256"]})
         assert put.status_code == 200, put.text
@@ -93,3 +105,11 @@ def test_an_unknown_prebuilt_or_a_taken_name_is_refused(tmp_path):
     assert r.status_code == 400 and "unknown prebuilt" in r.json()["detail"]
     assert c.post("/api/pipelines", json={"name": "x", "from_prebuilt": "docking"}).status_code == 201
     assert c.post("/api/pipelines", json={"name": "x", "from_prebuilt": "docking"}).status_code == 409
+
+
+def test_copy_plan_leaves_the_imported_record_behind():
+    from smeltery.bench.api.prebuilt import copy_plan
+
+    plan = copy_plan("danuglipron-halogen")
+    assert not [r for r in plan if r.split("/")[0] == "imported"]
+    assert {"7LCJ_pocket.pdb", "conf_00_cryo_em.xyz"} <= set(plan)

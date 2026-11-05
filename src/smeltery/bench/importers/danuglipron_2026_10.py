@@ -2,7 +2,12 @@
 
 That record predates the contract: its per-analogue paired values are `results.paired_ddE_amber`, it keeps no
 pose files, no pocket coordinates and no per-candidate dE_int. This importer maps what is there and leaves the
-rest out, so `results.not_recorded` names it. Nothing is derived or filled in.
+rest out, so `results.not_recorded` names it.
+
+Two things are derived, not read, and `results.imported.derived` says from where: the funnel's candidate counts (the
+12 analogues plus the parent, from the record's own paired_ddE_amber and cut), and `inputs.cut` (keep=3, z=2.0), which
+the record does not store as a field but `examples/danuglipron_halogen.py:583` passed to `cut()` (and the record's cut
+note repeats keep=3). No measured number is derived.
 """
 
 from __future__ import annotations
@@ -15,6 +20,10 @@ NAME = "danuglipron_2026_10"
 #: The example's `cut(paired, keep=3, z=2.0, floor=...)`; the record's own cut note reads "keep=3 falls inside ...".
 _KEEP, _Z = 3, 2.0
 _PARENT = "parent"
+DERIVED = {
+    "inputs.cut": "examples/danuglipron_halogen.py:583 cut(keep=3, z=2.0); the record's cut note says keep=3",
+    "results.funnel": "counts from paired_ddE_amber (12 analogues) plus the parent, and results.cut",
+}
 
 
 def detect(record: dict) -> bool:
@@ -63,7 +72,7 @@ def convert(record: dict, original: Path) -> dict:
             "unranked": unranked,
         },
     ]
-    return {
+    converted = {
         "campaign": record["campaign"],
         "ferric": record["ferric"],
         "host": record["host"],
@@ -80,6 +89,8 @@ def convert(record: dict, original: Path) -> dict:
         "started_utc": record["started_utc"],
         "tiers": record["tiers"],
     }
+    converted["results"]["imported"] = {"derived": DERIVED}
+    return converted
 
 
 register(NAME, detect, convert)

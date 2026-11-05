@@ -43,6 +43,16 @@ def test_paired_means_equal_the_originals(imported):
         assert got[name]["per_pose"] == m["per_pose"]
 
 
+def test_unpaired_sem_and_cut_groups_equal_the_originals(imported):
+    path, _ = imported
+    original = json.loads(ORIGINAL.read_text())["results"]
+    got = json.loads(path.read_text())["results"]
+    assert got["unpaired_sem"] == {k: v["unpaired_sem"] for k, v in original["criterion_3_pairing"].items()}
+    assert got["cut"]["groups"] == original["cut"]["groups"]
+    assert got["cut"]["survivors"] is None and got["cut"]["unranked"] is True
+    assert set(got["imported"]["derived"]) == {"inputs.cut", "results.funnel"}
+
+
 def test_the_original_is_byte_identical_after_import(imported):
     _, out = imported
     before = ORIGINAL.read_bytes()
@@ -90,3 +100,16 @@ def test_an_unknown_shape_has_no_importer(tmp_path):
 
 def test_the_original_is_recognised():
     assert importers.find(json.loads(ORIGINAL.read_text())).name == "danuglipron_2026_10"
+
+
+def test_a_missing_pose_key_says_the_run_was_imported(imported):
+    from smeltery.gui.results import pose_output
+
+    _, out = imported
+    run = load_run(out)
+    with pytest.raises(ValueError, match=r"imported from danuglipron_2026_10.*results\.per_pose was not recorded") as e:
+        pose_output(run, "per_pose")
+    assert "predates" not in str(e.value) and "re-run" not in str(e.value)
+    run.record["results"].pop("imported")
+    with pytest.raises(ValueError, match="predates pose output"):
+        pose_output(run, "per_pose")

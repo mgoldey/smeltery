@@ -72,6 +72,7 @@ def import_run(original: Path, out_dir: Path) -> Path:
     converted = importer.convert(record, original)
     results = converted["results"]
     results["imported"] = {
+        **results.get("imported", {}),  # an importer's own notes, e.g. `derived`
         "importer": importer.name,
         "original": f"original/{original.name}",
         "sha256": hashlib.sha256(raw).hexdigest(),
