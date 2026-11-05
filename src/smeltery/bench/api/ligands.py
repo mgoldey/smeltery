@@ -39,7 +39,9 @@ class LigandCheck(BaseModel):
     electrons: int | None = Field(description="electrons at that charge, hydrogens added: the CLI parity rule")
     electrons_even: bool | None = Field(description="false means the closed-shell RHF tiers cannot run it")
     sto3g_ok: bool | None = Field(description="false when an element has no STO-3G in ferric's bundled basis set")
-    sto3g_missing: list[str] = Field(description="the elements without STO-3G, e.g. Br and I")
+    sto3g_missing: list[str] = Field(
+        description="the elements without STO-3G: ferric's bundled set reaches Xe, so Cs and beyond"
+    )
     core_atoms: list[int] = Field(
         description="atoms of this candidate (SMILES with explicit hydrogens, AddHs order) that PairedPoses copies "
         "exactly from the parent; empty when there is no core. For the parent: every atom"

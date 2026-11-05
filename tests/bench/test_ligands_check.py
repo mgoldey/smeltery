@@ -22,13 +22,16 @@ def check(client, cands=None, parent="benzoic"):
     return {c["name"]: c for c in r.json()["candidates"]}
 
 
-def test_a_bromo_analogue_fails_sto3g_and_names_the_element(client_for):
+def test_an_analogue_outside_sto3g_fails_and_names_the_element(client_for):
+    """Br and I are covered (ferric's bundled STO-3G reaches Xe); an element past it is named, not guessed at."""
     c, _ = client_for()
-    got = check(c, {**CANDS, "4-Br": "OC(=O)c1ccc(Br)cc1"})
-    assert got["4-Br"]["sto3g_ok"] is False
-    assert got["4-Br"]["sto3g_missing"] == ["Br"]
-    assert any("Br" in m for m in got["4-Br"]["problems"])
-    assert got["4-F"]["sto3g_ok"] is True and got["4-F"]["sto3g_missing"] == []
+    got = check(c, {**CANDS, "4-Br": "OC(=O)c1ccc(Br)cc1", "4-I": "OC(=O)c1ccc(I)cc1"})
+    for name in ("4-F", "4-Br", "4-I"):
+        assert got[name]["sto3g_ok"] is True and got[name]["sto3g_missing"] == []
+    got = check(c, {**CANDS, "4-Cs": "OC(=O)c1ccc([Cs])cc1"})
+    assert got["4-Cs"]["sto3g_ok"] is False
+    assert got["4-Cs"]["sto3g_missing"] == ["Cs"]
+    assert any("Cs" in m for m in got["4-Cs"]["problems"])
 
 
 def test_an_odd_electron_radical_is_not_even(client_for):

@@ -1580,7 +1580,7 @@ export interface components {
             smiles_ok: boolean;
             /**
              * Sto3G Missing
-             * @description the elements without STO-3G, e.g. Br and I
+             * @description the elements without STO-3G: ferric's bundled set reaches Xe, so Cs and beyond
              */
             sto3g_missing: string[];
             /**

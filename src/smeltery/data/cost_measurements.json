@@ -98,6 +98,18 @@
         16.13105401804205,
         16.093620283005293
       ]
+    },
+    {
+      "role": "extrapolation",
+      "name": "danuglipron analogues (12 + parent, 51 poses)",
+      "smiles": "see src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml",
+      "n_atoms": 74,
+      "n_basis_functions": 235,
+      "scf_iterations": 79,
+      "seconds_per_pose": 1609.5,
+      "statistic": "median over 51 poses of one run, not repeats",
+      "source": "src/smeltery/prebuilt/danuglipron-halogen/run/calcs.jsonl (2026-11-05; ferric b22183b, 6 workers x 1 thread)",
+      "note": "2.5x past the calibration ceiling (93 bf) and 2.2x its iteration count (36): the fit predicts 934 s, i.e. 1.7x low"
     }
   ]
 }

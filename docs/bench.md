@@ -150,8 +150,9 @@ Provenance). The run directory defaults to a dated folder under `ROOT/out/`.
    choose the parent; removing the parent is refused). Each is checked before anything runs, with
    RDKit only: the SMILES parses, its formal charge, the electron count at that charge (the
    closed-shell RHF and DFT tiers cannot run an odd count), whether STO-3G covers its elements, and
-   the core it shares with the parent, highlighted. ferric's bundled STO-3G stops at argon, so a
-   ligand with Br or I is flagged as uncovered, and it would fail at the SCF. The core search is the
+   the core it shares with the parent, highlighted. ferric's bundled STO-3G reaches xenon, so a
+   brominated or iodinated ligand is covered; one with an element past it is flagged as uncovered,
+   and it would fail at the SCF. The core search is the
    one `smeltery run` uses, with the same time limit; a timeout is reported as a problem, not as
    "no core".
 3. **Paired poses**: each ligand's poses in the site, with the atoms copied exactly from the parent

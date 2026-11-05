@@ -686,13 +686,14 @@ class FieldInteraction:
             return none(f"calibrated for {cal.basis} only, tier is {self.basis}")
         if not candidates or any(not c.poses for c in candidates):
             return none("poses not built yet, so the SCF count is unknown")
-        total = 0.0
+        total, max_nbf = 0.0, 0
         for c in candidates:
             for pose in c.poses:
                 nbf = sto3g_basis_functions_strict(list(pose.symbols))
                 if nbf is None:
                     return none(f"{c.name}: element outside the STO-3G table")
                 total += cal.predicted_seconds_per_pose(nbf)
+                max_nbf = max(max_nbf, nbf)
         n = sum(len(c.poses) for c in candidates)
         return {
             "quantity": quantity,
@@ -700,7 +701,8 @@ class FieldInteraction:
             "predicted": total,
             "basis": f"{n} poses x (vacuum + field RHF) at {cal.basis}; measured {cal.reference_name} "
             f"({cal.reference_nbf} bf) {cal.reference_seconds:.3g} s scaled by nbf^{cal.exponent:.2f} "
-            f"(fit on calibration set), reference iteration count assumed; {cal.machine}",
+            f"(fit on calibration set), reference iteration count assumed; {cal.machine}"
+            f"{cal.extrapolation_note(max_nbf)}",
         }
 
     @property

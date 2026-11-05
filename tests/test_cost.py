@@ -43,10 +43,14 @@ def test_field_interaction_is_none_outside_what_was_measured():
     posed = _posed()
     assert FieldInteraction(basis="def2-svp").estimate_cost([posed])["predicted"] is None  # other basis
     assert FieldInteraction().estimate_cost([Candidate("c", ACID)])["predicted"] is None  # no poses yet
-    bromo = Candidate("br", "CBr")
-    bromo.poses = [Pose(("C", "Br", "H"), np.zeros((3, 3)))]  # Br is not in the table: ferric's STO-3G has none
-    assert FieldInteraction().estimate_cost([bromo])["predicted"] is None
+    heavy = Candidate("cs", "C")
+    heavy.poses = [Pose(("C", "Cs", "H"), np.zeros((3, 3)))]  # Cs: ferric's STO-3G does not reach it
+    assert FieldInteraction().estimate_cost([heavy])["predicted"] is None
     assert FieldInteraction().estimate_cost([posed])["predicted"] > 0
+    bromo = Candidate("br", "CBr")
+    bromo.poses = [Pose(("C", "Br", "H"), np.zeros((3, 3)))]  # Br IS in the table now (ferric reaches Xe)
+    est = FieldInteraction().estimate_cost([bromo])
+    assert est["predicted"] > 0 and "LOWER BOUND" not in est["basis"]  # 24 bf, inside the fit
 
 
 def test_prediction_scales_with_pose_count():
@@ -315,19 +319,21 @@ def test_pbe_tier_headroom_check_is_off_by_default():
 @pytest.mark.needs_ferric
 def test_every_sto3g_count_in_the_table_is_ferrics_own():
     """Data source: ferric's bundled STO-3G, counted by `ferric.shell_info`; the table must agree for every entry,
-    and an element ferric cannot build (Br) must stay out, so the estimators say "cannot say" rather than guess."""
+    and an element ferric cannot build (Cs and beyond) must stay out, so the estimators say "cannot say" rather
+    than guess. Br and I are IN the table: ferric's bundled set reaches Xe, though an earlier build stopped at Ar."""
     import ferric
 
     basis = ferric.BasisSet.bundled("sto-3g")
     unpaired = {"H": 1, "Li": 1, "B": 1, "C": 2, "N": 3, "O": 2, "F": 1, "Na": 1, "Al": 1, "Si": 2, "P": 3}
-    unpaired |= {"S": 2, "Cl": 1}
+    unpaired |= {"S": 2, "Cl": 1, "K": 1, "Se": 2, "Br": 1, "I": 1}
     for sym, n in cost._STO3G_NBF.items():
         mol = ferric.Molecule.from_xyz_string(f"1\n\n{sym} 0 0 0\n", 0, unpaired.get(sym, 0) + 1)
         _, _, per_shell = ferric.shell_info(mol, basis)
         assert int(sum(per_shell)) == n, sym
-    assert "Br" not in cost._STO3G_NBF
-    with pytest.raises(RuntimeError, match="no basis shells"):
-        ferric.shell_info(ferric.Molecule.from_xyz_string("1\n\nBr 0 0 0\n", 0, 2), basis)
+    assert cost._STO3G_NBF["Br"] == 18 and cost._STO3G_NBF["I"] == 27
+    assert "Cs" not in cost._STO3G_NBF
+    with pytest.raises(ValueError, match="unknown element"):
+        ferric.Molecule.from_xyz_string("1\n\nCs 0 0 0\n", 0, 2)
 
 
 def test_a_chlorinated_ligand_gets_a_memory_estimate_with_cl_counted_at_nine():
@@ -340,3 +346,13 @@ def test_a_chlorinated_ligand_gets_a_memory_estimate_with_cl_counted_at_nine():
     assert "total_gb" in mem, mem
     expected = sum({"H": 1, "C": 5, "O": 5, "Cl": 9}[s] for s in symbols)
     assert mem["n_basis_functions"] == expected
+
+
+def test_a_size_past_the_calibration_ceiling_is_disclosed_as_a_lower_bound():
+    """Above the largest size fitted the prediction is low twice over (the exponent and the assumed iteration
+    count), so the basis string says LOWER BOUND and names the measured factor; inside the fit it does not."""
+    cal = cost.rhf_calibration()
+    assert cal.ceiling_nbf == 93 and cal.reference_iterations == 36
+    note = cal.extrapolation_note(235)
+    assert "LOWER BOUND" in note and "2.5x" in note and "79 iterations" in note
+    assert cal.extrapolation_note(93) == "" and cal.extrapolation_note(21) == ""
