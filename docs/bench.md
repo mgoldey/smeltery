@@ -61,8 +61,8 @@ A pipeline starts in one of three ways. Names are lower case letters, digits, `-
     - `imported/`: the 2026-10-16 result of this campaign, **imported** rather than re-run. An
       imported run is a record converted from an original result file (kept beside it under
       `imported/original/`) by an importer; nothing the original lacks is invented. Keys the original
-      did not record are listed in `results.not_recorded`, and Bench shows those keys as not recorded
-      (views that need them say so) instead of leaving them blank or filling them in. The import is
+      did not record are listed in `results.not_recorded`; a view that needs one of them answers that
+      the run was imported and the key was not recorded, instead of leaving it blank or filling it in. The import is
       UNRANKED at the declared 1.26 kcal/mol floor.
     - `run/`: the pipeline's own run, made with `smeltery run --temporal`: a long Temporal run (hours
       of SCFs on several workers), not something to repeat casually.
