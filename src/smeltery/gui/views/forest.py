@@ -54,7 +54,9 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
                 y=pose_y,
                 mode="markers",
                 name="one pose",
-                marker={"size": 7, "color": INK_MUTED, "opacity": 0.55, "symbol": "line-ns-open", "line": {"width": 2}},
+                # As dark as the summary and a little taller: a pose that contradicts the mean must not be the
+                # faintest thing on its row. Open ticks, so a cluster still reads as a cluster.
+                marker={"size": 11, "color": INK, "opacity": 0.75, "symbol": "line-ns-open", "line": {"width": 2}},
                 customdata=pose_i,
                 hovertemplate="pose %{customdata}: %{x:.3f} " + unit + "<extra></extra>",
             )
