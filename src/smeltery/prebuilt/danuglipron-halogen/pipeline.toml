@@ -64,6 +64,9 @@ models = ["CHARMM"]            # the same pocket charged by pdb2pqr --ff=CHARMM,
 
 [run]
 scf_timeout_s = 14400          # the 2026-10-16 run's slowest SCF took 2 h 6 min
+# The 2026-11-05 run's legs are ferric b22183b, except pyr-C28-Cl pose 3's vacuum leg: b22183b falsely converged it
+# (fixed in ferric 455b8fbad) and it was rerun on 81f411c. Converged energies agree across the two to 2e-9 Ha.
+allow_mixed_builds = true
 
 [cut]
 keep = 3

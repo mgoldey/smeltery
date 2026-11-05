@@ -1,0 +1,76 @@
+# The danuglipron halogen campaign (12 analogues of the parent at four aromatic CH sites). The 2026-10-16 run of it
+# (benchmarks/danuglipron_halogen/results/danuglipron-halogen-38fa833cb90c.json) is imported under imported/; this
+# config is the campaign as a pipeline, with what that run lacked:
+#   - 4 kept poses per candidate, pose 0 the cryo-EM bound conformer ([bound_pose]); the 2026-10-16 run kept 2 and
+#     dropped pose 0 (its amendment A1), so its paired ddE had n = 1 per candidate after its non-converged SCFs;
+#   - a remedy ladder for SCFs that do not converge ([field_interaction] remedies), each value naming its rung;
+#   - the AMBER-vs-CHARMM pocket charge sensitivity ([charge_sensitivity]), which the 2026-10-16 run skipped.
+# The parent is the NEUTRAL ACID (the SMILES carries no formal charge), as recorded.
+# Run it durably: `smeltery run pipeline.toml --out OUT --temporal --workers 6` with `smeltery temporal-worker`.
+campaign = "danuglipron-halogen-scan"
+parent = "parent"
+
+[candidates]
+parent = "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F"
+bnz-C34-CH3 = "Cc1c(C#N)ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c1F"
+bnz-C34-Cl = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1Cl"
+bnz-C34-F = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1F"
+bnz-C36-CH3 = "Cc1cc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)cc1C#N"
+bnz-C36-Cl = "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1Cl"
+bnz-C36-F = "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1F"
+bzim-C9-CH3 = "Cc1cc2nc(CN3CCC(c4cccc(OCc5ccc(C#N)cc5F)n4)CC3)n(C[C@@H]3CCO3)c2cc1C(=O)O"
+bzim-C9-Cl = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(Cl)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+bzim-C9-F = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(F)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+pyr-C28-CH3 = "Cc1cc(OCc2ccc(C#N)cc2F)nc(C2CCN(Cc3nc4ccc(C(=O)O)cc4n3C[C@@H]3CCO3)CC2)c1"
+pyr-C28-Cl = "N#Cc1ccc(COc2cc(Cl)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+pyr-C28-F = "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+
+# Sites (parent heavy-atom index): bzim-C9 = 9, pyr-C28 = 28, bnz-C34 = 34, bnz-C36 = 36.
+[poses]
+n_poses = 4                # the parent's poses come from [bound_pose]; this matches its count
+seed = 20261005
+jitter_deg = 15.0
+jitter_ang = 0.5
+mcs_timeout_s = 900        # the default 10 s hit NoCommonCoreError for 9 of 12 analogues on this 74-atom parent
+min_core_heavy = 3
+relax_unmapped = true
+# [poses] seed also seeds the analogues' substituent embedding on each parent pose; [bound_pose] seed drives the jitters.
+
+[bound_pose]
+file = "inputs/6f9b5f507db3fc913ff33786f788e7f4fc81ceab6b94d8ffe7737b6a87863aea/conf_00_cryo_em.xyz"   # the cryo-EM bound conformer of the parent (atoms in SMILES order with explicit H)
+n_poses = 4                    # pose 0 = the conformer itself; poses 1-3 = seeded rigid jitters
+jitter_deg = 15.0
+jitter_ang = 0.5
+seed = 20261005
+skip_first = 0                 # pose 0 is kept: the remedy ladder replaces the 2026-10-16 run's drop of it
+
+[pocket]
+file = "inputs/caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110/7LCJ_pocket.pdb"   # 7LCJ pocket, charges from pdb2pqr30 (AMBER); no distance cutoff, as recorded
+
+[field_interaction]          # RHF, as recorded (engine ferric)
+basis = "sto-3g"
+energy_conv = 1e-10
+density_conv = 1e-8
+max_iter = 200
+# Tried in order when an SCF does not converge (rung 0 is the settings above). No rung loosens a threshold or smears:
+# those change the quantity measured. A pose whose parent or analogue fails every rung is dropped for both.
+remedies = [
+  { diis = "adiis", level_shift = 0.5 },
+  { diis = "adiis", level_shift = 1.0, soscf = true, max_iter = 150 },
+]
+
+[charge_sensitivity]
+models = ["CHARMM"]            # the same pocket charged by pdb2pqr --ff=CHARMM, every pose measured again
+
+[run]
+scf_timeout_s = 14400          # the 2026-10-16 run's slowest SCF took 2 h 6 min
+# The 2026-11-05 run's legs are ferric b22183b, except pyr-C28-Cl pose 3's vacuum leg: b22183b falsely converged it
+# (fixed in ferric 455b8fbad) and it was rerun on 81f411c. Converged energies agree across the two to 2e-9 Ha.
+allow_mixed_builds = true
+
+[cut]
+keep = 3
+z = 2.0
+# Declared, not measured here: the larger of two pocket-side charge-model sensitivities measured on other targets
+# (AMBER ff14SB vs CHARMM36: docs/limits.md L6 cdk2 1.26, L11 tyk2 0.67), a lower bound.
+floor = 1.26
