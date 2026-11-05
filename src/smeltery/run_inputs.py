@@ -38,13 +38,16 @@ def _manifest(out_dir: Path) -> dict[str, dict]:
 
 def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[str, dict]]:
     """Copy each `INPUT_PATHS` value that names an existing file (relative paths resolve against `config_dir`, as
-    `smeltery run` does) to `out_dir/inputs/<sha256><suffix>` and return the config text with that value rewritten
-    to the relative path `inputs/<sha256><suffix>`, plus `{"pocket.file": {"source", "sha256", "copy"}, ...}`.
+    `smeltery run` does) to `out_dir/inputs/<sha256>/<basename>` and return the config text with that value rewritten
+    to the relative path `inputs/<sha256>/<basename>`, plus `{"pocket.file": {"source", "sha256", "copy"}, ...}`.
     A value that is not a file (a PDB id for `structure.spec`) is left alone and not listed.
 
     `out_dir/inputs/manifest.json` maps each copy to the source it was first staged from. A value that already names
     a copy inside `out_dir` (a config staged earlier, e.g. by Bench's Launch and then again by `smeltery run`) keeps
-    that recorded source instead of becoming "inputs/<sha>", so the manifest is the one source of truth."""
+    that recorded source instead of becoming "inputs/<sha>/<name>", so the manifest is the one source of truth.
+
+    The original basename is kept so every name the plan records (and therefore the input digest) is the same with
+    and without staging; the contents stay addressed by the hash directory."""
     known = _manifest(out_dir)
     cfg = tomllib.loads(text)
     staged: dict[str, dict] = {}
@@ -57,8 +60,8 @@ def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[
         if not src.is_file():
             continue
         digest = _sha256(src)
-        source = known.get(value, {}).get("source", value) if value == f"inputs/{digest}{src.suffix}" else value
-        rel = f"inputs/{digest}{src.suffix}"
+        source = known.get(value, {}).get("source", value) if value == f"inputs/{digest}/{src.name}" else value
+        rel = f"inputs/{digest}/{src.name}"
         dest = Path(out_dir) / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         if not dest.exists():

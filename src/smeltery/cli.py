@@ -899,6 +899,23 @@ def _out_path(path: str | Path, out_dir: Path) -> str:
         return str(p)
 
 
+def _gates_in_out(gates: dict, out_dir: Path) -> dict:
+    """A copy of the per-pose gate results with every `receptor` path made relative to OUT when inside it (the
+    absolute path of a run directory that is later renamed or moved points at nothing)."""
+
+    def walk(x):
+        if isinstance(x, dict):
+            return {
+                k: _out_path(v, out_dir) if k == "receptor" and isinstance(v, str) and v else walk(v)
+                for k, v in x.items()
+            }
+        if isinstance(x, list):
+            return [walk(v) for v in x]
+        return x
+
+    return walk(gates)
+
+
 def pose_mol(c: Candidate) -> Chem.Mol:
     """The candidate as an RDKit mol with one conformer per pose: atoms and bonds from its SMILES with explicit
     H (`Chem.AddHs(Chem.MolFromSmiles(smiles))`), coordinates from `Pose.coords_ang`. A pose whose elements are
@@ -1000,7 +1017,7 @@ def write_outputs(
     if "decisions_in" in results:
         results["decisions_in"]["file"] = _out_path(results["decisions_in"]["file"], out_dir)
     if plan.gate_results:  # only the gates that ran
-        results["gates"] = plan.gate_results
+        results["gates"] = _gates_in_out(plan.gate_results, out_dir)
     if calc_rows is not None and not calc_rows:
         results["calcs"] = None  # a combine of partials with no calc logs: no SCF count is known, never "0"
     else:
@@ -1321,7 +1338,9 @@ def main(argv: list[str] | None = None) -> int:
         if explicit_out and e.gates:  # a rejected gate still leaves every pose's result
             try:
                 args.out.mkdir(parents=True, exist_ok=True)
-                (args.out / "gates.json").write_text(json.dumps(e.gates, indent=2, sort_keys=True) + "\n")
+                (args.out / "gates.json").write_text(
+                    json.dumps(_gates_in_out(e.gates, args.out), indent=2, sort_keys=True) + "\n"
+                )
             except OSError as oe:  # never mask the exit code of the failure itself
                 print(f"warning: could not write gates.json: {oe}", file=sys.stderr)
         if explicit_out and plan is not None:  # a failed SCF still leaves the SCFs it ran

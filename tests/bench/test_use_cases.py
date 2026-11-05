@@ -152,7 +152,7 @@ def test_launch_without_config_dir_resolves_against_the_bench_root(tmp_path, pip
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)  # not the root: the default must be the root, not the cwd
     _launch_with_pocket(tmp_path, pipeline, root=tmp_path)
-    assert list((tmp_path / "out" / "inputs").glob("*.pqr"))
+    assert list((tmp_path / "out" / "inputs").rglob("*.pqr"))
 
 
 def test_a_launched_run_keeps_the_users_original_source_through_the_cli_restage(tmp_path, pipeline, monkeypatch):
@@ -177,4 +177,4 @@ def test_a_launched_run_keeps_the_users_original_source_through_the_cli_restage(
     assert (proj / "p.pqr").is_file()
     assert (out / "config.toml").read_bytes() == first
     assert entry["sha256"] == hashlib.sha256(first).hexdigest()
-    assert len(list((out / "inputs").glob("*.pqr"))) == 1
+    assert len(list((out / "inputs").rglob("*.pqr"))) == 1

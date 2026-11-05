@@ -76,7 +76,7 @@ def test_the_record_names_each_input_by_sha256(tmp_path):
     info = stage_inputs(staged, out, out)[1]  # staging a staged config is a no-op that still names its inputs
     want = hashlib.sha256((src / "data" / "p.pqr").read_bytes()).hexdigest()
     assert info["pocket.file"]["sha256"] == want
-    assert info["pocket.file"]["copy"] == f"inputs/{want}.pqr"
+    assert info["pocket.file"]["copy"] == f"inputs/{want}/p.pqr"  # hash directory, original basename
 
 
 def test_the_run_record_holds_the_config_entry(tmp_path):
@@ -142,3 +142,42 @@ def test_a_full_run_records_the_config_entry_in_results(tmp_path, monkeypatch):
     staged = (tmp_path / "out" / "config.toml").read_bytes()
     assert entry["file"] == "config.toml" and entry["sha256"] == hashlib.sha256(staged).hexdigest()
     assert set(entry["inputs"]) == {"pocket.file"}
+
+
+def _digest(path):
+    from smeltery.cli import build_plan, load_config
+    from smeltery.record import RunRecord
+
+    plan = build_plan(load_config(path))
+    return RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
+
+
+def test_staging_keeps_the_original_basename_under_a_hash_directory(tmp_path):
+    src, cfg = _write(tmp_path)
+    text, staged = stage_inputs(cfg.read_text(), src, tmp_path / "out")
+    want = hashlib.sha256((src / "data" / "p.pqr").read_bytes()).hexdigest()
+    assert tomllib.loads(text)["pocket"]["file"] == f"inputs/{want}/p.pqr"
+    assert staged["pocket.file"]["copy"] == f"inputs/{want}/p.pqr"
+    again, _ = stage_inputs(text, tmp_path / "out", tmp_path / "out")  # re-staging copies nothing, keeps the source
+    assert again == text
+    assert len(list((tmp_path / "out" / "inputs").rglob("p.pqr"))) == 1
+    assert (
+        json.loads((tmp_path / "out" / "inputs" / "manifest.json").read_text())[f"inputs/{want}/p.pqr"]["source"]
+        == "data/p.pqr"
+    )
+
+
+def test_staging_does_not_change_the_input_digest(tmp_path):
+    src, cfg = _write(tmp_path)
+    out = tmp_path / "out"
+    assert main(["run", str(cfg), "--plan", "--out", str(out)]) == 0
+    assert _digest(cfg) == _digest(out / "config.toml")
+
+
+def test_staging_does_not_change_the_docking_example_digest(tmp_path):
+    """Data source: examples/mwe_docking.toml with its own files; the plan docks (vina, meeko, pdb2pqr30)."""
+    pytest.importorskip("vina")
+    ex = ROOT / "examples" / "mwe_docking.toml"
+    out = tmp_path / "out"
+    assert main(["run", str(ex), "--plan", "--out", str(out)]) == 0
+    assert _digest(ex) == _digest(out / "config.toml")

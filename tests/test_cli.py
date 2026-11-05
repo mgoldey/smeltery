@@ -363,6 +363,68 @@ def test_gates_report_every_pose_of_every_candidate_before_failing(tmp_path, mon
         assert all(x["passed"] is (not failed) for x in poses)
 
 
+def _abs_paths_in(x, out):
+    if isinstance(x, dict):
+        return [p for v in x.values() for p in _abs_paths_in(v, out)]
+    if isinstance(x, list):
+        return [p for v in x for p in _abs_paths_in(v, out)]
+    return [x] if isinstance(x, str) and x.startswith(str(out)) else []
+
+
+def test_gate_receptor_paths_inside_out_are_stored_relative(tmp_path):
+    from smeltery.cli import _gates_in_out
+
+    out = tmp_path / "out"
+    gates = {"posebusters": {"a": {"receptor": str(out / "inputs" / "h" / "r.pdb"), "poses": []}}}
+    got = _gates_in_out(gates, out)
+    assert got["posebusters"]["a"]["receptor"] == "inputs/h/r.pdb"
+    assert gates["posebusters"]["a"]["receptor"].startswith(str(out))  # the plan's own copy is untouched
+    elsewhere = {"posebusters": {"a": {"receptor": "/elsewhere/r.pdb", "poses": []}}}
+    assert _gates_in_out(elsewhere, out) == elsewhere
+    assert _gates_in_out({"posebusters": {"a": {"receptor": None}}}, out)["posebusters"]["a"]["receptor"] is None
+
+
+def test_gates_json_and_the_record_hold_no_absolute_path_inside_out(tmp_path, monkeypatch, capsys):
+    from smeltery.gates import PoseReport, PoseVerdict
+
+    out = tmp_path / "out"
+    receptor = str(out.resolve() / "inputs" / "h" / "r.pdb")
+
+    def check(cand, receptor_arg=None):
+        verdict = PoseVerdict(("sanitization",), ("planar",) if cand.name == "propanol" else ())
+        cand.pose_report = PoseReport((verdict,) * len(cand.poses), "mol", "9.9", receptor)
+        return cand.pose_report
+
+    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    p = write(tmp_path, GATED_UNRELAXED)
+    assert main(["run", str(p), "--out", str(out)]) == 3  # a rejected gate: gates.json is written
+    gates = json.loads((out / "gates.json").read_text())
+    assert gates["posebusters"]["ethanol"]["receptor"] == "inputs/h/r.pdb"
+    assert _abs_paths_in(gates, out.resolve()) == []
+
+
+def test_no_value_in_the_record_results_is_an_absolute_path_inside_out(tmp_path, monkeypatch):
+    """Data source: the GATED config's real plan (poses and gates), written by write_outputs with a stubbed receptor."""
+    from smeltery.cli import RunRecord, build_plan, load_config, write_outputs
+    from smeltery.gates import PoseReport, PoseVerdict
+
+    out = tmp_path / "out"
+    receptor = str(out.resolve() / "inputs" / "h" / "r.pdb")
+
+    def check(cand, receptor_arg=None):
+        cand.pose_report = PoseReport((PoseVerdict(("sanitization",), ()),) * len(cand.poses), "mol", "9.9", receptor)
+        return cand.pose_report
+
+    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    plan = build_plan(load_config(write(tmp_path, GATED)), out_dir=out)
+    per_pose = {c.name: {"dE_int": [0.0] * len(c.poses)} for c in plan.candidates}
+    rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {"per_pose": per_pose})
+    path = write_outputs(plan, rec, out)
+    results = json.loads(path.read_text())["results"]
+    assert results["gates"]["posebusters"]["ethanol"]["receptor"] == "inputs/h/r.pdb"
+    assert _abs_paths_in(results, out.resolve()) == []
+
+
 def test_a_failing_strain_gate_still_records_every_pose_strain(tmp_path, monkeypatch, capsys):
     p = write(tmp_path, SMALL.format(floor=0.0) + "\n[gates]\nforcefield = true\nmax_strain_kcal = 0.001\n")
     out = tmp_path / "out"
