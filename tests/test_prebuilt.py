@@ -14,12 +14,17 @@ from smeltery.bench.verdict import verdict_of
 from smeltery.pocket import pdb2pqr_version
 
 PREBUILT = Path(__file__).resolve().parent.parent / "src" / "smeltery" / "prebuilt"
-NAMES = ["benzoic-rhf", "benzoic-pbe", "docking", "structure"]
+NAMES = ["benzoic-rhf", "benzoic-pbe", "docking", "structure", "danuglipron-halogen"]
 
 
-def _plan_digest(folder: Path) -> str:
+#: Folders whose full plan embeds every analogue (a 74-atom parent: minutes of MCS), so the config test plans
+#: the parent and one analogue instead. The config is validated whole either way.
+ONE_CANDIDATE = {"danuglipron-halogen": "bzim-C9-F"}
+
+
+def _plan_digest(folder: Path, *extra: str) -> str:
     out = subprocess.run(
-        [sys.executable, "-m", "smeltery", "run", str(folder / "pipeline.toml"), "--plan"],
+        [sys.executable, "-m", "smeltery", "run", str(folder / "pipeline.toml"), "--plan", *extra],
         capture_output=True,
         text=True,
         check=True,
@@ -34,12 +39,15 @@ def test_every_prebuilt_config_validates(name):
     folder = PREBUILT / name
     assert (folder / "pipeline.toml").is_file()
     assert len(folder.joinpath("about.md").read_text().strip().splitlines()) == 2
-    assert _plan_digest(folder)
+    only = ONE_CANDIDATE.get(name)
+    assert _plan_digest(folder, *(["--only-candidate", only] if only else []))
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_each_prebuilt_run_is_its_configs_run(name):
     folder = PREBUILT / name
+    if not (folder / "run").exists() and (folder / "imported").exists():
+        pytest.skip(f"{name} has no run yet: only imported/ (the 2026-10-16 record), which is not this config's run")
     if not (folder / "run").exists():
         pytest.skip(f"{name} has no run/ yet: generate it with scripts/build_prebuilt.py {name}")
     records = sorted((folder / "run").glob("run-*.json"))

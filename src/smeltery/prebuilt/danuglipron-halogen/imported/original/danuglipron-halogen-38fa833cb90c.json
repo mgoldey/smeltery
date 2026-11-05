@@ -1,0 +1,522 @@
+{
+  "campaign": "danuglipron-halogen-scan",
+  "ferric": {
+    "commit": "cddfd1aa57777430484f67ab72f52a3351687076",
+    "dirty": false,
+    "provenance": "VERIFIED from ferric.__build__ (stamped at build time)",
+    "source": "ferric.__build__",
+    "version": "0.1.0rc7"
+  },
+  "host": {
+    "node": "blacktea",
+    "python": "3.12.12"
+  },
+  "input_digest": "38fa833cb90caef6cb53c98b3825364e106cc0db8948032a31aa77ca3b0994b1",
+  "inputs": {
+    "analogues": {
+      "bnz-C34-CH3": "Cc1c(C#N)ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c1F",
+      "bnz-C34-Cl": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1Cl",
+      "bnz-C34-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1F",
+      "bnz-C36-CH3": "Cc1cc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)cc1C#N",
+      "bnz-C36-Cl": "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1Cl",
+      "bnz-C36-F": "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1F",
+      "bzim-C9-CH3": "Cc1cc2nc(CN3CCC(c4cccc(OCc5ccc(C#N)cc5F)n4)CC3)n(C[C@@H]3CCO3)c2cc1C(=O)O",
+      "bzim-C9-Cl": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(Cl)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
+      "bzim-C9-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(F)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
+      "pyr-C28-CH3": "Cc1cc(OCc2ccc(C#N)cc2F)nc(C2CCN(Cc3nc4ccc(C(=O)O)cc4n3C[C@@H]3CCO3)CC2)c1",
+      "pyr-C28-Cl": "N#Cc1ccc(COc2cc(Cl)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1",
+      "pyr-C28-F": "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+    },
+    "campaign_summary": {
+      "CH3_sem": [
+        1.0,
+        3.5
+      ],
+      "n": 12,
+      "n_sign_flips": 4,
+      "rho": [
+        0.78,
+        0.9997
+      ],
+      "self_anchor": 0.31,
+      "spearman": 0.664
+    },
+    "dropped_pose_indices": {
+      "indices": [
+        0
+      ],
+      "reason": "plan amendment A1 (docs/benchmarks/danuglipron_halogen_plan.md)"
+    },
+    "ionization": "neutral acid (the SMILES given carries no formal charge)",
+    "parent": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
+    "pocket": {
+      "center_ang": null,
+      "cutoff_ang": null,
+      "input": "7LCJ_pocket.pdb",
+      "input_sha256": "caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110",
+      "n_charges": 6458,
+      "n_total": 6458,
+      "pdb2pqr_ff": "AMBER",
+      "pdb2pqr_version": "pdb2pqr 3.7.1"
+    },
+    "pocket_charge_model_b": null,
+    "sites": {
+      "bnz-C34": 34,
+      "bnz-C36": 36,
+      "bzim-C9": 9,
+      "pyr-C28": 28
+    }
+  },
+  "results": {
+    "cost": {
+      "first_pose_index": 1,
+      "n_poses": 2,
+      "scf_cpu_hours": 12.143975875262777,
+      "workers": 6
+    },
+    "criterion_1_self_anchor": {
+      "exact_zero": true,
+      "parent_dE_int": [
+        -18.406728361447094,
+        -14.529902208945806
+      ],
+      "per_pose": [
+        0.0,
+        0.0
+      ]
+    },
+    "criterion_2_campaign_comparison": {
+      "ch3_paired_sem_range": {
+        "inside": [
+          "bnz-C34-CH3",
+          "pyr-C28-CH3"
+        ],
+        "n_inside": 2,
+        "n_outside": 2,
+        "outside": [
+          "bnz-C36-CH3",
+          "bzim-C9-CH3"
+        ],
+        "range": [
+          1.0,
+          3.5
+        ]
+      },
+      "rho_range": {
+        "inside": [],
+        "n_inside": 0,
+        "n_outside": 12,
+        "outside": [
+          "bnz-C34-CH3",
+          "bnz-C34-Cl",
+          "bnz-C34-F",
+          "bnz-C36-CH3",
+          "bnz-C36-Cl",
+          "bnz-C36-F",
+          "bzim-C9-CH3",
+          "bzim-C9-Cl",
+          "bzim-C9-F",
+          "pyr-C28-CH3",
+          "pyr-C28-Cl",
+          "pyr-C28-F"
+        ],
+        "range": [
+          0.78,
+          0.9997
+        ]
+      },
+      "rows": [
+        {
+          "agrees": null,
+          "mean": -1.2454447072637844,
+          "name": "bzim-C9-F",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.22826267209120665
+        },
+        {
+          "agrees": null,
+          "mean": -2.4454886211214113,
+          "name": "bzim-C9-Cl",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.25275614759532594
+        },
+        {
+          "agrees": null,
+          "mean": -0.7642329220365305,
+          "name": "bzim-C9-CH3",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.9157536695375157
+        },
+        {
+          "agrees": null,
+          "mean": 0.9402937309208053,
+          "name": "pyr-C28-F",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.25668862255831293
+        },
+        {
+          "agrees": null,
+          "mean": 1.7948316989712776,
+          "name": "pyr-C28-Cl",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.6742988831518186
+        },
+        {
+          "agrees": null,
+          "mean": -1.3706016895027595,
+          "name": "pyr-C28-CH3",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 1.4296517822451162
+        },
+        {
+          "agrees": null,
+          "mean": -3.8692121009814926,
+          "name": "bnz-C34-F",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 1.157951515449021
+        },
+        {
+          "agrees": null,
+          "mean": 6.286004876073436,
+          "name": "bnz-C34-Cl",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 10.055628401515039
+        },
+        {
+          "agrees": null,
+          "mean": 2.5216036780812425,
+          "name": "bnz-C34-CH3",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 2.5403422505804807
+        },
+        {
+          "agrees": null,
+          "mean": 0.801238709960125,
+          "name": "bnz-C36-F",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.3005362517017245
+        },
+        {
+          "agrees": null,
+          "mean": 1.3843593350940786,
+          "name": "bnz-C36-Cl",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.6062843211077364
+        },
+        {
+          "agrees": null,
+          "mean": -0.4715195359083406,
+          "name": "bnz-C36-CH3",
+          "recorded": null,
+          "recorded_sem": null,
+          "sem": 0.0703531432729516
+        }
+      ],
+      "status": "UNVERIFIED: no campaign per-analogue values available"
+    },
+    "criterion_3_pairing": {
+      "bnz-C34-CH3": {
+        "paired_sem": 2.5403422505804807,
+        "ratio": 1.9210935411137178,
+        "rho": 1.0,
+        "unpaired_sem": 4.880235089808447
+      },
+      "bnz-C34-Cl": {
+        "paired_sem": 10.055628401515039,
+        "ratio": 1.2082457021941717,
+        "rho": 1.0,
+        "unpaired_sem": 12.149669798992194
+      },
+      "bnz-C34-F": {
+        "paired_sem": 1.157951515449021,
+        "ratio": 1.804594436905295,
+        "rho": 1.0,
+        "unpaired_sem": 2.089632862985359
+      },
+      "bnz-C36-CH3": {
+        "paired_sem": 0.0703531432729516,
+        "ratio": 39.67868981740753,
+        "rho": 1.0,
+        "unpaired_sem": 2.791520549607078
+      },
+      "bnz-C36-Cl": {
+        "paired_sem": 0.6062843211077364,
+        "ratio": 3.87940597427848,
+        "rho": 1.0,
+        "unpaired_sem": 2.352023017416725
+      },
+      "bnz-C36-F": {
+        "paired_sem": 0.3005362517017245,
+        "ratio": 8.444014284819508,
+        "rho": 1.0,
+        "unpaired_sem": 2.5377324024754726
+      },
+      "bzim-C9-CH3": {
+        "paired_sem": 0.9157536695375157,
+        "ratio": 2.3932615971152997,
+        "rho": 1.0,
+        "unpaired_sem": 2.1916380897215513
+      },
+      "bzim-C9-Cl": {
+        "paired_sem": 0.25275614759532594,
+        "ratio": 11.574476514446772,
+        "rho": 1.0,
+        "unpaired_sem": 2.925520094224142
+      },
+      "bzim-C9-F": {
+        "paired_sem": 0.22826267209120665,
+        "ratio": 12.736292501618477,
+        "rho": 1.0,
+        "unpaired_sem": 2.9072201589546327
+      },
+      "pyr-C28-CH3": {
+        "paired_sem": 1.4296517822451162,
+        "ratio": 2.718172322458633,
+        "rho": 1.0,
+        "unpaired_sem": 3.8860399052523316
+      },
+      "pyr-C28-Cl": {
+        "paired_sem": 0.6742988831518186,
+        "ratio": 3.4319798636312546,
+        "rho": 1.0,
+        "unpaired_sem": 2.314180189046086
+      },
+      "pyr-C28-F": {
+        "paired_sem": 0.25668862255831293,
+        "ratio": 9.997523938520903,
+        "rho": 1.0,
+        "unpaired_sem": 2.56625064877269
+      }
+    },
+    "criterion_4_sensitivity": "NOT RUN: --skip-model-b",
+    "cut": {
+      "adjacent_gaps_at_or_below_floor": [
+        [
+          "bzim-C9-Cl",
+          "pyr-C28-CH3",
+          1.0748869316186518
+        ],
+        [
+          "pyr-C28-CH3",
+          "bzim-C9-F",
+          0.1251569822389751
+        ],
+        [
+          "bzim-C9-F",
+          "bzim-C9-CH3",
+          0.48121178522725394
+        ],
+        [
+          "bzim-C9-CH3",
+          "bnz-C36-CH3",
+          0.29271338612818987
+        ],
+        [
+          "bnz-C36-F",
+          "pyr-C28-F",
+          0.13905502096068023
+        ],
+        [
+          "pyr-C28-F",
+          "bnz-C36-Cl",
+          0.44406560417327334
+        ],
+        [
+          "bnz-C36-Cl",
+          "pyr-C28-Cl",
+          0.410472363877199
+        ],
+        [
+          "pyr-C28-Cl",
+          "bnz-C34-CH3",
+          0.7267719791099649
+        ]
+      ],
+      "floor": 1.26,
+      "groups": [
+        [
+          "bnz-C34-F",
+          "bzim-C9-Cl",
+          "pyr-C28-CH3",
+          "bzim-C9-F",
+          "bzim-C9-CH3",
+          "bnz-C36-CH3"
+        ],
+        [
+          "bnz-C36-F",
+          "pyr-C28-F",
+          "bnz-C36-Cl",
+          "pyr-C28-Cl",
+          "bnz-C34-CH3",
+          "bnz-C34-Cl"
+        ]
+      ],
+      "notes": [
+        "keep=3 falls inside the unresolved group ['bnz-C34-F', 'bzim-C9-Cl', 'pyr-C28-CH3', 'bzim-C9-F', 'bzim-C9-CH3', 'bnz-C36-CH3']; refusing to cut it"
+      ],
+      "survivors": null,
+      "unranked": true
+    },
+    "declared_floor": {
+      "source": "1.26 kcal/mol, docs/limits.md L6 (cdk2; L11 tyk2 is 0.67), a lower bound from other targets",
+      "value": 1.26
+    },
+    "paired_ddE_amber": {
+      "bnz-C34-CH3": {
+        "mean": 2.5216036780812425,
+        "n": 2,
+        "per_pose": [
+          -0.01873857249923816,
+          5.061945928661723
+        ],
+        "sem": 2.5403422505804807
+      },
+      "bnz-C34-Cl": {
+        "mean": 6.286004876073436,
+        "n": 2,
+        "per_pose": [
+          -3.7696235254416024,
+          16.341633277588475
+        ],
+        "sem": 10.055628401515039
+      },
+      "bnz-C34-F": {
+        "mean": -3.8692121009814926,
+        "n": 2,
+        "per_pose": [
+          -2.7112605855324716,
+          -5.027163616430514
+        ],
+        "sem": 1.157951515449021
+      },
+      "bnz-C36-CH3": {
+        "mean": -0.4715195359083406,
+        "n": 2,
+        "per_pose": [
+          -0.5418726791812922,
+          -0.401166392635389
+        ],
+        "sem": 0.0703531432729516
+      },
+      "bnz-C36-Cl": {
+        "mean": 1.3843593350940786,
+        "n": 2,
+        "per_pose": [
+          1.990643656201815,
+          0.7780750139863422
+        ],
+        "sem": 0.6062843211077364
+      },
+      "bnz-C36-F": {
+        "mean": 0.801238709960125,
+        "n": 2,
+        "per_pose": [
+          1.1017749616618495,
+          0.5007024582584005
+        ],
+        "sem": 0.3005362517017245
+      },
+      "bzim-C9-CH3": {
+        "mean": -0.7642329220365305,
+        "n": 2,
+        "per_pose": [
+          0.1515207475009852,
+          -1.6799865915740462
+        ],
+        "sem": 0.9157536695375157
+      },
+      "bzim-C9-Cl": {
+        "mean": -2.4454886211214113,
+        "n": 2,
+        "per_pose": [
+          -2.6982447687167372,
+          -2.1927324735260854
+        ],
+        "sem": 0.25275614759532594
+      },
+      "bzim-C9-F": {
+        "mean": -1.2454447072637844,
+        "n": 2,
+        "per_pose": [
+          -1.473707379354991,
+          -1.0171820351725778
+        ],
+        "sem": 0.22826267209120665
+      },
+      "pyr-C28-CH3": {
+        "mean": -1.3706016895027595,
+        "n": 2,
+        "per_pose": [
+          -2.800253471747876,
+          0.05905009274235695
+        ],
+        "sem": 1.4296517822451162
+      },
+      "pyr-C28-Cl": {
+        "mean": 1.7948316989712776,
+        "n": 2,
+        "per_pose": [
+          2.469130582123096,
+          1.120532815819459
+        ],
+        "sem": 0.6742988831518186
+      },
+      "pyr-C28-F": {
+        "mean": 0.9402937309208053,
+        "n": 2,
+        "per_pose": [
+          1.1969823534791182,
+          0.6836051083624923
+        ],
+        "sem": 0.25668862255831293
+      }
+    },
+    "paired_ddE_charmm": {}
+  },
+  "smeltery_version": "0.0.2.dev230+g21d909fa4.d20261013",
+  "started_utc": "2026-10-16T17:22:39Z",
+  "tiers": [
+    {
+      "analogue_poses_given": false,
+      "jitter_ang": 0.5,
+      "jitter_deg": 15.0,
+      "mcs_timeout_s": 900,
+      "min_core_heavy": 3,
+      "n_poses": 3,
+      "name": "paired_poses",
+      "parent_poses_given": false,
+      "relax_unmapped": true,
+      "seed": 20261005
+    },
+    {
+      "basis": "sto-3g",
+      "density_conv": 1e-08,
+      "energy_conv": 1e-10,
+      "engine": "ferric",
+      "field": {
+        "center_ang": null,
+        "cutoff_ang": null,
+        "input": "7LCJ_pocket.pdb",
+        "input_sha256": "caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110",
+        "n_charges": 6458,
+        "n_total": 6458,
+        "pdb2pqr_ff": "AMBER",
+        "pdb2pqr_version": "pdb2pqr 3.7.1"
+      },
+      "max_iter": 200,
+      "method": "RHF",
+      "name": "field_interaction"
+    }
+  ]
+}

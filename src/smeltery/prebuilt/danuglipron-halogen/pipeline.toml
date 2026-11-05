@@ -1,0 +1,53 @@
+# The danuglipron halogen campaign (12 analogues of the parent at four aromatic CH sites), as it was run on
+# 2026-10-16: benchmarks/danuglipron_halogen/results/danuglipron-halogen-38fa833cb90c.json, imported under imported/.
+# The parent is the NEUTRAL ACID (the SMILES carries no formal charge), as recorded.
+#
+# This config does NOT yet express the whole campaign. Still needed, and the task that adds each:
+#   - the cryo-EM bound conformer as the parent's pose 0 (conf_00_cryo_em.xyz, copied here): [bound_pose], task D2
+#   - the AMBER-vs-CHARMM pocket charge sensitivity (criterion 4, not run in the record): [charge_sensitivity], task D3
+#   - the remedy ladder for SCFs that do not converge, and pairwise dropping of failed poses: task D4
+# Until D2 lands, `smeltery run` would embed ETKDG parent poses instead of the bound conformer, so do not read a new
+# run of this file as a repeat of the 2026-10-16 record.
+campaign = "danuglipron-halogen-scan"
+parent = "parent"
+
+[candidates]
+parent = "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F"
+bnz-C34-CH3 = "Cc1c(C#N)ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c1F"
+bnz-C34-Cl = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1Cl"
+bnz-C34-F = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1F"
+bnz-C36-CH3 = "Cc1cc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)cc1C#N"
+bnz-C36-Cl = "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1Cl"
+bnz-C36-F = "N#Cc1cc(F)c(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)cc1F"
+bzim-C9-CH3 = "Cc1cc2nc(CN3CCC(c4cccc(OCc5ccc(C#N)cc5F)n4)CC3)n(C[C@@H]3CCO3)c2cc1C(=O)O"
+bzim-C9-Cl = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(Cl)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+bzim-C9-F = "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5cc(F)c(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+pyr-C28-CH3 = "Cc1cc(OCc2ccc(C#N)cc2F)nc(C2CCN(Cc3nc4ccc(C(=O)O)cc4n3C[C@@H]3CCO3)CC2)c1"
+pyr-C28-Cl = "N#Cc1ccc(COc2cc(Cl)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+pyr-C28-F = "N#Cc1ccc(COc2cc(F)cc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1"
+
+# Sites (parent heavy-atom index): bzim-C9 = 9, pyr-C28 = 28, bnz-C34 = 34, bnz-C36 = 36.
+[poses]
+n_poses = 3
+seed = 20261005
+jitter_deg = 15.0
+jitter_ang = 0.5
+mcs_timeout_s = 900        # the default 10 s hit NoCommonCoreError for 9 of 12 analogues on this 74-atom parent
+min_core_heavy = 3
+relax_unmapped = true
+
+[pocket]
+file = "7LCJ_pocket.pdb"   # 7LCJ pocket, charges from pdb2pqr30 (AMBER); no distance cutoff, as recorded
+
+[field_interaction]          # RHF, as recorded (engine ferric)
+basis = "sto-3g"
+energy_conv = 1e-10
+density_conv = 1e-8
+max_iter = 200
+
+[cut]
+keep = 3
+z = 2.0
+# Declared, not measured here: the larger of two pocket-side charge-model sensitivities measured on other targets
+# (AMBER ff14SB vs CHARMM36: docs/limits.md L6 cdk2 1.26, L11 tyk2 0.67), a lower bound.
+floor = 1.26
