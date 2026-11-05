@@ -401,3 +401,18 @@ def test_existing_configs_keep_their_digests(config, tmp_path):
     plan = build_plan(cfg, out_dir=tmp_path)
     digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
     assert digest == DIGESTS_AT_7389ABA[config]
+
+
+def test_a_module_in_the_methods_package_registers_itself(tmp_path, monkeypatch):
+    """Adding a method is adding a module: `register_methods()` in any module of `smeltery.methods` is called."""
+    import sys
+
+    import smeltery.methods as methods
+
+    (tmp_path / "zz_probe_ext.py").write_text("CALLED = []\n\ndef register_methods():\n    CALLED.append(True)\n")
+    monkeypatch.setattr(methods, "__path__", [*methods.__path__, str(tmp_path)])
+    try:
+        methods._register_extensions()
+        assert sys.modules["smeltery.methods.zz_probe_ext"].CALLED == [True]
+    finally:
+        sys.modules.pop("smeltery.methods.zz_probe_ext", None)

@@ -151,10 +151,26 @@ def _ensure_builtins() -> None:
 
         try:
             builtin.register_builtins()
+            _register_extensions()
         except BaseException:  # never leave a half-registered catalog behind: the next call retries from scratch
             _REGISTRY.clear()
             _BUILTINS_LOADED = False
             raise
+
+
+def _register_extensions() -> None:
+    """Every other module of this package that defines `register_methods()` declares its methods: adding a method is
+    adding a module here, with no list to edit. Modules are loaded in name order, after the built-ins."""
+    import importlib
+    import pkgutil
+
+    for info in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
+        if info.name == "builtin" or info.name.startswith("_"):
+            continue
+        mod = importlib.import_module(f"{__name__}.{info.name}")
+        hook = getattr(mod, "register_methods", None)
+        if callable(hook):
+            hook()
 
 
 def register(spec: MethodSpec) -> MethodSpec:
