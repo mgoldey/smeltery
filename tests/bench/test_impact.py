@@ -177,3 +177,48 @@ def test_plan_out_writes_plan_json_and_pose_sdfs(tmp_path, monkeypatch, capsys):
     assert set(plan["poses"]) == {"benzoic", "4-F", "4-Cl"}
     assert all((out / e["file"]).is_file() for e in plan["poses"].values())
     assert plan["poses_key"] == cli.poses_key(tomllib.loads(BENZOIC), tmp_path)
+
+
+def test_every_memory_result_has_one_shape(client_for):
+    from smeltery.bench.api.pipelines import Impact
+
+    c, _ = client_for()
+    base = _docking_toml()
+    computed = _post(c, BENZOIC)
+    cannot = _post(c, base.replace("seeds = [7]", "seeds = [8]"), base)
+    assert cannot["memory"]["verdict"] == "cannot say" and cannot["memory"]["estimate"] is None
+    assert cannot["memory"]["basis"] and set(cannot["memory"]) == set(computed["memory"])
+    for body in (computed, cannot):
+        Impact.model_validate(body)
+
+
+def test_an_estimation_crash_is_an_issue_not_a_500(client_for, monkeypatch, tmp_path):
+    c, _ = client_for()
+
+    def boom(*a, **k):
+        raise RuntimeError("embedding failed")
+
+    monkeypatch.setattr(cli, "build_plan", boom)
+    got = _post(c, BENZOIC)
+    assert got["poses_from"] == "none" and got["seconds"]["value"] is None
+    assert got["memory"]["verdict"] == "cannot say"
+    assert any("RuntimeError" in i["message"] and "embedding failed" in i["message"] for i in got["issues"])
+    monkeypatch.undo()
+    unreadable = tmp_path / "pocket.pdb"
+    unreadable.mkdir()  # a path that exists as a file-like name but cannot be read as a file
+    toml = _docking_toml().replace(f'{ROOT}/tests/data/pocket_pep5.pdb"', f'{unreadable}"')
+    monkeypatch.setattr(cli.hashlib, "sha256", lambda *a, **k: (_ for _ in ()).throw(OSError("unreadable input")))
+    got = _post(c, toml, toml)
+    assert got["poses_from"] == "none" and any("OSError" in i["message"] for i in got["issues"])
+
+
+def test_a_second_preview_returns_the_running_one(client_for):
+    c, ports = client_for()
+    _named(c, None, _docking_toml())
+    first = c.post("/api/pipelines/p1/preview").json()["task"]
+    second = c.post("/api/pipelines/p1/preview").json()["task"]
+    assert second == first and len(ports["task_queue"].submitted) == 1
+    for t in ports["task_queue"].tasks:
+        t.status = "done"
+    third = c.post("/api/pipelines/p1/preview").json()["task"]
+    assert third != first and len(ports["task_queue"].submitted) == 2

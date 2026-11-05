@@ -42,9 +42,21 @@ class ImpactSeconds(BaseModel):
     basis: str
 
 
+class ImpactMemory(BaseModel):
+    """`smeltery.cli.memory_estimate`'s shape, in every case; `estimate` is None when it cannot say."""
+
+    tier: str | None
+    estimate: dict[str, Any] | None
+    free_gb: float | None
+    require_free_gb: float | None
+    check_memory: bool
+    verdict: Literal["fits", "does not fit", "cannot say", "no model"]
+    basis: str | None
+
+
 class Impact(BaseModel):
     seconds: ImpactSeconds
-    memory: dict[str, Any]  # `smeltery.cli.memory_estimate`, or {"verdict": "cannot say", "basis": ...}
+    memory: ImpactMemory
     changes: list[str]
     new_digest: bool
     poses_from: Literal["computed", "source run", "none"]
@@ -229,6 +241,9 @@ def pipeline_preview(request: Request, name: str) -> Any:
     """Submit `smeltery run config.toml --plan --out <folder>/preview`: poses, digest, seconds and memory, no SCF."""
     folder = _get(request, name).folder
     queue = ports(request).task_queue
+    running = _preview_task(request, name)
+    if running is not None:  # one preview at a time per pipeline: a second click gets the first one's id
+        return PreviewStarted(task=running)
     tid = queue.submit(
         f"preview {name}",
         [*smeltery_command(), "run", str(folder / "config.toml"), "--plan", "--out", str(folder / "preview")],

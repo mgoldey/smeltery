@@ -117,13 +117,14 @@ def impact(
     changes = [s.key for s in steps(new, old) if s.state == "changed"] if new and old else []
     result = ImpactResult(
         seconds={"value": None, "basis": CANNOT_SAY},
-        memory={"verdict": "cannot say", "basis": CANNOT_SAY},
+        memory=cli.memory_cannot_say(None, CANNOT_SAY),
         changes=changes,
         new_digest=raw != base_raw,
         poses_from="none",
         issues=issues,
         preview_task=preview_task,
     )
+    tier = None
     try:
         cfg = cli.validate_config(dict(raw))
         cfg["_dir"] = str(base_dir)
@@ -140,15 +141,18 @@ def impact(
                 cands = _recorded_poses(source, key, base_dir, smiles)
             if cands is None and preview_dir is not None:
                 cands, poses_from = _preview_poses(preview_dir, key, smiles), "computed"
-    except (cli.ConfigError, cli.StageError, KeyError, ValueError) as e:
-        issues.append({"level": "error", "stage": None, "message": f"cannot estimate: {e}"})
-        return result
-    if cands is None:
-        return result
-    cost = tier.estimate_cost(cands)
-    result.seconds = {"value": cost.get("predicted"), "basis": cost.get("basis", CANNOT_SAY)}
-    result.memory = cli.memory_estimate(SimpleNamespace(tier=tier, candidates=cands))
-    result.poses_from = poses_from
+        if cands is None:
+            result.memory = cli.memory_cannot_say(tier, CANNOT_SAY)
+            return result
+        cost = tier.estimate_cost(cands)
+        result.seconds = {"value": cost.get("predicted"), "basis": cost.get("basis", CANNOT_SAY)}
+        result.memory = cli.memory_estimate(SimpleNamespace(tier=tier, candidates=cands))
+        result.poses_from = poses_from
+    except Exception as e:  # noqa: BLE001 - a live-typing endpoint answers "cannot say" with the reason, never a 500
+        issues.append({"level": "error", "stage": None, "message": f"cannot estimate: {type(e).__name__}: {e}"})
+        result.seconds = {"value": None, "basis": CANNOT_SAY}
+        result.memory = cli.memory_cannot_say(tier, CANNOT_SAY)
+        result.poses_from = "none"
     return result
 
 

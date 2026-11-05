@@ -1086,14 +1086,16 @@ def memory_estimate(plan) -> dict:
     """The memory facts `--plan` and Bench's impact both state, structured. `plan` needs only `.tier` and
     `.candidates`. `estimate` is the measurement tier's own `estimate_memory` dict (the one its pre-SCF check
     uses, so the plan and the run cannot disagree) or None when the tier has no model; `verdict` is "fits",
-    "does not fit", "cannot say" (the model cannot count this basis or element: never "fits") or "no model"."""
+    "does not fit", "cannot say" (the model cannot count this basis or element: never "fits") or "no model";
+    `basis` says why when the verdict is not a number-backed one, else None."""
     tier = plan.tier
     fn = getattr(tier, "estimate_memory", None)
     mem = fn(plan.candidates) if fn is not None else None
+    basis = None
     if mem is None:
-        verdict = "no model"
+        verdict, basis = "no model", f"{tier.name} has no memory model"
     elif "total_gb" not in mem:
-        verdict = "cannot say"
+        verdict, basis = "cannot say", mem.get("basis")
     else:
         verdict = "fits" if mem["fits_budget"] else "does not fit"
     return {
@@ -1103,6 +1105,20 @@ def memory_estimate(plan) -> dict:
         "require_free_gb": getattr(tier, "require_free_gb", None),
         "check_memory": bool(getattr(tier, "check_memory", True)),
         "verdict": verdict,
+        "basis": basis,
+    }
+
+
+def memory_cannot_say(tier, basis: str) -> dict:
+    """`memory_estimate`'s shape for when there are no poses to size (or no tier): the same keys, `estimate` None."""
+    return {
+        "tier": getattr(tier, "name", None),
+        "estimate": None,
+        "free_gb": available_memory_gb(),
+        "require_free_gb": getattr(tier, "require_free_gb", None),
+        "check_memory": bool(getattr(tier, "check_memory", True)),
+        "verdict": "cannot say",
+        "basis": basis,
     }
 
 
