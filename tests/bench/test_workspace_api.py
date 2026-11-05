@@ -1,5 +1,6 @@
 """The workspace page's routes: steps of a draft, in-place step edits that keep the user's text, and Run."""
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -268,3 +269,29 @@ def test_run_resolves_relative_inputs_against_the_pipeline_folder(client_for, tm
 def test_run_of_an_unknown_pipeline_is_404(client_for):
     c, _ = client_for()
     assert c.post("/api/pipelines/ghost/launch", json={}).status_code == 404
+
+
+# ------------------------------------------------------------------------------------------------ create (R15)
+
+
+def test_a_blank_pipeline_picks_up_the_workspace_defaults(client_for):
+    c, _ = client_for()
+    assert c.put("/api/methods/paired_poses", json={"defaults": {"n_poses": 12}}).status_code == 200
+    made = c.post(
+        "/api/pipelines", json={"name": "p1", "blank": {"campaign": "x", "parent": "a", "candidates": {"a": "CCO"}}}
+    )
+    assert made.status_code == 201, made.text
+    assert tomllib.loads(made.json()["toml"])["poses"]["n_poses"] == 12
+
+
+def test_from_a_run_keeps_the_runs_value_whatever_the_workspace_default(client_for, run_dir):
+    (run_dir / "config.toml").write_text(HAND)
+    rec_path = next(run_dir.glob("run-*.json"))
+    rec = json.loads(rec_path.read_text())
+    rec["results"]["config"] = {"file": "config.toml", "sha256": "0" * 64, "inputs": {}}
+    rec_path.write_text(json.dumps(rec))
+    c, _ = client_for(run_dir)
+    assert c.put("/api/methods/paired_poses", json={"defaults": {"n_poses": 12}}).status_code == 200
+    made = c.post("/api/pipelines", json={"name": "next", "from_run": 0})
+    assert made.status_code == 201, made.text
+    assert made.json()["toml"] == HAND  # n_poses = 6 as the run had it, byte for byte

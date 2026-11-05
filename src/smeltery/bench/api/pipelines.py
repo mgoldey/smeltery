@@ -243,6 +243,17 @@ def _from_run(request: Request, idx: int) -> tuple[str, dict[str, Path], list[st
     return cfg_file.read_text(), files, []
 
 
+def _with_defaults(p: Pipeline, request: Request) -> Pipeline:
+    """A blank pipeline ADDS its methods, so each gets the workspace defaults copied in, exactly as
+    `Pipeline.add(..., defaults=)` does. (`from_run` copies an existing config and gets none.)"""
+    defaults = _workspace_defaults(request)
+    for st in p.stages:
+        known = {x.name for x in st.info.params}
+        copied = {k: v for k, v in (defaults.get(st.method) or {}).items() if k in known}
+        st.params = {**copied, **st.params}
+    return p
+
+
 class _Conflict(Exception):
     pass
 
@@ -265,7 +276,9 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
     if body.blank is not None:
         b = body.blank
         try:
-            text = dumps(Pipeline.minimal(b.campaign, b.parent, dict(b.candidates)).to_config())
+            text = dumps(
+                _with_defaults(Pipeline.minimal(b.campaign, b.parent, dict(b.candidates)), request).to_config()
+            )
         except (KeyError, ValueError, TypeError) as e:
             raise HTTPException(
                 status_code=400, detail=f"cannot build a blank pipeline: {str(e).strip(chr(39))}"
