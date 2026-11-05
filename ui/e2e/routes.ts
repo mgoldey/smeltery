@@ -16,6 +16,7 @@ export function routes(): string[] {
     `/run/${IDX.a_resolved}/proposals`,
     "/studies/bench.study_dag_fixture",
     "/compare",
+    "/methods",
     `/report/${IDX.a_resolved}`,
     `/report/${IDX.c_incomplete}`,
     "/no/such/page",

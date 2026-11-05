@@ -368,3 +368,55 @@ def test_an_empty_ks_dft_stage_survives_the_toml_round_trip():
     p.add("field_dft_interaction")
     back = Pipeline.from_toml(p.to_toml())
     assert "field_dft_interaction" in back.keys() and "field_interaction" not in back.keys()
+
+
+# ---------------------------------------------------------------- every setting explained, defaults copied in
+
+
+def test_every_wired_param_has_help():
+    bare = [f"{k}.{p.name}" for k, m in catalog().items() if m.wired for p in m.params if not p.help.strip()]
+    assert bare == []
+
+
+def test_add_copies_the_workspace_default_into_the_stage():
+    p = runnable()
+    p.remove("field_interaction")
+    s = p.add("field_dft_interaction", defaults={"field_dft_interaction": {"basis": "def2-svp"}, "cut": {"z": 3.0}})
+    assert s.params == {"basis": "def2-svp"}
+    assert 'basis = "def2-svp"' in p.to_toml().replace("'", '"')
+
+
+def test_an_explicit_param_beats_the_default_and_unknown_names_are_not_copied():
+    p = runnable()
+    p.remove("field_interaction")
+    s = p.add(
+        "field_dft_interaction",
+        {"basis": "sto-3g"},
+        defaults={"field_dft_interaction": {"basis": "def2-svp", "functional": "PBE0", "gone": 1}},
+    )
+    assert s.params == {"basis": "sto-3g", "functional": "PBE0"}
+
+
+def test_a_default_is_copied_not_referenced(tmp_path):
+    """Deleting the workspace's defaults afterwards changes nothing: the config alone fixes the run."""
+    from smeltery.cli import build_plan, load_config
+    from smeltery.record import RunRecord
+
+    store = tmp_path / "methods.toml"
+    store.write_text('[field_dft_interaction]\nbasis = "def2-svp"\n')
+    defaults = tomllib.loads(store.read_text())
+    p = runnable()
+    p.remove("field_interaction")
+    p.add("field_dft_interaction", defaults=defaults)
+    p.set("cut", floor=0.0)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(p.to_toml())
+    assert 'basis = "def2-svp"' in cfg_path.read_text()
+
+    def digest() -> str:
+        plan = build_plan(load_config(cfg_path))
+        return RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
+
+    before = digest()
+    store.unlink()
+    assert digest() == before

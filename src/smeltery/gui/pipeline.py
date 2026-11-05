@@ -99,10 +99,14 @@ class Pipeline:
                 return s
         raise KeyError(f"no {key!r} stage in this pipeline; stages: {self.keys()}")
 
-    def add(self, key: str, params: dict | None = None, at: int | None = None) -> Stage:
+    def add(self, key: str, params: dict | None = None, at: int | None = None, defaults: dict | None = None) -> Stage:
         """Place method `key`. `at` is an index (a drop position); by default the stage goes where
         `smeltery run` would execute it. Refuses an unknown, implicit or duplicate method; anything else
-        (unwired, misordered, conflicting) is allowed here and reported by `check()`, so a GUI can show it."""
+        (unwired, misordered, conflicting) is allowed here and reported by `check()`, so a GUI can show it.
+
+        `defaults` is the workspace's `{method_key: {param_name: value}}`. This method's entry is COPIED into the
+        stage under whatever `params` sets, so the config alone says what runs and a later change to the workspace
+        defaults reaches no existing stage. Names the method no longer has are not copied."""
         m = method(key)
         if m.implicit:
             raise ValueError(f"{key!r} always runs in smeltery run; it is shown, not placed")
@@ -111,7 +115,9 @@ class Pipeline:
         if at is None:
             rank = _exec_rank(key)
             at = sum(1 for s in self.stages if _exec_rank(s.method) <= rank)
-        s = Stage(key, dict(params or {}))
+        known = {p.name for p in m.params}
+        copied = {k: v for k, v in ((defaults or {}).get(key) or {}).items() if k in known}
+        s = Stage(key, {**copied, **(params or {})})
         self.stages.insert(at, s)
         return s
 

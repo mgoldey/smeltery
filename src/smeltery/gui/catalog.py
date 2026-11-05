@@ -351,6 +351,57 @@ def floor_status(method: Method) -> str:
     return "measured" if any(v is not None for v in facts["floors"].values()) else "UNMEASURED"
 
 
+#: What the two SCF-convergence knobs and the iteration cap mean, shared by the RHF and KS-DFT tiers.
+_SCF_HELP = {
+    "energy_conv": "SCF energy convergence threshold given to ferric for both SCFs of every pose",
+    "density_conv": "SCF density convergence threshold given to ferric for both SCFs of every pose",
+    "max_iter": "SCF iteration cap; unset keeps ferric's own limit, and an SCF that does not converge is an error",
+}
+
+
+#: What each method's code can say about its wall time, in the words its own `estimate_cost` / docs/tiers/*.md use.
+#: A method with no model says "cannot say", and the Methods tab shows that rather than a guess.
+_COST_MODEL = {
+    "docking": "cannot say: no Vina timing is recorded in smeltery, so estimate_cost gives no prediction",
+    "paired_poses": (
+        "cannot say: estimate_cost gives no prediction; one measurement, 0.0862 s for 6 parent and 6 paired poses "
+        "of a 15-atom pair, which says nothing about growth with atoms, relax_unmapped or a long mcs_timeout_s"
+    ),
+    "forcefield": "cannot say: no estimate; one MMFF94 minimisation of a 15-atom pose took 1.8 ms",
+    "gfn2": "about 0.1 to 1 s per pose (one xtb subprocess each); estimate_cost counts the runs, not seconds",
+    "field_interaction": (
+        "measured benzoic acid reference scaled by (basis functions / 51)^2.71, vacuum plus field RHF per pose; "
+        "STO-3G only, otherwise cannot say; assumes the reference's SCF iteration count"
+    ),
+    "field_dft_interaction": (
+        "measured PBE reference (74 atoms, 246 bf: 71.1 s vacuum + 80.7 s in field) scaled by nbf^2 x XC grid "
+        "points; PBE at STO-3G only, otherwise cannot say; a LOWER BOUND for slower-converging chemistry"
+    ),
+}
+_MEMORY_MODEL = {
+    "field_dft_interaction": (
+        "peak resident GB of the largest pose (AO cache + packed RI tensor), checked against memory_budget_gb "
+        "before the first SCF; basis functions are counted for STO-3G only, otherwise cannot say"
+    ),
+}
+
+
+def cost_model(key: str) -> str:
+    """How `key`'s wall time is estimated, or 'cannot say: ...'. A stage with no tier has no model."""
+    return _COST_MODEL.get(key, "cannot say: no cost model for this stage")
+
+
+def memory_model(key: str) -> str:
+    """How `key`'s memory is estimated, or 'cannot say: ...'."""
+    return _MEMORY_MODEL.get(key, "cannot say: no memory model for this stage")
+
+
+def measured_floor(m: Method) -> float | None:
+    """The tier's measured systematic floor for the quantity it produces, or None while it is unmeasured."""
+    values = [v for v in _tier_facts(m.tier)["floors"].values() if v is not None]
+    return float(values[0]) if values else None
+
+
 def _build() -> dict[str, Method]:
     from ..tiers import FieldDftInteraction, FieldInteraction, PairedPoses
 
@@ -406,8 +457,18 @@ def _build() -> dict[str, Method]:
                 Param("box_center", "vec3", optional=True, help="A, receptor frame; from [structure] if present"),
                 Param("box_size", "vec3", (24.0, 24.0, 24.0), help="Angstrom"),
                 Param("seeds", "int_list", help="independent ETKDG embeddings; the budget lever", optional=True),
-                Param("exhaustiveness", "int", optional=True),
-                Param("n_poses", "int", optional=True),
+                Param(
+                    "exhaustiveness",
+                    "int",
+                    optional=True,
+                    help="Vina effort per seed (default 4); more moved redock RMSD less than seed noise: add seeds",
+                ),
+                Param(
+                    "n_poses",
+                    "int",
+                    optional=True,
+                    help="docked poses kept per seed; the seeds are pooled and analogues are paired to them",
+                ),
             ),
         ),
         Method(
@@ -425,6 +486,11 @@ def _build() -> dict[str, Method]:
                 {
                     "n_poses": "ETKDG poses of the parent; not used when the parent is docked",
                     "relax_unmapped": "MMFF-relax only the substituent; needed to pass PoseBusters",
+                    "seed": "seed for the parent's ETKDG embeddings and their rigid jitter; a new seed draws new poses",
+                    "jitter_deg": "largest random rotation (deg) per parent pose, as docked spread; unused if docked",
+                    "jitter_ang": "largest random shift (A) per parent pose, mimicking docked spread; unused if docked",
+                    "min_core_heavy": "fewest heavy atoms the common core may have; a smaller core refuses the pair",
+                    "mcs_timeout_s": "seconds the core search may take; timing out refuses (10 is short for drugs)",
                 },
             ),
         ),
@@ -489,7 +555,13 @@ def _build() -> dict[str, Method]:
             tier="field_interaction",
             required=True,
             summary="dE_int = E(in field) - E(vacuum) per pose: a difference, so it compares across formulas.",
-            params=params_from_dataclass(FieldInteraction, {"basis": "ferric basis set name"}),
+            params=params_from_dataclass(
+                FieldInteraction,
+                {
+                    "basis": "ferric basis set name",
+                    **_SCF_HELP,
+                },
+            ),
             # Required, but satisfied by its alternative: a pipeline measures dE_int with RHF or with KS-DFT.
             exclusive=("field_dft_interaction",),
         ),
@@ -509,6 +581,8 @@ def _build() -> dict[str, Method]:
                     "functional": "libxc name ferric accepts; D3(BJ) is added separately, not by a -D3 suffix",
                     "memory_budget_gb": "refuse before the first SCF if the largest pose is predicted not to fit",
                     "require_free_gb": "refuse unless this much memory is actually free (unset: no check)",
+                    **_SCF_HELP,
+                    "check_memory": "false skips the pre-SCF memory check, so memory_budget_gb is not enforced",
                 },
             ),
             summary=(

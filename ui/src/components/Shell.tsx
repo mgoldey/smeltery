@@ -50,6 +50,7 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
         <nav aria-label="Areas">
           <NavLink to="/bench">Bench</NavLink>
           <NavLink to="/compare">Compare</NavLink>
+          <NavLink to="/methods">Methods</NavLink>
           {idx !== undefined ? (
             <>
               <NavLink to={`/run/${idx}`} className={() => (runMatch ? "active" : "")}>

@@ -131,6 +131,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Methods */
+        get: operations["list_methods_api_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/methods/{key}": {
         parameters: {
             query?: never;
@@ -140,7 +157,8 @@ export interface paths {
         };
         /** Get Method */
         get: operations["get_method_api_methods__key__get"];
-        put?: never;
+        /** Put Method Defaults */
+        put: operations["put_method_defaults_api_methods__key__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1115,6 +1133,49 @@ export interface components {
             /** Stage */
             stage: string;
         };
+        /**
+         * MethodDefaultsPut
+         * @description The workspace defaults of one method, replacing what was there; `{}` clears them.
+         */
+        MethodDefaultsPut: {
+            /** Defaults */
+            defaults: {
+                [key: string]: unknown;
+            };
+        };
+        /** MethodInfo */
+        MethodInfo: {
+            /**
+             * Cost Model
+             * @description how wall time is estimated, or 'cannot say: ...'
+             */
+            cost_model: string;
+            /**
+             * Floor
+             * @description the tier's measured systematic floor; null while it is unmeasured
+             */
+            floor: number | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Memory Model
+             * @description how memory is estimated, or 'cannot say: ...'
+             */
+            memory_model: string;
+            /** Params */
+            params: components["schemas"]["MethodParam"][];
+            /** Quantity */
+            quantity: string | null;
+            /** Summary */
+            summary: string;
+            /**
+             * Used By
+             * @description workspace pipelines that place this method
+             */
+            used_by: string[];
+        };
         /** MethodOut */
         MethodOut: {
             /** Exclusive */
@@ -1177,6 +1238,34 @@ export interface components {
             why_unwired: string;
             /** Wired */
             wired: boolean;
+        };
+        /**
+         * MethodParam
+         * @description One setting of a method: what the code defaults it to, what it does, and the workspace's own default.
+         */
+        MethodParam: {
+            /** Choices */
+            choices: unknown[];
+            /** Default */
+            default?: unknown;
+            /**
+             * Help
+             * @description one plain sentence, from the tier's own docs, saying what changing it does
+             */
+            help: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Optional */
+            optional: boolean;
+            /** Required */
+            required: boolean;
+            /**
+             * Workspace Default
+             * @description copied into a step when the method is added; null when unset
+             */
+            workspace_default: unknown;
         };
         /** ParamOut */
         ParamOut: {
@@ -1931,6 +2020,26 @@ export interface operations {
             };
         };
     };
+    list_methods_api_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MethodInfo"][];
+                };
+            };
+        };
+    };
     get_method_api_methods__key__get: {
         parameters: {
             query?: never;
@@ -1951,6 +2060,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_method_defaults_api_methods__key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MethodDefaultsPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MethodInfo"];
                 };
             };
             /** @description Validation Error */

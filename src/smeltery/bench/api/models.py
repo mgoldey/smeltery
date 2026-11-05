@@ -444,3 +444,34 @@ class Lineage(BaseModel):
     config: LineageConfig | None
     calcs: LineageCalcs | None
     missing: list[str] = Field(description="items above this run did not record (an older run, or no --out)")
+
+
+class MethodParam(BaseModel):
+    """One setting of a method: what the code defaults it to, what it does, and the workspace's own default."""
+
+    name: str
+    kind: str
+    default: Any = None
+    required: bool
+    optional: bool
+    choices: list[Any]
+    help: str = Field(description="one plain sentence, from the tier's own docs, saying what changing it does")
+    workspace_default: Any = Field(description="copied into a step when the method is added; null when unset")
+
+
+class MethodInfo(BaseModel):
+    key: str
+    label: str
+    summary: str
+    quantity: str | None
+    params: list[MethodParam]
+    cost_model: str = Field(description="how wall time is estimated, or 'cannot say: ...'")
+    memory_model: str = Field(description="how memory is estimated, or 'cannot say: ...'")
+    floor: float | None = Field(description="the tier's measured systematic floor; null while it is unmeasured")
+    used_by: list[str] = Field(description="workspace pipelines that place this method")
+
+
+class MethodDefaultsPut(BaseModel):
+    """The workspace defaults of one method, replacing what was there; `{}` clears them."""
+
+    defaults: dict[str, Any]
