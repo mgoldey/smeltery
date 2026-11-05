@@ -138,6 +138,36 @@ class PipelineState(BaseModel):
     notes: list[str] = []
 
 
+class PipelineDoc(BaseModel):
+    """A workspace pipeline: its config text as saved, the hash a save must quote, and what `check()` finds."""
+
+    name: str
+    toml: str
+    sha256: str
+    folder: str
+    ok: bool
+    issues: list[Issue]
+    notes: list[str] = []
+
+
+class PipelinePut(BaseModel):
+    toml: str
+    base_sha256: str | None = None
+
+
+class BlankPipeline(BaseModel):
+    campaign: str
+    parent: str
+    candidates: dict[str, str]
+
+
+class PipelineCreate(BaseModel):
+    name: str
+    from_run: int | None = None
+    from_prebuilt: str | None = None
+    blank: BlankPipeline | None = None
+
+
 class PipelineCheck(BaseModel):
     toml: str
 

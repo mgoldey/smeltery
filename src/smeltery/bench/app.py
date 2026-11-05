@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import lineage, notebook, runs, work
+from .api import lineage, notebook, pipelines, runs, work
 
 #: Where `npm run build` (in ui/) writes the app. Build output: never edited or committed.
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -49,6 +49,7 @@ def create_app(
     comment_store: Any = None,
     artifact_store: Any = None,
     structure_source: Any = None,
+    pipeline_store: Any = None,
     settings: Settings | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
@@ -70,11 +71,17 @@ def create_app(
 
         structure_source = LocalStructureSource(local / "structures")
 
+    if pipeline_store is None:
+        from .adapters.pipeline_store import FilesystemPipelineStore
+
+        pipeline_store = FilesystemPipelineStore(settings.root)
+
     app = FastAPI(title="smeltery bench", version="1")
     st = app.state
     st.run_store, st.task_queue, st.identity, st.clock = run_store, task_queue, identity, clock
     st.project_store, st.comment_store, st.artifact_store = project_store, comment_store, artifact_store
     st.structure_source, st.settings = structure_source, settings
+    st.pipeline_store = pipeline_store
     st.structures = {}  # sha256 -> PDB text of structures opened this session (a cache, rebuilt by reopening)
 
     @app.get("/healthz")
@@ -88,6 +95,7 @@ def create_app(
     app.include_router(runs.router)
     app.include_router(lineage.router)
     app.include_router(work.router)
+    app.include_router(pipelines.router)
     app.include_router(notebook.router)
 
     index = settings.web_dir / "index.html"

@@ -243,6 +243,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pipelines */
+        get: operations["list_pipelines_api_pipelines_get"];
+        put?: never;
+        /** Create Pipeline */
+        post: operations["create_pipeline_api_pipelines_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pipeline */
+        get: operations["get_pipeline_api_pipelines__name__get"];
+        /** Put Pipeline */
+        put: operations["put_pipeline_api_pipelines__name__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/proposals": {
         parameters: {
             query?: never;
@@ -760,6 +796,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BlankPipeline */
+        BlankPipeline: {
+            /** Campaign */
+            campaign: string;
+            /** Candidates */
+            candidates: {
+                [key: string]: string;
+            };
+            /** Parent */
+            parent: string;
+        };
         /** CampaignIn */
         CampaignIn: {
             /**
@@ -1178,6 +1225,39 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** PipelineCreate */
+        PipelineCreate: {
+            blank?: components["schemas"]["BlankPipeline"] | null;
+            /** From Prebuilt */
+            from_prebuilt?: string | null;
+            /** From Run */
+            from_run?: number | null;
+            /** Name */
+            name: string;
+        };
+        /**
+         * PipelineDoc
+         * @description A workspace pipeline: its config text as saved, the hash a save must quote, and what `check()` finds.
+         */
+        PipelineDoc: {
+            /** Folder */
+            folder: string;
+            /** Issues */
+            issues: components["schemas"]["Issue"][];
+            /** Name */
+            name: string;
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            /** Ok */
+            ok: boolean;
+            /** Sha256 */
+            sha256: string;
+            /** Toml */
+            toml: string;
+        };
         /** PipelineEdit */
         PipelineEdit: {
             /** At */
@@ -1202,6 +1282,13 @@ export interface components {
         PipelineFromRun: {
             /** Run */
             run: number;
+        };
+        /** PipelinePut */
+        PipelinePut: {
+            /** Base Sha256 */
+            base_sha256?: string | null;
+            /** Toml */
+            toml: string;
         };
         /** PipelineState */
         PipelineState: {
@@ -2038,6 +2125,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pipelines_api_pipelines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    create_pipeline_api_pipelines_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pipeline_api_pipelines__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_pipeline_api_pipelines__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinePut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Validation Error */

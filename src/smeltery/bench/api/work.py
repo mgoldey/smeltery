@@ -108,8 +108,12 @@ def _parse(text: str) -> Pipeline:
         raise HTTPException(status_code=400, detail=f"cannot read this TOML: {e}") from e
 
 
+def pipeline_issues(p: Pipeline) -> list[M.Issue]:
+    return [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
+
+
 def _state(p: Pipeline) -> M.PipelineState:
-    issues = [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
+    issues = pipeline_issues(p)
     return M.PipelineState(
         toml=dumps(p.to_config()),
         ok=not any(i.level == "error" for i in issues),
