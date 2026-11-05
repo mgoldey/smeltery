@@ -94,6 +94,7 @@ export function StepPanel({
   ligands,
   disabled,
   onEdit,
+  onToml,
 }: {
   pipeline: string;
   toml: string;
@@ -105,6 +106,7 @@ export function StepPanel({
   ligands: Schemas["Ligands"] | null | undefined;
   disabled: boolean;
   onEdit: (op: EditOp, key: string, extra?: EditExtra) => Promise<unknown>;
+  onToml: (text: string) => void;
 }) {
   const info = (k: string) => catalog?.methods[k];
   const label = (k: string) => info(k)?.label ?? k;
@@ -215,7 +217,7 @@ export function StepPanel({
         <section aria-label="View">
           <h3>View</h3>
           {StepView ? (
-            <StepView pipeline={pipeline} toml={toml} step={step} sourceRun={sourceRun} />
+            <StepView pipeline={pipeline} toml={toml} step={step} sourceRun={sourceRun} onToml={onToml} />
           ) : (
             <p className="lede">What this step produced will be shown here; the step views are not built yet.</p>
           )}

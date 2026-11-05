@@ -20,7 +20,7 @@ export type LigandCheck = {
 type LigandsOut = { parent: string; candidates: LigandCheck[] };
 
 /** The edit route's only caller wiring: the workspace hands the view a way to replace the draft text. */
-export type LigandsViewProps = StepViewProps & { onToml?: (toml: string) => void };
+export type LigandsViewProps = StepViewProps;
 
 async function post<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

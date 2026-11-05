@@ -128,6 +128,15 @@ export function Workspace() {
     [setDraft],
   );
 
+  /** A view that edits the pipeline hands back new TOML; it becomes the draft exactly as a step edit does. */
+  const onToml = useCallback(
+    (t: string) => {
+      setDraft(t);
+      setEditError(null);
+    },
+    [setDraft],
+  );
+
   const keep = useMutation({
     mutationFn: () =>
       unwrap(
@@ -238,6 +247,7 @@ export function Workspace() {
                   ligands={view?.ligands}
                   disabled={disabled}
                   onEdit={onEdit}
+                  onToml={onToml}
                 />
               ) : null}
               {doc.data ? (

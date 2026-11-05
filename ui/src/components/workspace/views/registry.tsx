@@ -9,8 +9,8 @@ import { PosesView } from "./PosesView";
 
 type Step = Schemas["StepOut"];
 
-/** What every step view receives: the pipeline name, its current draft TOML, the step, and the run it was made from. */
-export type StepViewProps = { pipeline: string; toml: string; step: Step; sourceRun: number | null };
+/** What every step view receives: the pipeline name, its current draft TOML, the step, the run it was made from, and `onToml` to replace the workspace draft. */
+export type StepViewProps = { pipeline: string; toml: string; step: Step; sourceRun: number | null; onToml: (text: string) => void };
 
 /** One component per step key, each in its own file, so the tasks that build them never edit the same file. */
 export const STEP_VIEWS: Partial<Record<string, (props: StepViewProps) => ReactElement>> = {
