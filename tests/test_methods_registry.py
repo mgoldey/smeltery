@@ -5,7 +5,10 @@ from it. Existing configs keep their input digests."""
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
+import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -346,24 +349,28 @@ def test_a_hook_must_implement_its_slot_protocol():
 
 # ---------------------------------------------------------------------------------- existing configs, same digests
 
-# `smeltery run CONFIG --plan` input digests recorded at 7389aba, before the registry existed (identical to the
-# in-process `build_plan` digest computed here). danuglipron-halogen is planned with `--only-candidate bnz-C34-F`
-# (the parent and one analogue): its full plan runs a 900 s MCS per analogue; the one-analogue plan takes about a
-# minute.
+# `--plan` input digests at 7389aba, before the registry existed: computed in process (`build_plan`, as here) from
+# a copy of 7389aba's src with the project venv's bin first on PATH, as scripts/build_prebuilt.py runs (ruling R12),
+# so pdb2pqr30 is the venv's 3.8.0. The docking and structure values equal the committed prebuilt run folders
+# (run-1a841ad89f2e, run-bc3482ef4170). A pocket read through pdb2pqr30 digests its PQR charges, so another
+# pdb2pqr version gives other digests; those configs are skipped then, naming both versions. danuglipron-halogen is
+# planned as `--only-candidate bnz-C34-F` would (the parent and one analogue): its full plan runs a 900 s MCS per
+# analogue; the one-analogue plan takes about a minute.
+PDB2PQR_AT_7389ABA = "pdb2pqr 3.8.0"
 DIGESTS_AT_7389ABA = {
     "examples/mwe_benzoic.toml": "5f7df3db8c7b797ab6931b0b64ca8e201ec07a1792928f0be9bb856efe4f4aa6",
-    "examples/mwe_docking.toml": "1233434c639b913906dfb33403c92071a4dc7c689188c82db2eea3f7fd623ba6",
-    "examples/mwe_structure.toml": "3eea93cb43f099e61935188d0e4c2d0f24773df6aa820a08017d64594da0db86",
+    "examples/mwe_docking.toml": "1a841ad89f2e0f2e7abb495aa0126e562209abea7013596f58d89856a7c891c6",
+    "examples/mwe_structure.toml": "bc3482ef4170810fced726a207ac434bcec15b2f59e886d922600719bf7642b2",
     "src/smeltery/prebuilt/benzoic-pbe/pipeline.toml": (
         "6a37df69178bdfa9f9b294a3078736ab3d2fca1857de0d57f13d5f9d4938d72c"
     ),
     "src/smeltery/prebuilt/benzoic-rhf/pipeline.toml": (
         "5f7df3db8c7b797ab6931b0b64ca8e201ec07a1792928f0be9bb856efe4f4aa6"
     ),
-    "src/smeltery/prebuilt/docking/pipeline.toml": "1233434c639b913906dfb33403c92071a4dc7c689188c82db2eea3f7fd623ba6",
-    "src/smeltery/prebuilt/structure/pipeline.toml": "3eea93cb43f099e61935188d0e4c2d0f24773df6aa820a08017d64594da0db86",
+    "src/smeltery/prebuilt/docking/pipeline.toml": "1a841ad89f2e0f2e7abb495aa0126e562209abea7013596f58d89856a7c891c6",
+    "src/smeltery/prebuilt/structure/pipeline.toml": "bc3482ef4170810fced726a207ac434bcec15b2f59e886d922600719bf7642b2",
     "src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml": (
-        "1a1360104d1e42d52c5eb0a558ebac6ab14237918e4422222a9e79d84423df19"
+        "67618b4d3edee7dc31e222e3afd880ca7030115f2d9c130950fdb606d50230f8"
     ),
 }
 ONLY_CANDIDATE = {"src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml": "bnz-C34-F"}
@@ -375,21 +382,38 @@ def test_every_example_and_prebuilt_config_has_a_recorded_digest():
     assert found == set(DIGESTS_AT_7389ABA)
 
 
+VENV_BIN = Path(sys.executable).parent
+
+
+def _pdb2pqr_version() -> str | None:
+    exe = shutil.which("pdb2pqr30", path=str(VENV_BIN) + os.pathsep + os.environ.get("PATH", ""))
+    if exe is None:
+        return None
+    out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=120)
+    lines = [x for x in (out.stdout + out.stderr).splitlines() if x.startswith("pdb2pqr ")]
+    return lines[-1].strip() if lines else "an unknown version"
+
+
 def _needs(text: str) -> str | None:
     """Why this config cannot be planned here, or None."""
     if "[docking]" in text or "[structure]" in text:
         missing = [m for m in ("vina", "meeko") if importlib.util.find_spec(m) is None]
         if missing:
             return f"needs the docking extra ({', '.join(missing)} missing)"
-    if ("[structure]" in text or 'file = "' in text) and shutil.which("pdb2pqr30") is None:
-        return "needs pdb2pqr30"
+    if "[structure]" in text or ('file = "' in text and ".pdb" in text):
+        found = _pdb2pqr_version()
+        if found is None:
+            return "needs pdb2pqr30"
+        if found != PDB2PQR_AT_7389ABA:
+            return f"digests were recorded with {PDB2PQR_AT_7389ABA}; the pdb2pqr30 found here is {found}"
     if "posebusters = true" in text and importlib.util.find_spec("posebusters") is None:
         return "needs the posebusters extra"
     return None
 
 
 @pytest.mark.parametrize("config", sorted(DIGESTS_AT_7389ABA))
-def test_existing_configs_keep_their_digests(config, tmp_path):
+def test_existing_configs_keep_their_digests(config, tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(VENV_BIN) + os.pathsep + os.environ.get("PATH", ""))  # as build_prebuilt runs
     path = ROOT / config
     why = _needs(path.read_text())
     if why:

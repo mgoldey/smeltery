@@ -95,3 +95,24 @@ def test_a_stage_without_a_tier_is_empty_but_a_missing_tier_is_none_and_named(ru
     assert steps["poses"]["settings"] is None  # should have one; the record lacks it
     assert "steps.poses.settings" in j["missing"]
     assert "steps.pocket.settings" not in j["missing"]
+
+
+def test_a_registered_stage_without_a_tier_is_not_missing(run_dir, client_for):
+    """Which stages have no tier comes from the method registry: a new tier-less method needs no edit here."""
+    from smeltery.methods import MethodSpec, register, unregister
+
+    register(MethodSpec("lineage_probe", "Probe", "check", "gate", step="checks", order=66))
+    try:
+
+        def edit(rec):
+            rec["results"]["stages"].insert(
+                1,
+                {"stage": "lineage_probe", "kind": "gate", "summary": "", "candidates_in": 4, "candidates_out": 4},
+            )
+
+        j = _lineage_with(run_dir, client_for, edit)
+    finally:
+        unregister("lineage_probe")
+    steps = {s["stage"]: s for s in j["steps"]}
+    assert steps["lineage_probe"]["settings"] == {}
+    assert "steps.lineage_probe.settings" not in j["missing"]

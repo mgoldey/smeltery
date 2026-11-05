@@ -18,14 +18,21 @@ QUANTITY = "dE_int"
 #: Stage names `smeltery run` logs (cli.py `_log`/`_stage`) whose tier is recorded under another name. A stage not here
 #: that has a tier (`docking`, `forcefield`, the measurement tier) is recorded under its own name.
 STAGE_TIER = {"poses": "paired_poses", "xtb": "gfn2"}
-#: Stages that are no tier by design: their numbers have no settings to show, so an empty dict is the whole truth.
-NO_TIER = frozenset({"pocket", "parity", "posebusters", "structure", "cut"})
+
+
+def no_tier() -> frozenset[str]:
+    """Stages that are no tier by design: their numbers have no settings to show, so an empty dict is the whole
+    truth. Every wired method registered without a tier (`smeltery.methods.registry()`); each logs under its key."""
+    from smeltery.methods import registry
+
+    return frozenset(k for k, s in registry().items() if s.wired and s.tier is None)
 
 
 def _steps(res: dict, tiers: list[dict]) -> tuple[list[M.LineageStep], list[str]]:
     """Steps joined to `rec.tiers` through STAGE_TIER. Settings are None when the stage should have a tier but the
     record has none; that stage is named in the returned `missing` list."""
     by_name = {t.get("name"): t for t in tiers if isinstance(t, dict)}
+    tierless = no_tier()
     steps: list[M.LineageStep] = []
     missing: list[str] = []
 
@@ -33,7 +40,7 @@ def _steps(res: dict, tiers: list[dict]) -> tuple[list[M.LineageStep], list[str]
         tier = by_name.get(STAGE_TIER.get(stage, stage))
         if tier is not None:
             settings: dict[str, Any] | None = dict(tier)
-        elif stage in NO_TIER:
+        elif stage in tierless:
             settings = {}
         else:
             settings = None
