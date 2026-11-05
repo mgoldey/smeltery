@@ -39,9 +39,11 @@ def test_every_prebuilt_config_validates(name):
 @pytest.mark.parametrize("name", NAMES)
 def test_each_prebuilt_run_is_its_configs_run(name):
     folder = PREBUILT / name
-    records = sorted((folder / "run").glob("run-*.json"))
-    if not records:
+    if not (folder / "run").exists():
         pytest.skip(f"{name} has no run/ yet: generate it with scripts/build_prebuilt.py {name}")
-    record = json.loads(records[-1].read_text())
-    assert record["input_digest"] == _plan_digest(folder)
+    digest = _plan_digest(folder)
+    path = folder / "run" / f"run-{digest[:12]}.json"
+    assert path.is_file(), f"run/ has no record for the current config digest ({path.name})"
+    record = json.loads(path.read_text())
+    assert record["input_digest"] == digest
     assert verdict_of(record).state != "INCOMPLETE"

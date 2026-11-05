@@ -17,8 +17,8 @@ from pathlib import Path
 
 PREBUILT = Path(__file__).resolve().parent.parent / "src" / "smeltery" / "prebuilt"
 NEEDS = {
-    "benzoic-rhf": "the base install (about 7 min on one core)",
-    "benzoic-pbe": "the base install (DFT SCFs; slower than RHF)",
+    "benzoic-rhf": "the base install (RHF: ~219 s on 2 cores, measured 2026-11-04)",
+    "benzoic-pbe": "the base install (PBE: 88 s on 2 cores, measured 2026-11-04)",
     "docking": "the docking and posebusters extras and pdb2pqr30 on PATH",
     "structure": "the docking and posebusters extras and pdb2pqr30 on PATH",
 }
@@ -40,12 +40,15 @@ def main(argv: list[str] | None = None) -> int:
     for name in names:
         folder = PREBUILT / name
         print(f"== {name}: needs {NEEDS[name]}", flush=True)
-        if (folder / "run").exists():
-            shutil.rmtree(folder / "run")
-        cmd = [sys.executable, "-m", "smeltery", "run", str(folder / "pipeline.toml"), "--out", str(folder / "run")]
+        tmp = folder / "run.new"
+        shutil.rmtree(tmp, ignore_errors=True)
+        cmd = [sys.executable, "-m", "smeltery", "run", str(folder / "pipeline.toml"), "--out", str(tmp)]
         if subprocess.run(cmd, check=False).returncode != 0:
-            print(f"{name}: run failed", file=sys.stderr)
+            shutil.rmtree(tmp, ignore_errors=True)
+            print(f"{name}: run failed; any existing run/ is kept", file=sys.stderr)
             return 1
+        shutil.rmtree(folder / "run", ignore_errors=True)
+        tmp.rename(folder / "run")
     return 0
 
 
