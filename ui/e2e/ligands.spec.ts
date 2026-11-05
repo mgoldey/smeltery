@@ -2,19 +2,21 @@ import { expect, newPipeline, openWorkspace, test } from "./bench";
 
 const row = (page: import("@playwright/test").Page, name: string) => page.locator(`[data-candidate="${name}"]`);
 
-test("each candidate shows its checks, and the bromo analogue names the element STO-3G lacks", async ({ page }) => {
-  const { name } = await newPipeline(page);
+test("each candidate shows its checks, and an element past STO-3G is named", async ({ page }) => {
+  // Br and I are inside ferric's bundled STO-3G (it reaches Xe), so the uncovered case needs an element past it.
+  const { name } = await newPipeline(page, (t) => t.replace('4-Br = "OC(=O)c1ccc(Br)cc1"', '4-Br = "OC(=O)c1ccc(Br)cc1"\n4-Cs = "OC(=O)c1ccc([Cs])cc1"'));
   await openWorkspace(page, name, "ligands");
   await expect(page.getByRole("table", { name: "Candidates" })).toBeVisible();
+  await expect(row(page, "4-Cs").locator('[data-check="sto3g_ok"]')).toContainText("no STO-3G for Cs");
   const br = row(page, "4-Br");
-  await expect(br.locator('[data-check="sto3g_ok"]')).toContainText("no STO-3G for Br");
+  await expect(br.locator('[data-check="sto3g_ok"]')).toContainText("covered");
   await expect(br.locator('[data-check="electrons_even"]')).toContainText("even");
   await expect(row(page, "4-F").locator('[data-check="sto3g_ok"]')).toContainText("covered");
   // the data source for the core is the API (PairedPoses' scaffold map); the drawing carries it
   const api = await (await page.request.post("/api/pipelines/ligands", { data: { toml: (await (await page.request.get(`/api/pipelines/${name}`)).json()).toml } })).json();
   const f = api.candidates.find((c: { name: string }) => c.name === "4-F");
   await expect(row(page, "4-F").locator(".structure2d")).toHaveAttribute("data-core", f.core_atoms.join(","));
-  await expect(page.getByTestId("ligands-problems")).toContainText("Br");
+  await expect(page.getByTestId("ligands-problems")).toContainText("Cs");
 });
 
 test("add, rename, change a SMILES and pick the parent write the text; removing the parent is refused", async ({ page }) => {
