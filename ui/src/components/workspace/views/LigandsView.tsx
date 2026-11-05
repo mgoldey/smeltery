@@ -18,7 +18,7 @@ export type LigandCheck = {
   problems: string[];
 };
 type LigandsOut = { parent: string; candidates: LigandCheck[]; problems: string[] };
-type Entry = { name: string; smiles: string };
+type Op = { op: "add" | "remove" | "rename" | "set_smiles" | "set_parent"; name: string; smiles?: string; new_name?: string };
 
 /** The edit route's only caller wiring: the workspace hands the view a way to replace the draft text. */
 export type LigandsViewProps = StepViewProps;
@@ -197,20 +197,13 @@ export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
   const data = q.data;
   const canEdit = onToml !== undefined;
 
-  async function write(candidates: Entry[], parent: string): Promise<boolean> {
+  /** One operation, applied by the server to the LIVE text: the list shown may be a stale check, so the view never
+   * builds the whole list itself (that would drop what was added since). The server refuses duplicates and the parent. */
+  async function write(op: Op): Promise<boolean> {
     if (!onToml) return false;
-    const dup = candidates.find((c, i) => candidates.findIndex((d) => d.name === c.name) !== i);
-    if (dup) {
-      setError(`there is already a candidate named ${JSON.stringify(dup.name)}; names must be unique`);
-      return false;
-    }
-    if (candidates.some((c) => !c.name.trim())) {
-      setError("a candidate needs a name");
-      return false;
-    }
     setBusy(true);
     try {
-      const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml: live, candidates, parent });
+      const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml: live, ...op });
       setError(null);
       onToml(r.toml);
       return true;
@@ -226,24 +219,22 @@ export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
   if (!data) return <p className="lede" data-view="ligands">Checking the candidates...</p>;
 
   const onCommit = (kind: "rename" | "smiles" | "parent" | "remove", c: LigandCheck, value?: string) => {
-    const next: Entry[] = [];
-    let parent = data.parent;
-    for (const x of data.candidates) {
-      if (x.name !== c.name) next.push({ name: x.name, smiles: x.smiles });
-      else if (kind === "remove") continue;
-      else if (kind === "rename") next.push({ name: (value ?? "").trim(), smiles: x.smiles });
-      else next.push({ name: x.name, smiles: kind === "smiles" ? (value ?? "") : x.smiles });
-    }
-    if (kind === "rename" && c.is_parent) parent = (value ?? "").trim();
-    if (kind === "parent") parent = c.name;
-    void write(next, parent);
+    const op: Op =
+      kind === "rename"
+        ? { op: "rename", name: c.name, new_name: value ?? "" }
+        : kind === "smiles"
+          ? { op: "set_smiles", name: c.name, smiles: value ?? "" }
+          : kind === "parent"
+            ? { op: "set_parent", name: c.name }
+            : { op: "remove", name: c.name };
+    void write(op);
   };
 
   const heavy = (s: string) => (s.match(/\[[^\]]+\]|Cl|Br|[BCNOPSFI]|[bcnops]/g) ?? []).length;
   const add = () => {
-    const next: Entry[] = data.candidates.map((x) => ({ name: x.name, smiles: x.smiles }));
-    next.push({ name: fresh.name.trim(), smiles: fresh.smiles.trim() });
-    void write(next, data.parent).then((ok) => ok && setFresh({ name: "", smiles: "" }));
+    void write({ op: "add", name: fresh.name.trim(), smiles: fresh.smiles.trim() }).then(
+      (ok) => ok && setFresh({ name: "", smiles: "" }),
+    );
   };
 
   return (
