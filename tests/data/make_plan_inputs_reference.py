@@ -4,9 +4,9 @@ config, as `build_plan` computes them.
 This is the reference the digest tests compare against. It exists because an input digest is a SHA-256 over
 full-precision floats, and a few of those floats are geometry: a placed `[pocket.site]` charge sits a fixed
 distance along a bond vector of the parent's RDKit conformer, and that conformer is ETKDG (seeded, so stable)
-followed by an MMFF cleanup, which is an iterative floating-point minimisation. Its last decimals differ between
-machines, so the digest does too, while the geometry is the same structure to any tolerance that means anything
-chemically. Comparing the values with a tolerance says what the digest pin was trying to say and says it portably.
+followed by an MMFF cleanup, which is an iterative floating-point minimisation. A hash of such a value can only
+say "not equal"; these values can say which coordinate moved and by how much, and can hold a tolerance below
+anything chemically meaningful. The exact digest is still asserted alongside, by the companion test.
 
 Every value is written with `repr`, so floats round-trip exactly and a reader can see the full precision the
 digest is taken over.

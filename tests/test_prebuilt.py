@@ -96,10 +96,10 @@ def test_each_prebuilt_run_is_its_configs_run(name):
     if why:
         pytest.skip(why)
     # The record is addressed BY its digest, so here the digest is the point and a tolerance would be meaningless.
-    # But a placed charge's position comes from an MMFF-cleaned conformer whose last decimals are machine-dependent,
-    # and the digest hashes them at full precision. So compare the inputs first: equal to 1e-9 A but not bit-equal
-    # means this machine computes the same plan and simply cannot reproduce the hash, which is not a defect in the
-    # record. `scripts/build_prebuilt.py` writes records on a machine where they are bit-equal, and there this runs.
+    # But a placed charge's position comes from an MMFF-cleaned conformer, and the digest hashes its coordinates at
+    # full precision. So compare the inputs first: equal to 1e-9 A but not bit-equal would mean this machine computes
+    # the same plan and merely cannot reproduce the hash, which is no defect in the record. No such case is known
+    # (see GEOMETRY_TOL_ANG in test_methods_registry); where it does not arise, the digest below is asserted exactly.
     from test_methods_registry import plan_differences, plan_differences_exact
 
     here = _plan_inputs(folder)  # planned once: for danuglipron-halogen this is the expensive part

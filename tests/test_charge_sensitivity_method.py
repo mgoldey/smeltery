@@ -357,8 +357,9 @@ def test_a_config_without_the_section_keeps_its_digest():
     """Registering this method changed nothing for a config that does not ask for it.
 
     Compared value by value against the same reference the pinned digests were taken over, not by digest: a
-    placed charge's position comes from an MMFF-cleaned conformer, whose last decimals differ between machines,
-    so an exact hash fails where the plan is in fact identical. See tests/data/make_plan_inputs_reference.py.
+    placed charge's position comes from an MMFF-cleaned conformer, whose last decimals could move without the
+    plan changing, so an exact hash can fail where the plan is in fact identical. See GEOMETRY_TOL_ANG in
+    test_methods_registry for what is and is not known about that, and tests/data/make_plan_inputs_reference.py.
     """
     from test_methods_registry import PLAN_INPUTS_REFERENCE, plan_differences
 

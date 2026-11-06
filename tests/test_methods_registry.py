@@ -418,9 +418,14 @@ def _needs(text: str) -> str | None:
 PLAN_INPUTS_REFERENCE = json.loads((ROOT / "tests" / "data" / "plan_inputs_reference.json").read_text())
 
 #: How far a float may drift and still be the same plan. A placed charge's position comes from the parent's RDKit
-#: conformer, which is ETKDG (seeded) plus an MMFF cleanup; that cleanup is an iterative floating-point
-#: minimisation, so its last decimals differ between machines while the structure does not. 1e-9 A is about a
-#: millionth of a bond length: far below anything chemically meaningful, far above the drift observed (~1e-15).
+#: conformer, which is ETKDG (seeded) plus an MMFF cleanup -- an iterative floating-point minimisation, so its
+#: last decimals are the kind of value that can move without the structure changing. 1e-9 A is about a millionth
+#: of a bond length: far below anything chemically meaningful.
+#:
+#: No such drift is known between this project's own environments. These digests once differed in CI, and the
+#: cause was a missing `pdb2pqr30`, not arithmetic: installing the recorded 3.8.0 made CI agree exactly, and the
+#: tests here pass on the exact digest too (the companion test below asserts it). The tolerance is headroom for a
+#: difference that has not been observed, which is why the exact pin is kept rather than replaced.
 GEOMETRY_TOL_ANG = 1e-9
 
 
@@ -474,8 +479,9 @@ def test_existing_configs_keep_their_digests(config, tmp_path, monkeypatch):
 
     Compared value by value rather than by digest. The digest is the identity a run record is addressed by, and
     `test_the_digest_is_the_reference_digest_on_the_machine_that_recorded_it` below still pins it; but a few of
-    the values it hashes are conformer geometry, whose last decimals are machine-dependent, so an exact hash
-    here fails on a machine that computes the very same plan. The tolerance is 1e-9 A.
+    the values it hashes are conformer geometry, whose last decimals could move without the plan changing, so
+    an exact hash can fail where the plan is in fact the same. The tolerance is 1e-9 A. See GEOMETRY_TOL_ANG:
+    no such difference is known here, and the companion test below still asserts the exact digest.
     """
     monkeypatch.setenv("PATH", str(VENV_BIN) + os.pathsep + os.environ.get("PATH", ""))  # as build_prebuilt runs
     path = ROOT / config
