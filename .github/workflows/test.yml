@@ -43,6 +43,10 @@ jobs:
 
       - name: Install (ferric from PyPI)
         run: uv sync --extra dev --extra posebusters --extra experiments --extra bench --no-sources
+      # The danuglipron-halogen prebuilt reads a .pdb pocket, so planning it needs pdb2pqr30 to assign the
+      # charges. 3.8.0 is the version the committed records were made with, which the digest guards expect.
+      - name: Install pdb2pqr30 (a .pdb pocket's charges come from it)
+        run: uv pip install pdb2pqr
 
       - name: Lint (ruff check)
         run: |
