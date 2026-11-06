@@ -121,9 +121,11 @@ def test_the_docking_example_stages_its_relative_paths(tmp_path):
 
 def test_a_staged_value_that_did_not_take_is_refused(tmp_path, monkeypatch):
     src, cfg = _write(tmp_path)
-    import smeltery.run_inputs as ri
+    # Patched where it is defined, not on run_inputs: staging imports it inside the function, so that `smeltery run`
+    # does not need tomlkit (the `gui`/`bench` extras' dependency).
+    import smeltery.gui.config_text as ct
 
-    monkeypatch.setattr(ri, "set_value", lambda text, dotted, value: text)
+    monkeypatch.setattr(ct, "set_value", lambda text, dotted, value: text)
     with pytest.raises(ValueError):
         stage_inputs(cfg.read_text(), src, tmp_path / "out")
 

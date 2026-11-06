@@ -62,10 +62,11 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         # each snippet is its own interpreter, so the import and the assert share one
         "from smeltery.bench.app import create_app, WEB_DIR; assert (WEB_DIR / 'index.html').is_file(), WEB_DIR",
         # the prebuilt pipelines ship as package data: each has its config and a finished run
+        # One segment per joinpath: MultiplexedPath.joinpath takes several only from 3.12, and CI runs 3.11.
         "from importlib import resources; r = resources.files('smeltery.prebuilt'); "
         "bad = [n for n in ('benzoic-rhf', 'benzoic-pbe', 'docking', 'structure') "
-        "if not (r.joinpath(n, 'pipeline.toml').is_file() and r.joinpath(n, 'run').is_dir() "
-        "and any(c.name.startswith('run-') for c in r.joinpath(n, 'run').iterdir()))]; assert not bad, bad",
+        "if not (r.joinpath(n).joinpath('pipeline.toml').is_file() and r.joinpath(n).joinpath('run').is_dir() "
+        "and any(c.name.startswith('run-') for c in r.joinpath(n).joinpath('run').iterdir()))]; assert not bad, bad",
     ],
 }
 #: extras too heavy to install on every run: `check` only proves that pip can RESOLVE them unless `--full` is given

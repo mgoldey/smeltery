@@ -115,6 +115,8 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install (dev + bench extras, ferric from PyPI)
         run: uv sync --extra dev --extra bench --no-sources
+      - name: Install pdb2pqr30 (the active-site preview charges a PDB with it)
+        run: uv pip install pdb2pqr
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"

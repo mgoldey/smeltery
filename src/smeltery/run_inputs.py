@@ -8,8 +8,6 @@ import shutil
 import tomllib
 from pathlib import Path
 
-from smeltery.gui.config_text import ConfigTextError, set_value
-
 #: Input files the config names outside any method's section: the decisions JSON (an input of the Ligands step).
 _OTHER_INPUT_PATHS: tuple[tuple[str, str], ...] = (("decisions", "file"),)
 
@@ -59,6 +57,10 @@ def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[
 
     The original basename is kept so every name the plan records (and therefore the input digest) is the same with
     and without staging; the contents stay addressed by the hash directory."""
+    # Imported here, not at module level: staging is core `smeltery run`, while config_text needs tomlkit, which
+    # only the `gui` and `bench` extras install. A module-level import makes `smeltery run` need the GUI's deps.
+    from smeltery.gui.config_text import ConfigTextError, set_value
+
     known = _manifest(out_dir)
     cfg = tomllib.loads(text)
     staged: dict[str, dict] = {}
