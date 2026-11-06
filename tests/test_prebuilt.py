@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import subprocess
@@ -34,11 +35,29 @@ def _plan_digest(folder: Path, *extra: str) -> str:
     return m.group(1)
 
 
+def _needs(text: str) -> str | None:
+    """Why this config cannot be planned in this environment, or None.
+
+    Planning a `[docking]` or `[structure]` section builds a receptor, so it needs the docking extra; the `test`
+    job installs dev/posebusters/experiments/bench and not docking, where `smeltery run --plan` exits 3 on an
+    honest ImportError. That is the environment's answer, not a broken config, so those configs skip."""
+    if "[docking]" in text or "[structure]" in text:
+        missing = [m for m in ("vina", "meeko") if importlib.util.find_spec(m) is None]
+        if missing:
+            return f"needs the docking extra ({', '.join(missing)} missing)"
+    if "posebusters = true" in text and importlib.util.find_spec("posebusters") is None:
+        return "needs the posebusters extra"
+    return None
+
+
 @pytest.mark.parametrize("name", NAMES)
 def test_every_prebuilt_config_validates(name):
     folder = PREBUILT / name
     assert (folder / "pipeline.toml").is_file()
     assert len(folder.joinpath("about.md").read_text().strip().splitlines()) == 2
+    why = _needs((folder / "pipeline.toml").read_text())
+    if why:
+        pytest.skip(why)
     only = ONE_CANDIDATE.get(name)
     assert _plan_digest(folder, *(["--only-candidate", only] if only else []))
 
@@ -59,6 +78,11 @@ def test_each_prebuilt_run_is_its_configs_run(name):
     here = pdb2pqr_version()
     if recorded is not None and recorded != here:
         pytest.skip(f"{name} was run with {recorded!r}; this machine's pdb2pqr30 reports {here!r}")
+    # Re-planning needs the config's own extras, like the test above: everything before this point checks the
+    # committed record itself, which is worth doing wherever the suite runs.
+    why = _needs((folder / "pipeline.toml").read_text())
+    if why:
+        pytest.skip(why)
     digest = _plan_digest(folder)
     assert records[0].name == f"run-{digest[:12]}.json", "run/ has no record for the current config digest"
     assert record["input_digest"] == digest
