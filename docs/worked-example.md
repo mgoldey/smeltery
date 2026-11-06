@@ -155,10 +155,11 @@ Reading it:
 * **The charge model barely matters.** No analogue moves more than
   0.43 kcal/mol between AMBER and CHARMM, under the 0.73 kcal/mol floor that
   sensitivity itself sets. The ranking is not an artefact of the charge set.
-* **The cut is UNRANKED.** Three analogues have a standard error larger than
-  their own mean (`bnz-C34-Cl` 5.20, `bzim-C9-CH3` 2.22, `bnz-C34-CH3` 1.37),
-  all from one pose disagreeing with the other three, so no gap near the keep-3
-  boundary clears the floor. With four poses this is the honest answer:
+* **The cut is UNRANKED.** The twelve land in a single tie group, so no gap near
+  the keep-3 boundary clears the floor. The widest spreads come from one pose
+  disagreeing with the other three: `bnz-C34-Cl` (SEM 5.20 on a mean of 5.58),
+  `bzim-C9-CH3` (2.22 on 1.56, the one analogue whose standard error exceeds its
+  own mean) and `bnz-C34-CH3` (1.37 on 2.36). With four poses this is the honest answer:
   `bnz-C34-F` is the most stabilised of the twelve, and the twelve are not
   separable at this pose count.
 * **The direction is consistent, though.** F at `bnz-C34` and Cl or F at
