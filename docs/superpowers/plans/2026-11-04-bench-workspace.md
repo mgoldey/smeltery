@@ -69,8 +69,10 @@ def test_an_editable_install_records_the_checked_out_commit_not_the_build_stamp(
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
     assert ident["commit"] == head and ident["provenance"].startswith("INFERRED")
 
+
 def test_the_record_carries_it_and_it_is_not_in_the_input_digest():
-    a = RunRecord("c", {"x": 1}, [], {}); b = RunRecord("c", {"x": 1}, [], {}, smeltery={"commit": "other"})
+    a = RunRecord("c", {"x": 1}, [], {})
+    b = RunRecord("c", {"x": 1}, [], {}, smeltery={"commit": "other"})
     assert "smeltery" in json.loads(a.to_json()) and a.input_digest == b.input_digest
 ```
 - [ ] **Step 2:** `pytest tests/test_record_identity.py -v` → FAIL (`smeltery_identity` undefined).
@@ -126,10 +128,14 @@ def test_a_run_directory_reruns_after_the_original_inputs_move(tmp_path):
     shutil.move(tmp_path / "out", tmp_path / "moved")
     assert main(["run", str(tmp_path / "moved" / "config.toml"), "--plan"]) == 0
 
-def test_a_pdb_id_is_left_alone_and_comments_survive_staging(tmp_path): ...
+
+def test_a_pdb_id_is_left_alone_and_comments_survive_staging(tmp_path):
+    ...
     # structure.spec = "5R83" stays "5R83"; a "# keep me" comment line is still in the staged text
 
-def test_the_record_names_each_input_by_sha256(tmp_path): ...
+
+def test_the_record_names_each_input_by_sha256(tmp_path):
+    ...
     # rec["results"]["config"]["inputs"]["pocket.file"]["sha256"] == sha256 of the source file
 ```
 Plus in `tests/bench/test_launch.py`: Launch on a pipeline whose `[pocket] file` is relative to the config's
