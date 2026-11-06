@@ -354,11 +354,19 @@ def test_validation_refuses_what_it_cannot_measure():
 
 
 def test_a_config_without_the_section_keeps_its_digest():
-    from test_methods_registry import DIGESTS_AT_7389ABA
+    """Registering this method changed nothing for a config that does not ask for it.
+
+    Compared value by value against the same reference the pinned digests were taken over, not by digest: a
+    placed charge's position comes from an MMFF-cleaned conformer, whose last decimals differ between machines,
+    so an exact hash fails where the plan is in fact identical. See tests/data/make_plan_inputs_reference.py.
+    """
+    from test_methods_registry import PLAN_INPUTS_REFERENCE, plan_differences
 
     path = "examples/mwe_benzoic.toml"
     plan = build_plan(load_config(ROOT / path))
-    assert RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest == DIGESTS_AT_7389ABA[path]
+    ref = PLAN_INPUTS_REFERENCE[path]
+    diffs = plan_differences({"inputs": plan.inputs, "tiers": plan.tiers}, {k: ref[k] for k in ("inputs", "tiers")})
+    assert not diffs, "the plan changed:\n  " + "\n  ".join(diffs)
     assert "charge_sensitivity" not in plan.inputs
 
 

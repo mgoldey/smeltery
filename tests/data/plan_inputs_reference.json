@@ -1,0 +1,846 @@
+{
+ "examples/mwe_benzoic.toml": {
+  "input_digest": "5f7df3db8c7b797ab6931b0b64ca8e201ec07a1792928f0be9bb856efe4f4aa6",
+  "inputs": {
+   "candidates": {
+    "4-Cl": "OC(=O)c1ccc(Cl)cc1",
+    "4-F": "OC(=O)c1ccc(F)cc1",
+    "benzoic": "OC(=O)c1ccccc1"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "field": [
+    [
+     1.0,
+     [
+      4.2053468248105865,
+      3.509664065947018,
+      -0.3358405690029567
+     ]
+    ],
+    [
+     1.0,
+     [
+      4.083283396347218,
+      -3.8505445564411658,
+      0.8676611760470799
+     ]
+    ]
+   ],
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": false,
+    "posebusters": false,
+    "xtb": false
+   },
+   "parent": "benzoic"
+  },
+  "tiers": [
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": false,
+    "relax_unmapped": false,
+    "seed": 20261005
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": null,
+    "max_iter": null,
+    "method": "RHF",
+    "name": "field_interaction"
+   }
+  ]
+ },
+ "examples/mwe_docking.toml": {
+  "input_digest": "1a841ad89f2e0f2e7abb495aa0126e562209abea7013596f58d89856a7c891c6",
+  "inputs": {
+   "candidates": {
+    "butanol": "CCCCO",
+    "ethanol": "CCO",
+    "propanol": "CCCO"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "docking": {
+    "box": {
+     "center": [
+      0.4,
+      -0.1,
+      -0.1
+     ],
+     "size": [
+      22.0,
+      16.0,
+      16.0
+     ]
+    },
+    "receptor": "pocket_pep5.pdbqt",
+    "receptor_sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+   },
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": true,
+    "posebusters": true,
+    "xtb": false
+   },
+   "parent": "ethanol",
+   "pocket": {
+    "center_ang": null,
+    "cutoff_ang": null,
+    "drop_waters": false,
+    "input": "pocket_pep5.pdb",
+    "input_sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+    "n_charges": 81,
+    "n_total": 81,
+    "pdb2pqr_ff": "AMBER",
+    "pdb2pqr_version": "pdb2pqr 3.8.0"
+   }
+  },
+  "tiers": [
+   {
+    "exhaustiveness": 4,
+    "name": "docking",
+    "provider": "vina",
+    "provider_settings": {
+     "cpu": 1,
+     "engine": "vina",
+     "exhaustiveness": 4,
+     "n_poses": 3,
+     "scoring": "vina"
+    },
+    "score_unit": "kcal/mol",
+    "seeds": [
+     7
+    ]
+   },
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": true,
+    "relax_unmapped": true,
+    "seed": 20261005
+   },
+   {
+    "max_iters": 2000,
+    "name": "forcefield",
+    "path": "mmff",
+    "rdkit": "2026.03.6",
+    "variant": "MMFF94"
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": {
+     "center_ang": null,
+     "cutoff_ang": null,
+     "drop_waters": false,
+     "input": "pocket_pep5.pdb",
+     "input_sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+     "n_charges": 81,
+     "n_total": 81,
+     "pdb2pqr_ff": "AMBER",
+     "pdb2pqr_version": "pdb2pqr 3.8.0"
+    },
+    "max_iter": null,
+    "method": "RHF",
+    "name": "field_interaction"
+   }
+  ]
+ },
+ "examples/mwe_structure.toml": {
+  "input_digest": "bc3482ef4170810fced726a207ac434bcec15b2f59e886d922600719bf7642b2",
+  "inputs": {
+   "candidates": {
+    "butanol": "CCCCO",
+    "ethanol": "CCO",
+    "propanol": "CCCO"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "docking": {
+    "box": {
+     "center": [
+      0.4,
+      -0.1,
+      -0.1
+     ],
+     "size": [
+      22.0,
+      16.0,
+      16.0
+     ]
+    },
+    "receptor": "receptor.pdbqt",
+    "receptor_sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+   },
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": true,
+    "posebusters": true,
+    "xtb": false
+   },
+   "parent": "ethanol",
+   "pocket": {
+    "center_ang": [
+     0.4,
+     -0.1,
+     -0.1
+    ],
+    "cutoff_ang": 12.0,
+    "drop_waters": false,
+    "input": "receptor.pdb",
+    "input_sha256": "556b12e97654da8e7f6f0b40161f4734ff332444a9993866cb6b69b111435aef",
+    "n_charges": 81,
+    "n_total": 81,
+    "pdb2pqr_ff": "AMBER",
+    "pdb2pqr_version": "pdb2pqr 3.8.0"
+   },
+   "structure": {
+    "allow_network": false,
+    "artefacts": {
+     "receptor.pdb": "556b12e97654da8e7f6f0b40161f4734ff332444a9993866cb6b69b111435aef",
+     "receptor.pdbqt": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+    },
+    "center": {
+     "mode": "explicit",
+     "xyz": [
+      0.4,
+      -0.1,
+      -0.1
+     ]
+    },
+    "frame": {
+     "centre_to_nearest_receptor_atom_ang": 1.295,
+     "dropped_inside_box": 0,
+     "field_covers_box_corners": false,
+     "field_covers_box_faces": true,
+     "pdbqt_heavy_atoms_vs_pdb_max_dev_ang": 0.0,
+     "receptor_atoms_dropped_by_meeko": 0
+    },
+    "kind": "EXPERIMENTAL",
+    "pocket_cutoff_ang": 12.0,
+    "provider": "pdb",
+    "selection": {
+     "altloc": "blank or A",
+     "chains": null,
+     "hetatm_dropped": {},
+     "model": 1,
+     "n_altloc_dropped": 0,
+     "n_protein_atoms": 41
+    },
+    "spec": "pocket_pep5.pdb",
+    "structure": {
+     "attribution": null,
+     "kind": "EXPERIMENTAL",
+     "license_id": null,
+     "mean_plddt": null,
+     "metadata": {},
+     "n_residues_with_plddt": 0,
+     "sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+     "source": "file:pocket_pep5.pdb",
+     "weights_source": null
+    },
+    "tool_versions": {
+     "meeko": "0.8.0"
+    }
+   }
+  },
+  "tiers": [
+   {
+    "exhaustiveness": 4,
+    "name": "docking",
+    "provider": "vina",
+    "provider_settings": {
+     "cpu": 1,
+     "engine": "vina",
+     "exhaustiveness": 4,
+     "n_poses": 3,
+     "scoring": "vina"
+    },
+    "score_unit": "kcal/mol",
+    "seeds": [
+     7
+    ]
+   },
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": true,
+    "relax_unmapped": true,
+    "seed": 20261005
+   },
+   {
+    "max_iters": 2000,
+    "name": "forcefield",
+    "path": "mmff",
+    "rdkit": "2026.03.6",
+    "variant": "MMFF94"
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": {
+     "center_ang": [
+      0.4,
+      -0.1,
+      -0.1
+     ],
+     "cutoff_ang": 12.0,
+     "drop_waters": false,
+     "input": "receptor.pdb",
+     "input_sha256": "556b12e97654da8e7f6f0b40161f4734ff332444a9993866cb6b69b111435aef",
+     "n_charges": 81,
+     "n_total": 81,
+     "pdb2pqr_ff": "AMBER",
+     "pdb2pqr_version": "pdb2pqr 3.8.0"
+    },
+    "max_iter": null,
+    "method": "RHF",
+    "name": "field_interaction"
+   }
+  ]
+ },
+ "src/smeltery/prebuilt/benzoic-pbe/pipeline.toml": {
+  "input_digest": "6a37df69178bdfa9f9b294a3078736ab3d2fca1857de0d57f13d5f9d4938d72c",
+  "inputs": {
+   "candidates": {
+    "4-Cl": "OC(=O)c1ccc(Cl)cc1",
+    "4-F": "OC(=O)c1ccc(F)cc1",
+    "benzoic": "OC(=O)c1ccccc1"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "field": [
+    [
+     1.0,
+     [
+      4.2053468248105865,
+      3.509664065947018,
+      -0.3358405690029567
+     ]
+    ],
+    [
+     1.0,
+     [
+      4.083283396347218,
+      -3.8505445564411658,
+      0.8676611760470799
+     ]
+    ]
+   ],
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": false,
+    "posebusters": false,
+    "xtb": false
+   },
+   "parent": "benzoic"
+  },
+  "tiers": [
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": false,
+    "relax_unmapped": false,
+    "seed": 20261005
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "dispersion": "D3(BJ), reported as E_d3; cancels in dE_int at fixed geometry",
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": null,
+    "functional": "PBE",
+    "max_iter": null,
+    "memory_budget_gb": 8.0,
+    "method": "KS-DFT PBE + D3(BJ)",
+    "name": "field_dft_interaction",
+    "require_free_gb": null
+   }
+  ]
+ },
+ "src/smeltery/prebuilt/benzoic-rhf/pipeline.toml": {
+  "input_digest": "5f7df3db8c7b797ab6931b0b64ca8e201ec07a1792928f0be9bb856efe4f4aa6",
+  "inputs": {
+   "candidates": {
+    "4-Cl": "OC(=O)c1ccc(Cl)cc1",
+    "4-F": "OC(=O)c1ccc(F)cc1",
+    "benzoic": "OC(=O)c1ccccc1"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "field": [
+    [
+     1.0,
+     [
+      4.2053468248105865,
+      3.509664065947018,
+      -0.3358405690029567
+     ]
+    ],
+    [
+     1.0,
+     [
+      4.083283396347218,
+      -3.8505445564411658,
+      0.8676611760470799
+     ]
+    ]
+   ],
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": false,
+    "posebusters": false,
+    "xtb": false
+   },
+   "parent": "benzoic"
+  },
+  "tiers": [
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": false,
+    "relax_unmapped": false,
+    "seed": 20261005
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": null,
+    "max_iter": null,
+    "method": "RHF",
+    "name": "field_interaction"
+   }
+  ]
+ },
+ "src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml": {
+  "input_digest": "4abb6eef3f889acc77467ee17ab5e684206c0accf06ad916d98db276b203fb69",
+  "inputs": {
+   "bound_pose": {
+    "file": {
+     "name": "conf_00_cryo_em.xyz",
+     "sha256": "6f9b5f507db3fc913ff33786f788e7f4fc81ceab6b94d8ffe7737b6a87863aea"
+    },
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "n_poses": 4,
+    "seed": 20261005,
+    "skip_first": 0
+   },
+   "candidates": {
+    "bnz-C34-F": "N#Cc1ccc(COc2cccc(C3CCN(Cc4nc5ccc(C(=O)O)cc5n4C[C@@H]4CCO4)CC3)n2)c(F)c1F",
+    "parent": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F"
+   },
+   "charge_sensitivity": {
+    "models": [
+     "CHARMM"
+    ]
+   },
+   "cut": {
+    "keep": 3,
+    "z": 2.0
+   },
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 1.26
+   },
+   "gates": {
+    "forcefield": false,
+    "posebusters": false,
+    "xtb": false
+   },
+   "parent": "parent",
+   "pocket": {
+    "center_ang": null,
+    "cutoff_ang": null,
+    "drop_waters": false,
+    "input": "7LCJ_pocket.pdb",
+    "input_sha256": "caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110",
+    "n_charges": 6458,
+    "n_total": 6458,
+    "pdb2pqr_ff": "AMBER",
+    "pdb2pqr_version": "pdb2pqr 3.8.0"
+   }
+  },
+  "tiers": [
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 900,
+    "min_core_heavy": 3,
+    "n_poses": 4,
+    "name": "paired_poses",
+    "parent_poses_given": true,
+    "relax_unmapped": true,
+    "seed": 20261005
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": {
+     "center_ang": null,
+     "cutoff_ang": null,
+     "drop_waters": false,
+     "input": "7LCJ_pocket.pdb",
+     "input_sha256": "caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110",
+     "n_charges": 6458,
+     "n_total": 6458,
+     "pdb2pqr_ff": "AMBER",
+     "pdb2pqr_version": "pdb2pqr 3.8.0"
+    },
+    "max_iter": 200,
+    "method": "RHF",
+    "name": "field_interaction",
+    "remedies": [
+     {
+      "diis": "adiis",
+      "level_shift": 0.5
+     },
+     {
+      "diis": "adiis",
+      "level_shift": 1.0,
+      "max_iter": 150,
+      "soscf": true
+     }
+    ]
+   }
+  ]
+ },
+ "src/smeltery/prebuilt/docking/pipeline.toml": {
+  "input_digest": "1a841ad89f2e0f2e7abb495aa0126e562209abea7013596f58d89856a7c891c6",
+  "inputs": {
+   "candidates": {
+    "butanol": "CCCCO",
+    "ethanol": "CCO",
+    "propanol": "CCCO"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "docking": {
+    "box": {
+     "center": [
+      0.4,
+      -0.1,
+      -0.1
+     ],
+     "size": [
+      22.0,
+      16.0,
+      16.0
+     ]
+    },
+    "receptor": "pocket_pep5.pdbqt",
+    "receptor_sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+   },
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": true,
+    "posebusters": true,
+    "xtb": false
+   },
+   "parent": "ethanol",
+   "pocket": {
+    "center_ang": null,
+    "cutoff_ang": null,
+    "drop_waters": false,
+    "input": "pocket_pep5.pdb",
+    "input_sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+    "n_charges": 81,
+    "n_total": 81,
+    "pdb2pqr_ff": "AMBER",
+    "pdb2pqr_version": "pdb2pqr 3.8.0"
+   }
+  },
+  "tiers": [
+   {
+    "exhaustiveness": 4,
+    "name": "docking",
+    "provider": "vina",
+    "provider_settings": {
+     "cpu": 1,
+     "engine": "vina",
+     "exhaustiveness": 4,
+     "n_poses": 3,
+     "scoring": "vina"
+    },
+    "score_unit": "kcal/mol",
+    "seeds": [
+     7
+    ]
+   },
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": true,
+    "relax_unmapped": true,
+    "seed": 20261005
+   },
+   {
+    "max_iters": 2000,
+    "name": "forcefield",
+    "path": "mmff",
+    "rdkit": "2026.03.6",
+    "variant": "MMFF94"
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": {
+     "center_ang": null,
+     "cutoff_ang": null,
+     "drop_waters": false,
+     "input": "pocket_pep5.pdb",
+     "input_sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+     "n_charges": 81,
+     "n_total": 81,
+     "pdb2pqr_ff": "AMBER",
+     "pdb2pqr_version": "pdb2pqr 3.8.0"
+    },
+    "max_iter": null,
+    "method": "RHF",
+    "name": "field_interaction"
+   }
+  ]
+ },
+ "src/smeltery/prebuilt/structure/pipeline.toml": {
+  "input_digest": "bc3482ef4170810fced726a207ac434bcec15b2f59e886d922600719bf7642b2",
+  "inputs": {
+   "candidates": {
+    "butanol": "CCCCO",
+    "ethanol": "CCO",
+    "propanol": "CCCO"
+   },
+   "cut": {
+    "keep": 1,
+    "z": 2.0
+   },
+   "docking": {
+    "box": {
+     "center": [
+      0.4,
+      -0.1,
+      -0.1
+     ],
+     "size": [
+      22.0,
+      16.0,
+      16.0
+     ]
+    },
+    "receptor": "receptor.pdbqt",
+    "receptor_sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+   },
+   "floor": {
+    "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+    "value": 0.0
+   },
+   "gates": {
+    "forcefield": true,
+    "posebusters": true,
+    "xtb": false
+   },
+   "parent": "ethanol",
+   "pocket": {
+    "center_ang": [
+     0.4,
+     -0.1,
+     -0.1
+    ],
+    "cutoff_ang": 12.0,
+    "drop_waters": false,
+    "input": "receptor.pdb",
+    "input_sha256": "556b12e97654da8e7f6f0b40161f4734ff332444a9993866cb6b69b111435aef",
+    "n_charges": 81,
+    "n_total": 81,
+    "pdb2pqr_ff": "AMBER",
+    "pdb2pqr_version": "pdb2pqr 3.8.0"
+   },
+   "structure": {
+    "allow_network": false,
+    "artefacts": {
+     "receptor.pdb": "556b12e97654da8e7f6f0b40161f4734ff332444a9993866cb6b69b111435aef",
+     "receptor.pdbqt": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+    },
+    "center": {
+     "mode": "explicit",
+     "xyz": [
+      0.4,
+      -0.1,
+      -0.1
+     ]
+    },
+    "frame": {
+     "centre_to_nearest_receptor_atom_ang": 1.295,
+     "dropped_inside_box": 0,
+     "field_covers_box_corners": false,
+     "field_covers_box_faces": true,
+     "pdbqt_heavy_atoms_vs_pdb_max_dev_ang": 0.0,
+     "receptor_atoms_dropped_by_meeko": 0
+    },
+    "kind": "EXPERIMENTAL",
+    "pocket_cutoff_ang": 12.0,
+    "provider": "pdb",
+    "selection": {
+     "altloc": "blank or A",
+     "chains": null,
+     "hetatm_dropped": {},
+     "model": 1,
+     "n_altloc_dropped": 0,
+     "n_protein_atoms": 41
+    },
+    "spec": "pocket_pep5.pdb",
+    "structure": {
+     "attribution": null,
+     "kind": "EXPERIMENTAL",
+     "license_id": null,
+     "mean_plddt": null,
+     "metadata": {},
+     "n_residues_with_plddt": 0,
+     "sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+     "source": "file:pocket_pep5.pdb",
+     "weights_source": null
+    },
+    "tool_versions": {
+     "meeko": "0.8.0"
+    }
+   }
+  },
+  "tiers": [
+   {
+    "exhaustiveness": 4,
+    "name": "docking",
+    "provider": "vina",
+    "provider_settings": {
+     "cpu": 1,
+     "engine": "vina",
+     "exhaustiveness": 4,
+     "n_poses": 3,
+     "scoring": "vina"
+    },
+    "score_unit": "kcal/mol",
+    "seeds": [
+     7
+    ]
+   },
+   {
+    "analogue_poses_given": false,
+    "jitter_ang": 0.5,
+    "jitter_deg": 15.0,
+    "mcs_timeout_s": 10,
+    "min_core_heavy": 3,
+    "n_poses": 6,
+    "name": "paired_poses",
+    "parent_poses_given": true,
+    "relax_unmapped": true,
+    "seed": 20261005
+   },
+   {
+    "max_iters": 2000,
+    "name": "forcefield",
+    "path": "mmff",
+    "rdkit": "2026.03.6",
+    "variant": "MMFF94"
+   },
+   {
+    "basis": "sto-3g",
+    "density_conv": 1e-08,
+    "energy_conv": 1e-10,
+    "engine": "ferric",
+    "field": {
+     "center_ang": [
+      0.4,
+      -0.1,
+      -0.1
+     ],
+     "cutoff_ang": 12.0,
+     "drop_waters": false,
+     "input": "receptor.pdb",
+     "input_sha256": "556b12e97654da8e7f6f0b40161f4734ff332444a9993866cb6b69b111435aef",
+     "n_charges": 81,
+     "n_total": 81,
+     "pdb2pqr_ff": "AMBER",
+     "pdb2pqr_version": "pdb2pqr 3.8.0"
+    },
+    "max_iter": null,
+    "method": "RHF",
+    "name": "field_interaction"
+   }
+  ]
+ }
+}

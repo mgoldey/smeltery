@@ -35,6 +35,18 @@ def _plan_digest(folder: Path, *extra: str) -> str:
     return m.group(1)
 
 
+def _plan_inputs(folder: Path) -> dict:
+    """The plan's `inputs` in process, to compare against a record's values. `_plan_digest` stays a subprocess,
+    because the digest it reads is what the real `smeltery run` prints; this only needs the values it hashed.
+    Plans the whole config, as `_plan_digest(folder)` beside it does, so the two describe the same plan."""
+    import tempfile
+
+    from smeltery.cli import build_plan, load_config
+
+    with tempfile.TemporaryDirectory() as tmp:
+        return build_plan(load_config(folder / "pipeline.toml"), out_dir=Path(tmp)).inputs
+
+
 def _needs(text: str) -> str | None:
     """Why this config cannot be planned in this environment, or None.
 
@@ -83,6 +95,18 @@ def test_each_prebuilt_run_is_its_configs_run(name):
     why = _needs((folder / "pipeline.toml").read_text())
     if why:
         pytest.skip(why)
+    # The record is addressed BY its digest, so here the digest is the point and a tolerance would be meaningless.
+    # But a placed charge's position comes from an MMFF-cleaned conformer whose last decimals are machine-dependent,
+    # and the digest hashes them at full precision. So compare the inputs first: equal to 1e-9 A but not bit-equal
+    # means this machine computes the same plan and simply cannot reproduce the hash, which is not a defect in the
+    # record. `scripts/build_prebuilt.py` writes records on a machine where they are bit-equal, and there this runs.
+    from test_methods_registry import plan_differences, plan_differences_exact
+
+    here = _plan_inputs(folder)  # planned once: for danuglipron-halogen this is the expensive part
+    drift = plan_differences(here, record["inputs"])
+    assert not drift, f"{name}'s plan no longer matches its committed record:\n  " + "\n  ".join(drift)
+    if plan_differences_exact(here, record["inputs"]):
+        pytest.skip(f"{name}'s conformer is not bit-identical here, so its digest cannot be; the inputs do match")
     digest = _plan_digest(folder)
     assert records[0].name == f"run-{digest[:12]}.json", "run/ has no record for the current config digest"
     assert record["input_digest"] == digest

@@ -5,6 +5,7 @@ from it. Existing configs keep their input digests."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -413,8 +414,69 @@ def _needs(text: str) -> str | None:
     return None
 
 
+#: The plan inputs the pinned digests were taken over, written by tests/data/make_plan_inputs_reference.py.
+PLAN_INPUTS_REFERENCE = json.loads((ROOT / "tests" / "data" / "plan_inputs_reference.json").read_text())
+
+#: How far a float may drift and still be the same plan. A placed charge's position comes from the parent's RDKit
+#: conformer, which is ETKDG (seeded) plus an MMFF cleanup; that cleanup is an iterative floating-point
+#: minimisation, so its last decimals differ between machines while the structure does not. 1e-9 A is about a
+#: millionth of a bond length: far below anything chemically meaningful, far above the drift observed (~1e-15).
+GEOMETRY_TOL_ANG = 1e-9
+
+
+def plan_differences_exact(got, want) -> list[str]:
+    """`plan_differences` with no tolerance: every float must be bit-identical to the reference."""
+    return plan_differences(got, want, tol=0.0)
+
+
+def plan_differences(got, want, path: str = "", tol: float | None = None) -> list[str]:
+    """Every way `got` differs from the reference `want`: floats within `tol`, everything else exact.
+
+    The digest cannot do this. It is a SHA-256 over full-precision floats, so a last-decimal difference in the
+    conformer makes it a different hash, and a hash says only "not equal" -- never which value, nor by how much.
+    """
+    tol = GEOMETRY_TOL_ANG if tol is None else tol
+    if isinstance(want, bool) or isinstance(got, bool):  # bool is an int; compare it as itself
+        return [] if got is want else [f"{path or '<root>'}: {got!r} != {want!r}"]
+    if isinstance(want, float) or isinstance(got, float):
+        if not isinstance(got, (int, float)) or not isinstance(want, (int, float)):
+            return [f"{path or '<root>'}: {got!r} is not a number, reference has {want!r}"]
+        if abs(float(got) - float(want)) <= tol:
+            return []
+        return [f"{path or '<root>'}: {got!r} != {want!r} (differs by {abs(float(got) - float(want)):.3g})"]
+    if isinstance(want, dict):
+        if not isinstance(got, dict):
+            return [f"{path or '<root>'}: {type(got).__name__}, reference has a table"]
+        out = []
+        for key in sorted(set(want) | set(got)):
+            if key not in got:
+                out.append(f"{path}.{key}: missing, reference has {want[key]!r}")
+            elif key not in want:
+                out.append(f"{path}.{key}: {got[key]!r}, not in the reference")
+            else:
+                out += plan_differences(got[key], want[key], f"{path}.{key}", tol)
+        return out
+    if isinstance(want, (list, tuple)):
+        if not isinstance(got, (list, tuple)):
+            return [f"{path or '<root>'}: {type(got).__name__}, reference has a list"]
+        if len(got) != len(want):
+            return [f"{path or '<root>'}: {len(got)} entries, reference has {len(want)}"]
+        out = []
+        for i, (g, w) in enumerate(zip(got, want)):
+            out += plan_differences(g, w, f"{path}[{i}]", tol)
+        return out
+    return [] if got == want else [f"{path or '<root>'}: {got!r} != {want!r}"]
+
+
 @pytest.mark.parametrize("config", sorted(DIGESTS_AT_7389ABA))
 def test_existing_configs_keep_their_digests(config, tmp_path, monkeypatch):
+    """What a config means has not changed: every input and tier still equals the recorded reference.
+
+    Compared value by value rather than by digest. The digest is the identity a run record is addressed by, and
+    `test_the_digest_is_the_reference_digest_on_the_machine_that_recorded_it` below still pins it; but a few of
+    the values it hashes are conformer geometry, whose last decimals are machine-dependent, so an exact hash
+    here fails on a machine that computes the very same plan. The tolerance is 1e-9 A.
+    """
     monkeypatch.setenv("PATH", str(VENV_BIN) + os.pathsep + os.environ.get("PATH", ""))  # as build_prebuilt runs
     path = ROOT / config
     why = _needs(path.read_text())
@@ -425,6 +487,35 @@ def test_existing_configs_keep_their_digests(config, tmp_path, monkeypatch):
     if only is not None:  # what `--only-candidate` plans: the parent and that one analogue
         cfg = {**cfg, "candidates": {k: v for k, v in cfg["candidates"].items() if k in (cfg["parent"], only)}}
     plan = build_plan(cfg, out_dir=tmp_path)
+    ref = PLAN_INPUTS_REFERENCE[config]
+    diffs = plan_differences({"inputs": plan.inputs, "tiers": plan.tiers}, {k: ref[k] for k in ("inputs", "tiers")})
+    assert not diffs, "the plan no longer matches tests/data/plan_inputs_reference.json:\n  " + "\n  ".join(diffs)
+
+
+@pytest.mark.parametrize("config", sorted(DIGESTS_AT_7389ABA))
+def test_the_digest_is_the_reference_digest_on_the_machine_that_recorded_it(config, tmp_path, monkeypatch):
+    """The pinned digest still holds wherever the conformer is bit-identical to the reference.
+
+    This is what keeps the pins honest: `build_prebuilt.py` addresses a run record by this digest, so on the
+    machine that writes records it must be exactly the recorded one. Where the conformer differs in its last
+    decimals the digest cannot match and says nothing useful, so the test above carries the comparison and this
+    one skips, naming the first value that drifted.
+    """
+    monkeypatch.setenv("PATH", str(VENV_BIN) + os.pathsep + os.environ.get("PATH", ""))
+    path = ROOT / config
+    why = _needs(path.read_text())
+    if why:
+        pytest.skip(why)
+    cfg = load_config(path)
+    only = ONLY_CANDIDATE.get(config)
+    if only is not None:
+        cfg = {**cfg, "candidates": {k: v for k, v in cfg["candidates"].items() if k in (cfg["parent"], only)}}
+    plan = build_plan(cfg, out_dir=tmp_path)
+    ref = PLAN_INPUTS_REFERENCE[config]
+    here = {"inputs": plan.inputs, "tiers": plan.tiers}
+    exact = plan_differences_exact(here, {k: ref[k] for k in ("inputs", "tiers")})
+    if exact:
+        pytest.skip(f"this machine's conformer differs from the reference ({exact[0]}), so the digest cannot match")
     digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
     assert digest == DIGESTS_AT_7389ABA[config]
 
