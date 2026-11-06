@@ -155,7 +155,16 @@ def check(
         for snippet in EXTRA_CHECKS[extra]:
             _run([str(py), "-c", snippet], cwd=scratch)
         if config is not None:
-            _run([str(venv / "bin" / "smeltery"), "run", str(config.resolve()), "--plan"], cwd=scratch)
+            # With `--out`, so the run stages its config and input files. Staging rewrites TOML in place and so
+            # needs tomlkit; a plain `--plan` never calls it, which let a core install that could not stage ship
+            # green. The staged directory is the real deliverable of a run, so the smoke test writes one.
+            _run(
+                [str(venv / "bin" / "smeltery"), "run", str(config.resolve()), "--plan", "--out", "staged"],
+                cwd=scratch,
+            )
+            if not (scratch / "staged" / "config.toml").is_file():
+                print("error: `smeltery run --out staged` wrote no staged config.toml", file=sys.stderr)
+                return 1
         if example is not None:
             probe = (
                 "import importlib.metadata as m; print(m.distribution('ferric').read_text('direct_url.json') is None)"
