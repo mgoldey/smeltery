@@ -20,7 +20,7 @@ dependencies = [
     # ferric publishes only pre-releases so far; the explicit pre-release floor
     # lets pip select them. For development, [tool.uv.sources] below pins an
     # exact ferric commit instead.
-    "ferric>=0.1.0rc6",
+    "ferric>=0.1.0rc10",
     "rdkit>=2024.3",
     "numpy>=1.26",
 ]
@@ -100,7 +100,7 @@ pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
 # An exact commit, not a branch: the run record reports this SHA, read back
 # from the installed package's metadata. To develop against a local ferric
 # checkout instead, point this at it: ferric = { path = "../ferric" }
-ferric = { git = "https://github.com/mgoldey/ferric", rev = "b22183b9dbed226e1d2acc5cb6e5194c973b023b" }
+ferric = { git = "https://github.com/mgoldey/ferric", rev = "d13daf20e273685e57cd1866795892e536057c26" }
 
 [build-system]
 requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]
