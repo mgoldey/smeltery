@@ -57,8 +57,9 @@ def stage_inputs(text: str, config_dir: Path, out_dir: Path) -> tuple[str, dict[
 
     The original basename is kept so every name the plan records (and therefore the input digest) is the same with
     and without staging; the contents stay addressed by the hash directory."""
-    # Imported here, not at module level: staging is core `smeltery run`, while config_text needs tomlkit, which
-    # only the `gui` and `bench` extras install. A module-level import makes `smeltery run` need the GUI's deps.
+    # Imported here, not at module level, only to keep `import smeltery.run_inputs` from pulling in the
+    # `smeltery.gui` package. Its dependency is core: staging rewrites the config's input paths while keeping
+    # its comments, which needs tomlkit (tomllib only reads), so tomlkit is a core dependency, not a `gui` extra.
     from smeltery.gui.config_text import ConfigTextError, set_value
 
     known = _manifest(out_dir)

@@ -23,6 +23,9 @@ dependencies = [
     "ferric>=0.1.0rc10",
     "rdkit>=2024.3",
     "numpy>=1.26",
+    # Core, not a `gui`/`bench` extra: `smeltery run --out` stages the config's input files, which rewrites
+    # their paths while keeping the config's comments. tomllib only reads, so staging needs tomlkit.
+    "tomlkit>=0.13",
 ]
 
 [project.scripts]
