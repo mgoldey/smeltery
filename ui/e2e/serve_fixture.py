@@ -103,6 +103,10 @@ def main() -> int:
         json.dumps({"root": str(root), "runs": runs, "study": "bench.study_dag_fixture", "pdb": str(pdb)}, indent=1)
     )
     app = build_app(root, studies=("bench.study_dag_fixture", "bench.study_fixture"))
+    from fastapi.testclient import TestClient
+
+    made = TestClient(app).post("/api/pipelines", json={"name": "e2e", "from_run": 0})  # e2e/bench.ts PIPELINE
+    assert made.status_code == 201, made.text
     if os.environ.get("BENCH_E2E_BROKEN_QUEUE"):
         app.state.task_queue = BrokenQueue()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

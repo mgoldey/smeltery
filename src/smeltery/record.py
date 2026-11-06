@@ -49,23 +49,10 @@ def _ferric_build() -> dict | None:
     return None
 
 
-def ferric_identity() -> dict:
-    ident: dict = {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"}
-    build = _ferric_build()
-    if build is not None:
-        try:
-            ident["version"] = metadata.version("ferric")
-        except metadata.PackageNotFoundError:
-            pass
-        ident.update(
-            source="ferric.__build__",
-            commit=build["git_sha"],
-            dirty=bool(build.get("dirty")),
-            provenance="VERIFIED from ferric.__build__ (stamped at build time)",
-        )
-        return ident
+def _distribution_identity(name: str, ident: dict) -> dict:
+    """Fill `ident` from the installed distribution `name`: index pin, git install, or local dir."""
     try:
-        dist = metadata.distribution("ferric")
+        dist = metadata.distribution(name)
     except metadata.PackageNotFoundError:
         return ident
     ident["version"] = dist.version
@@ -91,7 +78,42 @@ def ferric_identity() -> dict:
         st = _git(path, "status", "--porcelain", "--untracked-files=no")
         ident["dirty"] = None if st is None else bool(st)
         ident["provenance"] = "INFERRED from the local source directory's current git state"
+    elif "archive_info" in du and ident["source"]:
+        # A built wheel installed from a path or URL. Reached only when the wheel carries NO build stamp: ferric's
+        # own CI wheels stamp `ferric.__build__` with the commit, which the caller prefers, and `direct_url.json`
+        # records how this machine installed the file (often a local path) rather than where it was built. Without
+        # a stamp the hash pip recorded is the only identity there is: it pins the artifact, claiming no more.
+        h = (du["archive_info"] or {}).get("hash") or (du["archive_info"] or {}).get("hashes", {}).get("sha256")
+        name = Path(unquote(urlparse(ident["source"]).path)).name
+        ident["dirty"] = False
+        ident["provenance"] = f"INFERRED from the installed wheel {name}" + (
+            f" ({h})" if h else " (pip recorded no hash)"
+        )
     return ident
+
+
+def smeltery_identity() -> dict:
+    """Which smeltery source ran. An editable install reports the checkout's HEAD, not the install-time stamp."""
+    ident: dict = {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"}
+    return _distribution_identity("smeltery", ident)
+
+
+def ferric_identity() -> dict:
+    ident: dict = {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"}
+    build = _ferric_build()
+    if build is not None:
+        try:
+            ident["version"] = metadata.version("ferric")
+        except metadata.PackageNotFoundError:
+            pass
+        ident.update(
+            source="ferric.__build__",
+            commit=build["git_sha"],
+            dirty=bool(build.get("dirty")),
+            provenance="VERIFIED from ferric.__build__ (stamped at build time)",
+        )
+        return ident
+    return _distribution_identity("ferric", ident)
 
 
 def digest(obj) -> str:
@@ -106,6 +128,7 @@ class RunRecord:
     results: dict
     smeltery_version: str = field(default_factory=lambda: metadata.version("smeltery"))
     ferric: dict = field(default_factory=ferric_identity)
+    smeltery: dict | None = field(default_factory=smeltery_identity)
     host: dict = field(default_factory=lambda: {"node": platform.node(), "python": platform.python_version()})
     started_utc: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
@@ -122,4 +145,5 @@ class RunRecord:
     def from_json(cls, s: str) -> RunRecord:
         d = json.loads(s)
         d.pop("input_digest", None)
+        d.setdefault("smeltery", None)  # old records: never invent today's identity
         return cls(**d)

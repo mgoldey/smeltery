@@ -3,6 +3,11 @@
 It draws exactly what `funnel.cut` decided. A tie group is one band labelled "(no order)"; the +/-floor band sits
 on each group boundary when the floor is non-zero; the keep boundary is drawn only when the cut placed one, and an
 UNRANKED cut says so across the top instead.
+
+Every row also shows the per-pose values behind its mean, and its n. A mean with a wide interval can come from a
+genuinely uncertain measurement or from one pose disagreeing with the others, and those call for different work
+(more poses against a look at that pose's geometry). The points tell them apart; the interval alone cannot. An
+UNRANKED verdict names the analogues whose own SEM is at least their mean, because that is usually the reason.
 """
 
 from __future__ import annotations
@@ -15,6 +20,22 @@ def group_label(index: int, size: int) -> str:
     return f"tie group {index + 1} (no order)" if size > 1 else f"group {index + 1}"
 
 
+def wide_rows(rows: list[dict]) -> list[dict]:
+    """The rows whose own SEM is at least as large as the size of their mean: each is a reason not to rank."""
+    return [r for r in rows if r.get("sem") is not None and r["sem"] >= abs(r["mean"])]
+
+
+def _unranked_text(rows: list[dict], run) -> str:
+    """Why the cut refused: the keep boundary inside a tie group, and which analogues are too uncertain to place."""
+    head = f"<b>UNRANKED</b>: keep={run.keep} falls inside a tie group. The cut refused to choose and dropped nothing."
+    wide = wide_rows(rows)
+    if not wide:
+        return head
+    names = ", ".join(f"{r['candidate']} (SEM {r['sem']:.2f} vs mean {r['mean']:.2f})" for r in wide[:3])
+    more = f" and {len(wide) - 3} more" if len(wide) > 3 else ""
+    return f"{head}<br>{len(wide)} of {len(rows)} have SEM at or above their own mean: {names}{more}"
+
+
 def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
     """`rows` is `results.ddE_table(run)`; `run` is the `results.Run`. Returns a plotly Figure."""
     import plotly.graph_objects as go
@@ -22,6 +43,24 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
     n = len(rows)
     y = list(range(n))
     fig = go.Figure()
+    # The per-pose values first, so the summary marker sits on top of them.
+    pose_x = [v for r in rows for v in (r.get("per_pose") or [])]
+    pose_y = [y[i] for i, r in enumerate(rows) for _ in (r.get("per_pose") or [])]
+    pose_i = [j for r in rows for j, _ in enumerate(r.get("per_pose") or [])]
+    if pose_x:
+        fig.add_trace(
+            go.Scatter(
+                x=pose_x,
+                y=pose_y,
+                mode="markers",
+                name="one pose",
+                # As dark as the summary and a little taller: a pose that contradicts the mean must not be the
+                # faintest thing on its row. Open ticks, so a cluster still reads as a cluster.
+                marker={"size": 11, "color": INK, "opacity": 0.75, "symbol": "line-ns-open", "line": {"width": 2}},
+                customdata=pose_i,
+                hovertemplate="pose %{customdata}: %{x:.3f} " + unit + "<extra></extra>",
+            )
+        )
     status = {True: ("kept by the cut", KEPT), False: ("dropped by the cut", NOT_KEPT), None: ("not cut", NEUTRAL)}
     for flag, (name, colour) in status.items():
         idx = [i for i, r in enumerate(rows) if r["survivor"] is flag]
@@ -118,10 +157,7 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
             x=0.5,
             y=1.0,
             yanchor="bottom",
-            text=(
-                f"<b>UNRANKED</b>: keep={run.keep} falls inside a tie group. "
-                "The cut refused to choose and dropped nothing."
-            ),
+            text=_unranked_text(rows, run),
             showarrow=False,
             font={"color": "white", "size": 13},
             bgcolor=UNRANKED,
@@ -160,11 +196,11 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
     fig.update_yaxes(
         tickmode="array",
         tickvals=y,
-        ticktext=[r["candidate"] for r in rows],
+        ticktext=[f"{r['candidate']}<br><sup>n={r['n']}</sup>" if r.get("n") else r["candidate"] for r in rows],
         autorange="reversed",
         showgrid=False,
         zeroline=False,
         title=None,
     )
-    fig.update_xaxes(title=f"paired ddE ({unit}), lower is better", zeroline=False)
+    fig.update_xaxes(title=f"paired ddE ({unit}), lower is better; ticks are single poses", zeroline=False)
     return fig

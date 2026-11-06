@@ -18,22 +18,28 @@ from dataclasses import dataclass, field
 
 from .catalog import Method, catalog, method
 
-#: The order `smeltery run` executes stages in (`smeltery.cli.build_plan` then `run_plan`).
-EXECUTION_ORDER: tuple[str, ...] = (
-    "structure",
-    "docking",
-    "paired_poses",
-    "pocket",
-    "parity",
-    "posebusters",
-    "forcefield",
-    "gfn2",
-    "field_interaction",
-    "cut",
-)
+
+def execution_order() -> tuple[str, ...]:
+    """The order `smeltery run` executes stages in (`smeltery.cli.build_plan` then `run_plan`), from each
+    registration's `order` (`smeltery.methods.execution_order`)."""
+    from ..methods import execution_order as _order
+
+    return _order()
+
+
+def __getattr__(name: str):
+    if name == "EXECUTION_ORDER":  # derived on every read, so a registration made later is in it
+        return execution_order()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 #: Measured quantity the cut ranks (`smeltery.cli.QUANTITY`).
 QUANTITY = "dE_int"
+
+
+def _alternative_placed(m: Method, placed: list[str]) -> bool:
+    """A required method is satisfied by a placed method it is exclusive with (its alternative)."""
+    return any(o in placed for o in m.exclusive)
 
 
 class PipelineError(ValueError):
@@ -72,6 +78,8 @@ class Pipeline:
     stages: list[Stage] = field(default_factory=list)
     #: The config's `[decisions]` table, carried through unchanged (an input file, not a stage), or None.
     decisions: dict | None = None
+    #: The config's `[run]` table (how the run executes, e.g. `scf_timeout_s`), carried through unchanged, or None.
+    run: dict | None = None
 
     # ------------------------------------------------------------------ building
 
@@ -93,10 +101,14 @@ class Pipeline:
                 return s
         raise KeyError(f"no {key!r} stage in this pipeline; stages: {self.keys()}")
 
-    def add(self, key: str, params: dict | None = None, at: int | None = None) -> Stage:
+    def add(self, key: str, params: dict | None = None, at: int | None = None, defaults: dict | None = None) -> Stage:
         """Place method `key`. `at` is an index (a drop position); by default the stage goes where
         `smeltery run` would execute it. Refuses an unknown, implicit or duplicate method; anything else
-        (unwired, misordered, conflicting) is allowed here and reported by `check()`, so a GUI can show it."""
+        (unwired, misordered, conflicting) is allowed here and reported by `check()`, so a GUI can show it.
+
+        `defaults` is the workspace's `{method_key: {param_name: value}}`. This method's entry is COPIED into the
+        stage under whatever `params` sets, so the config alone says what runs and a later change to the workspace
+        defaults reaches no existing stage. Names the method no longer has are not copied."""
         m = method(key)
         if m.implicit:
             raise ValueError(f"{key!r} always runs in smeltery run; it is shown, not placed")
@@ -105,7 +117,9 @@ class Pipeline:
         if at is None:
             rank = _exec_rank(key)
             at = sum(1 for s in self.stages if _exec_rank(s.method) <= rank)
-        s = Stage(key, dict(params or {}))
+        known = {p.name for p in m.params}
+        copied = {k: v for k, v in ((defaults or {}).get(key) or {}).items() if k in known}
+        s = Stage(key, {**copied, **(params or {})})
         self.stages.insert(at, s)
         return s
 
@@ -158,8 +172,9 @@ class Pipeline:
                 if other in known and keys.index(other) > keys.index(k):
                     issues.append(Issue("error", k, f"cannot be combined with {other!r}"))
         for k, m in catalog().items():
-            if m.required and k not in known:
-                issues.append(Issue("error", None, f"add {k!r} ({m.label}): every pipeline needs it"))
+            if m.required and k not in known and not _alternative_placed(m, known):
+                alts = "".join(f" or {o!r} ({method(o).label})" for o in m.exclusive if method(o).wired)
+                issues.append(Issue("error", None, f"add {k!r} ({m.label}){alts}: every pipeline needs it"))
         if "structure" in known and "docking" not in known:
             issues.append(Issue("error", "structure", "a structure is docked into: add 'docking' after it"))
         if "pocket" not in known and "structure" not in known:
@@ -189,7 +204,8 @@ class Pipeline:
             provided |= set(m.provides)
             if k == "docking":
                 provided.add("parent_poses")
-        placed = [k for k in known if k in EXECUTION_ORDER]
+        order = execution_order()
+        placed = [k for k in known if k in order]
         runs = sorted(placed, key=_exec_rank)
         if placed != runs and not issues:
             issues.append(Issue("note", None, "smeltery run executes these in the order " + " -> ".join(runs)))
@@ -237,9 +253,21 @@ class Pipeline:
         return out
 
     def _tier_floor(self) -> float | None:
-        from ..tiers import FieldInteraction
+        """The systematic floor of whichever tier this pipeline measures dE_int with: the placed method of the
+        `measure` slot, else the required one (what `smeltery.cli.measurement_tier` picks)."""
+        from ..methods import by_slot
+        from ..tier_registry import registered_tiers
 
-        return FieldInteraction().systematic_floor(QUANTITY)
+        measures = by_slot("measure")
+        placed = [s for s in measures if s.key in self.keys()]
+        spec = (placed or [s for s in measures if s.required])[0]
+        if spec.tier is None:
+            return None
+        try:
+            tier = registered_tiers()[spec.tier]()
+        except Exception:  # a tier that needs constructor inputs cannot say; the cut's floor must be explicit
+            return None
+        return tier.systematic_floor(QUANTITY)
 
     def _validator(self) -> list[Issue]:
         from ..cli import ConfigError, validate_config
@@ -277,6 +305,8 @@ class Pipeline:
             cfg["gates"] = gates
         if self.decisions is not None:
             cfg["decisions"] = dict(self.decisions)
+        if self.run is not None:
+            cfg["run"] = dict(self.run)
         return cfg
 
     def compile(self) -> dict:
@@ -301,8 +331,12 @@ class Pipeline:
         p = cls(cfg.get("campaign", ""), cfg.get("parent", ""), dict(cfg.get("candidates", {})))
         if "decisions" in cfg:
             p.decisions = dict(cfg["decisions"])
+        if isinstance(cfg.get("run"), dict):
+            p.run = dict(cfg["run"])
         for section, key in by_section.items():
-            if section in cfg or method(key).required or (key == "docking" and "structure" in cfg):
+            m = method(key)
+            alternative = any(method(o).section in cfg for o in m.exclusive)
+            if section in cfg or (m.required and not alternative) or (key == "docking" and "structure" in cfg):
                 p.add(key, dict(cfg.get(section, {})))
         for gate, key in by_gate.items():
             if gates.pop(gate, False):
@@ -355,7 +389,8 @@ class Pipeline:
 
 
 def _exec_rank(key: str) -> int:
-    return EXECUTION_ORDER.index(key) if key in EXECUTION_ORDER else len(EXECUTION_ORDER)
+    order = execution_order()
+    return order.index(key) if key in order else len(order)
 
 
 def _artefact(a: str) -> str:

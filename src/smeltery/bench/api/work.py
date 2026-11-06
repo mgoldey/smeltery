@@ -18,13 +18,14 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 from smeltery.bench.provisional import place_site, provisional_pose
-from smeltery.bench.use_cases.launch_run import LaunchRun
+from smeltery.bench.use_cases.launch_run import LaunchRun, LiveRunRefused
 from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import catalog, catalog_json, method
 from smeltery.gui.pipeline import Pipeline
 
 from . import models as M
 from .common import ports, run
+from .methods import workspace_defaults
 
 router = APIRouter(prefix="/api", tags=["work"])
 
@@ -108,8 +109,12 @@ def _parse(text: str) -> Pipeline:
         raise HTTPException(status_code=400, detail=f"cannot read this TOML: {e}") from e
 
 
+def pipeline_issues(p: Pipeline) -> list[M.Issue]:
+    return [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
+
+
 def _state(p: Pipeline) -> M.PipelineState:
-    issues = [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
+    issues = pipeline_issues(p)
     return M.PipelineState(
         toml=dumps(p.to_config()),
         ok=not any(i.level == "error" for i in issues),
@@ -145,10 +150,13 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
         cut["floor"] = floor.get("value")
     p.set("cut", **cut)
     by_gate = {m.gate_key: k for k, m in catalog().items() if m.gate_key}  # the TOML's gate names -> stage keys
-    for gate, on in inputs.get("gates", {}).items():
+    gates = inputs.get("gates", {})
+    for gate, on in gates.items():
         key = by_gate.get(gate)
         if on is True and key and key in p.addable():
-            p.add(key)
+            p.add(key)  # a copy of what ran: the workspace defaults are for methods added new, not for this
+    if "forcefield" in p.keys() and gates.get("max_strain_kcal") is not None:
+        p.set("forcefield", max_strain_kcal=gates["max_strain_kcal"])
     if inputs.get("field"):
         notes.append(
             f"This run's {len(inputs['field'])} pocket charges are recorded as positions, not as the atom sites that "
@@ -160,11 +168,12 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
 
 
 @router.post("/pipeline/edit", response_model=M.PipelineState)
-def pipeline_edit(body: M.PipelineEdit) -> M.PipelineState:
+def pipeline_edit(request: Request, body: M.PipelineEdit) -> M.PipelineState:
     p = _parse(body.toml)
+    defaults = workspace_defaults(request) if body.op == "add" else None
     try:
         if body.op == "add":
-            p.add(body.key, body.params or None, at=body.at)
+            p.add(body.key, body.params or None, at=body.at, defaults=defaults)
         elif body.op == "remove":
             p.remove(body.key)
         elif body.op == "move":
@@ -217,7 +226,12 @@ def pipeline_launch(request: Request, body: M.LaunchRequest) -> Any:
     out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
     if not out.is_absolute():
         out = root / out
-    tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock).run(p, out_dir=out)
+    try:
+        tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
+            p, out_dir=out
+        )
+    except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
+        raise HTTPException(status_code=409, detail=str(e)) from None
     t = st.task_queue.get(tid)
     if t is None:
         raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")

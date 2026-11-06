@@ -20,9 +20,12 @@ dependencies = [
     # ferric publishes only pre-releases so far; the explicit pre-release floor
     # lets pip select them. For development, [tool.uv.sources] below pins an
     # exact ferric commit instead.
-    "ferric>=0.1.0rc6",
+    "ferric>=0.1.0rc10",
     "rdkit>=2024.3",
     "numpy>=1.26",
+    # Core, not a `gui`/`bench` extra: `smeltery run --out` stages the config's input files, which rewrites
+    # their paths while keeping the config's comments. tomllib only reads, so staging needs tomlkit.
+    "tomlkit>=0.13",
 ]
 
 [project.scripts]
@@ -72,12 +75,12 @@ aimnet2 = ["aimnet>=0.2.0", "torch>=2.8", "numpy"]
 experiments = ["psutil>=5.9", "scipy>=1.11"]
 # The GUI (smeltery.gui.app, docs/gui.md): the Marimo app and its views. Only smeltery.gui.views imports these, and
 # only inside functions, so `import smeltery.gui` works without the extra. mols2grid needs pandas and pulls it in.
-gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
+gui = ["marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6", "tomlkit>=0.13"]
 # `smeltery bench` (smeltery.bench): the API and the built React app (ui/, built into src/smeltery/bench/web/ and
 # shipped in the wheel). plotly and molviewspec are here, not only in `gui`, because the API serves the figures
 # and pose scenes smeltery.gui builds, and those import them lazily: without them the app starts and then fails
 # on the first plot.
-bench = ["fastapi>=0.120", "uvicorn>=0.38", "plotly>=6", "molviewspec>=1.8"]
+bench = ["fastapi>=0.120", "uvicorn>=0.38", "plotly>=6", "molviewspec>=1.8", "tomlkit>=0.13"]
 # `smeltery gui OUT --desktop`: the same app in a pywebview window instead of a browser tab.
 desktop = ["pywebview>=5", "marimo>=0.25", "anywidget>=0.11", "mols2grid>=2.2", "molviewspec>=1.8", "plotly>=6"]
 # scripts/plb_pocket_charges.py only (force-field charges for a PLB protein, docs/benchmarks/plb_plan.md). One-off tool
@@ -100,7 +103,7 @@ pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
 # An exact commit, not a branch: the run record reports this SHA, read back
 # from the installed package's metadata. To develop against a local ferric
 # checkout instead, point this at it: ferric = { path = "../ferric" }
-ferric = { git = "https://github.com/mgoldey/ferric", rev = "b22183b9dbed226e1d2acc5cb6e5194c973b023b" }
+ferric = { git = "https://github.com/mgoldey/ferric", rev = "d13daf20e273685e57cd1866795892e536057c26" }
 
 [build-system]
 requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]
@@ -115,7 +118,7 @@ source = "vcs"
 packages = ["src/smeltery"]
 # The built Bench UI is gitignored (it is build output), and hatch leaves ignored files out by default; `artifacts`
 # puts it back. CI and release run `npm run build` in ui/ before building the wheel.
-artifacts = ["src/smeltery/bench/web/**"]
+artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -61,6 +61,12 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "import fastapi, uvicorn, plotly, molviewspec",
         # each snippet is its own interpreter, so the import and the assert share one
         "from smeltery.bench.app import create_app, WEB_DIR; assert (WEB_DIR / 'index.html').is_file(), WEB_DIR",
+        # the prebuilt pipelines ship as package data: each has its config and a finished run
+        # One segment per joinpath: MultiplexedPath.joinpath takes several only from 3.12, and CI runs 3.11.
+        "from importlib import resources; r = resources.files('smeltery.prebuilt'); "
+        "bad = [n for n in ('benzoic-rhf', 'benzoic-pbe', 'docking', 'structure') "
+        "if not (r.joinpath(n).joinpath('pipeline.toml').is_file() and r.joinpath(n).joinpath('run').is_dir() "
+        "and any(c.name.startswith('run-') for c in r.joinpath(n).joinpath('run').iterdir()))]; assert not bad, bad",
     ],
 }
 #: extras too heavy to install on every run: `check` only proves that pip can RESOLVE them unless `--full` is given
@@ -149,7 +155,16 @@ def check(
         for snippet in EXTRA_CHECKS[extra]:
             _run([str(py), "-c", snippet], cwd=scratch)
         if config is not None:
-            _run([str(venv / "bin" / "smeltery"), "run", str(config.resolve()), "--plan"], cwd=scratch)
+            # With `--out`, so the run stages its config and input files. Staging rewrites TOML in place and so
+            # needs tomlkit; a plain `--plan` never calls it, which let a core install that could not stage ship
+            # green. The staged directory is the real deliverable of a run, so the smoke test writes one.
+            _run(
+                [str(venv / "bin" / "smeltery"), "run", str(config.resolve()), "--plan", "--out", "staged"],
+                cwd=scratch,
+            )
+            if not (scratch / "staged" / "config.toml").is_file():
+                print("error: `smeltery run --out staged` wrote no staged config.toml", file=sys.stderr)
+                return 1
         if example is not None:
             probe = (
                 "import importlib.metadata as m; print(m.distribution('ferric').read_text('direct_url.json') is None)"

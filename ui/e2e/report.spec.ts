@@ -32,6 +32,7 @@ test("a comment on a candidate appears in its thread with the author from Identi
 });
 
 test("nothing on the report edits the method or starts work", async ({ page }) => {
+  test.slow(); // every select and button is exercised, and each pose switch reloads the 3D viewer
   const forbidden: string[] = [];
   page.on("request", (r) => {
     const u = new URL(r.url());

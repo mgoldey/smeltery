@@ -26,7 +26,7 @@ _POSE_KEYS = ("per_pose", "units", "poses", "field", "receptor")
 
 @dataclass
 class Run:
-    record: dict  # the parsed run-*.json
+    record: dict  # the parsed run-*.json, through `contract_record` (an imported record's derived values laid over)
     out_dir: Path  # where `poses/...` paths resolve
 
     @property
@@ -90,6 +90,12 @@ def pose_output(run: Run, key: str):
     try:
         return run.record["results"][key]
     except KeyError:
+        imported = run.record["results"].get("imported")
+        if isinstance(imported, dict):
+            raise ValueError(
+                f"{run.campaign}: this run was imported from {imported.get('importer')}, and results.{key} "
+                "was not recorded by the original run, so it cannot be shown"
+            ) from None
         raise ValueError(
             f"{run.campaign}: the run record has no results.{key}; it predates pose output "
             "(docs/gui-contract.md section 1) and must be re-run with this smeltery to show it"
@@ -100,7 +106,7 @@ def _check_record(record: dict, where: Path) -> None:
     for key in ("campaign", "inputs", "results"):
         if key not in record:
             raise ValueError(f"{where}: not a smeltery run record (no {key!r})")
-    for key in ("parent", "candidates", "cut", "floor"):
+    for key in CONTRACT_INPUTS:
         if key not in record["inputs"]:
             raise ValueError(f"{where}: run record has no inputs.{key}")
     results = record["results"]
@@ -109,9 +115,31 @@ def _check_record(record: dict, where: Path) -> None:
             raise ValueError(f"{where}: run record has no results.{key}")
 
 
+#: `record.inputs` keys a viewer reads; `load_run` requires each.
+CONTRACT_INPUTS = ("parent", "candidates", "cut", "floor")
+
+
+def contract_record(record: dict) -> dict:
+    """The record as the contract reads it. For an imported record (`results.imported`), each value an importer
+    derived (`results.imported.derived["inputs.<key>"]` or `["results.<key>"]`, a dict with `value` and `from`) is
+    laid over `inputs` or `results`; the record's own `inputs` stay the original's, which `input_digest` hashes. Any
+    other record is returned unchanged (the same object)."""
+    results = record.get("results")
+    imported = results.get("imported") if isinstance(results, dict) else None
+    derived = imported.get("derived") if isinstance(imported, dict) else None
+    if not isinstance(derived, dict):
+        return record
+    out = {**record, "inputs": dict(record.get("inputs") or {}), "results": dict(results)}
+    for key, d in derived.items():
+        where, _, name = str(key).partition(".")
+        if where in ("inputs", "results") and name and isinstance(d, dict) and "value" in d:
+            out[where][name] = d["value"]
+    return out
+
+
 def load_run(path: str | Path) -> Run:
     """Read a run. `path` is a run-*.json, or an OUT directory holding exactly one; anything else is a
-    ValueError that names what was found."""
+    ValueError that names what was found. An imported record is read through `contract_record`."""
     p = Path(path)
     if p.is_dir():
         found = sorted(p.glob("run-*.json"))
@@ -127,6 +155,7 @@ def load_run(path: str | Path) -> Run:
         raise ValueError(f"{p}: cannot read run record: {e}") from e
     if not isinstance(record, dict):
         raise ValueError(f"{p}: not a smeltery run record (not a JSON object)")
+    record = contract_record(record)
     _check_record(record, p)
     return Run(record, p.parent)
 
@@ -141,7 +170,7 @@ def _cut_order(run: Run) -> list[str]:
 
 
 def ddE_table(run: Run) -> list[dict]:
-    """One row per analogue, in cut order (groups flattened): candidate, smiles, mean, sem, n, lo, hi
+    """One row per analogue, in cut order (groups flattened): candidate, smiles, mean, sem, n, per_pose, lo, hi
     (mean -/+ z*sem), unpaired_sem, group (index into run.groups), survivor (None when the cut was unranked)."""
     smiles = run.candidates
     unpaired = run.record["results"]["unpaired_sem"]
@@ -157,6 +186,7 @@ def ddE_table(run: Run) -> list[dict]:
                     "mean": m.mean,
                     "sem": m.sem,
                     "n": m.n,
+                    "per_pose": list(m.per_pose),  # the values behind the mean: a forest plot draws them
                     "lo": m.mean - run.z * m.sem,
                     "hi": m.mean + run.z * m.sem,
                     "unpaired_sem": float(unpaired[name]) if name in unpaired else None,
@@ -176,24 +206,61 @@ def resolved_matrix(run: Run) -> tuple[list[str], list[list[bool]]]:
     return names, matrix
 
 
-def per_pose_table(run: Run, quantity: str = "dE_int") -> list[dict]:
-    """One row per (analogue, pose) in cut order: candidate, pose, value, parent_value, paired (value -
-    parent_value). Poses pair by index. KeyError naming the quantities present if `quantity` was not recorded."""
+def pose_indices(run: Run, name: str, n: int) -> list[int]:
+    """The original pose index of each of `name`'s `n` recorded poses (its per-pose values, its SDF records). After a
+    pairwise pose drop (`smeltery run --temporal`) that is `results.pose_index[name]`; otherwise poses were never
+    dropped and record `k` is pose `k`. ValueError when the record's list does not have `n` entries."""
+    got = (run.record["results"].get("pose_index") or {}).get(name)
+    if got is None:
+        return list(range(n))
+    if len(got) != n:
+        raise ValueError(f"{name!r} has {n} recorded poses but results.pose_index lists {len(got)}")
+    return [int(i) for i in got]
+
+
+def paired_poses(run: Run, name: str, quantity: str = "dE_int") -> list[dict]:
+    """One analogue's rows of `per_pose_table`. Analogue pose `i` pairs with parent pose `i` by ORIGINAL index:
+    after a pairwise drop the two lists differ in length, and `results.pose_index` says which pose each value is."""
     per_pose = pose_output(run, "per_pose")
     present = sorted({q for qs in per_pose.values() for q in qs})
-    if quantity not in per_pose.get(run.parent, {}):
-        raise KeyError(f"{quantity!r} was not recorded for the parent; per-pose quantities present: {present}")
-    parent = per_pose[run.parent][quantity]
+    for who in (run.parent, name):
+        if quantity not in per_pose.get(who, {}):
+            raise KeyError(f"{quantity!r} was not recorded for {who!r}; per-pose quantities present: {present}")
+    parent, values = per_pose[run.parent][quantity], per_pose[name][quantity]
+    if "pose_index" not in run.record["results"] and len(values) != len(parent):
+        raise ValueError(f"{name!r} has {len(values)} poses of {quantity!r}, the parent {len(parent)}")
+    at = {orig: k for k, orig in enumerate(pose_indices(run, run.parent, len(parent)))}
     rows = []
-    for name in _cut_order(run):
-        if quantity not in per_pose.get(name, {}):
-            raise KeyError(f"{quantity!r} was not recorded for {name!r}; per-pose quantities present: {present}")
-        values = per_pose[name][quantity]
-        if len(values) != len(parent):
-            raise ValueError(f"{name!r} has {len(values)} poses of {quantity!r}, the parent {len(parent)}")
-        for i, (v, pv) in enumerate(zip(values, parent, strict=True)):
-            rows.append({"candidate": name, "pose": i, "value": v, "parent_value": pv, "paired": v - pv})
+    for k, (orig, v) in enumerate(zip(pose_indices(run, name, len(values)), values, strict=True)):
+        if orig not in at:
+            raise ValueError(f"{name!r} pose {orig} was kept but the parent's pose {orig} was dropped")
+        pv = parent[at[orig]]
+        rows.append(
+            {
+                "candidate": name,
+                "pose": orig,
+                "position": k,
+                "parent_position": at[orig],
+                "value": v,
+                "parent_value": pv,
+                "paired": v - pv,
+            }
+        )
     return rows
+
+
+def per_pose_table(run: Run, quantity: str = "dE_int") -> list[dict]:
+    """One row per (analogue, pose) in cut order: candidate, pose (the ORIGINAL pose index, the pairing key), position
+    (the pose's place in the candidate's per-pose values and SDF), parent_position (the same for the parent's pose),
+    value, parent_value, paired (value - parent_value). Poses pair by original index (`pose_indices`): an analogue
+    has no row for a pose dropped from it. KeyError naming the quantities present if `quantity` was not recorded."""
+    return [row for name in _cut_order(run) for row in paired_poses(run, name, quantity)]
+
+
+def dropped_poses(run: Run) -> list[dict]:
+    """`results.dropped_poses`, unchanged: the poses a `--temporal` run dropped, one entry per failed leg. Empty when
+    none was."""
+    return [dict(d) for d in run.record["results"].get("dropped_poses") or []]
 
 
 def funnel_rows(run: Run) -> list[dict]:

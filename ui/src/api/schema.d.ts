@@ -131,6 +131,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Methods */
+        get: operations["list_methods_api_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/methods/{key}": {
         parameters: {
             query?: never;
@@ -140,7 +157,8 @@ export interface paths {
         };
         /** Get Method */
         get: operations["get_method_api_methods__key__get"];
-        put?: never;
+        /** Put Method Defaults */
+        put: operations["put_method_defaults_api_methods__key__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -243,6 +261,248 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pipelines */
+        get: operations["list_pipelines_api_pipelines_get"];
+        put?: never;
+        /** Create Pipeline */
+        post: operations["create_pipeline_api_pipelines_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/active_site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose Active Site
+         * @description Switch step 1 to one of its three ways, writing only the lines that change into the user's text
+         *     (`config_text.apply`): a structure adds `[structure]` and `[docking]`, a pocket file keeps `[pocket] file` with
+         *     the docking receptor and box, hand-placed charges drop both.
+         */
+        post: operations["choose_active_site_api_pipelines_active_site_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Edit
+         * @description One step edit applied to the user's text: only the lines the edit changes are written, comments and layout
+         *     stay (`config_text.apply`). Workspace defaults are copied into a method when it is added.
+         */
+        post: operations["pipeline_edit_api_pipelines_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Impact
+         * @description What the edit costs, without running docking or an SCF: estimates from RDKit-placed poses, from the source
+         *     run's poses when nothing upstream of them changed, or "cannot say".
+         */
+        post: operations["pipeline_impact_api_pipelines_impact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/ligands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ligands Check
+         * @description What can be said about each candidate before anything runs: parses, charge, electron parity, STO-3G cover
+         *     and the core it shares with the parent. RDKit only; fast enough to call on every edit.
+         */
+        post: operations["ligands_check_api_pipelines_ligands_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/ligands/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ligands Edit
+         * @description Apply one add / remove / rename / set_smiles / set_parent to the user's live text (comments and layout stay).
+         *     Removing the parent is refused: pick another parent first. A rename of the parent moves `parent` with it.
+         */
+        post: operations["ligands_edit_api_pipelines_ligands_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/pocket_preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pocket Preview
+         * @description The point-charge field the run would build, without docking or an SCF: `[structure]` is cleaned and cut around
+         *     its centre exactly as `smeltery run` does (minus the Meeko receptor), `[pocket] file` is loaded whole, and placed
+         *     sites are only counted. 409 names the binary a .pdb needs when it is missing.
+         */
+        post: operations["pocket_preview_api_pipelines_pocket_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Steps
+         * @description The draft drawn as its six steps, each with its knobs, its state against the kept text, and its issues.
+         */
+        post: operations["pipeline_steps_api_pipelines_steps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pipeline */
+        get: operations["get_pipeline_api_pipelines__name__get"];
+        /** Put Pipeline */
+        put: operations["put_pipeline_api_pipelines__name__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/launch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Launch
+         * @description Run the KEPT config: inputs staged into OUT by hash, relative paths resolved against the pipeline's folder.
+         *     Refused, with the number of errors and each one, while `Pipeline.check()` reports an error.
+         */
+        post: operations["pipeline_launch_api_pipelines__name__launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pipeline Preview
+         * @description Submit `smeltery run config.toml --plan --out <folder>/preview`: poses, digest, seconds and memory, no SCF.
+         */
+        post: operations["pipeline_preview_api_pipelines__name__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prebuilt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Prebuilt */
+        get: operations["list_prebuilt_api_prebuilt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/proposals": {
         parameters: {
             query?: never;
@@ -334,6 +594,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/calcs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Calcs
+         * @description Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
+         *     written, of one field model: `field_model`, else the run's primary one (`results.calcs.primary`). A line naming
+         *     no model (a run from before models were recorded) is the primary's. `pose` is the record's place in the
+         *     candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
+         *     409 when the run kept no SCF log.
+         */
+        get: operations["run_calcs_api_runs__idx__calcs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/charge_sensitivity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Charge Sensitivity */
+        get: operations["run_charge_sensitivity_api_runs__idx__charge_sensitivity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/comments": {
         parameters: {
             query?: never;
@@ -390,6 +691,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/dropped_poses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Dropped Poses */
+        get: operations["run_dropped_poses_api_runs__idx__dropped_poses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/figures/{name}": {
         parameters: {
             query?: never;
@@ -403,6 +721,40 @@ export interface paths {
          *     re-derives or recolours it.
          */
         get: operations["run_figure_api_runs__idx__figures__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/gates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Gates */
+        get: operations["run_gates_api_runs__idx__gates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Lineage */
+        get: operations["run_lineage_api_runs__idx__lineage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -441,6 +793,26 @@ export interface paths {
          *     SDF bytes, never derived from the SMILES, so a mismatch with any depiction is detectable.
          */
         get: operations["run_pose_atoms_api_runs__idx__pose_atoms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/pose_maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Pose Maps
+         * @description Empty for a record written before pose maps were kept; the Poses view then cannot tell core from the rest.
+         */
+        get: operations["run_pose_maps_api_runs__idx__pose_maps_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -743,6 +1115,74 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActiveSiteChoice */
+        ActiveSiteChoice: {
+            /**
+             * Allow Network
+             * @default false
+             */
+            allow_network: boolean;
+            /** Box Center */
+            box_center?: number[] | null;
+            /** Box Size */
+            box_size?: number[] | null;
+            /** Center */
+            center?: number[] | null;
+            /**
+             * Choice
+             * @enum {string}
+             */
+            choice: "structure" | "pocket_file" | "hand_placed";
+            /**
+             * File
+             * @description pocket_file: a .pdb or .pqr in the receptor's frame
+             */
+            file?: string | null;
+            /** Pocket Cutoff */
+            pocket_cutoff?: number | null;
+            /**
+             * Receptor
+             * @description pocket_file: the prepared .pdbqt docking uses
+             */
+            receptor?: string | null;
+            /**
+             * Reference Ligand
+             * @description structure: HETATM RES[:CHAIN[:RESNUM]]; or center
+             */
+            reference_ligand?: string | null;
+            /**
+             * Spec
+             * @description structure: a .pdb path, PDB id or accession
+             */
+            spec?: string | null;
+            /** Toml */
+            toml: string;
+        };
+        /** BlankPipeline */
+        BlankPipeline: {
+            /** Campaign */
+            campaign: string;
+            /** Candidates */
+            candidates: {
+                [key: string]: string;
+            };
+            /** Parent */
+            parent: string;
+        };
+        /**
+         * CalcLines
+         * @description The SCF log lines of one pose: every line of the run's calc log whose candidate and original pose match.
+         */
+        CalcLines: {
+            /** File */
+            file: string | null;
+            /** Lines */
+            lines: {
+                [key: string]: unknown;
+            }[];
+            /** Pose */
+            pose: number;
+        };
         /** CampaignIn */
         CampaignIn: {
             /**
@@ -788,6 +1228,16 @@ export interface components {
             rungs: components["schemas"]["RungOut"][];
             /** Site Fields */
             site_fields: components["schemas"]["SiteField"][];
+        };
+        /**
+         * ChargeSensitivity
+         * @description `results.charge_sensitivity`, one entry per extra charge model; `models` None: the analysis did not run.
+         */
+        ChargeSensitivity: {
+            /** Models */
+            models: {
+                [key: string]: components["schemas"]["ModelSensitivity"];
+            } | null;
         };
         /** CommentIn */
         CommentIn: {
@@ -839,6 +1289,11 @@ export interface components {
             mean: number;
             /** N */
             n: number;
+            /**
+             * Per Pose
+             * @description the per-pose values behind the mean, in pose order
+             */
+            per_pose: number[];
             /** Sem */
             sem: number;
             /** Smiles */
@@ -895,6 +1350,46 @@ export interface components {
             /** User */
             user: string;
         };
+        /** DiffLine */
+        DiffLine: {
+            /** Line */
+            line: string;
+            /**
+             * Sign
+             * @description "+" added, "-" removed, " " unchanged context
+             */
+            sign: string;
+        };
+        /**
+         * DroppedPose
+         * @description One entry of `results.dropped_poses`: a leg that failed every rung, so its pose was dropped pairwise.
+         */
+        DroppedPose: {
+            /** Candidate */
+            candidate: string;
+            /** Dropped With */
+            dropped_with?: string[] | null;
+            /** Field Model */
+            field_model?: string | null;
+            /** Leg */
+            leg: string;
+            /** Outcome */
+            outcome?: string | null;
+            /** Pose */
+            pose: number;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Rungs Tried
+             * @default []
+             */
+            rungs_tried: number[];
+        };
+        /** EditedText */
+        EditedText: {
+            /** Toml */
+            toml: string;
+        };
         /** EntryIn */
         EntryIn: {
             /**
@@ -933,10 +1428,106 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** GateRow */
+        GateRow: {
+            /** Candidate */
+            candidate: string;
+            /** Checked */
+            checked: boolean;
+            /** Failed Checks */
+            failed_checks: string[];
+            /** Ok */
+            ok: boolean;
+            /** Over Strain */
+            over_strain: boolean | null;
+            /** Pose */
+            pose: number;
+            /** Posebusters */
+            posebusters: boolean | null;
+            /** Strain Kcal */
+            strain_kcal: number | null;
+        };
+        /**
+         * Gates
+         * @description `results.gates` as one row per (candidate, pose). `raw` is the record's own dict, unchanged.
+         */
+        Gates: {
+            /** Max Strain Kcal */
+            max_strain_kcal: number | null;
+            /** Ran */
+            ran: string[];
+            /** Raw */
+            raw: {
+                [key: string]: unknown;
+            };
+            /** Rows */
+            rows: components["schemas"]["GateRow"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Impact */
+        Impact: {
+            /** Changes */
+            changes: string[];
+            /** Issues */
+            issues: components["schemas"]["Issue"][];
+            memory: components["schemas"]["ImpactMemory"];
+            /** New Digest */
+            new_digest: boolean;
+            /**
+             * Poses From
+             * @enum {string}
+             */
+            poses_from: "computed" | "source run" | "none";
+            /** Preview Task */
+            preview_task: string | null;
+            seconds: components["schemas"]["ImpactSeconds"];
+        };
+        /**
+         * ImpactMemory
+         * @description `smeltery.cli.memory_estimate`'s shape, in every case; `estimate` is None when it cannot say.
+         */
+        ImpactMemory: {
+            /** Basis */
+            basis: string | null;
+            /** Check Memory */
+            check_memory: boolean;
+            /** Estimate */
+            estimate: {
+                [key: string]: unknown;
+            } | null;
+            /** Free Gb */
+            free_gb: number | null;
+            /** Require Free Gb */
+            require_free_gb: number | null;
+            /** Tier */
+            tier: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "fits" | "does not fit" | "cannot say" | "no model";
+        };
+        /** ImpactRequest */
+        ImpactRequest: {
+            /** Baseline Toml */
+            baseline_toml: string;
+            /** Name */
+            name?: string | null;
+            /** Source Run */
+            source_run?: number | null;
+            /** Toml */
+            toml: string;
+        };
+        /** ImpactSeconds */
+        ImpactSeconds: {
+            /** Basis */
+            basis: string;
+            /** Value */
+            value: number | null;
         };
         /** Issue */
         Issue: {
@@ -956,6 +1547,246 @@ export interface components {
             out?: string | null;
             /** Toml */
             toml: string;
+        };
+        /** LigandCheck */
+        LigandCheck: {
+            /**
+             * Core Atoms
+             * @description atoms of this candidate (SMILES with explicit hydrogens, AddHs order) that PairedPoses copies exactly from the parent; empty when there is no core. For the parent: every atom
+             */
+            core_atoms: number[];
+            /**
+             * Electrons
+             * @description electrons at that charge, hydrogens added: the CLI parity rule
+             */
+            electrons: number | null;
+            /**
+             * Electrons Even
+             * @description false means the closed-shell RHF tiers cannot run it
+             */
+            electrons_even: boolean | null;
+            /**
+             * Formal Charge
+             * @description sum of the SMILES' formal charges, as the CLI uses; null if unparseable
+             */
+            formal_charge: number | null;
+            /** Is Parent */
+            is_parent: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Problems
+             * @description every reason this candidate would fail a run, in words
+             */
+            problems: string[];
+            /** Smiles */
+            smiles: string;
+            /** Smiles Ok */
+            smiles_ok: boolean;
+            /**
+             * Sto3G Missing
+             * @description the elements without STO-3G: ferric's bundled set reaches Xe, so Cs and beyond
+             */
+            sto3g_missing: string[];
+            /**
+             * Sto3G Ok
+             * @description false when an element has no STO-3G in ferric's bundled basis set
+             */
+            sto3g_ok: boolean | null;
+        };
+        /** Ligands */
+        Ligands: {
+            /** Campaign */
+            campaign: string;
+            /** Candidates */
+            candidates: {
+                [key: string]: string;
+            };
+            /** Parent */
+            parent: string;
+        };
+        /**
+         * LigandsEdit
+         * @description One operation on the live text. The server reads the candidates from `toml` itself, so an edit can never be
+         *     built from a stale copy of the list.
+         */
+        LigandsEdit: {
+            /**
+             * Name
+             * @description the candidate the op applies to (for add: the new name)
+             */
+            name: string;
+            /**
+             * New Name
+             * @description rename: the new name
+             */
+            new_name?: string | null;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "add" | "remove" | "rename" | "set_smiles" | "set_parent";
+            /**
+             * Smiles
+             * @description add and set_smiles: the SMILES
+             */
+            smiles?: string | null;
+            /** Toml */
+            toml: string;
+        };
+        /** LigandsOut */
+        LigandsOut: {
+            /** Candidates */
+            candidates: components["schemas"]["LigandCheck"][];
+            /** Parent */
+            parent: string;
+            /**
+             * Problems
+             * @description problems with the list as a whole, e.g. a parent that is not a candidate
+             */
+            problems: string[];
+        };
+        /** LigandsRequest */
+        LigandsRequest: {
+            /** Toml */
+            toml: string;
+        };
+        /**
+         * Lineage
+         * @description What made one candidate's paired ΔΔE: its poses, the steps that ran, and what the run recorded about itself.
+         */
+        Lineage: {
+            calcs: components["schemas"]["LineageCalcs"] | null;
+            /** Candidate */
+            candidate: string;
+            config: components["schemas"]["LineageConfig"] | null;
+            /** Digest */
+            digest: string;
+            /** Engine */
+            engine: {
+                [key: string]: unknown;
+            };
+            field: components["schemas"]["LineageField"];
+            /** Mean */
+            mean: number;
+            /**
+             * Missing
+             * @description items above this run did not record (an older run, or no --out)
+             */
+            missing: string[];
+            /** N */
+            n: number;
+            /** Parent */
+            parent: string;
+            /** Poses */
+            poses: components["schemas"]["LineagePose"][];
+            /** Quantity */
+            quantity: string;
+            /** Sem */
+            sem: number;
+            /** Smeltery */
+            smeltery: {
+                [key: string]: unknown;
+            } | null;
+            /** Started Utc */
+            started_utc: string | null;
+            /** Steps */
+            steps: components["schemas"]["LineageStep"][];
+        };
+        /** LineageCalcs */
+        LineageCalcs: {
+            /** File */
+            file: string;
+            /** N */
+            n?: number | null;
+        };
+        /** LineageConfig */
+        LineageConfig: {
+            /** File */
+            file: string;
+            /** Inputs */
+            inputs: unknown;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** LineageField */
+        LineageField: {
+            /** N Charges */
+            n_charges: number;
+            /** Provenance */
+            provenance: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** LineagePose */
+        LineagePose: {
+            /** Difference */
+            difference: number;
+            /** Parent Value */
+            parent_value: number;
+            /** Pose */
+            pose: number;
+            /** Value */
+            value: number;
+        };
+        /** LineageStep */
+        LineageStep: {
+            /** Kind */
+            kind: string;
+            /** Seconds */
+            seconds: number | null;
+            /**
+             * Settings
+             * @description None: the stage should have a tier but the record has none
+             */
+            settings: {
+                [key: string]: unknown;
+            } | null;
+            /** Stage */
+            stage: string;
+        };
+        /**
+         * MethodDefaultsPut
+         * @description The workspace defaults of one method, replacing what was there; `{}` clears them.
+         */
+        MethodDefaultsPut: {
+            /** Defaults */
+            defaults: {
+                [key: string]: unknown;
+            };
+        };
+        /** MethodInfo */
+        MethodInfo: {
+            /**
+             * Cost Model
+             * @description how wall time is estimated, or 'cannot say: ...'
+             */
+            cost_model: string;
+            /**
+             * Floor
+             * @description the tier's measured systematic floor; null while it is unmeasured
+             */
+            floor: number | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Memory Model
+             * @description how memory is estimated, or 'cannot say: ...'
+             */
+            memory_model: string;
+            /** Params */
+            params: components["schemas"]["MethodParam"][];
+            /** Quantity */
+            quantity: string | null;
+            /** Summary */
+            summary: string;
+            /**
+             * Used By
+             * @description workspace pipelines that place this method
+             */
+            used_by: string[];
         };
         /** MethodOut */
         MethodOut: {
@@ -1020,6 +1851,95 @@ export interface components {
             /** Wired */
             wired: boolean;
         };
+        /**
+         * MethodParam
+         * @description One setting of a method: what the code defaults it to, what it does, and the workspace's own default.
+         */
+        MethodParam: {
+            /** Choices */
+            choices: unknown[];
+            /** Default */
+            default?: unknown;
+            /**
+             * Help
+             * @description one plain sentence, from the tier's own docs, saying what changing it does
+             */
+            help: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Optional */
+            optional: boolean;
+            /** Required */
+            required: boolean;
+            /**
+             * Workspace Default
+             * @description copied into a step when the method is added; null when unset
+             */
+            workspace_default: unknown;
+        };
+        /** ModelSensitivity */
+        ModelSensitivity: {
+            /**
+             * Dropped Poses
+             * @default {}
+             */
+            dropped_poses: {
+                [key: string]: number[];
+            };
+            /** Error */
+            error?: string | null;
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded: string[];
+            /**
+             * Failures
+             * @default {}
+             */
+            failures: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
+            /** Field */
+            field?: {
+                [key: string]: unknown;
+            } | null;
+            /** Floor */
+            floor?: number | null;
+            /** N */
+            n?: number | null;
+            /**
+             * N Dropped
+             * @default 0
+             */
+            n_dropped: number;
+            /** Note */
+            note?: string | null;
+            /**
+             * Paired Dde
+             * @default {}
+             */
+            paired_ddE: {
+                [key: string]: components["schemas"]["SensitivityRow"];
+            };
+            /**
+             * Parent Dropped Poses
+             * @default []
+             */
+            parent_dropped_poses: number[];
+            /** Primary Model */
+            primary_model?: string | null;
+            /** Sign Flips */
+            sign_flips?: number | null;
+            /** Spearman */
+            spearman?: number | null;
+            /** Stage */
+            stage?: string | null;
+        };
         /** ParamOut */
         ParamOut: {
             /**
@@ -1055,15 +1975,52 @@ export interface components {
             candidate: string;
             /** Paired */
             paired: number;
+            /** Parent Position */
+            parent_position: number;
             /** Parent Value */
             parent_value: number;
             /** Pose */
             pose: number;
+            /** Position */
+            position: number;
             /** Value */
             value: number;
         };
         /** PipelineCheck */
         PipelineCheck: {
+            /** Toml */
+            toml: string;
+        };
+        /** PipelineCreate */
+        PipelineCreate: {
+            blank?: components["schemas"]["BlankPipeline"] | null;
+            /** From Prebuilt */
+            from_prebuilt?: string | null;
+            /** From Run */
+            from_run?: number | null;
+            /** Name */
+            name: string;
+        };
+        /**
+         * PipelineDoc
+         * @description A workspace pipeline: its config text as saved, the hash a save must quote, and what `check()` finds.
+         */
+        PipelineDoc: {
+            /** Folder */
+            folder: string;
+            /** Issues */
+            issues: components["schemas"]["Issue"][];
+            /** Name */
+            name: string;
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            /** Ok */
+            ok: boolean;
+            /** Sha256 */
+            sha256: string;
             /** Toml */
             toml: string;
         };
@@ -1091,6 +2048,18 @@ export interface components {
         PipelineFromRun: {
             /** Run */
             run: number;
+        };
+        /** PipelineLaunch */
+        PipelineLaunch: {
+            /** Out */
+            out?: string | null;
+        };
+        /** PipelinePut */
+        PipelinePut: {
+            /** Base Sha256 */
+            base_sha256?: string | null;
+            /** Toml */
+            toml: string;
         };
         /** PipelineState */
         PipelineState: {
@@ -1137,6 +2106,43 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** PocketPreview */
+        PocketPreview: {
+            /** N Charges */
+            n_charges: number;
+            /**
+             * Nearest Ang
+             * @description nearest charge to the box centre / reference ligand, Angstrom
+             */
+            nearest_ang: number | null;
+            /**
+             * Net Charge
+             * @description sum of the point charges, e
+             */
+            net_charge: number;
+            /**
+             * Scene
+             * @description a MolViewSpec state for the viewer; null when nothing is placed in 3D
+             */
+            scene: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Source
+             * @description what the field was built from, in words
+             */
+            source: string;
+        };
+        /** PocketPreviewRequest */
+        PocketPreviewRequest: {
+            /**
+             * Pipeline
+             * @description the saved pipeline: relative paths resolve against its folder
+             */
+            pipeline?: string | null;
+            /** Toml */
+            toml: string;
+        };
         /** PoseAtoms */
         PoseAtoms: {
             /** Candidate */
@@ -1148,6 +2154,44 @@ export interface components {
             source: string;
             /** Symbols */
             symbols: string[];
+        };
+        /**
+         * PoseDrops
+         * @description What a `--temporal` run dropped. `pose_index` is `results.pose_index` (empty: no pose was dropped, record `k`
+         *     is pose `k`).
+         */
+        PoseDrops: {
+            /** Dropped */
+            dropped: components["schemas"]["DroppedPose"][];
+            /** Pose Index */
+            pose_index: {
+                [key: string]: number[];
+            };
+        };
+        /**
+         * PoseMaps
+         * @description `results.pose_maps`: per analogue, (analogue atom, parent atom) pairs copied exactly from the parent's pose.
+         */
+        PoseMaps: {
+            /** Maps */
+            maps: {
+                [key: string]: number[][];
+            };
+        };
+        /** Prebuilt */
+        Prebuilt: {
+            /** About */
+            about: string;
+            /** Name */
+            name: string;
+            /** Needs */
+            needs: string;
+            verdict: components["schemas"]["Verdict"];
+        };
+        /** PreviewStarted */
+        PreviewStarted: {
+            /** Task */
+            task: string;
         };
         /** Problem */
         Problem: {
@@ -1289,6 +2333,20 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * SensitivityRow
+         * @description One analogue's paired ddE under the primary charge model and under the other one (None: no pose on both).
+         */
+        SensitivityRow: {
+            /** Delta */
+            delta: number | null;
+            /** Model */
+            model: number | null;
+            /** N */
+            n: number;
+            /** Primary */
+            primary: number | null;
+        };
         /** SiteField */
         SiteField: {
             /** Kind */
@@ -1315,6 +2373,23 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** SiteSpec */
+        SiteSpec: {
+            /** Atom */
+            atom: number;
+            /**
+             * Distance
+             * @default 3
+             */
+            distance: number;
+            /** From Atom */
+            from_atom: number;
+            /**
+             * Q
+             * @default 1
+             */
+            q: number;
+        };
         /** Snapshot */
         Snapshot: {
             /**
@@ -1326,6 +2401,114 @@ export interface components {
             path: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** StepEdit */
+        StepEdit: {
+            /** Baseline Toml */
+            baseline_toml?: string | null;
+            /** Key */
+            key: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "add" | "remove" | "set" | "choose" | "site" | "revert";
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            } | null;
+            site?: components["schemas"]["SiteSpec"] | null;
+            /** Toml */
+            toml: string;
+        };
+        /** StepLink */
+        StepLink: {
+            /** Step */
+            step: string | null;
+            /** Text */
+            text: string;
+        };
+        /** StepOut */
+        StepOut: {
+            /** Chosen */
+            chosen: string | null;
+            /** Gives */
+            gives: components["schemas"]["StepLink"][];
+            /** Inputs */
+            inputs: components["schemas"]["StepLink"][];
+            /** Issues */
+            issues: components["schemas"]["Issue"][];
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Methods */
+            methods: string[];
+            /** Params */
+            params: components["schemas"]["StepParam"][];
+            /** Placed */
+            placed: string[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "needs_input" | "off" | "changed" | "stale";
+            /** Summary */
+            summary: string;
+        };
+        /** StepParam */
+        StepParam: {
+            /**
+             * Changed From
+             * @description the baseline's value when it differs, else null
+             */
+            changed_from: unknown;
+            /**
+             * Choices
+             * @default []
+             */
+            choices: unknown[];
+            /** Default */
+            default: unknown;
+            /** Help */
+            help: string;
+            /** Kind */
+            kind: string;
+            /** Method */
+            method: string;
+            /** Name */
+            name: string;
+            /** Value */
+            value: unknown;
+            /**
+             * Workspace Default
+             * @description the Methods tab's default for this knob, null when none is set
+             */
+            workspace_default: unknown;
+        };
+        /** StepsOut */
+        StepsOut: {
+            /**
+             * Diff
+             * @description the line diff from baseline_toml to toml, context lines included
+             */
+            diff: components["schemas"]["DiffLine"][];
+            /** @description what the Ligands step holds; null when the text is not a pipeline */
+            ligands: components["schemas"]["Ligands"] | null;
+            /**
+             * Pipeline Issues
+             * @description issues that belong to no one step: shown above the drawing
+             */
+            pipeline_issues: components["schemas"]["Issue"][];
+            /** Steps */
+            steps: components["schemas"]["StepOut"][];
+        };
+        /** StepsRequest */
+        StepsRequest: {
+            /** Baseline Toml */
+            baseline_toml?: string | null;
+            /** Toml */
+            toml: string;
         };
         /** StructureInfo */
         StructureInfo: {
@@ -1733,6 +2916,26 @@ export interface operations {
             };
         };
     };
+    list_methods_api_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MethodInfo"][];
+                };
+            };
+        };
+    };
     get_method_api_methods__key__get: {
         parameters: {
             query?: never;
@@ -1753,6 +2956,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_method_defaults_api_methods__key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MethodDefaultsPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MethodInfo"];
                 };
             };
             /** @description Validation Error */
@@ -1940,6 +3178,532 @@ export interface operations {
             };
         };
     };
+    list_pipelines_api_pipelines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    create_pipeline_api_pipelines_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    choose_active_site_api_pipelines_active_site_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveSiteChoice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedText"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_edit_api_pipelines_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedText"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_impact_api_pipelines_impact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImpactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Impact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_check_api_pipelines_ligands_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LigandsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LigandsOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_edit_api_pipelines_ligands_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LigandsEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedText"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pocket_preview_api_pipelines_pocket_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PocketPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PocketPreview"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_steps_api_pipelines_steps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepsOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pipeline_api_pipelines__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_pipeline_api_pipelines__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinePut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_launch_api_pipelines__name__launch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineLaunch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pipeline_preview_api_pipelines__name__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prebuilt_api_prebuilt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prebuilt"][];
+                };
+            };
+        };
+    };
     list_proposals_api_proposals_get: {
         parameters: {
             query?: {
@@ -2060,6 +3824,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_calcs_api_runs__idx__calcs_get: {
+        parameters: {
+            query: {
+                candidate: string;
+                pose: number;
+                field_model?: string | null;
+            };
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalcLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_charge_sensitivity_api_runs__idx__charge_sensitivity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChargeSensitivity"];
                 };
             };
             /** @description Validation Error */
@@ -2236,6 +4066,37 @@ export interface operations {
             };
         };
     };
+    run_dropped_poses_api_runs__idx__dropped_poses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoseDrops"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     run_figure_api_runs__idx__figures__name__get: {
         parameters: {
             query?: {
@@ -2259,6 +4120,70 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_gates_api_runs__idx__gates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Gates"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_lineage_api_runs__idx__lineage_get: {
+        parameters: {
+            query: {
+                candidate: string;
+            };
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lineage"];
                 };
             };
             /** @description Validation Error */
@@ -2325,6 +4250,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoseAtoms"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_pose_maps_api_runs__idx__pose_maps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoseMaps"];
                 };
             };
             /** @description Validation Error */
@@ -2409,6 +4365,7 @@ export interface operations {
             query: {
                 candidate: string;
                 pose?: number;
+                core?: boolean;
             };
             header?: never;
             path: {

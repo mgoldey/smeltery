@@ -267,7 +267,13 @@ def test_the_funnel_counts_every_stage_and_marks_the_cut_unranked():
     assert [r["stage"] for r in plan_rows] == ["poses", "pocket", "parity", "forcefield"]
     assert all(r["candidates_in"] == 2 == r["candidates_out"] for r in plan_rows)
     ranked = funnel_counts(plan, CutResult([["a"], ["b"]], ["a"], False, 2.0, 0.0))[-2:]
-    assert ranked[0] == {"stage": "field_interaction", "kind": "measure", "candidates_in": 2, "candidates_out": 2}
+    assert ranked[0] == {
+        "stage": "field_interaction",
+        "kind": "measure",
+        "candidates_in": 2,
+        "candidates_out": 2,
+        "seconds": None,  # no measurement ran: its wall time is unknown, never 0
+    }
     assert ranked[1]["stage"] == "cut" and ranked[1]["candidates_in"] == 1 and ranked[1]["candidates_out"] == 1
     unranked = funnel_counts(plan, CutResult([["a", "b"]], None, True, 2.0, 0.0, ["x"]))[-1]
     assert unranked["candidates_out"] is None and unranked["unranked"] is True

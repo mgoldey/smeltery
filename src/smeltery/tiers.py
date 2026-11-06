@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -256,6 +257,9 @@ class PairedPoses:
     parent_poses_given: bool = False
     relax_unmapped: bool = False
     analogue_poses_given: bool = False
+    #: Index of the first pose in the ensemble it was cut from: analogue pose i embeds its unmapped atoms with seed
+    #: `seed + first_pose_index + i`, so poses kept after dropping leading ones are the poses they were before the drop.
+    first_pose_index: int = 0
     #: Known scaffold cores: analogue name -> list of (analogue HEAVY atom, parent HEAVY atom) pairs.
     #: Supplied by a caller that knows the correspondence by construction (`ScaffoldGrowth` pins the
     #: scaffold, measured at 0.045-0.059 A RMSD with every element symbol and all 43/43 internal bonds
@@ -286,7 +290,7 @@ class PairedPoses:
                 "relax_unmapped",
                 "analogue_poses_given",
             )
-        }
+        } | ({"first_pose_index": self.first_pose_index} if self.first_pose_index else {})  # 0: digests unchanged
 
     def produces(self) -> dict[str, str]:
         return {}  # writes poses, no per_pose quantity
@@ -457,7 +461,7 @@ class PairedPoses:
             if len(mapping) == amol.GetNumAtoms():
                 xyz = np.zeros((amol.GetNumAtoms(), 3))
             else:
-                cid = AllChem.EmbedMolecule(amol, randomSeed=self.seed + i)
+                cid = AllChem.EmbedMolecule(amol, randomSeed=self.seed + self.first_pose_index + i)
                 if cid < 0:
                     raise RuntimeError(f"{cand.name}: could not embed pose {i}")
                 ref = Chem.Mol(pmol)
@@ -519,6 +523,105 @@ class PairedPoses:
         return out
 
 
+class _NotConverged:
+    """An engine result the ladder refused: `converged` is False whatever the engine said; the rest is the engine's."""
+
+    def __init__(self, res) -> None:
+        self._res = res
+
+    converged = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._res, name)
+
+
+def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seconds: float) -> dict:
+    """One `calc_log` line: a single SCF, logged whether or not it converged."""
+    return {
+        "candidate": candidate,
+        "pose": pose,
+        "leg": leg,
+        "converged": bool(result.converged),
+        "iterations": int(result.iterations),
+        "energy_hartree": float(energy),
+        "seconds": float(seconds),
+    }
+
+
+#: How far (Hartree) a rung's "converged" energy may sit above the lowest energy an earlier rung of the same leg
+#: reached before the convergence is refused. Every SCF iterate is the energy of a real determinant, so the RHF
+#: minimum cannot lie above one already reached; a rung that stops there has settled on a wrong state (ferric before
+#: 455b8fbad: ADIIS with a level shift "converged" in 3 iterations, 0.8 Ha high). 1e-4 Ha is 0.06 kcal/mol.
+FALSE_CONVERGENCE_HARTREE = 1e-4
+
+
+def refuse_false_convergence(row: dict, earlier: list[dict]) -> dict:
+    """`row` (a `calc_log` line) as the ladder must treat it: a converged line whose energy lies more than
+    `FALSE_CONVERGENCE_HARTREE` above the lowest energy of `earlier` (the same leg's lines at lower rungs) becomes
+    not converged, keeping what the engine said under `engine_converged` and why under `refused`."""
+    if not row.get("converged"):
+        return row
+    lows = [float(r["energy_hartree"]) for r in earlier if r.get("energy_hartree") is not None]
+    if not lows or float(row["energy_hartree"]) <= min(lows) + FALSE_CONVERGENCE_HARTREE:
+        return row
+    low = min(lows)
+    return {
+        **row,
+        "converged": False,
+        "engine_converged": True,
+        "refused": f"false convergence: {float(row['energy_hartree']):.6f} Ha is "
+        f"{float(row['energy_hartree']) - low:.4f} Ha above {low:.6f} Ha, which an earlier rung of this leg reached",
+    }
+
+
+#: `run_rhf` knobs a remedy rung may override, with their types: they change how the SCF reaches its solution, not
+#: which solution it reports.
+REMEDY_KEYS: dict[str, type] = {"max_iter": int, "diis": str, "diis_size": int, "level_shift": float, "soscf": bool}
+#: The DIIS flavours ferric's `run_rhf(diis=...)` accepts (a string; True is a TypeError there).
+DIIS_KINDS = ("pulay", "adiis", "ediis")
+#: Knobs a remedy may NOT override, and why: each changes the quantity being measured, so a value from that rung
+#: would not be the same measurement as a value from rung 0.
+REMEDY_REFUSED: dict[str, str] = {
+    "energy_conv": "a looser energy threshold changes the precision of the reported energy",
+    "density_conv": "a looser density threshold changes the precision of the reported energy",
+    "smearing": "fractional occupations change the state whose energy is reported",
+}
+
+
+def check_remedies(remedies) -> list[dict]:
+    """The remedy ladder as a list of plain dicts, or ValueError naming the first bad rung.
+
+    Rung 0 is the tier's own settings; rung k (k >= 1) is rung 0 with `remedies[k - 1]` applied on top."""
+    if not isinstance(remedies, (list, tuple)):
+        raise ValueError("remedies must be a list of tables of run_rhf knob overrides")
+    out = []
+    for k, r in enumerate(remedies, start=1):
+        if not isinstance(r, dict) or not r:
+            raise ValueError(f"remedies rung {k} must be a non-empty table of run_rhf knob overrides")
+        for key, v in r.items():
+            if key in REMEDY_REFUSED:
+                raise ValueError(
+                    f"remedies rung {k} overrides {key!r}: {REMEDY_REFUSED[key]}, so a value from that rung would "
+                    f"not be the same quantity; allowed overrides: {sorted(REMEDY_KEYS)}"
+                )
+            if key not in REMEDY_KEYS:
+                raise ValueError(f"remedies rung {k}: unknown override {key!r}; allowed: {sorted(REMEDY_KEYS)}")
+            want = REMEDY_KEYS[key]
+            if want is str:
+                if v not in DIIS_KINDS:
+                    raise ValueError(f"remedies rung {k}: diis = {v!r} is not one of {list(DIIS_KINDS)}")
+                continue
+            ok = isinstance(v, bool) if want is bool else (isinstance(v, (int, float)) and not isinstance(v, bool))
+            if want is int and ok:
+                ok = isinstance(v, int) and v >= 1
+            if want is float and ok:
+                ok = v >= 0
+            if not ok:
+                raise ValueError(f"remedies rung {k}: {key} = {v!r} is not a valid {want.__name__}")
+        out.append({key: (float(v) if REMEDY_KEYS[key] is float else v) for key, v in r.items()})
+    return out
+
+
 @dataclass
 class FieldInteraction:
     """ΔE_int = E_RHF(in point-charge field) − E_RHF(vacuum), per pose, in kcal/mol.
@@ -526,17 +629,29 @@ class FieldInteraction:
     Both energies are at the same geometry, so the difference is the field's
     interaction energy including the electronic polarization it induces. Unlike
     a total energy, it is comparable between molecules of different formula.
+
+    `remedies` is a ladder for a non-converged SCF: each rung a dict of `run_rhf` overrides (`REMEDY_KEYS`), tried
+    in order when the SCF before it did not converge (`result.converged`). Each leg (vacuum, field) of a pose climbs
+    on its own; the pose's value records the higher of its two legs' rungs in `per_pose["scf_rung"]`, and each SCF
+    its own rung in the calc log. Empty (the default) is exactly the tier without a ladder: same settings, same
+    record.
     """
 
     basis: str = "sto-3g"
     energy_conv: float = 1e-10
     density_conv: float = 1e-8
     max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
+    remedies: list[dict] = field(default_factory=list)
     name: str = "field_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
+    #: One dict per SCF of the last `run` (candidate, pose, leg, converged, iterations, energy_hartree, seconds).
+    calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.remedies = check_remedies(self.remedies)
 
     def settings(self) -> dict:
-        return {
+        s = {
             "method": "RHF",
             "basis": self.basis,
             "energy_conv": self.energy_conv,
@@ -545,14 +660,19 @@ class FieldInteraction:
             "engine": "ferric",
             "field": self.field_provenance,
         }
+        if self.remedies:  # only when set, so configs without a ladder keep their digests
+            s["remedies"] = [dict(r) for r in self.remedies]
+        return s
 
     def produces(self) -> dict[str, str]:
+        if self.remedies:
+            return {"dE_int": "kcal/mol", "scf_rung": "rung"}
         return {"dE_int": "kcal/mol"}
 
     def systematic_floor(self, quantity: str) -> float | None:
-        if quantity != "dE_int":
+        if quantity not in self.produces():
             raise _unknown_quantity(self, quantity)
-        return None  # charge-model / basis sensitivity not yet measured
+        return None  # dE_int: charge-model / basis sensitivity not yet measured; scf_rung is a count, not ranked
 
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
         """Measured reference time scaled by nbf^p (see `smeltery.cost`); None outside what was measured."""
@@ -566,13 +686,14 @@ class FieldInteraction:
             return none(f"calibrated for {cal.basis} only, tier is {self.basis}")
         if not candidates or any(not c.poses for c in candidates):
             return none("poses not built yet, so the SCF count is unknown")
-        total = 0.0
+        total, max_nbf = 0.0, 0
         for c in candidates:
             for pose in c.poses:
                 nbf = sto3g_basis_functions_strict(list(pose.symbols))
                 if nbf is None:
                     return none(f"{c.name}: element outside the STO-3G table")
                 total += cal.predicted_seconds_per_pose(nbf)
+                max_nbf = max(max_nbf, nbf)
         n = sum(len(c.poses) for c in candidates)
         return {
             "quantity": quantity,
@@ -580,8 +701,45 @@ class FieldInteraction:
             "predicted": total,
             "basis": f"{n} poses x (vacuum + field RHF) at {cal.basis}; measured {cal.reference_name} "
             f"({cal.reference_nbf} bf) {cal.reference_seconds:.3g} s scaled by nbf^{cal.exponent:.2f} "
-            f"(fit on calibration set), reference iteration count assumed; {cal.machine}",
+            f"(fit on calibration set), reference iteration count assumed; {cal.machine}"
+            f"{cal.extrapolation_note(max_nbf)}",
         }
+
+    @property
+    def n_rungs(self) -> int:
+        """Rung 0 (the base settings) plus one per remedy."""
+        return 1 + len(self.remedies)
+
+    def rung_kwargs(self, rung: int) -> dict:
+        """The `run_rhf` keyword arguments of `rung`: the base settings, then remedy `rung` on top."""
+        if not 0 <= rung < self.n_rungs:
+            raise ValueError(f"rung {rung} outside the ladder 0..{self.n_rungs - 1}")
+        kw: dict = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
+        if self.max_iter is not None:
+            kw["max_iter"] = self.max_iter
+        if rung:
+            kw.update(self.remedies[rung - 1])
+        return kw
+
+    def scf(self, ferric, mol, bs, charges, rung: int):
+        """One SCF of one leg at `rung` (`charges` None = vacuum); returns (result, wall seconds)."""
+        kw = self.rung_kwargs(rung)
+        t0 = time.perf_counter()
+        res = ferric.run_rhf(mol, bs, **kw) if charges is None else ferric.run_rhf(mol, bs, point_charges=charges, **kw)
+        return res, time.perf_counter() - t0
+
+    def _climb(self, ferric, mol, bs, charges, cand: str, pose: int, leg: str):
+        """One leg up the ladder until it converges or the rungs run out; every SCF logged. Returns (result, rung)."""
+        earlier: list[dict] = []
+        for rung in range(self.n_rungs):
+            res, secs = self.scf(ferric, mol, bs, charges, rung)
+            row = {**_calc_entry(cand, pose, leg, res, res.energy, secs), "rung": rung}
+            row = refuse_false_convergence(row, earlier)
+            self.calc_log.append(row)
+            if row["converged"]:
+                return res, rung
+            earlier.append(row)
+        return _NotConverged(res), rung
 
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         for cand in candidates:
@@ -592,20 +750,21 @@ class FieldInteraction:
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
+        self.calc_log = []
         for cand in candidates:
-            vals = []
+            vals, rungs = [], []
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
                 mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
-                kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
-                if self.max_iter is not None:
-                    kw["max_iter"] = self.max_iter
-                vac = ferric.run_rhf(mol, bs, **kw)
-                fld = ferric.run_rhf(mol, bs, point_charges=charges, **kw)
+                vac, vr = self._climb(ferric, mol, bs, None, cand.name, i, "vacuum")
+                fld, fr = self._climb(ferric, mol, bs, charges, cand.name, i, "field")
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
+                rungs.append(float(max(vr, fr)))
             cand.per_pose["dE_int"] = vals
+            if self.remedies:
+                cand.per_pose["scf_rung"] = rungs
 
 
 def _dft_energy(result) -> float:
@@ -685,6 +844,8 @@ class FieldDftInteraction:
     require_free_gb: float | None = None
     name: str = "field_dft_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
+    #: One dict per SCF of the last `run` (candidate, pose, leg, converged, iterations, energy_hartree, seconds).
+    calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def settings(self) -> dict:
         return {
@@ -824,6 +985,7 @@ class FieldDftInteraction:
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
+        self.calc_log = []
         for cand in candidates:
             vals: list[float] = []
             d3s: list[float] = []
@@ -833,8 +995,14 @@ class FieldDftInteraction:
                 kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
                 if self.max_iter is not None:
                     kw["max_iter"] = self.max_iter
+                t0 = time.perf_counter()
                 vac = ferric.run_dft(mol, bs, functional=self.functional, **kw)
+                t1 = time.perf_counter()
                 fld = ferric.run_dft(mol, bs, functional=self.functional, point_charges=charges, **kw)
+                t2 = time.perf_counter()
+                for leg, res, secs in (("vacuum", vac, t1 - t0), ("field", fld, t2 - t1)):
+                    # a non-converged energy is logged as-is: `_dft_energy` only refuses double-counted dispersion
+                    self.calc_log.append(_calc_entry(cand.name, i, leg, res, _dft_energy(res), secs))
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(
                         f"{cand.name} pose {i}: SCF did not converge (vacuum={vac.converged}, field={fld.converged})"

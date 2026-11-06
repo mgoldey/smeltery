@@ -123,6 +123,11 @@ class DftSize:
 
 # STO-3G contracted functions per atom, by row. Enough to compare two
 # molecules' XC work without building a basis; NOT a general basis-set model.
+# Each entry is ferric's own count (`ferric.shell_info` on `BasisSet.bundled("sto-3g")`;
+# tests/test_cost.py checks them): row 1 is 1s, row 2 adds 2s 2p (5), row 3 adds 3s 3p (9).
+# ferric's bundled STO-3G reaches Xe (verified on ferric 81f411c; an earlier build stopped at Ar, which is why
+# Br and I were once absent), so row 4 adds 4s 3d 4p (18) and row 5 adds 5s 4d 5p (27). An element ferric's parser
+# does not know (Cs and beyond) stays out, so the estimators say "cannot say" rather than guess.
 _STO3G_NBF = {
     "H": 1,
     "He": 1,
@@ -134,6 +139,21 @@ _STO3G_NBF = {
     "Be": 5,
     "Li": 5,
     "Ne": 5,
+    "Na": 9,
+    "Mg": 9,
+    "Al": 9,
+    "Si": 9,
+    "P": 9,
+    "S": 9,
+    "Cl": 9,
+    "Ar": 9,
+    "K": 13,
+    "Ca": 13,
+    "Se": 18,
+    "Br": 18,
+    "Kr": 18,
+    "I": 27,
+    "Xe": 27,
 }
 
 
@@ -224,10 +244,26 @@ class RhfCalibration:
     reference_seconds: float
     exponent: float  # fit on calibration seconds-per-iteration vs nbf
     machine: str
+    ceiling_nbf: int = 0  # the largest nbf fitted; past it the prediction is an extrapolation
+    reference_iterations: int = 0
 
     def predicted_seconds_per_pose(self, n_basis_functions: int) -> float:
         """Vacuum + field RHF wall seconds for one pose, assuming the reference's iteration count."""
         return self.reference_seconds * (n_basis_functions / self.reference_nbf) ** self.exponent
+
+    def extrapolation_note(self, max_nbf: int) -> str:
+        """Why this prediction is a LOWER BOUND, or "" when every pose is inside what was fitted.
+
+        Two things make it low above the ceiling: the exponent is fitted below it, and the iteration count is the
+        reference's. Measured: danuglipron at 235 bf took 79 iterations against benzoic acid's 36 and 1609 s against
+        the fit's 934, i.e. 1.7x. The factor is not applied (one measurement is not a model); it is disclosed."""
+        if not self.ceiling_nbf or max_nbf <= self.ceiling_nbf:
+            return ""
+        return (
+            f"; LOWER BOUND: {max_nbf} bf is {max_nbf / self.ceiling_nbf:.1f}x the largest size fitted "
+            f"({self.ceiling_nbf} bf) and the {self.reference_iterations}-iteration reference count is assumed "
+            "(measured at 235 bf: 79 iterations, 1.7x this prediction)"
+        )
 
 
 def load_measurements() -> dict:
@@ -244,7 +280,14 @@ def fit_rhf_calibration(record: dict) -> RhfCalibration:
     exponent = sum((a - mx) * (b - my) for a, b in zip(x, y, strict=True)) / sum((a - mx) ** 2 for a in x)
     ref = cal[len(cal) // 2]  # median-sized calibration molecule
     return RhfCalibration(
-        record["basis"], ref["name"], ref["n_basis_functions"], ref["seconds_per_pose"], exponent, record["machine"]
+        record["basis"],
+        ref["name"],
+        ref["n_basis_functions"],
+        ref["seconds_per_pose"],
+        exponent,
+        record["machine"],
+        ceiling_nbf=cal[-1]["n_basis_functions"],
+        reference_iterations=int(ref["scf_iterations"]),
     )
 
 

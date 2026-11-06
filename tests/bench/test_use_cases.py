@@ -110,3 +110,108 @@ def test_no_use_case_imports_a_web_framework():
         if re.search(r"^\s*(from|import)\s+(fastapi|starlette|uvicorn)\b", p.read_text(), re.M):
             bad.append(p.name)
     assert bad == []
+
+
+def test_launch_stages_a_pocket_file_relative_to_the_configs_directory_not_the_cwd(tmp_path, pipeline, monkeypatch):
+    """The pipeline names `data/p.pqr`, which exists only beside the config; the server's cwd is elsewhere."""
+    import tomllib
+
+    proj = tmp_path / "proj"
+    (proj / "data").mkdir(parents=True)
+    (proj / "data" / "p.pqr").write_text("pocket")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    pipeline.stage("pocket").params.pop("site")
+    pipeline.stage("pocket").params["file"] = "data/p.pqr"
+    LaunchRun(
+        FakeTaskQueue(), FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock()
+    ).execute(pipeline, out=tmp_path / "out", config_dir=proj)
+    staged = tomllib.loads((tmp_path / "out" / "config.toml").read_text())["pocket"]["file"]
+    assert staged.startswith("inputs/") and (tmp_path / "out" / staged).read_text() == "pocket"
+
+
+def _launch_with_pocket(tmp_path, pipeline, **kw):
+    proj = tmp_path
+    (proj / "p.pqr").write_text("pocket")
+    pipeline.stage("pocket").params.pop("site", None)
+    pipeline.stage("pocket").params["file"] = "p.pqr"
+    LaunchRun(
+        FakeTaskQueue(),
+        FakeRunStore(tmp_path),
+        FakeArtifactStore(tmp_path / ".art"),
+        FakeIdentity("mg"),
+        FixedClock(),
+        **kw,
+    ).execute(pipeline, out=tmp_path / "out", **({"config_dir": proj} if "root" not in kw else {}))
+    return proj
+
+
+def test_launch_without_config_dir_resolves_against_the_bench_root(tmp_path, pipeline, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # not the root: the default must be the root, not the cwd
+    _launch_with_pocket(tmp_path, pipeline, root=tmp_path)
+    assert list((tmp_path / "out" / "inputs").rglob("*.pqr"))
+
+
+def test_a_launched_run_keeps_the_users_original_source_through_the_cli_restage(tmp_path, pipeline, monkeypatch):
+    """Launch stages, then `smeltery run OUT/config.toml --out OUT` stages again. Data source: the file the pipeline
+    named, written by this test; the record must name it, not `inputs/<sha>.pqr`."""
+    import hashlib
+
+    import smeltery.cli as cli
+    from smeltery.record import RunRecord
+
+    proj = _launch_with_pocket(tmp_path, pipeline, root=tmp_path)
+    out = tmp_path / "out"
+    first = (out / "config.toml").read_bytes()
+    seen = {}
+    monkeypatch.setattr(cli, "run_plan", lambda plan: (RunRecord("c", {}, {}, {}), {}))
+    monkeypatch.setattr(cli, "write_outputs", lambda plan, rec, o: seen.setdefault("rec", rec) and o / "r.json")
+    monkeypatch.setattr(cli, "format_table", lambda plan, o: "")
+    monkeypatch.setattr(cli, "build_plan", lambda cfg, out_dir: object())
+    assert cli.main(["run", str(out / "config.toml"), "--out", str(out)]) == 0
+    entry = seen["rec"].results["config"]
+    assert entry["inputs"]["pocket.file"]["source"] == "p.pqr"  # as the pipeline wrote it, beside the original
+    assert (proj / "p.pqr").is_file()
+    assert (out / "config.toml").read_bytes() == first
+    assert entry["sha256"] == hashlib.sha256(first).hexdigest()
+    assert len(list((out / "inputs").rglob("*.pqr"))) == 1
+
+
+def test_launch_run_writes_the_given_text_not_a_regenerated_one(tmp_path, pipeline):
+    q = FakeTaskQueue()
+    text = "# mine\n" + pipeline.to_toml()
+    LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock()).run(
+        pipeline, out_dir=tmp_path / "out", text=text
+    )
+    assert (tmp_path / "out" / "config.toml").read_text() == text
+
+
+def test_launch_refuses_a_live_temporal_out_before_writing_anything(tmp_path, pipeline, monkeypatch):
+    """`smeltery run`'s guard runs in Launch too, before OUT/config.toml or any staged input is written."""
+    import smeltery.temporal_run as temporal_run
+    from smeltery.bench.use_cases.launch_run import LiveRunRefused
+
+    asked = []
+
+    def refuse(out, sha, temporal):
+        asked.append((out, temporal))
+        return "a Temporal run is still running"
+
+    monkeypatch.setattr(temporal_run, "guard_out", refuse)
+    q, out = FakeTaskQueue(), tmp_path / "out"
+    uc = LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock())
+    with pytest.raises(LiveRunRefused, match="still running"):
+        uc.execute(pipeline, out=out)
+    assert asked == [(out, False)] and not out.exists() and q.submitted == []
+
+
+def test_relaunching_an_unchanged_config_does_not_rewrite_it(tmp_path, pipeline):
+    q, out = FakeTaskQueue(), tmp_path / "out"
+    uc = LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock())
+    uc.execute(pipeline, out=out)
+    before = (out / "config.toml").stat().st_mtime_ns
+    uc.execute(pipeline, out=out)
+    assert (out / "config.toml").stat().st_mtime_ns == before

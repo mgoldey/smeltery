@@ -47,6 +47,18 @@ def _poses(smiles: str, seed: int) -> Chem.Mol:
     return mol
 
 
+def _pose_maps() -> dict[str, list[list[int]]]:
+    """(analogue atom, parent atom) per analogue, as PairedPoses.scaffold_maps: the parent's heavy atoms matched into
+    each analogue (SMILES-with-H order puts heavy atoms first, so these indices are the SDF's)."""
+    core = Chem.MolFromSmiles(CANDIDATES[PARENT])
+    out = {}
+    for name, smi in CANDIDATES.items():
+        if name != PARENT:
+            match = Chem.AddHs(Chem.MolFromSmiles(smi)).GetSubstructMatch(core)
+            out[name] = [[a, p] for p, a in enumerate(match)]
+    return out
+
+
 def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
     """Write a contract-shaped OUT directory under `root` and return it. `unranked=True` sets keep=2, which falls
     inside the {4-Cl, 4-Br} tie group, so the cut is UNRANKED."""
@@ -111,6 +123,7 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
                     "kind": "pair",
                     "candidates_in": n,
                     "candidates_out": n,
+                    "seconds": 0.5,
                 },
                 {
                     "stage": "pocket",
@@ -118,13 +131,20 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
                     "kind": "field",
                     "candidates_in": n,
                     "candidates_out": n,
+                    "seconds": 0.01,
                 },
             ],
             "funnel": [
                 {"stage": "poses", "kind": "pair", "candidates_in": n, "candidates_out": n},
                 {"stage": "pocket", "kind": "field", "candidates_in": n, "candidates_out": n},
                 {"stage": "parity", "kind": "gate", "candidates_in": n, "candidates_out": n},
-                {"stage": "field_interaction", "kind": "measure", "candidates_in": n, "candidates_out": n},
+                {
+                    "stage": "field_interaction",
+                    "kind": "measure",
+                    "candidates_in": n,
+                    "candidates_out": n,
+                    "seconds": 1.5,
+                },
                 {
                     "stage": "cut",
                     "kind": "rank",
@@ -135,13 +155,16 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
             ],
             "per_pose": per_pose,
             "candidate_order": list(CANDIDATES),
+            "pose_maps": _pose_maps(),
             "units": {"dE_int": "kcal/mol"},
             "poses": poses,
             "field": FIELD,
             "receptor": None,
+            "calcs": {"file": "calcs.jsonl", "n": 0},
         },
         "smeltery_version": "0.0.0+fixture",
         "ferric": {"provenance": "UNKNOWN (fixture: no tier ran)"},
+        "smeltery": {"provenance": "UNKNOWN (fixture: no tier ran)"},
         "host": {"node": "fixture", "python": "3"},
         "started_utc": "2026-10-28T00:00:00Z",
     }
@@ -149,5 +172,6 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
         json.dumps({"inputs": record["inputs"], "tiers": record["tiers"]}, sort_keys=True, default=str).encode()
     ).hexdigest()
     record["input_digest"] = digest
+    (out / "calcs.jsonl").write_text("")  # no SCF ran in a fixture; the file `results.calcs` names still exists
     (out / f"run-{digest[:12]}.json").write_text(json.dumps(record, indent=2, sort_keys=True, default=str))
     return out

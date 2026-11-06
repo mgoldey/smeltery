@@ -1,0 +1,10 @@
+{
+  "inputs/6f9b5f507db3fc913ff33786f788e7f4fc81ceab6b94d8ffe7737b6a87863aea/conf_00_cryo_em.xyz": {
+    "sha256": "6f9b5f507db3fc913ff33786f788e7f4fc81ceab6b94d8ffe7737b6a87863aea",
+    "source": "conf_00_cryo_em.xyz"
+  },
+  "inputs/caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110/7LCJ_pocket.pdb": {
+    "sha256": "caa7451521d6ac917e016b0d7168836e04966cb3a32ef638c11e9bee4feab110",
+    "source": "7LCJ_pocket.pdb"
+  }
+}

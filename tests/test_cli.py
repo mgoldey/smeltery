@@ -12,6 +12,7 @@ import sys
 import tomllib
 
 import pytest
+from golden_path import results_without_timing
 
 from smeltery.cli import ConfigError, build_plan, format_table, load_config, main, run_plan, validate_config
 from smeltery.record import RunRecord
@@ -227,7 +228,8 @@ def test_an_unranked_run_exits_zero_and_a_rerun_reproduces_the_digest_and_the_de
         records.append(json.loads(path.read_text()))
     a, b = records
     assert a["input_digest"] == b["input_digest"]
-    assert a["results"] == b["results"]  # same ranking decision AND the same numbers
+    # wall time is the one thing two runs of the same inputs do not share; same ranking decision AND same numbers
+    assert results_without_timing(a["results"]) == results_without_timing(b["results"])
     assert a["results"]["cut"]["unranked"] is True and a["results"]["cut"]["survivors"] is None
 
 
@@ -328,6 +330,127 @@ def test_posebusters_rejects_unrelaxed_analogue_poses_loudly_with_the_reason(tmp
     r = _cli("run", str(p), "--plan")
     assert r.returncode == 3, r.stdout + r.stderr
     assert "stage 'posebusters' failed" in r.stderr and "propanol" in r.stderr and "relax_unmapped = true" in r.stderr
+    assert "butanol" in r.stderr  # every failing candidate is named, not just the first
+
+
+def _stub_posebusters(monkeypatch, failing: dict[str, tuple[str, ...]]):
+    """check_candidate_poses without the extra: candidates in `failing` fail those checks on every pose."""
+    from smeltery.gates import PoseReport, PoseVerdict
+
+    def check(cand, receptor=None):
+        bad = failing.get(cand.name, ())
+        verdict = PoseVerdict(("sanitization",), bad)
+        cand.pose_report = PoseReport((verdict,) * len(cand.poses), "mol", "9.9", receptor)
+        return cand.pose_report
+
+    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+
+
+def test_gates_report_every_pose_of_every_candidate_before_failing(tmp_path, monkeypatch, capsys):
+    _stub_posebusters(monkeypatch, {"propanol": ("bond_lengths",), "butanol": ("internal_clash", "planar")})
+    p = write(tmp_path, GATED_UNRELAXED)
+    out = tmp_path / "out"
+    assert main(["run", str(p), "--out", str(out)]) == 3
+    err = capsys.readouterr().err
+    assert "stage 'posebusters' failed" in err and "propanol" in err and "butanol" in err
+    assert "ethanol" not in err.split("failed:", 1)[1].split("relax_unmapped")[0]  # the passing parent is not blamed
+    gates = json.loads((out / "gates.json").read_text())
+    assert set(gates) == {"posebusters"} and set(gates["posebusters"]) == {"ethanol", "propanol", "butanol"}
+    for name, failed in [("ethanol", []), ("propanol", ["bond_lengths"]), ("butanol", ["internal_clash", "planar"])]:
+        poses = gates["posebusters"][name]["poses"]
+        assert len(poses) == 3 and all(x["failed_checks"] == failed for x in poses)
+        assert all(x["passed"] is (not failed) for x in poses)
+
+
+def _abs_paths_in(x, out):
+    if isinstance(x, dict):
+        return [p for v in x.values() for p in _abs_paths_in(v, out)]
+    if isinstance(x, list):
+        return [p for v in x for p in _abs_paths_in(v, out)]
+    return [x] if isinstance(x, str) and x.startswith(str(out)) else []
+
+
+def test_gate_receptor_paths_inside_out_are_stored_relative(tmp_path):
+    from smeltery.cli import _gates_in_out
+
+    out = tmp_path / "out"
+    gates = {"posebusters": {"a": {"receptor": str(out / "inputs" / "h" / "r.pdb"), "poses": []}}}
+    got = _gates_in_out(gates, out)
+    assert got["posebusters"]["a"]["receptor"] == "inputs/h/r.pdb"
+    assert gates["posebusters"]["a"]["receptor"].startswith(str(out))  # the plan's own copy is untouched
+    elsewhere = {"posebusters": {"a": {"receptor": "/elsewhere/r.pdb", "poses": []}}}
+    assert _gates_in_out(elsewhere, out) == elsewhere
+    assert _gates_in_out({"posebusters": {"a": {"receptor": None}}}, out)["posebusters"]["a"]["receptor"] is None
+
+
+def test_gates_json_and_the_record_hold_no_absolute_path_inside_out(tmp_path, monkeypatch, capsys):
+    from smeltery.gates import PoseReport, PoseVerdict
+
+    out = tmp_path / "out"
+    receptor = str(out.resolve() / "inputs" / "h" / "r.pdb")
+
+    def check(cand, receptor_arg=None):
+        verdict = PoseVerdict(("sanitization",), ("planar",) if cand.name == "propanol" else ())
+        cand.pose_report = PoseReport((verdict,) * len(cand.poses), "mol", "9.9", receptor)
+        return cand.pose_report
+
+    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    p = write(tmp_path, GATED_UNRELAXED)
+    assert main(["run", str(p), "--out", str(out)]) == 3  # a rejected gate: gates.json is written
+    gates = json.loads((out / "gates.json").read_text())
+    assert gates["posebusters"]["ethanol"]["receptor"] == "inputs/h/r.pdb"
+    assert _abs_paths_in(gates, out.resolve()) == []
+
+
+def test_no_value_in_the_record_results_is_an_absolute_path_inside_out(tmp_path, monkeypatch):
+    """Data source: the GATED config's real plan (poses and gates), written by write_outputs with a stubbed receptor."""
+    from smeltery.cli import RunRecord, build_plan, load_config, write_outputs
+    from smeltery.gates import PoseReport, PoseVerdict
+
+    out = tmp_path / "out"
+    receptor = str(out.resolve() / "inputs" / "h" / "r.pdb")
+
+    def check(cand, receptor_arg=None):
+        cand.pose_report = PoseReport((PoseVerdict(("sanitization",), ()),) * len(cand.poses), "mol", "9.9", receptor)
+        return cand.pose_report
+
+    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    plan = build_plan(load_config(write(tmp_path, GATED)), out_dir=out)
+    per_pose = {c.name: {"dE_int": [0.0] * len(c.poses)} for c in plan.candidates}
+    rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {"per_pose": per_pose})
+    path = write_outputs(plan, rec, out)
+    results = json.loads(path.read_text())["results"]
+    assert results["gates"]["posebusters"]["ethanol"]["receptor"] == "inputs/h/r.pdb"
+    assert _abs_paths_in(results, out.resolve()) == []
+
+
+def test_a_failing_strain_gate_still_records_every_pose_strain(tmp_path, monkeypatch, capsys):
+    p = write(tmp_path, SMALL.format(floor=0.0) + "\n[gates]\nforcefield = true\nmax_strain_kcal = 0.001\n")
+    out = tmp_path / "out"
+    assert main(["run", str(p), "--out", str(out)]) == 3
+    err = capsys.readouterr().err
+    assert "stage 'forcefield' failed" in err
+    strain = json.loads((out / "gates.json").read_text())["strain_kcal"]
+    assert set(strain) == {"ethanol", "propanol", "butanol"} and all(len(v) == 3 for v in strain.values())
+    assert all(isinstance(x, float) for v in strain.values() for x in v)
+
+
+def test_later_gates_do_not_run_on_poses_posebusters_rejected(tmp_path, monkeypatch, capsys):
+    _stub_posebusters(monkeypatch, {"propanol": ("bond_lengths",)})
+    p = write(tmp_path, GATED_UNRELAXED + "forcefield = true\nmax_strain_kcal = 0.001\n")
+    out = tmp_path / "out"
+    assert main(["run", str(p), "--out", str(out)]) == 3
+    err = capsys.readouterr().err
+    assert "stage 'posebusters' failed" in err and "stage 'forcefield'" not in err
+    assert set(json.loads((out / "gates.json").read_text())) == {"posebusters"}  # no strain recorded for bad poses
+
+
+def test_no_gates_json_without_out_and_none_when_the_gates_pass(tmp_path, monkeypatch):
+    _stub_posebusters(monkeypatch, {"propanol": ("bond_lengths",)})
+    p = write(tmp_path, GATED_UNRELAXED)
+    monkeypatch.chdir(tmp_path)
+    assert main(["run", str(p)]) == 3
+    assert not list(tmp_path.glob("**/gates.json"))
 
 
 def test_relaxing_only_the_substituent_lets_the_same_poses_pass_posebusters(tmp_path):
@@ -347,3 +470,205 @@ def test_a_pocket_file_that_does_not_exist_is_a_config_error(tmp_path, capsys):
     p.write_text(cfg_text.replace("[cut]", '[pocket]\nfile = "missing.pdb"\n\n[cut]'))
     assert main(["run", str(p), "--plan"]) == 2
     assert "does not exist" in capsys.readouterr().err
+
+
+# ---- choosing the measurement: [field_dft_interaction] selects KS-DFT instead of RHF -----------------------------
+
+PBE = SMALL.format(floor=0.0) + '\n[field_dft_interaction]\nfunctional = "PBE"\n'
+
+
+def test_a_field_dft_interaction_section_measures_with_ks_dft_and_says_so_in_the_record():
+    from smeltery.tiers import FieldDftInteraction, FieldInteraction
+
+    rhf = build_plan(validate_config(tomllib.loads(SMALL.format(floor=0.0))))
+    pbe = build_plan(validate_config(tomllib.loads(PBE)))
+    assert type(rhf.tier) is FieldInteraction and type(pbe.tier) is FieldDftInteraction
+    (rec,) = [t for t in pbe.tiers if t["name"] == "field_dft_interaction"]
+    assert rec["method"] == "KS-DFT PBE + D3(BJ)" and rec["functional"] == "PBE"
+    assert "field_interaction" not in [t["name"] for t in pbe.tiers]
+    assert digest(validate_config(tomllib.loads(PBE))) != digest(
+        validate_config(tomllib.loads(SMALL.format(floor=0.0)))
+    )
+
+
+def test_rhf_and_ks_dft_together_is_a_config_error_not_a_silent_choice():
+    both = PBE + '\n[field_interaction]\nbasis = "sto-3g"\n'
+    with pytest.raises(ConfigError, match="keep one"):
+        validate_config(tomllib.loads(both))
+
+
+def test_an_unknown_ks_dft_knob_is_a_config_error():
+    with pytest.raises(ConfigError, match=r"\[field_dft_interaction\]"):
+        validate_config(tomllib.loads(PBE + "xc = 'PBE0'\n"))
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("functional", "B3LYP"), ("basis", "3-21g"), ("energy_conv", 1e-9), ("memory_budget_gb", 16.0)],
+)
+def test_changing_any_ks_dft_knob_changes_the_digest(key, value):
+    base = validate_config(tomllib.loads(PBE))
+    changed = copy.deepcopy(base)
+    changed["field_dft_interaction"][key] = value
+    assert digest(changed) != digest(base), f"[field_dft_interaction] {key} is accepted but not in the digest"
+
+
+def test_the_funnel_and_the_stage_errors_name_the_tier_that_measured():
+    plan = build_plan(validate_config(tomllib.loads(PBE)))
+    plan.tier = _KnownValues(
+        plan.tier, {"ethanol": [0.0, 0.0, 0.0], "propanol": [1.0, 1.1, 0.9], "butanol": [3.0, 3.1, 2.9]}
+    )
+    rec, out = run_plan(plan)
+    measure = [f for f in rec.results["funnel"] if f["kind"] == "measure"]
+    assert [f["stage"] for f in measure] == ["field_dft_interaction"]
+    text = format_table(plan, out)
+    assert "-> field_dft_interaction" in text
+    # the per-stage table stays a table: every row's kind starts in the same column
+    rows = [ln for ln in text.splitlines() if ln.startswith("  ") and " -> " in ln]
+    kinds = {ln.index(f" {k} ") for ln in rows for k in ("pair", "field", "gate", "measure", "rank") if f" {k} " in ln}
+    assert len(rows) >= 4 and len(kinds) == 1, rows
+
+
+@pytest.mark.needs_ferric
+def test_a_pbe_run_through_the_cli_equals_the_pbe_tier_called_by_hand(tmp_path):
+    """Data source: FieldDftInteraction run directly on the same poses and field, outside the CLI."""
+    from smeltery import Candidate, PointCharge, paired_delta
+    from smeltery.tiers import FieldDftInteraction, PairedPoses
+
+    cfg = validate_config(tomllib.loads(PBE))
+    plan = build_plan(cfg)
+    rec, out = run_plan(plan)
+    assert set(rec.results["units"]) >= {"dE_int", "E_d3"}  # D3(BJ) is recorded per pose, beside dE_int
+
+    cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
+    parent = cands[0]
+    PairedPoses(n_poses=3, relax_unmapped=True).run(cands, {"parent": parent})
+    xyz = parent.poses[0].coords_ang
+    u = xyz[2] - xyz[1]
+    field = [PointCharge(1.0, tuple(float(v) for v in xyz[2] + 3.0 * u / (u @ u) ** 0.5))]
+    FieldDftInteraction(functional="PBE").run(cands, {"field": field})
+    for c in cands[1:]:
+        by_hand = paired_delta(parent, c, "dE_int")
+        assert out["paired"][c.name].mean == pytest.approx(by_hand.mean, abs=1e-9)
+
+
+# ---- --plan says what memory the measurement needs, before any SCF ---------------------------------------------
+
+BENZOIC_PBE = BASE + '\n[field_dft_interaction]\nfunctional = "PBE"\n'
+
+
+def _plan_text(text, tmp_path, capsys):
+    assert main(["run", str(write(tmp_path, text)), "--plan"]) == 0
+    return capsys.readouterr().out
+
+
+def test_plan_prints_the_tiers_own_memory_prediction_for_the_largest_pose(tmp_path, capsys):
+    """Data source: FieldDftInteraction.estimate_memory on the same plan, the call its pre-SCF check makes."""
+    out = _plan_text(BENZOIC_PBE, tmp_path, capsys)
+    plan = build_plan(validate_config(tomllib.loads(BENZOIC_PBE)))
+    mem = plan.tier.estimate_memory(plan.candidates)
+    (line,) = [ln for ln in out.splitlines() if ln.startswith("memory (field_dft_interaction")]
+    assert f"{mem['n_atoms']} atoms, {mem['n_basis_functions']} basis functions" in line
+    assert f"needs {mem['total_gb']:.2f} GB" in line and line.endswith(": fits")
+    assert any(ln.startswith("machine: ") for ln in out.splitlines())
+
+
+def test_plan_says_when_the_run_would_refuse_and_when_it_would_not_check(tmp_path, capsys):
+    tight = BENZOIC_PBE + "memory_budget_gb = 0.001\n"
+    assert "does NOT fit: the run will refuse before its first SCF" in _plan_text(tight, tmp_path, capsys)
+    unchecked = tight + "check_memory = false\n"
+    assert "check_memory = false, so the run will start anyway" in _plan_text(unchecked, tmp_path, capsys)
+
+
+def test_plan_says_cannot_say_for_a_basis_the_model_cannot_count_never_fits(tmp_path, capsys):
+    out = _plan_text(
+        BENZOIC_PBE.replace('functional = "PBE"\n', 'functional = "PBE"\nbasis = "def2-svp"\n'), tmp_path, capsys
+    )
+    (line,) = [ln for ln in out.splitlines() if ln.startswith("memory (")]
+    assert "cannot say" in line and "def2-svp" in line and "fits" not in line
+
+
+def test_plan_compares_free_memory_with_require_free_gb(tmp_path, capsys, monkeypatch):
+    import smeltery.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "available_memory_gb", lambda: 3.0)  # data source: a machine with 3 GB free
+    out = _plan_text(BENZOIC_PBE + "require_free_gb = 12.0\n", tmp_path, capsys)
+    assert "3.0 GB available now, below require_free_gb 12: the run would refuse if started now" in out
+    monkeypatch.setattr(cli_mod, "available_memory_gb", lambda: None)
+    assert "unknown (no /proc/meminfo)" in _plan_text(BENZOIC_PBE, tmp_path, capsys)
+
+
+def test_an_rhf_plan_says_it_has_no_memory_model_rather_than_printing_nothing(tmp_path, capsys):
+    out = _plan_text(BASE, tmp_path, capsys)
+    assert "memory: field_interaction has no memory model; nothing is checked before its SCFs" in out
+
+
+def test_each_stage_records_its_seconds(monkeypatch):
+    """A clock that advances 0.25 s per reading makes every `_stage` call exactly 0.25 s: a stamp that is always
+    0.0, keyed by the wrong stage name, or missing shows up as a different number."""
+    import types
+
+    import smeltery.cli as cli
+
+    ticks = iter(range(10_000))
+    monkeypatch.setattr(cli, "time", types.SimpleNamespace(perf_counter=lambda: next(ticks) * 0.25))
+    cfg = validate_config(tomllib.loads(SMALL.format(floor=0.0)))
+    plan = build_plan(cfg)
+    assert [e["stage"] for e in plan.stage_log] == ["poses", "pocket"]
+    assert [e["seconds"] for e in plan.stage_log] == [0.25, 0.25]  # "pocket" logs from inside its _stage
+    plan.tier = _KnownValues(
+        plan.tier, {"ethanol": [0.0, 0.0, 0.0], "propanol": [1.0, 1.1, 0.9], "butanol": [3.0, 3.1, 2.9]}
+    )
+    rec, _ = run_plan(plan)
+    (measure,) = [r for r in rec.results["funnel"] if r["kind"] == "measure"]
+    assert measure["seconds"] == 0.25  # the measurement step's own wall time
+    log: list = []
+    cli._log(log, "never_timed", "x", None, None, "prep")
+    assert log[0]["seconds"] is None  # never timed is not "took zero seconds"
+
+
+def test_the_record_keeps_the_scaffold_maps_as_pose_maps():
+    """Data source: `PairedPoses.scaffold_maps` of the same plan, (analogue atom, parent atom) per analogue, which
+    the Poses view reads to draw the shared core solid. The parent has no map."""
+    cfg = validate_config(tomllib.loads(SMALL.format(floor=0.0)))
+    plan = build_plan(cfg)
+    plan.tier = _KnownValues(
+        plan.tier, {"ethanol": [0.0, 0.0, 0.0], "propanol": [1.0, 1.1, 0.9], "butanol": [3.0, 3.1, 2.9]}
+    )
+    rec, _ = run_plan(plan)
+    maps = plan.poses.scaffold_maps
+    assert set(maps) == {"propanol", "butanol"} and all(maps.values())
+    assert rec.results["pose_maps"] == {k: [list(p) for p in v] for k, v in maps.items()}
+    assert json.loads(rec.to_json())["results"]["pose_maps"] == rec.results["pose_maps"]
+
+
+def test_stage_seconds_belong_to_their_own_plan(tmp_path):
+    """Two plans (two runs on one worker) keep their own stage seconds: running one never moves the other's."""
+    import time
+
+    from smeltery import cli
+
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(BASE)
+    a = build_plan(load_config(cfg))
+    b = build_plan(load_config(cfg))
+    assert a.stage_seconds is not b.stage_seconds and "poses" in a.stage_seconds
+
+    def slow(p):
+        time.sleep(0.5)
+        for c in p.candidates:
+            c.per_pose["dE_int"] = [0.0] * len(c.poses)
+
+    def fast(p):
+        for c in p.candidates:
+            c.per_pose["dE_int"] = [0.0] * len(c.poses)
+
+    rec_b, _ = run_plan(b, measure=slow)
+    rec_a, _ = run_plan(a, measure=fast)
+
+    def measured(rec):
+        (row,) = [r for r in rec.results["funnel"] if r["kind"] == "measure"]
+        return row["seconds"]
+
+    assert measured(rec_b) >= 0.5 and measured(rec_a) < 0.25
+    assert cli._STAGE_SECONDS.get() is a.stage_seconds  # the plan last run is the current one

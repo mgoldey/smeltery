@@ -307,3 +307,149 @@ def _toml_dumps(cfg):
     from smeltery.gui._toml import dumps
 
     return dumps(cfg)
+
+
+# ---- RHF or KS-DFT: one measurement, either tier -------------------------------------------------------------
+
+
+def _pbe() -> Pipeline:
+    p = runnable()
+    p.remove("field_interaction")
+    p.add("field_dft_interaction", {"functional": "PBE"})
+    return p
+
+
+def test_removing_rhf_asks_for_rhf_or_ks_dft_and_offers_ks_dft():
+    p = runnable()
+    assert "field_dft_interaction" not in p.addable(), "an alternative is not offered while RHF is placed"
+    p.remove("field_interaction")
+    (msg,) = [m for s, m in errors(p) if s is None and "every pipeline needs it" in m]
+    assert "'field_interaction'" in msg and "'field_dft_interaction'" in msg
+    assert "field_dft_interaction" in p.addable()
+
+
+def test_a_ks_dft_pipeline_is_runnable_and_compiles_to_the_cli_section():
+    p = _pbe()
+    assert errors(p) == []
+    cfg = p.compile()
+    assert cfg["field_dft_interaction"] == {"functional": "PBE"} and "field_interaction" not in cfg
+    assert type(cli.build_plan(cli.validate_config(cfg)).tier).__name__ == "FieldDftInteraction"
+
+
+def test_a_ks_dft_config_reads_back_as_ks_dft_only_and_round_trips():
+    """The required RHF stage must not be re-added beside its alternative when the config is read."""
+    text = _pbe().to_toml()
+    back = Pipeline.from_toml(text)
+    assert "field_dft_interaction" in back.keys() and "field_interaction" not in back.keys()
+    assert back.to_toml() == text
+    # a config with neither section still reads as RHF, as `smeltery run` would run it
+    plain = Pipeline.from_toml(runnable().to_toml())
+    assert "field_interaction" in plain.keys() and "field_dft_interaction" not in plain.keys()
+
+
+def test_rhf_and_ks_dft_together_is_refused_whichever_was_placed_first():
+    for first, second in (
+        ("field_interaction", "field_dft_interaction"),
+        ("field_dft_interaction", "field_interaction"),
+    ):
+        p = runnable()
+        if first == "field_dft_interaction":
+            p.remove("field_interaction")
+            p.add(first)
+        p.add(second)
+        assert any("cannot be combined" in m for _, m in errors(p)), (first, second)
+
+
+def test_an_empty_ks_dft_stage_survives_the_toml_round_trip():
+    """Placing the alternative is the decision even with default knobs; dropping its empty section would silently
+    turn the pipeline back into RHF."""
+    p = runnable()
+    p.remove("field_interaction")
+    p.add("field_dft_interaction")
+    back = Pipeline.from_toml(p.to_toml())
+    assert "field_dft_interaction" in back.keys() and "field_interaction" not in back.keys()
+
+
+# ---------------------------------------------------------------- every setting explained, defaults copied in
+
+
+def test_every_wired_param_has_help():
+    bare = [f"{k}.{p.name}" for k, m in catalog().items() if m.wired for p in m.params if not p.help.strip()]
+    assert bare == []
+
+
+def test_add_copies_the_workspace_default_into_the_stage():
+    p = runnable()
+    p.remove("field_interaction")
+    s = p.add("field_dft_interaction", defaults={"field_dft_interaction": {"basis": "def2-svp"}, "cut": {"z": 3.0}})
+    assert s.params == {"basis": "def2-svp"}
+    assert 'basis = "def2-svp"' in p.to_toml().replace("'", '"')
+
+
+def test_an_explicit_param_beats_the_default_and_unknown_names_are_not_copied():
+    p = runnable()
+    p.remove("field_interaction")
+    s = p.add(
+        "field_dft_interaction",
+        {"basis": "sto-3g"},
+        defaults={"field_dft_interaction": {"basis": "def2-svp", "functional": "PBE0", "gone": 1}},
+    )
+    assert s.params == {"basis": "sto-3g", "functional": "PBE0"}
+
+
+def test_a_default_is_copied_not_referenced(tmp_path):
+    """Deleting the workspace's defaults afterwards changes nothing: the config alone fixes the run."""
+    from smeltery.cli import build_plan, load_config
+    from smeltery.record import RunRecord
+
+    store = tmp_path / "methods.toml"
+    store.write_text('[field_dft_interaction]\nbasis = "def2-svp"\n')
+    defaults = tomllib.loads(store.read_text())
+    p = runnable()
+    p.remove("field_interaction")
+    p.add("field_dft_interaction", defaults=defaults)
+    p.set("cut", floor=0.0)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(p.to_toml())
+    assert 'basis = "def2-svp"' in cfg_path.read_text()
+
+    def digest() -> str:
+        plan = build_plan(load_config(cfg_path))
+        return RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
+
+    before = digest()
+    store.unlink()
+    assert digest() == before
+
+
+def test_the_cost_and_memory_text_is_read_from_the_code_that_owns_the_numbers(monkeypatch):
+    """Changing a calibration value changes the catalog string: the text cannot drift from the model."""
+    import dataclasses
+
+    from smeltery import cost
+    from smeltery.gui.catalog import cost_model, memory_model
+
+    cal = cost.rhf_calibration()
+    assert f"{cal.reference_nbf} bf" in cost_model("field_interaction")
+    assert f"{cal.reference_seconds:.3g} s per pose" in cost_model("field_interaction")
+    changed = dataclasses.replace(cal, reference_nbf=777, reference_seconds=123.0, exponent=1.5, basis="def2-svp")
+    monkeypatch.setattr(cost, "rhf_calibration", lambda: changed)
+    text = cost_model("field_interaction")
+    assert "777 bf" in text and "123 s per pose" in text and "^1.50" in text and "DEF2-SVP only" in text
+
+    assert f"{cost.PBE_REFERENCE_VACUUM_SECONDS:g} s vacuum" in cost_model("field_dft_interaction")
+    monkeypatch.setattr(cost, "PBE_REFERENCE_VACUUM_SECONDS", 12.5)
+    monkeypatch.setattr(cost, "PBE_REFERENCE", cost.DftSize(n_atoms=9, n_basis_functions=33))
+    dft = cost_model("field_dft_interaction")
+    assert "12.5 s vacuum" in dft and "9 atoms, 33 bf" in dft
+
+    from smeltery.tiers import FieldDftInteraction
+
+    # the budget is the tier's own default, read from an instance rather than written into the text
+    assert f"default {FieldDftInteraction().memory_budget_gb:g}" in memory_model("field_dft_interaction")
+
+
+def test_a_method_without_a_model_says_it_cannot_say():
+    from smeltery.gui.catalog import cost_model, memory_model
+
+    assert cost_model("structure").startswith("cannot say") and memory_model("cut").startswith("cannot say")

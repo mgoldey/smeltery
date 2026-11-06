@@ -7,13 +7,15 @@ One honest path, not a framework. Stages, in order, each a loud failure when it 
    MCS gate refuses a pair with no common core.
 2. pocket: point charges placed from the parent's pose 0 (see `[[pocket.site]]`).
 3. parity: every candidate must have an even electron count at its formal charge,
-   because the tier is closed-shell RHF. An odd count is a stage error, never a
-   silent zero-survivor run.
-4. `FieldInteraction`: dE_int = E(field) - E(vacuum) per pose (ferric RHF).
+   because both measurement tiers are closed-shell (RHF, or restricted KS-DFT). An odd
+   count is a stage error, never a silent zero-survivor run.
+4. the measurement: dE_int = E(field) - E(vacuum) per pose. `FieldInteraction` (ferric
+   RHF) by default; `[field_dft_interaction]` selects `FieldDftInteraction` (ferric PBE,
+   D3(BJ) recorded separately) instead.
 5. paired ddE against the parent, then `cut`.
 
 The cut's floor is the tier's own systematic floor. While that is unmeasured
-(`FieldInteraction` today) the config must state `[cut] floor` explicitly, and the record
+(both tiers today) the config must state `[cut] floor` explicitly, and the record
 says the floor came from the config. Candidates the cut cannot separate are printed as
 tie groups; a run where nothing can be ordered prints UNRANKED and still exits 0.
 
@@ -31,7 +33,7 @@ Config (TOML; unknown keys are an error, not ignored):
     atom = 1
     from_atom = 2
     distance = 3.0
-    [field_interaction]     # optional: FieldInteraction knobs
+    [field_interaction]     # optional: FieldInteraction (RHF) knobs
     basis = "sto-3g"
     [cut]
     keep = 1
@@ -56,6 +58,14 @@ Optional sections (absent = the stages above only):
     forcefield = true       # MMFF94 energy and strain per pose, recorded
     max_strain_kcal = 25.0  # optional, needs forcefield: reject (stage error) any pose with more strain; no default
     xtb = true              # GFN2 energy per pose in the pocket field, recorded (a gate, not a ranker)
+
+Choosing the measurement (one of the two; absent = RHF with default knobs):
+
+    [field_dft_interaction] # KS-DFT instead of RHF: FieldDftInteraction knobs
+    functional = "PBE"      # a libxc name ferric accepts; D3(BJ) is computed separately and cancels in dE_int
+    basis = "sto-3g"        # the memory check counts basis functions for STO-3G only (check_memory = false otherwise)
+    memory_budget_gb = 8.0  # refuse before the first SCF if the largest pose is predicted not to fit
+    require_free_gb = 12.0  # optional: refuse unless this much memory is actually free
 
 Starting from a target (replaces [docking] receptor/box_center and [pocket]; see `smeltery.prep`):
 
@@ -101,55 +111,106 @@ UNRANKED exactly as above; it counts analogues, because the parent is the paired
 is deliberately not offered: the only wired ranker has an unmeasured floor, so a ladder would need a second invented
 floor, and totals are never compared across formulas.
 
+Durable runs (`smeltery.temporal_run`): `smeltery run CONFIG --out OUT --temporal [--workers N]` runs the same plan as
+a Temporal workflow, one activity per (candidate, pose, field model), and `smeltery temporal-worker` executes it. The
+same OUT and staged config resume the same workflow; finished SCFs are read back from OUT/calcs.jsonl. With the server
+down it exits 2 naming the docker command; it never falls back to an in-process run.
+
+    [run]
+    scf_timeout_s = 14400       # bounds one SCF leg (one rung) under --temporal (not an input: no digest change)
+    [field_interaction]
+    remedies = [{level_shift = 0.5}, {max_iter = 300, soscf = true}]  # tried in order when an SCF does not converge
+
 Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextvars
 import dataclasses
+import hashlib
 import json
+import os
 import re
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from rdkit import Chem
 
+from .cost import available_memory_gb
 from .decisions import DecisionSet
 from .funnel import cut, paired_delta, tier_floor, unpaired_delta
 from .gates import PoseGateError, check_candidate_poses, require_passing_poses
+from .methods import Analysis, FieldSource, Measure, MethodSpec, PoseSource, active, active_hooks, by_slot, registry
 from .model import Candidate, PointCharge
 from .pocket import load_pocket
 from .pocket.loader import file_digest
 from .record import RunRecord
-from .tiers import FieldInteraction, ForceField, Gfn2, PairedPoses, _net_charge
+from .tiers import (
+    FieldDftInteraction,
+    FieldInteraction,
+    ForceField,
+    Gfn2,
+    PairedPoses,
+    _net_charge,
+    check_remedies,
+)
 
-TOP_KEYS = {
-    "campaign",
-    "parent",
-    "candidates",
-    "poses",
-    "pocket",
-    "field_interaction",
-    "cut",
-    "docking",
-    "gates",
-    "structure",
-    "decisions",
-}
+#: Top-level keys that are inputs of the pipeline, not a method's section (the Ligands step, and the gate switches).
+OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions", "run"}
+#: `[run]`: how the run executes, not what it measures (not an input: it never moves the digest).
+RUN_KEYS = {"scf_timeout_s", "allow_mixed_builds"}
+#: `[run] scf_timeout_s` default: one SCF leg (vacuum or field, one rung) is ended after this long under `--temporal`.
+SCF_TIMEOUT_S = 14400
 DECISIONS_KEYS = {"file"}
-STRUCTURE_KEYS = {"spec", "provider", "allow_network", "center", "reference_ligand", "pocket_cutoff", "chains"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
-POCKET_KEYS = {"site", "file"}
-DOCKING_KEYS = {"receptor", "box_center", "box_size", "seeds", "exhaustiveness", "n_poses"}
-GATE_KEYS = {"posebusters", "forcefield", "xtb"}
-GATE_OPTION_KEYS = {"max_strain_kcal"}  # explicit rejection thresholds; absent = recorded only
-CUT_KEYS = {"keep", "z", "floor"}
 QUANTITY = "dE_int"
 POSES_DIR = "poses"
+
+
+def top_keys() -> set[str]:
+    """Every key a config may have at the top level: the pipeline's own, plus each registered method's section."""
+    return OWN_TOP_KEYS | {s.section for s in registry().values() if s.section is not None}
+
+
+def section_keys(key: str) -> set[str]:
+    """The knobs method `key`'s config section accepts (its registration's `knobs` dataclass or `params`)."""
+    return set(registry()[key].knob_names())
+
+
+def gate_keys() -> set[str]:
+    """The switches under `[gates]`: each registered gate method's `gate_key`."""
+    return {s.gate_key for s in registry().values() if s.gate_key is not None}
+
+
+def gate_option_keys() -> set[str]:
+    """Explicit rejection thresholds under `[gates]` (absent = recorded only): the gate methods' own knobs."""
+    return {k for s in registry().values() if s.gate_key is not None for k in s.knob_names()}
+
+
+#: Names that used to be hand-written sets, now derived from the method registry on every read.
+_DERIVED = {
+    "TOP_KEYS": top_keys,
+    "GATE_KEYS": gate_keys,
+    "GATE_OPTION_KEYS": gate_option_keys,
+    "STRUCTURE_KEYS": lambda: section_keys("structure"),
+    "POCKET_KEYS": lambda: section_keys("pocket"),
+    "DOCKING_KEYS": lambda: section_keys("docking"),
+    "CUT_KEYS": lambda: section_keys("cut"),
+    "POSE_SECTIONS": lambda: pose_sections(),
+}
+
+
+def __getattr__(name: str):
+    if name in _DERIVED:
+        return _DERIVED[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class ConfigError(ValueError):
@@ -157,7 +218,13 @@ class ConfigError(ValueError):
 
 
 class StageError(RuntimeError):
-    """A pipeline stage failed. Exit code 3."""
+    """A pipeline stage failed. Exit code 3.
+
+    `gates`: when the failure is a gate rejection, every gate result computed before it stopped (the
+    `results["gates"]` dict), so the CLI can leave OUT/gates.json behind.
+    """
+
+    gates: dict | None = None
 
 
 @dataclass
@@ -169,7 +236,7 @@ class Plan:
     parent: Candidate
     field: list[PointCharge]
     poses: PairedPoses
-    tier: FieldInteraction
+    tier: FieldInteraction | FieldDftInteraction
     floor: float
     floor_source: str
     before_poses: list = dataclasses.field(default_factory=list)  # tiers that ran before pairing (docking)
@@ -178,6 +245,8 @@ class Plan:
     stage_log: list = dataclasses.field(default_factory=list)  # one dict per stage: its name and a summary line
     receptor_pdb: Path | None = None  # a receptor .pdb in the poses' frame, when one exists
     decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
+    gate_results: dict = dataclasses.field(default_factory=dict)  # results["gates"]: per-pose gate results that ran
+    stage_seconds: dict = dataclasses.field(default_factory=dict)  # this plan's wall time per stage (`_stage`)
 
     @property
     def inputs(self) -> dict:
@@ -187,7 +256,7 @@ class Plan:
             "parent": self.parent.name,
             "cut": {"keep": self.cfg["cut"]["keep"], "z": self.cfg["cut"].get("z", 2.0)},
             "floor": {"value": self.floor, "source": self.floor_source},
-            "gates": {k: bool(gates.get(k, False)) for k in sorted(GATE_KEYS)},
+            "gates": {k: bool(gates.get(k, False)) for k in sorted(gate_keys())},
             **self.extra_inputs,
         }
         if "max_strain_kcal" in gates:  # only when set, so configs from before this knob keep their digests
@@ -231,8 +300,12 @@ def load_config(path: Path) -> dict:
 
 
 def validate_config(cfg: dict) -> dict:
-    _check_keys("the top level", cfg, TOP_KEYS)
-    for key in ("campaign", "parent", "candidates", "cut"):
+    """Check a config (as `tomllib` parses it); return it unchanged or raise ConfigError naming the first problem.
+
+    The top-level keys and every method section's rules come from the method registry: each registration's
+    `validate`, or the generic section check (`_validate_section`) for one that declares only its knobs."""
+    _check_keys("the top level", cfg, top_keys())
+    for key in ("campaign", "parent", "candidates"):
         if key not in cfg:
             raise ConfigError(f"missing required key {key!r}")
     cands = cfg["candidates"]
@@ -243,23 +316,125 @@ def validate_config(cfg: dict) -> dict:
     for name, smi in cands.items():
         if not isinstance(smi, str) or Chem.MolFromSmiles(smi) is None:
             raise ConfigError(f"candidate {name!r}: unparseable SMILES {smi!r}")
-    poses_cfg = _knobs(cfg, "poses", PairedPoses)
-    _knobs(cfg, "field_interaction", FieldInteraction)
-    _validate_structure(cfg)
-    _validate_docking(cfg, poses_cfg)
+    for spec in registry().values():
+        if spec.validate is not None:
+            spec.validate(cfg)
+        else:
+            _validate_section(spec, cfg)
+    measures = [s for s in by_slot("measure") if s.section in cfg]
+    if len(measures) > 1:
+        names = " and ".join(f"[{s.section}]" for s in measures)
+        raise ConfigError(f"{names} each choose how dE_int is measured; keep one")
+    for slot in ("pose_source", "field_source"):
+        hooks = active_hooks(slot, cfg)
+        if len(hooks) > 1:
+            raise ConfigError(f"{' and '.join(f'[{s.section}]' for s in hooks)} are each a {slot}; keep one")
+    for spec in active_hooks("pose_source", cfg):
+        for other, why in (("structure", "[structure] implies docking, which"), ("docking", "[docking]")):
+            if other in cfg:
+                raise ConfigError(f"[{spec.section}] gives the parent's poses, and {why} gives them too; keep one")
+    for spec in active_hooks("field_source", cfg):
+        if "structure" in cfg:
+            raise ConfigError(
+                f"[{spec.section}] gives the point-charge field, and [structure] supplies the field from its prepared "
+                "receptor; keep one"
+            )
     _validate_gates(cfg)
     _validate_decisions(cfg)
+    _validate_run(cfg)
+    return cfg
+
+
+def _validate_run(cfg: dict) -> None:
+    """[run]: execution settings. `scf_timeout_s` (seconds, > 0) bounds one SCF leg (one rung) under `--temporal`;
+    `allow_mixed_builds` (bool) lets a --temporal run whose SCFs ran under different builds be finalized."""
+    if "run" not in cfg:
+        return
+    r = cfg["run"]
+    if not isinstance(r, dict):
+        raise ConfigError("[run] must be a table")
+    _check_keys("[run]", r, RUN_KEYS)
+    t = r.get("scf_timeout_s", SCF_TIMEOUT_S)
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or t <= 0:
+        raise ConfigError(f"[run] scf_timeout_s must be a positive number of seconds, got {t!r}")
+    if not isinstance(r.get("allow_mixed_builds", False), bool):
+        raise ConfigError(f"[run] allow_mixed_builds must be true or false, got {r['allow_mixed_builds']!r}")
+
+
+def allow_mixed_builds(cfg: dict) -> bool:
+    """`[run] allow_mixed_builds`: a --temporal run whose calcs.jsonl rows name more than one (ferric, smeltery) build
+    is finalized (recorded as mixed in results.builds) instead of refused."""
+    return bool((cfg.get("run") or {}).get("allow_mixed_builds", False))
+
+
+def scf_timeout_s(cfg: dict) -> float:
+    """`[run] scf_timeout_s`, or the default (4 h)."""
+    return float((cfg.get("run") or {}).get("scf_timeout_s", SCF_TIMEOUT_S))
+
+
+def _exclusive_with(spec: MethodSpec) -> list[MethodSpec]:
+    """The methods that cannot share a config with `spec`: those it names, and those that name it."""
+    reg = registry()
+    keys = list(spec.exclusive) + [o.key for o in reg.values() if spec.key in o.exclusive]
+    return [reg[k] for k in dict.fromkeys(keys) if k in reg]
+
+
+def _validate_section(spec: MethodSpec, cfg: dict) -> None:
+    """The generic rules of a method section: a table, of the method's knobs only, beside no exclusive method's."""
+    if spec.section is None or spec.section not in cfg:
+        return
+    got = cfg[spec.section]
+    if not isinstance(got, dict):
+        raise ConfigError(f"[{spec.section}] must be a table")
+    _check_keys(f"[{spec.section}]", got, set(spec.knob_names()))
+    for other in _exclusive_with(spec):
+        if other.section is not None and other.section in cfg:
+            raise ConfigError(f"[{spec.section}] ({spec.label}) cannot be combined with [{other.section}]; keep one")
+
+
+def _validate_measurement(cfg: dict) -> None:
+    """[field_interaction] (RHF) or [field_dft_interaction] (KS-DFT): tier knobs, and at most one of them."""
+    rhf = _knobs(cfg, "field_interaction", FieldInteraction)
+    _knobs(cfg, "field_dft_interaction", FieldDftInteraction)
+    if "remedies" in rhf:
+        try:
+            check_remedies(rhf["remedies"])
+        except ValueError as e:
+            raise ConfigError(f"[field_interaction] {e}") from e
+    if "field_interaction" in cfg and "field_dft_interaction" in cfg:
+        raise ConfigError(
+            "[field_interaction] (RHF) and [field_dft_interaction] (KS-DFT) both choose how dE_int is measured; "
+            "keep one"
+        )
+
+
+def _validate_cut(cfg: dict) -> None:
+    if "cut" not in cfg:
+        raise ConfigError("missing required key 'cut'")
     cut_cfg = cfg["cut"]
-    _check_keys("[cut]", cut_cfg, CUT_KEYS)
-    n_analogues = len(cands) - 1
+    if not isinstance(cut_cfg, dict):
+        raise ConfigError("[cut] must be a table")
+    _check_keys("[cut]", cut_cfg, section_keys("cut"))
+    n_analogues = len(cfg["candidates"]) - 1
     if not isinstance(cut_cfg.get("keep"), int) or not 1 <= cut_cfg["keep"] <= n_analogues:
         raise ConfigError(f"[cut] keep must be an integer in 1..{n_analogues} (the number of analogues)")
+
+
+def _validate_pocket(cfg: dict) -> None:
+    """[pocket]: a file or point-charge sites, unless the field comes from elsewhere ([structure], or another
+    registered field source)."""
     pocket = cfg.get("pocket", {})
-    if "structure" in cfg:
+    elsewhere = ["structure"] if "structure" in cfg else []
+    elsewhere += [s.section for s in active_hooks("field_source", cfg) if s.key != "pocket" and s.section]
+    if elsewhere:
         if pocket:
-            raise ConfigError("[pocket] cannot be combined with [structure]: the field comes from the structure")
-        return cfg
-    _check_keys("[pocket]", pocket, POCKET_KEYS)
+            raise ConfigError(
+                f"[pocket] cannot be combined with [{elsewhere[0]}]: the field comes from [{elsewhere[0]}]"
+            )
+        return
+    if not isinstance(pocket, dict):
+        raise ConfigError("[pocket] must be a table")
+    _check_keys("[pocket]", pocket, section_keys("pocket"))
     sites = pocket.get("site", [])
     if "file" in pocket:
         if sites:
@@ -275,7 +450,6 @@ def validate_config(cfg: dict) -> dict:
         missing = sorted(SITE_KEYS - set(s))
         if missing:
             raise ConfigError(f"[[pocket.site]] #{i} is missing {missing}")
-    return cfg
 
 
 def _validate_structure(cfg: dict) -> None:
@@ -284,7 +458,7 @@ def _validate_structure(cfg: dict) -> None:
     s = cfg["structure"]
     if not isinstance(s, dict):
         raise ConfigError("[structure] must be a table")
-    _check_keys("[structure]", s, STRUCTURE_KEYS)
+    _check_keys("[structure]", s, section_keys("structure"))
     if not isinstance(s.get("spec"), str) or not s["spec"]:
         raise ConfigError("[structure] spec is required: a .pdb path, a PDB id or (provider afdb) a UniProt accession")
     if s.get("provider", "pdb") not in ("pdb", "afdb"):
@@ -309,14 +483,15 @@ def _validate_structure(cfg: dict) -> None:
         raise ConfigError("[structure] chains must be a non-empty list of one-letter chain ids")
 
 
-def _validate_docking(cfg: dict, poses_cfg: dict) -> None:
+def _validate_docking(cfg: dict) -> None:
+    poses_cfg = cfg.get("poses", {}) if isinstance(cfg.get("poses", {}), dict) else {}
     structure = "structure" in cfg
     if "docking" not in cfg and not structure:
         return
     d = cfg.get("docking", {})
     if not isinstance(d, dict):
         raise ConfigError("[docking] must be a table")
-    _check_keys("[docking]", d, DOCKING_KEYS)
+    _check_keys("[docking]", d, section_keys("docking"))
     if structure:
         clash = sorted({"receptor", "box_center"} & set(d))
         if clash:
@@ -409,8 +584,9 @@ def _validate_gates(cfg: dict) -> None:
     g = cfg.get("gates", {})
     if not isinstance(g, dict):
         raise ConfigError("[gates] must be a table")
-    _check_keys("[gates]", g, GATE_KEYS | GATE_OPTION_KEYS)
-    bad = sorted(k for k, v in g.items() if k in GATE_KEYS and not isinstance(v, bool))
+    switches = gate_keys()
+    _check_keys("[gates]", g, switches | gate_option_keys())
+    bad = sorted(k for k, v in g.items() if k in switches and not isinstance(v, bool))
     if bad:
         raise ConfigError(f"[gates] {bad} must be true or false")
     if "max_strain_kcal" in g:
@@ -421,13 +597,39 @@ def _validate_gates(cfg: dict) -> None:
             raise ConfigError("[gates] max_strain_kcal needs forcefield = true: it thresholds the MMFF94 strain")
 
 
-def _stage(name: str, fn):
+#: Wall time per stage name, summed over its `_stage` calls: the dict of the plan being built or run in this context
+#: (`build_plan` starts a fresh one and keeps it on the plan; `run_plan` makes it current again). A context variable,
+#: not a module global, so two runs on one worker (threads copy the context) never write each other's seconds.
+_STAGE_SECONDS: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar("stage_seconds", default=None)
+
+
+def _stage_seconds() -> dict[str, float]:
+    d = _STAGE_SECONDS.get()
+    if d is None:
+        d = {}
+        _STAGE_SECONDS.set(d)
+    return d
+
+
+def _stage(name: str, fn, log: list | None = None):
+    """Run one stage, converting an unexpected failure to a StageError and timing it.
+
+    The seconds go to every `stage_log` entry of that stage: those already in `log` (a stage that logs from
+    inside `fn`) now, and those `_log` writes after the call returns.
+    """
+    t0 = time.perf_counter()
+    secs = _stage_seconds()
     try:
         return fn()
     except (ConfigError, StageError):
         raise
     except Exception as e:
         raise StageError(f"stage {name!r} failed: {type(e).__name__}: {e}") from e
+    finally:
+        secs[name] = secs.get(name, 0.0) + (time.perf_counter() - t0)
+        for e in log or []:
+            if e["stage"] == name:
+                e["seconds"] = secs[name]
 
 
 def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | None, kind: str, **extra) -> None:
@@ -436,7 +638,15 @@ def _log(log: list, stage: str, summary: str, n_in: int | None, n_out: int | Non
     `kind`: prep (no candidates yet), search (parent only), pair, field, gate (rejects loudly, so a run that
     reaches the next stage has n_out == n_in), recorded (measured and kept, no rejection threshold).
     """
-    entry = {"stage": stage, "summary": summary, "kind": kind, "candidates_in": n_in, "candidates_out": n_out}
+    entry = {
+        "stage": stage,
+        "summary": summary,
+        "kind": kind,
+        "candidates_in": n_in,
+        "candidates_out": n_out,
+        # wall time of that stage's `_stage` call(s); None when it was never timed (not "took 0 s")
+        "seconds": _stage_seconds().get(stage),
+    }
     log.append({**entry, **extra})
 
 
@@ -548,69 +758,93 @@ def cfg_poses_relax(cfg: dict) -> bool:
     return bool(cfg.get("poses", {}).get("relax_unmapped", False))
 
 
-def _run_gates(plan_cfg: dict, cands: list[Candidate], field, pocket_path: Path | None, log: list) -> list:
-    """The recorded stages between pairing and the SCFs. Returns the tiers to put in the record."""
+def _run_gates(
+    plan_cfg: dict, cands: list[Candidate], field, pocket_path: Path | None, log: list, results: dict
+) -> list:
+    """The recorded stages between pairing and the SCFs. Returns the tiers to put in the record.
+
+    Every gate is evaluated on every pose of every candidate and its per-pose result goes into `results`
+    (`posebusters`: {candidate: PoseReport.to_dict()}, `strain_kcal`: {candidate: [kcal/mol]}) whether or not a
+    gate then rejects. Rejections are collected: one StageError names every failing candidate and pose, with
+    `results` attached. Once PoseBusters has rejected, the later gates do not run: their tiers refuse poses that
+    failed it, so those gates are simply absent from `results`.
+    """
     gates = plan_cfg.get("gates", {})
     recorded = []
+    failures: list[str] = []
     if gates.get("posebusters"):
         receptor = str(pocket_path) if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
 
         def posebusters():
+            report, bad = None, []
             for c in cands:
                 report = check_candidate_poses(c, receptor)
+                results.setdefault("posebusters", {})[c.name] = report.to_dict()
                 try:
                     require_passing_poses(c, {"require_pose_report": True})
                 except PoseGateError as e:
-                    hint = ""
-                    if c.name != plan_cfg["parent"] and not cfg_poses_relax(plan_cfg):
-                        hint = (
-                            " Analogue poses copy the parent's core and embed the substituent unrelaxed, which "
-                            "PoseBusters rejects at the junction; [poses] relax_unmapped = true relaxes only the "
-                            "substituent (the core stays exactly the parent's)."
-                        )
-                    raise StageError(f"stage 'posebusters' failed: {e}.{hint}") from e
-            return report
+                    bad.append((c.name, str(e)))
+            return report, bad
 
-        report = _stage("posebusters", posebusters)
+        report, bad = _stage("posebusters", posebusters)
         n = sum(len(c.poses) for c in cands)
         mode = "ligand + protein" if receptor else "ligand only"
-        _log(
-            log,
-            "posebusters",
-            f"posebusters ({mode}): all {n} pose(s) of {len(cands)} candidate(s) pass",
-            len(cands),
-            len(cands),
-            "gate",
-            posebusters_version=getattr(report, "posebusters_version", None),
-        )
-    if gates.get("forcefield"):
+        if bad:
+            hint = ""
+            if any(name != plan_cfg["parent"] for name, _ in bad) and not cfg_poses_relax(plan_cfg):
+                hint = (
+                    " Analogue poses copy the parent's core and embed the substituent unrelaxed, which "
+                    "PoseBusters rejects at the junction; [poses] relax_unmapped = true relaxes only the "
+                    "substituent (the core stays exactly the parent's)."
+                )
+            failures.append(f"stage 'posebusters' failed: {'; '.join(m for _, m in bad)}.{hint}")
+        else:
+            _log(
+                log,
+                "posebusters",
+                f"posebusters ({mode}): all {n} pose(s) of {len(cands)} candidate(s) pass",
+                len(cands),
+                len(cands),
+                "gate",
+                posebusters_version=getattr(report, "posebusters_version", None),
+            )
+    if gates.get("forcefield") and not failures:  # the tier itself refuses poses that failed PoseBusters
         ff = ForceField()
         _stage("forcefield", lambda: ff.run(cands, {}))
         strain = {
-            c.name: [a - b for a, b in zip(c.per_pose["E_mmff"], c.per_pose["E_mmff_relaxed"], strict=True)]
+            c.name: [float(a - b) for a, b in zip(c.per_pose["E_mmff"], c.per_pose["E_mmff_relaxed"], strict=True)]
             for c in cands
         }
+        results["strain_kcal"] = strain
         worst = max(max(v) for v in strain.values())
         limit = gates.get("max_strain_kcal")
+        over = []
         if limit is not None:
             for name, v in strain.items():
-                bad = [i for i, x in enumerate(v) if x > limit]
-                if bad:
-                    raise StageError(
-                        f"stage 'forcefield' failed: {name} pose(s) {bad} have MMFF94 strain "
-                        f"{max(v):.1f} kcal/mol > the configured max_strain_kcal {limit:g}"
+                bad_poses = [i for i, x in enumerate(v) if x > limit]
+                if bad_poses:
+                    over.append(
+                        f"{name} pose(s) {bad_poses} have MMFF94 strain {max(v):.1f} kcal/mol "
+                        f"> the configured max_strain_kcal {limit:g}"
                     )
-        what = f"gated at {limit:g} kcal/mol" if limit is not None else "recorded, no rejection threshold"
-        _log(
-            log,
-            "forcefield",
-            f"forcefield MMFF94 {what}; largest pose strain {worst:.1f} kcal/mol",
-            len(cands),
-            len(cands),
-            "gate" if limit is not None else "recorded",
-            strain=strain,
-        )
+        if over:
+            failures.append(f"stage 'forcefield' failed: {'; '.join(over)}")
+        else:
+            what = f"gated at {limit:g} kcal/mol" if limit is not None else "recorded, no rejection threshold"
+            _log(
+                log,
+                "forcefield",
+                f"forcefield MMFF94 {what}; largest pose strain {worst:.1f} kcal/mol",
+                len(cands),
+                len(cands),
+                "gate" if limit is not None else "recorded",
+                strain=strain,
+            )
         recorded.append(ff)
+    if failures:
+        err = StageError("\n".join(failures))
+        err.gates = results
+        raise err
     if gates.get("xtb"):
         xtb = Gfn2()
         _stage("xtb", lambda: xtb.run(cands, {"field": field}))
@@ -655,6 +889,50 @@ def _prepare_structure(cfg: dict, out_dir: Path | None, fetch, log: list, extra:
     return prepared
 
 
+def _hook_inputs(cfg: dict, extra: dict) -> None:
+    """Each hook-bearing method the config uses puts its section into the inputs (so the digest moves with its
+    knobs), with every file knob replaced by the file's sha256 (so a staged copy digests the same). Builtins carry
+    no hook, so configs that use only them keep their digests."""
+    for spec in registry().values():
+        if spec.hook is None or spec.section is None or not active(spec, cfg):
+            continue
+        section = json.loads(json.dumps(cfg.get(spec.section, {}), sort_keys=True, default=str))
+        for k in spec.file_knobs:
+            v = section.get(k)
+            if isinstance(v, str) and _resolve(cfg, v).is_file():
+                section[k] = {"name": Path(v).name, "sha256": file_digest(_resolve(cfg, v))}
+        extra[spec.key] = section
+
+
+def _hook_poses(spec: MethodSpec, cfg: dict, parent: Candidate, ctx: dict) -> None:
+    """A `pose_source` hook gives the parent's poses; the analogues are then paired to them."""
+    hook = cast(PoseSource, spec.hook)
+
+    def run():
+        got = list(hook.parent_poses(cfg, parent, ctx))
+        if not got:
+            raise StageError(f"stage {spec.key!r} failed: it gave no parent pose")
+        parent.poses = got
+
+    _stage(spec.key, run, ctx["log"])
+    if not any(e["stage"] == spec.key for e in ctx["log"]):
+        _log(ctx["log"], spec.key, f"{spec.label}: {len(parent.poses)} parent pose(s)", 1, 1, "search")
+
+
+def _hook_field(spec: MethodSpec, cfg: dict, parent: Candidate, ctx: dict):
+    """A `field_source` hook gives the point charges (a `PocketField` keeps its provenance in the record)."""
+    hook = cast(FieldSource, spec.hook)
+    field = _stage(spec.key, lambda: hook.field(cfg, parent, ctx), ctx["log"])
+    if not len(field):
+        raise StageError(f"stage {spec.key!r} failed: it gave no point charges")
+    if getattr(field, "provenance", None) is not None:
+        ctx["extra"].setdefault(spec.key, {})["field"] = dict(field.provenance)
+    if not any(e["stage"] == spec.key for e in ctx["log"]):
+        n = len(cfg["candidates"])
+        _log(ctx["log"], spec.key, f"{spec.label}: {len(field)} point charges", n, n, "field")
+    return field
+
+
 def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     """Everything before the field-interaction SCFs: structure prep, docking, pairing, pocket, parity, gates, floor.
 
@@ -666,11 +944,21 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
     extra: dict = {}
+    stage_seconds: dict[str, float] = {}
+    _STAGE_SECONDS.set(stage_seconds)
     before = []
+    _hook_inputs(cfg, extra)
+    ctx = {"log": log, "extra": extra, "out_dir": out_dir, "before_poses": before}
     docked = "docking" in cfg or "structure" in cfg
     prepared = _prepare_structure(cfg, out_dir, fetch, log, extra) if "structure" in cfg else None
     if docked:
-        before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra, prepared)))
+        before.append(_stage("docking", lambda: _dock_parent(cfg, parent, log, extra, prepared), log))
+    sources = active_hooks("pose_source", cfg)
+    if sources and docked:
+        raise ConfigError(f"[{sources[0].section}] gives the parent's poses; so does docking: keep one")
+    for spec in sources:  # validate_config allows at most one
+        _hook_poses(spec, cfg, parent, ctx)
+        docked = True  # the parent's poses are given; analogues are paired to them
     poses = PairedPoses(parent_poses_given=docked, **cfg.get("poses", {}))
     _stage("poses", lambda: poses.run(cands, {"parent": parent}))
     _log(
@@ -681,11 +969,17 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
         len(cands),
         "pair",
     )
-    field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared))
+    fields = active_hooks("field_source", cfg)
+    if fields:  # validate_config allows at most one, and not beside [pocket] or [structure]
+        field, pocket_path = _hook_field(fields[0], cfg, parent, ctx), None
+    else:
+        field, pocket_path = _stage("pocket", lambda: _load_field(cfg, parent, extra, log, prepared), log)
     _stage("parity", lambda: _check_parity(cands))
-    after = _run_gates(cfg, cands, field, pocket_path, log)
-    tier = FieldInteraction(**cfg.get("field_interaction", {}))
-    tier.field_provenance = getattr(field, "provenance", None)  # what run() will record, so plan and run digests agree
+    gate_results: dict = {}
+    after = _run_gates(cfg, cands, field, pocket_path, log, gate_results)
+    tier = measurement_tier(cfg)
+    if hasattr(tier, "field_provenance"):  # what run() will record, so plan and run digests agree
+        tier.field_provenance = getattr(field, "provenance", None)
     try:
         floor, source = tier_floor(tier, QUANTITY), f"tier {tier.name} systematic_floor"
     except ValueError as e:
@@ -695,7 +989,20 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     receptor = pocket_path if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
     plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
+    plan.gate_results = gate_results
+    plan.stage_seconds = stage_seconds
     return plan
+
+
+def measurement_tier(cfg: dict) -> FieldInteraction | FieldDftInteraction:
+    """The tier that measures dE_int: a registered `measure` hook whose section is in the config, else
+    `[field_dft_interaction]` selects KS-DFT, otherwise RHF (the default)."""
+    hooks = active_hooks("measure", cfg)
+    if hooks:  # validate_config allows at most one measurement section
+        return cast(Measure, hooks[0].hook).tier(cfg)
+    if "field_dft_interaction" in cfg:
+        return FieldDftInteraction(**cfg["field_dft_interaction"])
+    return FieldInteraction(**cfg.get("field_interaction", {}))
 
 
 def funnel_counts(plan: Plan, res=None) -> list[dict]:
@@ -713,7 +1020,15 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
         if e["stage"] == "pocket":  # parity runs right after the pocket, before the recorded gates
             rows.append({"stage": "parity", "kind": "gate", "candidates_in": n, "candidates_out": n})
     if res is not None:
-        rows.append({"stage": "field_interaction", "kind": "measure", "candidates_in": n, "candidates_out": n})
+        rows.append(
+            {
+                "stage": plan.tier.name,
+                "kind": "measure",
+                "candidates_in": n,
+                "candidates_out": n,
+                "seconds": plan.stage_seconds.get(plan.tier.name),  # wall time of the measurement `_stage` call
+            }
+        )
         rows.append(
             {
                 "stage": "cut",
@@ -748,17 +1063,40 @@ def per_pose_results(plan: Plan) -> tuple[dict, dict]:
     return per_pose, units
 
 
-def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord, dict]:
+def _paired_parent(plan: Plan, c: Candidate, pose_index: dict[str, list[int]] | None) -> Candidate:
+    """The parent as analogue `c` pairs with it: itself, or (after a pairwise pose drop) a view holding only the
+    parent's values at `c`'s kept pose indices, so pose i still pairs with pose i."""
+    if not pose_index:
+        return plan.parent
+    at = {orig: k for k, orig in enumerate(pose_index[plan.parent.name])}
+    view = Candidate(plan.parent.name, plan.parent.smiles)
+    view.per_pose = {q: [v[at[i]] for i in pose_index[c.name]] for q, v in plan.parent.per_pose.items()}
+    return view
+
+
+def run_plan(
+    plan: Plan,
+    measure=None,
+    partial: bool = False,
+    skip_analyses: frozenset[str] = frozenset(),
+    pose_index: dict[str, list[int]] | None = None,
+) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
     `measure(plan)`, when given, fills `per_pose[QUANTITY]` on every candidate in place of running
     `plan.tier` (the field-interaction SCFs); tests inject fixed numbers, so everything after the SCFs is checked
     without ferric.
+
+    `skip_analyses`: analysis keys the caller computes itself (the Temporal runner summarizes the ones that
+    re-measure). `pose_index`: after a pairwise pose drop, each candidate's kept ORIGINAL pose indices (its poses
+    and per_pose hold only those); an analogue then pairs with the parent's values at its own kept indices, and
+    the record carries `results.pose_index`.
     """
+    _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
     if measure is None:
-        _stage("field_interaction", lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
+        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
     else:
-        _stage("field_interaction", lambda: measure(plan))
+        _stage(plan.tier.name, lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
     if partial:
         paired = {}
@@ -768,8 +1106,8 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
             "stages": plan.stage_log,
         }
     else:
-        paired = {c.name: paired_delta(plan.parent, c, QUANTITY) for c in analogues}
-        unpaired = {c.name: unpaired_delta(plan.parent, c, QUANTITY) for c in analogues}
+        paired = {c.name: paired_delta(_paired_parent(plan, c, pose_index), c, QUANTITY) for c in analogues}
+        unpaired = {c.name: unpaired_delta(_paired_parent(plan, c, pose_index), c, QUANTITY) for c in analogues}
         res = cut(paired, keep=plan.cfg["cut"]["keep"], z=plan.cfg["cut"].get("z", 2.0), floor=plan.floor)
         results: dict[str, object] = {
             "paired_ddE": {
@@ -781,6 +1119,10 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
             "funnel": funnel_counts(plan, res),
         }
     results["candidate_order"] = [c.name for c in plan.candidates]
+    if pose_index:  # only after a pairwise drop, so ordinary records keep their shape
+        results["pose_index"] = {k: list(v) for k, v in pose_index.items()}
+    # (analogue atom, parent atom) pairs copied exactly from the parent's pose: the core a view draws solid
+    results["pose_maps"] = {k: [list(p) for p in v] for k, v in plan.poses.scaffold_maps.items()}
     results["per_pose"], results["units"] = per_pose_results(plan)
     results["field"] = [[float(c.q), *(float(v) for v in c.xyz_ang)] for c in plan.field]
     results["receptor"] = (
@@ -791,7 +1133,21 @@ def run_plan(plan: Plan, measure=None, partial: bool = False) -> tuple[RunRecord
     if plan.decisions_in is not None:
         results["decisions_in"] = dict(plan.decisions_in)
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
+    if not partial:  # an analysis reads the whole measurement; a combine of the partials runs it
+        for spec in active_hooks("analysis", plan.cfg):
+            if spec.key in skip_analyses:
+                continue
+            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log})
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
+
+
+def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict) -> None:
+    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`."""
+    hook = cast(Analysis, spec.hook)
+    got = _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+    if not isinstance(got, dict):
+        raise StageError(f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}")
+    rec.results[spec.key] = {**(rec.results.get(spec.key) or {}), **got}
 
 
 def pose_file_name(candidate: str) -> str:
@@ -806,6 +1162,23 @@ def _out_path(path: str | Path, out_dir: Path) -> str:
         return p.relative_to(out_dir.resolve()).as_posix()
     except ValueError:
         return str(p)
+
+
+def _gates_in_out(gates: dict, out_dir: Path) -> dict:
+    """A copy of the per-pose gate results with every `receptor` path made relative to OUT when inside it (the
+    absolute path of a run directory that is later renamed or moved points at nothing)."""
+
+    def walk(x):
+        if isinstance(x, dict):
+            return {
+                k: _out_path(v, out_dir) if k == "receptor" and isinstance(v, str) and v else walk(v)
+                for k, v in x.items()
+            }
+        if isinstance(x, list):
+            return [walk(v) for v in x]
+        return x
+
+    return walk(gates)
 
 
 def pose_mol(c: Candidate) -> Chem.Mol:
@@ -857,6 +1230,7 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
             if c.name in paired_ddE and isinstance(paired_ddE[c.name], dict):
                 paired = paired_ddE[c.name].get("per_pose")
         mol = mols[c.name]
+        index = (results.get("pose_index") or {}).get(c.name)  # original indices after a pairwise drop
         with Chem.SDWriter(str(path)) as w:
             for i, conf in enumerate(mol.GetConformers()):
                 m = Chem.Mol(mol)
@@ -864,7 +1238,7 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
                 m.AddConformer(Chem.Conformer(conf), assignId=True)
                 m.SetProp("_Name", f"{c.name} pose {i}")
                 m.SetProp("smeltery_candidate", c.name)
-                m.SetProp("smeltery_pose_index", str(i))
+                m.SetProp("smeltery_pose_index", str(i if index is None else index[i]))
                 m.SetProp("smeltery_parent", "1" if c is plan.parent else "0")
                 for q, v in values.items():
                     m.SetProp(q, f"{v[i]:.10g}")
@@ -875,7 +1249,29 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
     return poses
 
 
-def write_outputs(plan: Plan, rec: RunRecord, out_dir: Path) -> Path:
+def calc_file_name(candidate: str) -> str:
+    """The calc log of a `--only-candidate` partial run: calcs-<candidate>.jsonl, sanitised like the pose SDFs."""
+    return "calcs-" + pose_file_name(candidate)[: -len(".sdf")] + ".jsonl"
+
+
+def merged_partial_calcs(out_dir: Path, partials: list[Path]) -> list[dict]:
+    """Every SCF line of the partial runs being combined, read from the calc logs their records name."""
+    rows: list[dict] = []
+    for p in partials:
+        calcs = (json.loads(p.read_text()).get("results") or {}).get("calcs")
+        f = Path(out_dir) / calcs["file"] if calcs else None
+        if f is not None and f.is_file():
+            rows += [json.loads(x) for x in f.read_text().splitlines() if x.strip()]
+    return rows
+
+
+def write_outputs(
+    plan: Plan,
+    rec: RunRecord,
+    out_dir: Path,
+    calc_file: str = "calcs.jsonl",
+    calc_rows: list[dict] | None = None,
+) -> Path:
     """Write everything a run leaves under OUT and return the record's path: the pose SDFs (`results.poses`), the
     receptor and decisions paths made relative to OUT when inside it, then OUT/run-<digest12>.json."""
     out_dir = Path(out_dir)
@@ -886,9 +1282,76 @@ def write_outputs(plan: Plan, rec: RunRecord, out_dir: Path) -> Path:
         results["receptor"]["file"] = _out_path(results["receptor"]["file"], out_dir)
     if "decisions_in" in results:
         results["decisions_in"]["file"] = _out_path(results["decisions_in"]["file"], out_dir)
+    if plan.gate_results:  # only the gates that ran
+        results["gates"] = _gates_in_out(plan.gate_results, out_dir)
+    if calc_rows is not None and not calc_rows:
+        results["calcs"] = None  # a combine of partials with no calc logs: no SCF count is known, never "0"
+    else:
+        base = list(calc_rows) if calc_rows is not None else list(getattr(plan.tier, "calc_log", None) or [])
+        rows = write_calc_log(plan, out_dir, calc_file, base + _analysis_calcs(plan, results))
+        results["calcs"] = {
+            "file": calc_file,
+            "n": rows,
+            "primary": primary_model(plan.field),
+            "by_model": _count_models(out_dir / calc_file),
+        }
     path = out_dir / f"run-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     return path
+
+
+def primary_model(field) -> str:
+    """The name of the plan's own field model: the force field pdb2pqr charged it with, else "primary" (sites, a
+    .pqr)."""
+    prov = getattr(field, "provenance", None) or {}
+    return str(prov.get("pdb2pqr_ff") or "primary")
+
+
+def _tag(row: dict, model: str) -> dict:
+    """An SCF line as calcs.jsonl holds it: every line names its field model and its rung (0 without a ladder)."""
+    if "outcome" in row:  # a Temporal outcome line: already names its model
+        return row
+    return {**row, "field_model": row.get("field_model", model), "rung": row.get("rung", 0)}
+
+
+def _analysis_calcs(plan: Plan, results: dict) -> list[dict]:
+    """Move every active analysis's per-model SCF lines (`results[key][model]["calcs"]`) out of the record, which
+    then keeps `{"n": count}`: calcs.jsonl is the one per-SCF log."""
+    rows: list[dict] = []
+    for spec in active_hooks("analysis", plan.cfg):
+        val = results.get(spec.key)
+        if not isinstance(val, dict):
+            continue
+        for model, entry in val.items():
+            if isinstance(entry, dict) and isinstance(entry.get("calcs"), list):
+                rows += [_tag(r, str(model)) for r in entry["calcs"]]
+                entry["calcs"] = {"n": len(entry["calcs"])}
+    return rows
+
+
+def _count_models(path: Path) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for x in path.read_text().splitlines():
+        if x.strip():
+            r = json.loads(x)
+            if "outcome" not in r:  # a --temporal vacuum leg has no model: it is shared by every model
+                k = "shared_vacuum" if r.get("field_model") is None else str(r["field_model"])
+                out[k] = out.get(k, 0) + 1
+    return out
+
+
+def write_calc_log(plan: Plan, out_dir: Path, name: str = "calcs.jsonl", rows: list[dict] | None = None) -> int:
+    """Write OUT/<name> (one line per SCF: `rows`, else the ones the tier ran) and return how many lines it has.
+    A line without a field model is the primary field's."""
+    primary = primary_model(plan.field)
+    rows = list(rows) if rows is not None else list(getattr(plan.tier, "calc_log", None) or [])
+    calc_log = [_tag(r, primary) for r in rows]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = out_dir / (name + ".tmp")  # written whole, then renamed: a crash never leaves a half-written log
+    tmp.write_text("".join(json.dumps(e) + "\n" for e in calc_log))
+    os.replace(tmp, out_dir / name)
+    return len(calc_log)
 
 
 def format_table(plan: Plan, out: dict) -> str:
@@ -899,12 +1362,14 @@ def format_table(plan: Plan, out: dict) -> str:
             continue
         m = out["paired"][c.name]
         lines.append(f"{c.name:12} {c.formula:10} {m.mean:+12.4f} ± {m.sem:.4f} {out['unpaired'][c.name].sem:13.4f}")
-    lines.append("\nstages: " + " -> ".join(e["summary"] for e in plan.stage_log) + " -> field_interaction")
+    lines.append("\nstages: " + " -> ".join(e["summary"] for e in plan.stage_log) + f" -> {plan.tier.name}")
     lines.append("candidates in -> out per stage (a gate rejects loudly or passes everyone; only the cut ranks):")
-    for r in funnel_counts(plan, res):
+    rows = funnel_counts(plan, res)
+    w = max(18, *(len(r["stage"]) for r in rows))  # field_dft_interaction is wider than the old fixed 18
+    for r in rows:
         cin = "-" if r["candidates_in"] is None else r["candidates_in"]
         cout = "unranked" if r.get("unranked") else ("-" if r["candidates_out"] is None else r["candidates_out"])
-        lines.append(f"  {r['stage']:18} {r['kind']:9} {cin!s:>3} -> {cout!s}")
+        lines.append(f"  {r['stage']:{w}} {r['kind']:9} {cin!s:>3} -> {cout!s}")
     st = plan.extra_inputs.get("structure")
     if st:
         lines.append(f"structure: {st['kind']}, {st['structure']['source']}")
@@ -929,8 +1394,160 @@ def _describe_plan(plan: Plan, digest: str) -> str:
         f"plan OK (no SCF run)\nparent {plan.parent.name} atoms (index:element): {atoms}\n"
         f"{len(plan.field)} pocket charge(s); {len(plan.parent.poses)} poses per candidate; "
         f"stages: {' -> '.join(e['stage'] for e in plan.stage_log)}; "
-        f"floor {plan.floor:g} from {plan.floor_source}\ninput_digest {digest}"
+        f"floor {plan.floor:g} from {plan.floor_source}\n"
+        + "\n".join(describe_memory(plan))
+        + "\n"
+        + describe_scf_work(plan)
+        + f"\ninput_digest {digest}"
     )
+
+
+def describe_scf_work(plan: Plan) -> str:
+    """How many scores (poses x candidates x field models) the run will do and how many SCFs that is: under
+    `--temporal` one vacuum leg per pose shared by the models plus one field leg per model, in a plain run two legs
+    per score; and the tier's own time estimate (`estimate_cost`, for two legs per pose) scaled to each, in CPU-h."""
+    n_models = 1
+    for spec in active_hooks("analysis", plan.cfg):
+        hook = spec.hook
+        if hasattr(hook, "extra_models"):  # cheap: the model names from the config
+            n_models += len(hook.extra_models(plan.cfg))
+        elif hasattr(hook, "extra_fields"):
+            n_models += len(hook.extra_fields(plan, {"log": plan.stage_log, "out_dir": None}))
+    n_poses = sum(len(c.poses) for c in plan.candidates)
+    per_cand = sorted({len(c.poses) for c in plan.candidates})
+    poses = str(per_cand[0]) if len(per_cand) == 1 else f"{per_cand[0]}-{per_cand[-1]}"
+    n = n_poses * n_models
+    temporal, plain = n_poses * (1 + n_models), 2 * n
+    head = (
+        f"SCF work: {n} scores = {poses} poses x {len(plan.candidates)} candidates x {n_models} field model(s); "
+        f"{temporal} SCFs under --temporal (one vacuum leg per pose, shared), {plain} in a plain run"
+    )
+    est = plan.tier.estimate_cost(plan.candidates)
+    if est.get("predicted") is None:
+        return f"{head}; time estimate: none ({est.get('basis')})"
+    legs_h = float(est["predicted"]) / 2 / 3600.0  # one leg of every pose: estimate_cost covers two
+    return (
+        f"{head}; estimate {legs_h * (1 + n_models):.2f} CPU-h under --temporal, "
+        f"{legs_h * 2 * n_models:.2f} CPU-h plain (summed SCF wall time; {est.get('basis')})"
+    )
+
+
+def memory_estimate(plan) -> dict:
+    """The memory facts `--plan` and Bench's impact both state, structured. `plan` needs only `.tier` and
+    `.candidates`. `estimate` is the measurement tier's own `estimate_memory` dict (the one its pre-SCF check
+    uses, so the plan and the run cannot disagree) or None when the tier has no model; `verdict` is "fits",
+    "does not fit", "cannot say" (the model cannot count this basis or element: never "fits") or "no model";
+    `basis` says why when the verdict is not a number-backed one, else None."""
+    tier = plan.tier
+    fn = getattr(tier, "estimate_memory", None)
+    mem = fn(plan.candidates) if fn is not None else None
+    basis = None
+    if mem is None:
+        verdict, basis = "no model", f"{tier.name} has no memory model"
+    elif "total_gb" not in mem:
+        verdict, basis = "cannot say", mem.get("basis")
+    else:
+        verdict = "fits" if mem["fits_budget"] else "does not fit"
+    return {
+        "tier": tier.name,
+        "estimate": mem,
+        "free_gb": available_memory_gb(),
+        "require_free_gb": getattr(tier, "require_free_gb", None),
+        "check_memory": bool(getattr(tier, "check_memory", True)),
+        "verdict": verdict,
+        "basis": basis,
+    }
+
+
+def memory_cannot_say(tier, basis: str) -> dict:
+    """`memory_estimate`'s shape for when there are no poses to size (or no tier): the same keys, `estimate` None."""
+    return {
+        "tier": getattr(tier, "name", None),
+        "estimate": None,
+        "free_gb": available_memory_gb(),
+        "require_free_gb": getattr(tier, "require_free_gb", None),
+        "check_memory": bool(getattr(tier, "check_memory", True)),
+        "verdict": "cannot say",
+        "basis": basis,
+    }
+
+
+def describe_memory(plan: Plan) -> list[str]:
+    """What `--plan` says about memory: `memory_estimate`, as text."""
+    m = memory_estimate(plan)
+    name, mem, enforced = m["tier"], m["estimate"], m["check_memory"]
+    if mem is None:
+        return [f"memory: {name} has no memory model; nothing is checked before its SCFs"]
+    if m["verdict"] == "cannot say":
+        lines = [f"memory ({name}, per calculation): cannot say ({mem['basis']}); the run will not refuse on it"]
+    else:
+        verdict = (
+            "fits"
+            if mem["fits_budget"]
+            else "does NOT fit: the run will refuse before its first SCF"
+            if enforced
+            else "does NOT fit (check_memory = false, so the run will start anyway and may spill to disk)"
+        )
+        lines = [
+            f"memory ({name}, per calculation): the largest pose ({mem['n_atoms']} atoms, "
+            f"{mem['n_basis_functions']} basis functions) needs {mem['total_gb']:.2f} GB "
+            f"(AO cache {mem['ao_cache_gb']:.2f} + RI tensor {mem['ri_tensor_gb']:.2f}); "
+            f"budget {mem['budget_gb']:g} GB: {verdict}"
+        ]
+    free, need = m["free_gb"], m["require_free_gb"]
+    have = "unknown (no /proc/meminfo)" if free is None else f"{free:.1f} GB available now"
+    if need is None:
+        lines.append(f"machine: {have}; require_free_gb unset, so free memory is not checked")
+    elif free is not None and free < need and enforced:
+        lines.append(f"machine: {have}, below require_free_gb {need:g}: the run would refuse if started now")
+    else:
+        lines.append(f"machine: {have}; require_free_gb {need:g}")
+    lines.append(
+        "  (a per-calculation figure: a long run has been measured holding ~11 GB against a ~2 GB prediction, "
+        "so leave the machine headroom beyond it)"
+    )
+    return lines
+
+
+def pose_sections() -> tuple[str, ...]:
+    """The config sections that decide the poses; an edit outside them leaves every pose where it was: the sections
+    of the methods on the input and geometry rungs (`smeltery.methods.registry()`), and the pipeline's own
+    candidates, parent and decisions."""
+    own = tuple(s.section for s in registry().values() if s.section is not None and s.rung in ("input", "geometry"))
+    return (*own, "candidates", "parent", "decisions")
+
+
+def poses_key(cfg: dict, base: Path) -> str:
+    """A hash of everything upstream of the poses in a raw config (`tomllib` output). A file the config names is
+    hashed by content, so a run's staged copy (`inputs/<sha>/name`) and the original path give the same key."""
+    from .run_inputs import input_paths
+
+    parts: dict = {}
+    for sec in pose_sections():
+        if sec in cfg:
+            parts[sec] = json.loads(json.dumps(cfg[sec], sort_keys=True, default=str))
+    for table, key in input_paths():
+        v = parts.get(table, {}).get(key) if isinstance(parts.get(table), dict) else None
+        if isinstance(v, str):
+            f = Path(v) if Path(v).is_absolute() else Path(base) / v
+            if f.is_file():
+                parts[table][key] = {"sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+
+
+def write_plan_preview(plan: Plan, digest: str, out_dir: Path, config: Path) -> None:
+    """`--plan --out OUT`: OUT/plan.json (`digest`, `seconds` = the measurement tier's `estimate_cost`, `memory`,
+    `poses_key`, `poses`) and the pose SDFs under OUT/poses/. No SCF ran; Bench's impact reads these."""
+    poses = write_pose_sdfs(plan, {"per_pose": {c.name: {} for c in plan.candidates}}, out_dir)
+    raw = tomllib.loads(Path(config).read_text())  # the config as written: before decisions drop candidates
+    rec = {
+        "digest": digest,
+        "seconds": plan.tier.estimate_cost(plan.candidates),
+        "memory": memory_estimate(plan),
+        "poses_key": poses_key(raw, Path(config).resolve().parent),
+        "poses": poses,
+    }
+    (out_dir / "plan.json").write_text(json.dumps(rec, indent=2, sort_keys=True, default=str) + "\n")
 
 
 #: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.
@@ -943,6 +1560,81 @@ VIEWERS = {
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
 }
+
+
+def _stage_config(config: Path, out_dir: Path, temporal: bool = False) -> tuple[Path, dict]:
+    """Write OUT/config.toml with every input file copied under OUT/inputs/, and return its path and the record's
+    `results.config` entry; the run then reads only from OUT. Refused (ConfigError) while a Temporal run is live in
+    OUT, unless this is `--temporal` with the same staged config (it attaches)."""
+    from .run_inputs import stage_inputs
+
+    config = Path(config)
+    try:
+        text = config.read_text()
+    except OSError as e:
+        raise ConfigError(f"cannot read {config}: {e}") from e
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"cannot read {config}: {e}") from e
+    out_dir = Path(out_dir)
+    # the guard first: nothing is written into an OUT whose Temporal run is live
+    _guard_out(out_dir, lambda: staged_sha256(text, config.resolve().parent), temporal)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    staged, inputs = stage_inputs(text, config.resolve().parent, out_dir)
+    dest = out_dir / "config.toml"
+    if not dest.is_file() or dest.read_text() != staged:  # an unchanged config is not rewritten (a live run reads it)
+        dest.write_text(staged)
+    return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
+
+
+def staged_sha256(text: str, config_dir: Path) -> str:
+    """The sha256 of the config `stage_inputs` would write, computed by staging into a scratch directory: the staged
+    text names each input by content (`inputs/<sha>/<name>`), not by OUT, so it is the same text OUT would get."""
+    import tempfile
+
+    from .run_inputs import stage_inputs
+
+    with tempfile.TemporaryDirectory(prefix="smeltery-stage-") as tmp:
+        staged, _ = stage_inputs(text, Path(config_dir), Path(tmp))
+    return hashlib.sha256(staged.encode()).hexdigest()
+
+
+def _guard_out(out_dir: Path, staged_sha, temporal: bool = False) -> None:
+    from .temporal_run import guard_out
+
+    why = guard_out(Path(out_dir), staged_sha, temporal)
+    if why:
+        raise ConfigError(why)
+
+
+def partial_digest(plan: Plan, parent: str, name: str) -> str:
+    """The input digest `--only-candidate name` records for this config: the plan's inputs with only the parent and
+    `name` as candidates (a partial plan is built from exactly those), and the same tiers."""
+    from .record import digest
+
+    keep = {k: v for k, v in plan.inputs["candidates"].items() if k in (parent, name)}
+    return digest({"inputs": {**plan.inputs, "candidates": keep}, "tiers": plan.tiers})
+
+
+def _check_partials(plan: Plan, parent: str, recs: dict[Path, dict]) -> None:
+    """A combine joins partials of THIS config only: each partial's input digest is the one this plan gives its
+    candidate, and every partial staged the same config (results.config sha256). Else ConfigError."""
+    for p, r in recs.items():
+        name = p.name[len("partial-") : -len(".json")]
+        want = partial_digest(plan, parent, name)
+        if r.get("input_digest") != want:
+            raise ConfigError(
+                f"{p.name} was measured with other inputs (input_digest {str(r.get('input_digest'))[:12]}, this "
+                f"config gives {want[:12]}): a combine joins partials of one config; re-run that partial"
+            )
+    shas = {p.name: ((r.get("results") or {}).get("config") or {}).get("sha256") for p, r in recs.items()}
+    if len(set(shas.values())) > 1:
+        each = ", ".join(f"{k}: {str(v)[:12] if v else 'none'}" for k, v in sorted(shas.items()))
+        raise ConfigError(
+            f"the partials staged different configs ({each}): a combine record states one config; re-run the "
+            "partials from one staged config"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -967,7 +1659,12 @@ def main(argv: list[str] | None = None) -> int:
     tw.add_argument("--concurrency", type=int, default=2, help="max concurrent activities")
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
-    run.add_argument("--out", type=Path, default=Path("out"), help="directory for the run record")
+    run.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="directory for the run record (default out); when given it also receives config.toml and inputs/",
+    )
     run.add_argument("--plan", action="store_true", help="stop before the SCFs: poses, pocket, parity, digest")
     run.add_argument(
         "--only-candidate",
@@ -976,11 +1673,46 @@ def main(argv: list[str] | None = None) -> int:
         help="measure one candidate only, writing a partial result",
     )  # noqa: E501
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
+    run.add_argument(
+        "--temporal",
+        action="store_true",
+        help="run as a durable Temporal workflow (needs --out, a server and `smeltery temporal-worker`)",
+    )
+    run.add_argument("--workers", type=int, default=2, help="with --temporal: scores run at once")
+    run.add_argument("--host", default="127.0.0.1:7233", help="with --temporal: the Temporal server")
+    run.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline", help="with --temporal")
+    me = sub.add_parser("methods", help="every method's config section, knobs and defaults, as TOML")
+    me.add_argument("--out", help="write one <key>.toml per method plus index.toml into this directory")
+    me.add_argument("--only", help="one method key, e.g. field_interaction")
+    pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
+    pw.add_argument("--workers", type=int, default=2, help="SCFs at once, one child process each (memory-bound)")
+    pw.add_argument(
+        "--threads-per-worker", dest="threads_per_worker", type=int, default=1, help="RAYON_NUM_THREADS per SCF"
+    )
+    pw.add_argument("--host", default="127.0.0.1:7233")
+    pw.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline")
     args = ap.parse_args(argv)
     if getattr(args, "command", None) == "golden":
         from smeltery.golden import main as _golden_main
 
         return _golden_main(argv[1:])
+    if getattr(args, "command", None) == "methods":
+        from smeltery.methods import registry
+        from smeltery.methods.usage import all_methods_toml, method_toml, write_methods_toml
+
+        if args.only:
+            spec = registry().get(args.only)
+            if spec is None:
+                print(f"no method {args.only!r}; one of: {', '.join(sorted(registry()))}", file=sys.stderr)
+                return 2
+            print(method_toml(spec), end="")
+            return 0
+        if args.out:
+            paths = write_methods_toml(args.out)
+            print(f"wrote {len(paths)} file(s) to {args.out}: index.toml and one per method")
+            return 0
+        print(all_methods_toml(), end="")
+        return 0
     if getattr(args, "command", None) == "task-worker":
         from smeltery.tasks import TEMPORAL_AVAILABLE, worker_activities, worker_workflows
 
@@ -1014,8 +1746,42 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             return 0
         return 0
+    if args.command == "temporal-worker":
+        from .temporal_run import worker_cli
+
+        return worker_cli(args.host, args.task_queue, args.workers, args.threads_per_worker)
+    explicit_out = args.out is not None
+    if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
+        print(
+            "config error: --temporal needs --out OUT, and runs the whole config (no --only-candidate/--combine)",
+            file=sys.stderr,
+        )
+        return 2
+    plan = None
+    calc_file = "calcs.jsonl"
+    if args.out is None:
+        args.out = Path("out")
     try:
+        config_info = None
+        if explicit_out and not args.combine:
+            args.config, config_info = _stage_config(args.config, args.out, temporal=args.temporal)
+        elif explicit_out:  # a combine writes its record into OUT
+            _guard_out(args.out, None)
         cfg = load_config(args.config)
+        # --plan runs no SCF, so planning one candidate of such a config is fine
+        if (args.only_candidate is not None and not args.plan) or args.combine:
+            from .temporal_run import remeasuring_analyses
+
+            again = remeasuring_analyses(cfg)
+            if again:  # a partial measures one field only; a combine has no SCFs to re-measure with
+                raise ConfigError(
+                    f"[{again[0].section}] re-measures every pose under other fields, which a partial "
+                    "(--only-candidate) run does not do and a combine cannot; run the whole config, or use --temporal"
+                )
+        if args.temporal and not args.plan:
+            from .temporal_run import run_cli
+
+            return run_cli(args.config, args.out, args.workers, args.host, args.task_queue, config_info)
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
                 print(f"config error: unknown candidate {args.only_candidate!r}", file=sys.stderr)
@@ -1034,13 +1800,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
                 return 0
             target_name = args.only_candidate
+            calc_file = calc_file_name(target_name)
 
             def measure_one(p):
                 target = next(c for c in p.candidates if c.name == target_name)
                 p.tier.run([target], {"field": p.field})
 
             rec, out = run_plan(plan, measure=measure_one, partial=True)
-            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+            if config_info is not None:
+                rec.results["config"] = config_info
+            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_file))
             # rename to partial-<name>.json and drop cut
             p = Path(path)
             new_path = p.parent / f"partial-{args.only_candidate}.json"
@@ -1066,8 +1835,12 @@ def main(argv: list[str] | None = None) -> int:
             plan = build_plan(cfg, out_dir=args.out)
             per_candidate_values = {}
             parent_values = None
+            partial_configs = []
+            recs = {p: json.loads(p.read_text()) for p in partials}
+            _check_partials(plan, cfg["parent"], recs)
             for p in partials:
-                recp = json.loads(p.read_text())
+                recp = recs[p]
+                partial_configs.append(recp["results"].get("config"))
                 pp = recp["results"]["per_pose"]
                 name = p.name[len("partial-") : -len(".json")]
                 if name in pp:
@@ -1089,21 +1862,43 @@ def main(argv: list[str] | None = None) -> int:
                             c.per_pose[q] = list(v)
 
             rec, out = run_plan(plan, measure=measure)
-            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+            # the partials staged the config (_check_partials: all the same one); the combine carries it
+            if partial_configs and partial_configs[0] is not None:
+                rec.results["config"] = partial_configs[0]
+            merged = merged_partial_calcs(out_dir, partials)
+            path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
             return 0
         plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
-            print(_describe_plan(plan, RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest))
+            digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
+            print(_describe_plan(plan, digest))
+            if explicit_out:
+                write_plan_preview(plan, digest, args.out, args.config)
             return 0
         rec, out = run_plan(plan)
+        if config_info is not None:
+            rec.results["config"] = config_info
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 2
     except StageError as e:
         print(f"error: {e}", file=sys.stderr)
+        if explicit_out and e.gates:  # a rejected gate still leaves every pose's result
+            try:
+                args.out.mkdir(parents=True, exist_ok=True)
+                (args.out / "gates.json").write_text(
+                    json.dumps(_gates_in_out(e.gates, args.out), indent=2, sort_keys=True) + "\n"
+                )
+            except OSError as oe:  # never mask the exit code of the failure itself
+                print(f"warning: could not write gates.json: {oe}", file=sys.stderr)
+        if explicit_out and plan is not None:  # a failed SCF still leaves the SCFs it ran
+            try:
+                write_calc_log(plan, args.out, calc_file)
+            except OSError as oe:  # the log is a courtesy: never mask the exit code of the failure itself
+                print(f"warning: could not write {calc_file}: {oe}", file=sys.stderr)
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")

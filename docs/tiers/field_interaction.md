@@ -40,7 +40,7 @@
 ## Systematic floor
 
 - **Floor (`dE_int`):** UNMEASURED
-- `systematic_floor("dE_int")` returns `None` with the comment "charge-model / basis sensitivity not yet measured" (`src/smeltery/tiers.py`). `gates.charge_sensitivity` measures the charge-model part per run; it is not a stored number.
+- `systematic_floor("dE_int")` returns `None` with the comment "charge-model / basis sensitivity not yet measured" (`src/smeltery/tiers.py`). `gates.charge_sensitivity` computes the charge-model part per run, and the `[charge_sensitivity]` method (`docs/methods.md`, `src/smeltery/methods/charge_sensitivity.py`) repeats a measurement under a second pdb2pqr force field and reports it in `results.charge_sensitivity`; it is not a stored number, and this page records no measured value.
 - Related, and not this tier's floor: the pose-ensemble ddE noise floor, **ddE noise floor:** 4.07 kcal/mol (`smeltery.pocket.DDE_NOISE_FLOOR_KCAL_MOL`). It is SEM·√2 at n = 100 poses of an UNPAIRED difference of two independently embedded ensembles, from a per-pose sd of 28.75 kcal/mol on danuglipron in 7LCJ (`experiments/danuglipron/RESULTS.md`, M13 table; cited as M4 to M14 in `src/smeltery/pocket/binding_energy.py`). It is pose-sampling noise, not a systematic error of RHF/STO-3G, and the record does not establish that its `pose_fit` quantity is this tier's `dE_int`. Paired differences have a smaller SEM: 0.221 to 0.615 kcal/mol for F-for-H and Cl-for-H on one paracetamol-like molecule with MMFF energies in the gas phase, recorded as provisional (`experiments/danuglipron/RESULTS.md`, M17). Not measured for this tier.
 
 ## Not licensed to claim

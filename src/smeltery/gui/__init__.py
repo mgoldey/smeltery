@@ -13,7 +13,7 @@
 
 from .catalog import RUNGS, Method, Param, catalog, catalog_json, floor_status, hierarchy, method
 from .compare import Comparison, KeyRow
-from .pipeline import EXECUTION_ORDER, Issue, Pipeline, PipelineError, Stage
+from .pipeline import Issue, Pipeline, PipelineError, Stage, execution_order
 from .results import (
     Run,
     ddE_table,
@@ -26,6 +26,13 @@ from .results import (
     resolved_matrix,
 )
 from .scenes import pose_scene
+
+
+def __getattr__(name: str):
+    if name == "EXECUTION_ORDER":  # derived from the method registry on every read
+        return execution_order()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "EXECUTION_ORDER",
@@ -46,6 +53,7 @@ __all__ = [
     "funnel_rows",
     "hierarchy",
     "load_run",
+    "execution_order",
     "method",
     "per_pose_table",
     "pose_output",

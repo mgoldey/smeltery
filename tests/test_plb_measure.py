@@ -497,10 +497,13 @@ def test_a_declared_exclusion_is_honoured_and_an_undeclared_one_is_refused():
 
 
 @pytest.mark.needs_ferric
-def test_basis_gaps_finds_bromine_in_sto3g_but_not_chlorine_or_sulfur():
+def test_basis_gaps_asks_ferric_rather_than_assuming_which_elements_it_covers():
+    """Drug-like elements are covered; ferric's bundled STO-3G reaches Xe, so Br and I are too (an earlier build
+    stopped at Ar). The probe asks the installed engine, which is why this keeps working as ferric grows."""
     run = _script("run_plb_ddE")
     assert run.basis_gaps(("C", "H", "N", "O", "S", "Cl"), "sto-3g") == []
-    assert run.basis_gaps(("C", "H", "Br"), "sto-3g") == ["Br"]
+    assert run.basis_gaps(("C", "H", "Br", "I"), "sto-3g") == []
+    assert run.basis_gaps(("C", "Cs"), "sto-3g") == ["Cs"]
 
 
 def test_a_dropped_pose_must_be_declared_and_cannot_be_used():

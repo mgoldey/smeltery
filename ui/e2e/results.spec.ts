@@ -14,12 +14,19 @@ async function rendered(page: Page, name: string): Promise<Fig> {
   return el.evaluate((d) => ({ data: (d as unknown as Fig).data, layout: (d as unknown as Fig).layout }));
 }
 
-test("the forest plot has one marker per analogue, from the API's table", async ({ page }) => {
-  const table = await api<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+test("the forest plot has one marker per analogue and one tick per pose, from the API's table", async ({ page }) => {
+  const table = await api<{ rows: { candidate: string; per_pose: number[] }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
   await page.goto(`/run/${IDX.a_resolved}/results`);
-  await rendered(page, "forest");
-  await expect(page.locator('[data-figure="forest"] .scatterlayer .point')).toHaveCount(table.rows.length);
-  for (const r of table.rows) await expect(page.getByRole("cell", { name: r.candidate, exact: true })).toBeVisible();
+  const fig = await rendered(page, "forest");
+  // Two kinds of point share the layer: the per-pose ticks behind, one summary marker per row on top. Counting
+  // only the total would pass while either half silently went missing, so count each trace.
+  const poses = table.rows.reduce((n, r) => n + (r.per_pose?.length ?? 0), 0);
+  const ticks = fig.data.find((d) => (d as { name?: string }).name === "one pose");
+  expect(ticks?.y?.length ?? 0).toBe(poses);
+  const summary = fig.data.filter((d) => (d as { name?: string }).name !== "one pose");
+  expect(summary.reduce((n, d) => n + (d.y?.length ?? 0), 0)).toBe(table.rows.length);
+  await expect(page.locator('[data-figure="forest"] .scatterlayer .point')).toHaveCount(table.rows.length + poses);
+  for (const r of table.rows) await expect(page.getByRole("button", { name: `Trace ${r.candidate}`, exact: true })).toBeVisible();
 });
 
 test("a non-zero floor draws its band around each group boundary", async ({ page }) => {

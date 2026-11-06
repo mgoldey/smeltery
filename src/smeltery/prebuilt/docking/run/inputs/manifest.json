@@ -1,0 +1,10 @@
+{
+  "inputs/08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca/pocket_pep5.pdbqt": {
+    "sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca",
+    "source": "pocket_pep5.pdbqt"
+  },
+  "inputs/79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb/pocket_pep5.pdb": {
+    "sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+    "source": "pocket_pep5.pdb"
+  }
+}

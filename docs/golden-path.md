@@ -66,14 +66,27 @@ The zip contains the run record, poses, receptor, decisions, and `report.html` (
 
 ## Long / interrupted work
 
-Use Temporal instead of a bare `smeltery run`:
+Use a durable Temporal run instead of a bare `smeltery run`. Start the Temporal server, a pipeline worker, then the run:
+
+```sh
+docker run -d --name temporal-dev -p 7233:7233 -p 8233:8233 temporalio/temporal:latest server start-dev --ip 0.0.0.0
+smeltery temporal-worker --workers 6 --threads-per-worker 1 &    # runs the SCFs
+smeltery run myrun.toml --out out/myrun --temporal --workers 6    # starts, or resumes, and waits
+```
+
+Re-running the same command resumes: finished SCFs are read back from `out/myrun/calcs.jsonl`. The options, the remedy
+ladder, `[run] scf_timeout_s`, exit codes and the pairwise pose drop are in [temporal-runs.md](temporal-runs.md).
+
+There are two different workers. `smeltery temporal-worker` runs the SCFs of a `run --temporal` (queue
+`smeltery-pipeline`). `smeltery task-worker` runs Bench's shell tasks (queue `smeltery-tasks`), for example the
+`smeltery run` command a dashboard submits:
 
 ```sh
 smeltery task-worker &                      # one shell
 smeltery dashboard out/ --port 8123         # centralized view + task submission
 ```
 
-Submit `smeltery run myrun.toml --out out/myrun` from the dashboard; Temporal handles retries, timeouts and resume.
+A Bench launch on the Temporal task queue submits `smeltery run ... --temporal` as a task, so it needs both workers.
 
 ## Provenance
 

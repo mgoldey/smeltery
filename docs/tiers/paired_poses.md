@@ -25,6 +25,10 @@
 | `relax_unmapped` | `False` |
 | `analogue_poses_given` | `False` |
 
+A tenth key, `first_pose_index`, is reported only when it is not 0: analogue pose i then embeds its unmapped atoms
+with seed `seed + first_pose_index + i`, the seed it had before the leading poses were dropped (`[bound_pose]
+skip_first` sets it).
+
 ## Cost
 
 - **Cost:** 0.0862 s; **Unit of work:** `PairedPoses(n_poses=6).run` on a parent and one analogue (6 parent poses plus 6 paired analogue poses); **System:** benzoic acid paired with 4-fluorobenzoic acid, 15 atoms each, RDKit 2026.03.6, Python 3.11.14, one thread, box load average 41.4 on 12 cores, median of 5; **Basis:** none (no basis set; RDKit embedding and MMFF94); **Source:** `docs/tiers/measurements.json`, produced by `scripts/measure_tier_costs.py`

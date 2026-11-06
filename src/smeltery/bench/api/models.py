@@ -53,6 +53,7 @@ class DdeRow(BaseModel):
     mean: float
     sem: float
     n: int
+    per_pose: list[float] = Field(description="the per-pose values behind the mean, in pose order")
     lo: float
     hi: float
     unpaired_sem: float | None
@@ -77,7 +78,12 @@ class Resolved(BaseModel):
 
 class PerPoseRow(BaseModel):
     candidate: str
+    #: the ORIGINAL pose index, the pairing key (`results.pose_index` after a pairwise drop, else the position)
     pose: int
+    #: the pose's place in this candidate's per-pose values and SDF (what `/scene` and `/calcs` take)
+    position: int
+    #: the paired parent pose's place in the parent's per-pose values and SDF
+    parent_position: int
     value: float
     parent_value: float
     paired: float
@@ -136,6 +142,36 @@ class PipelineState(BaseModel):
     parent: str
     candidates: dict[str, str]
     notes: list[str] = []
+
+
+class PipelineDoc(BaseModel):
+    """A workspace pipeline: its config text as saved, the hash a save must quote, and what `check()` finds."""
+
+    name: str
+    toml: str
+    sha256: str
+    folder: str
+    ok: bool
+    issues: list[Issue]
+    notes: list[str] = []
+
+
+class PipelinePut(BaseModel):
+    toml: str
+    base_sha256: str | None = None
+
+
+class BlankPipeline(BaseModel):
+    campaign: str
+    parent: str
+    candidates: dict[str, str]
+
+
+class PipelineCreate(BaseModel):
+    name: str
+    from_run: int | None = None
+    from_prebuilt: str | None = None
+    blank: BlankPipeline | None = None
 
 
 class PipelineCheck(BaseModel):
@@ -363,3 +399,85 @@ class CatalogOut(BaseModel):
     kinds: list[str]
     site_fields: list[SiteField]
     methods: dict[str, MethodOut]
+
+
+class LineagePose(BaseModel):
+    pose: int
+    value: float
+    parent_value: float
+    difference: float
+
+
+class LineageStep(BaseModel):
+    stage: str
+    kind: str
+    seconds: float | None
+    settings: dict[str, Any] | None = Field(description="None: the stage should have a tier but the record has none")
+
+
+class LineageField(BaseModel):
+    n_charges: int
+    provenance: dict[str, Any] | None
+
+
+class LineageConfig(BaseModel):
+    file: str
+    sha256: str
+    inputs: Any
+
+
+class LineageCalcs(BaseModel):
+    file: str
+    n: int | None = None
+
+
+class Lineage(BaseModel):
+    """What made one candidate's paired ΔΔE: its poses, the steps that ran, and what the run recorded about itself."""
+
+    candidate: str
+    quantity: str
+    parent: str
+    mean: float
+    sem: float
+    n: int
+    poses: list[LineagePose]
+    steps: list[LineageStep]
+    field: LineageField
+    engine: dict[str, Any]
+    smeltery: dict[str, Any] | None
+    digest: str
+    started_utc: str | None
+    config: LineageConfig | None
+    calcs: LineageCalcs | None
+    missing: list[str] = Field(description="items above this run did not record (an older run, or no --out)")
+
+
+class MethodParam(BaseModel):
+    """One setting of a method: what the code defaults it to, what it does, and the workspace's own default."""
+
+    name: str
+    kind: str
+    default: Any = None
+    required: bool
+    optional: bool
+    choices: list[Any]
+    help: str = Field(description="one plain sentence, from the tier's own docs, saying what changing it does")
+    workspace_default: Any = Field(description="copied into a step when the method is added; null when unset")
+
+
+class MethodInfo(BaseModel):
+    key: str
+    label: str
+    summary: str
+    quantity: str | None
+    params: list[MethodParam]
+    cost_model: str = Field(description="how wall time is estimated, or 'cannot say: ...'")
+    memory_model: str = Field(description="how memory is estimated, or 'cannot say: ...'")
+    floor: float | None = Field(description="the tier's measured systematic floor; null while it is unmeasured")
+    used_by: list[str] = Field(description="workspace pipelines that place this method")
+
+
+class MethodDefaultsPut(BaseModel):
+    """The workspace defaults of one method, replacing what was there; `{}` clears them."""
+
+    defaults: dict[str, Any]

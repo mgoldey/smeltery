@@ -47,7 +47,6 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import rdDetermineBonds
 
 from smeltery import (
     Candidate,
@@ -60,7 +59,9 @@ from smeltery import (
     paired_delta,
     unpaired_delta,
 )
-from smeltery.tiers import FieldInteraction, PairedPoses, _mol_with_h, _rigid_jitter
+from smeltery.methods.bound_pose import BoundPosePairedPoses
+from smeltery.methods.bound_pose import bound_pose_in_smiles_order as _bound_pose_in_smiles_order
+from smeltery.tiers import FieldInteraction
 
 PARENT_SMILES = "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F"
 # Atom indices (heavy-atom order of PARENT_SMILES) of the four substituted aromatic CH sites.
@@ -120,81 +121,11 @@ def analogue_smiles(sites: dict[str, int] | None = None) -> dict[str, str]:
 
 
 def bound_pose_in_smiles_order(xyz_path: Path) -> Pose:
-    """The cryo-EM conformer, relabelled to the atom order of `AddHs(PARENT_SMILES)`.
+    """The cryo-EM conformer, relabelled to the atom order of `AddHs(PARENT_SMILES)`; coordinates unaltered.
 
-    Heavy atoms by skeleton substructure match on the connectivity perceived from
-    the file; each hydrogen goes to a slot of the heavy atom it sits on.
-    Hydrogens of one heavy atom are interchangeable, so slot order within a heavy
-    atom is immaterial. Coordinates are copied, never altered.
+    The relabelling is `smeltery.methods.bound_pose.bound_pose_in_smiles_order`, which `[bound_pose]` runs.
     """
-    pmol = _mol_with_h(PARENT_SMILES)
-    xmol = Chem.MolFromXYZFile(str(xyz_path))
-    rdDetermineBonds.DetermineConnectivity(xmol)
-    xyz = np.array([list(xmol.GetConformer().GetAtomPosition(i)) for i in range(xmol.GetNumAtoms())])
-
-    def skeleton(m):
-        r = Chem.RWMol(Chem.RemoveHs(m, sanitize=False))
-        for b in r.GetBonds():
-            b.SetBondType(Chem.BondType.SINGLE)
-            b.SetIsAromatic(False)
-        for a in r.GetAtoms():
-            a.SetIsAromatic(False)
-            a.SetFormalCharge(0)
-        return r.GetMol()
-
-    sx, sp = skeleton(xmol), skeleton(pmol)
-    match = sp.GetSubstructMatch(sx)  # xyz heavy-atom order index -> pmol heavy-atom index
-    if len(match) != sx.GetNumAtoms():
-        raise RuntimeError("cryo-EM conformer does not match the parent's heavy-atom skeleton")
-    xheavy = [a.GetIdx() for a in xmol.GetAtoms() if a.GetAtomicNum() > 1]
-    out = np.full((pmol.GetNumAtoms(), 3), np.nan)
-    for xi, pi in zip(xheavy, match, strict=True):
-        out[pi] = xyz[xi]
-    xh_by_heavy: dict[int, list[int]] = {}
-    for a in xmol.GetAtoms():
-        if a.GetAtomicNum() == 1:
-            nb = [n.GetIdx() for n in a.GetNeighbors() if n.GetAtomicNum() > 1]
-            if len(nb) != 1:
-                raise RuntimeError("hydrogen without exactly one heavy neighbour in the cryo-EM conformer")
-            xh_by_heavy.setdefault(nb[0], []).append(a.GetIdx())
-    x2p = dict(zip(xheavy, match, strict=True))
-    for xi, hs in xh_by_heavy.items():
-        slots = [n.GetIdx() for n in pmol.GetAtomWithIdx(x2p[xi]).GetNeighbors() if n.GetAtomicNum() == 1]
-        if len(slots) != len(hs):
-            raise RuntimeError("hydrogen count differs between the cryo-EM conformer and the parent SMILES")
-        for slot, h in zip(slots, hs, strict=True):
-            out[slot] = xyz[h]
-    if np.isnan(out).any():
-        raise RuntimeError("some parent atoms received no cryo-EM coordinates")
-    return Pose(tuple(a.GetSymbol() for a in pmol.GetAtoms()), out)
-
-
-class BoundPosePairedPoses(PairedPoses):
-    """`PairedPoses` with the parent ensemble built on the cryo-EM bound conformer.
-
-    Parent pose 0 is the bound conformer; poses 1.. are seeded rigid jitters of it.
-    Analogue pairing is `PairedPoses._paired`, unchanged: mapped atoms are exact
-    copies of the parent pose, so pairing a molecule with itself copies everything.
-    """
-
-    def __init__(self, bound: Pose, **kw):
-        super().__init__(**kw)
-        self.bound = bound
-
-    def run(self, candidates: list[Candidate], ctx: dict) -> None:
-        parent = ctx["parent"]
-        pmol = _mol_with_h(parent.smiles)
-        if tuple(a.GetSymbol() for a in pmol.GetAtoms()) != self.bound.symbols:
-            raise ValueError("bound pose atom order does not match the parent SMILES")
-        rng = np.random.default_rng(self.seed)
-        base = self.bound.coords_ang
-        parent_poses = [base.copy()] + [
-            _rigid_jitter(base, rng, self.jitter_deg, self.jitter_ang) for _ in range(self.n_poses - 1)
-        ]
-        parent.poses = [Pose(self.bound.symbols, x) for x in parent_poses]
-        for cand in candidates:
-            if cand is not parent:
-                cand.poses = self._paired(pmol, parent_poses, cand)
+    return _bound_pose_in_smiles_order(xyz_path, PARENT_SMILES)
 
 
 def make_pairing(bound: Pose, n_poses: int, relax_unmapped: bool = False) -> BoundPosePairedPoses:

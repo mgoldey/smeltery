@@ -5,6 +5,18 @@ import { api, unwrap } from "../api/client";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
 
+/** "name SMILES" per line; at least one analogue. */
+export function parseAnalogues(text: string): { ok: boolean; candidates: Record<string, string>; why: string } {
+  const candidates: Record<string, string> = {};
+  for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    const [name, smiles, ...rest] = line.split(/\s+/);
+    if (!name || !smiles || rest.length) return { ok: false, candidates, why: `"${line}": give a name and a SMILES` };
+    candidates[name] = smiles;
+  }
+  const ok = Object.keys(candidates).length > 0;
+  return { ok, candidates, why: ok ? "" : "at least one analogue" };
+}
+
 export function BenchHome() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
   const [task, setTask] = useState<string | null>(null);
@@ -13,6 +25,60 @@ export function BenchHome() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => unwrap(api.GET("/api/pipelines")) });
+  const [pipeName, setPipeName] = useState("");
+  const [fromRun, setFromRun] = useState("");
+  const newPipeline = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: Number(fromRun) } })),
+    onSuccess: (d) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      navigate(`/pipelines/${d.name}?run=${fromRun}`);
+    },
+  });
+  const prebuilt = useQuery({ queryKey: ["prebuilt"], queryFn: () => unwrap(api.GET("/api/prebuilt")) });
+  const [prebuiltName, setPrebuiltName] = useState<Record<string, string>>({});
+  const startPrebuilt = useMutation({
+    mutationFn: async (p: string) => {
+      const name = (prebuiltName[p] ?? p).trim();
+      const made = await unwrap(api.POST("/api/pipelines", { body: { name, from_prebuilt: p } }));
+      // The example run was copied into the new pipeline's folder, so the run store lists it: find its index now.
+      const list = await unwrap(api.GET("/api/runs"));
+      const mine = list.find((r) => r.path.includes(`/pipelines/${made.name}/run/`));
+      return { name: made.name, idx: mine?.idx ?? null };
+    },
+    onSuccess: ({ name, idx }) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+      navigate(`/pipelines/${name}?${idx === null ? "" : `run=${idx}&`}step=measure`);
+    },
+  });
+  const [blank, setBlank] = useState({ name: "", campaign: "", parent: "", parentSmiles: "", analogues: "" });
+  const analogues = parseAnalogues(blank.analogues);
+  const blankReady =
+    !!blank.name.trim() && !!blank.campaign.trim() && !!blank.parent.trim() && !!blank.parentSmiles.trim() && analogues.ok;
+  const newBlank = useMutation({
+    mutationFn: () =>
+      unwrap(
+        api.POST("/api/pipelines", {
+          body: {
+            name: blank.name.trim(),
+            blank: {
+              campaign: blank.campaign.trim(),
+              parent: blank.parent.trim(),
+              candidates: { [blank.parent.trim()]: blank.parentSmiles.trim(), ...analogues.candidates },
+            },
+          },
+        }),
+      ),
+    onSuccess: (d) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      navigate(`/pipelines/${d.name}?step=ligands`);
+    },
+  });
+  const field = (k: keyof typeof blank) => ({
+    value: blank[k],
+    onChange: (e: { target: { value: string } }) => setBlank((b) => ({ ...b, [k]: e.target.value })),
+  });
   const create = useMutation({
     mutationFn: () => unwrap(api.POST("/api/campaigns", { body: { name, description: "" } })),
     onSuccess: (c) => {
@@ -67,6 +133,122 @@ export function BenchHome() {
                 </tbody>
               </table>
             )}
+          </section>
+          <section aria-labelledby="pipelines-h">
+            <h2 id="pipelines-h">Pipelines</h2>
+            {pipelines.isError ? (
+              <div className="banner" role="alert">
+                Pipelines could not be listed: {pipelines.error.message}
+              </div>
+            ) : pipelines.data && pipelines.data.length ? (
+              <ul>
+                {pipelines.data.map((n) => (
+                  <li key={n}>
+                    <Link className="mono" to={`/pipelines/${n}`}>
+                      {n}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-state">No pipelines yet. Start one from a run below, or open a run's Pipeline tab.</p>
+            )}
+            <div role="group" aria-labelledby="prebuilt-h">
+              <h3 id="prebuilt-h">Start from a working pipeline</h3>
+              {prebuilt.isError ? (
+                <div className="banner" role="alert">
+                  Working pipelines could not be listed: {prebuilt.error.message}
+                </div>
+              ) : (
+                <ul>
+                  {(prebuilt.data ?? []).map((p) => (
+                    <li key={p.name} data-prebuilt={p.name}>
+                      <strong className="mono">{p.name}</strong>{" "}
+                      <span className="status" data-state={p.verdict.state}>
+                        {p.verdict.state === "UNRANKED" ? "does not resolve" : p.verdict.state}
+                      </span>
+                      <div>{p.about}</div>
+                      <div className="lede">{p.needs}</div>
+                      <label htmlFor={`prebuilt-name-${p.name}`}>Name of your copy</label>{" "}
+                      <input
+                        id={`prebuilt-name-${p.name}`}
+                        className="mono"
+                        value={prebuiltName[p.name] ?? p.name}
+                        onChange={(e) => setPrebuiltName((m) => ({ ...m, [p.name]: e.target.value }))}
+                      />{" "}
+                      <button type="button" disabled={startPrebuilt.isPending} onClick={() => startPrebuilt.mutate(p.name)}>
+                        Start from {p.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {startPrebuilt.isError ? <p className="field-error">{startPrebuilt.error.message}</p> : null}
+            </div>
+            <form
+              className="controls"
+              aria-label="New pipeline"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (pipeName.trim() && fromRun !== "") newPipeline.mutate();
+              }}
+            >
+              <div>
+                <label htmlFor="pipeline-name">Pipeline name</label>
+                <input id="pipeline-name" className="mono" value={pipeName} onChange={(e) => setPipeName(e.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="pipeline-from">Start from run</label>
+                <select id="pipeline-from" value={fromRun} onChange={(e) => setFromRun(e.target.value)}>
+                  <option value="">choose a run</option>
+                  {(runs.data ?? []).map((r) => (
+                    <option key={r.idx} value={String(r.idx)}>
+                      {r.idx}: {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" disabled={newPipeline.isPending || !pipeName.trim() || fromRun === ""}>
+                New pipeline
+              </button>
+            </form>
+            {newPipeline.isError ? <p className="field-error">{newPipeline.error.message}</p> : null}
+            <form
+              aria-label="New blank pipeline"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (blankReady) newBlank.mutate();
+              }}
+            >
+              <h3>Or start a blank pipeline</h3>
+              <div className="controls">
+                <div>
+                  <label htmlFor="blank-name">Pipeline name</label>
+                  <input id="blank-name" className="mono" {...field("name")} />
+                </div>
+                <div>
+                  <label htmlFor="blank-campaign">Campaign</label>
+                  <input id="blank-campaign" {...field("campaign")} />
+                </div>
+                <div>
+                  <label htmlFor="blank-parent">Parent name</label>
+                  <input id="blank-parent" {...field("parent")} />
+                </div>
+                <div>
+                  <label htmlFor="blank-parent-smiles">Parent SMILES</label>
+                  <input id="blank-parent-smiles" className="mono" {...field("parentSmiles")} />
+                </div>
+              </div>
+              <label htmlFor="blank-analogues">Analogues, one per line: name, then SMILES</label>
+              <textarea id="blank-analogues" className="mono" rows={3} cols={60} {...field("analogues")} />
+              {blank.analogues.trim() && !analogues.ok ? <p className="field-error">{analogues.why}</p> : null}
+              <p>
+                <button type="submit" disabled={newBlank.isPending || !blankReady}>
+                  New blank pipeline
+                </button>
+              </p>
+            </form>
+            {newBlank.isError ? <p className="field-error">{newBlank.error.message}</p> : null}
           </section>
           <WorkPanel selected={task} onSelect={setTask} />
           <section aria-labelledby="campaigns-h">

@@ -1,0 +1,1179 @@
+{
+  "campaign": "mwe-docking",
+  "ferric": {
+    "commit": "b22183b9dbed226e1d2acc5cb6e5194c973b023b",
+    "dirty": false,
+    "provenance": "VERIFIED from ferric.__build__ (stamped at build time)",
+    "source": "ferric.__build__",
+    "version": "0.1.0.dev0"
+  },
+  "host": {
+    "node": "blacktea",
+    "python": "3.12.12"
+  },
+  "input_digest": "1a841ad89f2e0f2e7abb495aa0126e562209abea7013596f58d89856a7c891c6",
+  "inputs": {
+    "candidates": {
+      "butanol": "CCCCO",
+      "ethanol": "CCO",
+      "propanol": "CCCO"
+    },
+    "cut": {
+      "keep": 1,
+      "z": 2.0
+    },
+    "docking": {
+      "box": {
+        "center": [
+          0.4,
+          -0.1,
+          -0.1
+        ],
+        "size": [
+          22.0,
+          16.0,
+          16.0
+        ]
+      },
+      "receptor": "pocket_pep5.pdbqt",
+      "receptor_sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca"
+    },
+    "floor": {
+      "source": "config [cut] floor (explicit; the tier's own is unmeasured)",
+      "value": 0.0
+    },
+    "gates": {
+      "forcefield": true,
+      "posebusters": true,
+      "xtb": false
+    },
+    "parent": "ethanol",
+    "pocket": {
+      "center_ang": null,
+      "cutoff_ang": null,
+      "drop_waters": false,
+      "input": "pocket_pep5.pdb",
+      "input_sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+      "n_charges": 81,
+      "n_total": 81,
+      "pdb2pqr_ff": "AMBER",
+      "pdb2pqr_version": "pdb2pqr 3.8.0"
+    }
+  },
+  "results": {
+    "calcs": {
+      "file": "calcs.jsonl",
+      "n": 18
+    },
+    "candidate_order": [
+      "ethanol",
+      "propanol",
+      "butanol"
+    ],
+    "config": {
+      "file": "config.toml",
+      "inputs": {
+        "docking.receptor": {
+          "copy": "inputs/08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca/pocket_pep5.pdbqt",
+          "sha256": "08cf9e58e976e8cd8b4d3523a897d40513c0eca2ac4dc6602fa7b5d3c713bbca",
+          "source": "pocket_pep5.pdbqt"
+        },
+        "pocket.file": {
+          "copy": "inputs/79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb/pocket_pep5.pdb",
+          "sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+          "source": "pocket_pep5.pdb"
+        }
+      },
+      "sha256": "f01b3cea6a4e8f8516303419972a2d57dfcd58f459a401c6c5fa0d60ac6497e9"
+    },
+    "cut": {
+      "groups": [
+        [
+          "butanol",
+          "propanol"
+        ]
+      ],
+      "survivors": null,
+      "unranked": true
+    },
+    "field": [
+      [
+        0.1849,
+        -5.222,
+        1.025,
+        -1.225
+      ],
+      [
+        0.0567,
+        -3.873,
+        1.667,
+        -1.215
+      ],
+      [
+        0.6163,
+        -2.912,
+        0.888,
+        -0.293
+      ],
+      [
+        -0.5722,
+        -1.808,
+        1.309,
+        0.046
+      ],
+      [
+        0.2596,
+        -3.953,
+        3.138,
+        -0.778
+      ],
+      [
+        -0.6714,
+        -4.879,
+        3.279,
+        0.307
+      ],
+      [
+        0.1898,
+        -5.111,
+        0.035,
+        -1.234
+      ],
+      [
+        0.0782,
+        -3.512,
+        1.623,
+        -2.145
+      ],
+      [
+        0.0273,
+        -3.059,
+        3.432,
+        -0.475
+      ],
+      [
+        0.0273,
+        -4.27,
+        3.682,
+        -1.54
+      ],
+      [
+        0.1898,
+        -5.72,
+        1.303,
+        -0.408
+      ],
+      [
+        0.1898,
+        -5.715,
+        1.318,
+        -2.039
+      ],
+      [
+        0.4239,
+        -4.438,
+        2.986,
+        1.151
+      ],
+      [
+        -0.4157,
+        -3.365,
+        -0.364,
+        0.046
+      ],
+      [
+        -0.0518,
+        -2.637,
+        -1.308,
+        0.889
+      ],
+      [
+        0.5973,
+        -1.633,
+        -2.115,
+        0.03
+      ],
+      [
+        -0.5679,
+        -1.634,
+        -3.34,
+        -0.054
+      ],
+      [
+        -0.1102,
+        -3.607,
+        -2.244,
+        1.625
+      ],
+      [
+        0.3531,
+        -4.62,
+        -1.533,
+        2.547
+      ],
+      [
+        -0.4121,
+        -3.939,
+        -0.731,
+        3.656
+      ],
+      [
+        -0.4121,
+        -5.569,
+        -2.565,
+        3.163
+      ],
+      [
+        0.2719,
+        -4.308,
+        -0.574,
+        -0.373
+      ],
+      [
+        0.0922,
+        -2.115,
+        -0.799,
+        1.573
+      ],
+      [
+        0.0457,
+        -4.128,
+        -2.741,
+        0.947
+      ],
+      [
+        0.0457,
+        -3.075,
+        -2.855,
+        2.19
+      ],
+      [
+        -0.0361,
+        -5.22,
+        -2.227,
+        2.959
+      ],
+      [
+        0.1,
+        -3.351,
+        -0.034,
+        3.247
+      ],
+      [
+        0.1,
+        -4.635,
+        -0.292,
+        4.222
+      ],
+      [
+        0.1,
+        -3.388,
+        -1.346,
+        4.219
+      ],
+      [
+        0.1,
+        -5.039,
+        -3.224,
+        3.696
+      ],
+      [
+        0.1,
+        -6.222,
+        -2.099,
+        3.758
+      ],
+      [
+        0.1,
+        -6.059,
+        -3.039,
+        2.433
+      ],
+      [
+        -0.4157,
+        -0.687,
+        -1.333,
+        -0.59
+      ],
+      [
+        -0.0024,
+        0.357,
+        -1.868,
+        -1.463
+      ],
+      [
+        0.5973,
+        1.504,
+        -0.843,
+        -1.599
+      ],
+      [
+        -0.5679,
+        2.3,
+        -0.82,
+        -2.535
+      ],
+      [
+        -0.0343,
+        -0.162,
+        -2.36,
+        -2.825
+      ],
+      [
+        0.0118,
+        -1.042,
+        -1.381,
+        -3.574
+      ],
+      [
+        -0.1256,
+        -0.483,
+        -0.364,
+        -4.359
+      ],
+      [
+        -0.1256,
+        -2.438,
+        -1.49,
+        -3.501
+      ],
+      [
+        -0.1704,
+        -1.303,
+        0.523,
+        -5.058
+      ],
+      [
+        -0.1704,
+        -3.257,
+        -0.606,
+        -4.204
+      ],
+      [
+        -0.1072,
+        -2.69,
+        0.401,
+        -4.982
+      ],
+      [
+        0.2719,
+        -0.794,
+        -0.317,
+        -0.371
+      ],
+      [
+        0.0978,
+        0.746,
+        -2.667,
+        -1.005
+      ],
+      [
+        0.0295,
+        0.626,
+        -2.556,
+        -3.395
+      ],
+      [
+        0.0295,
+        -0.693,
+        -3.184,
+        -2.666
+      ],
+      [
+        0.133,
+        0.502,
+        -0.273,
+        -4.421
+      ],
+      [
+        0.133,
+        -2.846,
+        -2.206,
+        -2.942
+      ],
+      [
+        0.143,
+        -0.886,
+        1.25,
+        -5.614
+      ],
+      [
+        0.143,
+        -4.262,
+        -0.701,
+        -4.143
+      ],
+      [
+        0.1297,
+        -3.272,
+        1.036,
+        -5.486
+      ],
+      [
+        -0.4157,
+        1.629,
+        -0.015,
+        -0.498
+      ],
+      [
+        0.0143,
+        2.809,
+        0.814,
+        -0.297
+      ],
+      [
+        0.5973,
+        3.906,
+        -0.002,
+        0.422
+      ],
+      [
+        -0.5679,
+        3.717,
+        -1.122,
+        0.894
+      ],
+      [
+        -0.2041,
+        2.46,
+        2.103,
+        0.448
+      ],
+      [
+        0.713,
+        1.841,
+        1.868,
+        1.809
+      ],
+      [
+        0.2719,
+        0.818,
+        -0.054,
+        0.138
+      ],
+      [
+        0.1048,
+        3.174,
+        1.047,
+        -1.199
+      ],
+      [
+        0.0797,
+        3.3,
+        2.634,
+        0.567
+      ],
+      [
+        0.0797,
+        1.814,
+        2.623,
+        -0.111
+      ],
+      [
+        -0.5931,
+        1.56,
+        0.772,
+        2.276
+      ],
+      [
+        -0.9191,
+        1.593,
+        3.011,
+        2.517
+      ],
+      [
+        0.4196,
+        1.809,
+        3.892,
+        2.131
+      ],
+      [
+        0.4196,
+        1.19,
+        2.93,
+        3.427
+      ],
+      [
+        -0.3821,
+        5.14,
+        0.613,
+        0.483
+      ],
+      [
+        -0.242,
+        6.208,
+        0.056,
+        1.325
+      ],
+      [
+        0.781,
+        6.051,
+        0.501,
+        2.783
+      ],
+      [
+        -0.8044,
+        6.729,
+        0.12,
+        3.724
+      ],
+      [
+        0.3025,
+        7.593,
+        0.516,
+        0.819
+      ],
+      [
+        -0.6496,
+        7.559,
+        0.808,
+        -0.587
+      ],
+      [
+        -0.1853,
+        8.67,
+        -0.537,
+        1.054
+      ],
+      [
+        -0.8044,
+        5.103,
+        1.446,
+        2.977
+      ],
+      [
+        0.2681,
+        5.222,
+        1.452,
+        -0.091
+      ],
+      [
+        0.1207,
+        6.146,
+        -0.947,
+        1.293
+      ],
+      [
+        0.0078,
+        7.855,
+        1.374,
+        1.315
+      ],
+      [
+        0.0586,
+        8.27,
+        -1.453,
+        0.979
+      ],
+      [
+        0.0586,
+        9.396,
+        -0.437,
+        0.371
+      ],
+      [
+        0.0586,
+        9.061,
+        -0.423,
+        1.969
+      ],
+      [
+        0.4119,
+        6.611,
+        0.799,
+        -0.921
+      ]
+    ],
+    "funnel": [
+      {
+        "candidates_in": 1,
+        "candidates_out": 1,
+        "kind": "search",
+        "stage": "docking"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "pair",
+        "stage": "poses"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "field",
+        "stage": "pocket"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "gate",
+        "stage": "parity"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "gate",
+        "stage": "posebusters"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "recorded",
+        "stage": "forcefield"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "measure",
+        "seconds": 12.303091634999873,
+        "stage": "field_interaction"
+      },
+      {
+        "candidates_in": 2,
+        "candidates_out": null,
+        "kind": "rank",
+        "stage": "cut",
+        "unranked": true
+      }
+    ],
+    "gates": {
+      "posebusters": {
+        "butanol": {
+          "all_passed": true,
+          "config": "dock",
+          "posebusters_version": "0.6.5",
+          "poses": [
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            },
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            },
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            }
+          ],
+          "receptor": "inputs/79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb/pocket_pep5.pdb"
+        },
+        "ethanol": {
+          "all_passed": true,
+          "config": "dock",
+          "posebusters_version": "0.6.5",
+          "poses": [
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            },
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            },
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            }
+          ],
+          "receptor": "inputs/79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb/pocket_pep5.pdb"
+        },
+        "propanol": {
+          "all_passed": true,
+          "config": "dock",
+          "posebusters_version": "0.6.5",
+          "poses": [
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            },
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            },
+            {
+              "failed_checks": [],
+              "passed": true,
+              "passed_checks": [
+                "mol_pred_loaded",
+                "mol_cond_loaded",
+                "sanitization",
+                "inchi_convertible",
+                "all_atoms_connected",
+                "no_radicals",
+                "bond_lengths",
+                "bond_angles",
+                "internal_steric_clash",
+                "aromatic_ring_flatness",
+                "non-aromatic_ring_non-flatness",
+                "double_bond_flatness",
+                "internal_energy",
+                "protein-ligand_maximum_distance",
+                "minimum_distance_to_protein",
+                "minimum_distance_to_organic_cofactors",
+                "minimum_distance_to_inorganic_cofactors",
+                "minimum_distance_to_waters",
+                "volume_overlap_with_protein",
+                "volume_overlap_with_organic_cofactors",
+                "volume_overlap_with_inorganic_cofactors",
+                "volume_overlap_with_waters"
+              ]
+            }
+          ],
+          "receptor": "inputs/79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb/pocket_pep5.pdb"
+        }
+      },
+      "strain_kcal": {
+        "butanol": [
+          0.755109343103924,
+          109.28928103270785,
+          108.0420575645694
+        ],
+        "ethanol": [
+          0.00017338624014695547,
+          0.024307991955268005,
+          5.701919732437055e-05
+        ],
+        "propanol": [
+          105.73415785443854,
+          105.73292317126791,
+          105.7196259461093
+        ]
+      }
+    },
+    "paired_ddE": {
+      "butanol": {
+        "mean": -0.1871357941171977,
+        "n": 3,
+        "per_pose": [
+          -1.0044534935041796,
+          -1.5378449688338076,
+          1.9808910799863941
+        ],
+        "sem": 1.094894517235203
+      },
+      "propanol": {
+        "mean": 1.081342763449956,
+        "n": 3,
+        "per_pose": [
+          2.8698439133043054,
+          -1.5109991809283443,
+          1.8851835579739067
+        ],
+        "sem": 1.3269723146166426
+      }
+    },
+    "per_pose": {
+      "butanol": {
+        "E_mmff": [
+          -0.4444676877803371,
+          109.2504066601868,
+          106.46680741327616
+        ],
+        "E_mmff_relaxed": [
+          -1.199577030884261,
+          -0.038874372521049416,
+          -1.575250151293254
+        ],
+        "dE_int": [
+          -8.110369488511571,
+          -5.53994950063621,
+          -0.8309137453826163
+        ]
+      },
+      "ethanol": {
+        "E_mmff": [
+          -1.3366836778071651,
+          -1.4927895852876425,
+          -1.3368000448533746
+        ],
+        "E_mmff_relaxed": [
+          -1.336857064047312,
+          -1.5170975772429105,
+          -1.336857064050699
+        ],
+        "dE_int": [
+          -7.105915995007392,
+          -4.002104531802402,
+          -2.8118048253690104
+        ],
+        "dock_score": [
+          -1.758,
+          -1.363,
+          -1.119
+        ]
+      },
+      "propanol": {
+        "E_mmff": [
+          104.32953419845884,
+          104.20873565598619,
+          104.31500228999218
+        ],
+        "E_mmff_relaxed": [
+          -1.4046236559796972,
+          -1.5241875152817248,
+          -1.4046236561171268
+        ],
+        "dE_int": [
+          -4.236072081703086,
+          -5.5131037127307465,
+          -0.9266212673951036
+        ]
+      }
+    },
+    "poses": {
+      "butanol": {
+        "file": "poses/butanol.sdf",
+        "n_poses": 3,
+        "sha256": "90c85be615bf6923374a9902e2fbf70c4c7f9a27d607c38233206df517e7a3be"
+      },
+      "ethanol": {
+        "file": "poses/ethanol.sdf",
+        "n_poses": 3,
+        "sha256": "afa26c8377934769764aaabd386f59bdf32e8e420543401b019bf13887b9b71b"
+      },
+      "propanol": {
+        "file": "poses/propanol.sdf",
+        "n_poses": 3,
+        "sha256": "1c8f3f9e7c00d7fcfd621021cdfe5c414f1802f75271c2c817456d114d7fcc90"
+      }
+    },
+    "receptor": {
+      "file": "inputs/79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb/pocket_pep5.pdb",
+      "sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb"
+    },
+    "stages": [
+      {
+        "candidates_in": 1,
+        "candidates_out": 1,
+        "kind": "search",
+        "scores": [
+          -1.758,
+          -1.363,
+          -1.119
+        ],
+        "seconds": 1.7025123570001597,
+        "stage": "docking",
+        "summary": "docking ethanol: 3 pose(s), best -1.76 kcal/mol"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "pair",
+        "seconds": 0.023035880999486835,
+        "stage": "poses",
+        "summary": "paired poses: 3 per candidate, 3 candidates"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "field",
+        "seconds": 1.906153734000327,
+        "stage": "pocket",
+        "summary": "pocket pocket_pep5.pdb: 81 point charges"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "gate",
+        "posebusters_version": "0.6.5",
+        "seconds": 0.5220113800005493,
+        "stage": "posebusters",
+        "summary": "posebusters (ligand + protein): all 9 pose(s) of 3 candidate(s) pass"
+      },
+      {
+        "candidates_in": 3,
+        "candidates_out": 3,
+        "kind": "recorded",
+        "seconds": 0.011818738999863854,
+        "stage": "forcefield",
+        "strain": {
+          "butanol": [
+            0.755109343103924,
+            109.28928103270785,
+            108.0420575645694
+          ],
+          "ethanol": [
+            0.00017338624014695547,
+            0.024307991955268005,
+            5.701919732437055e-05
+          ],
+          "propanol": [
+            105.73415785443854,
+            105.73292317126791,
+            105.7196259461093
+          ]
+        },
+        "summary": "forcefield MMFF94 recorded, no rejection threshold; largest pose strain 109.3 kcal/mol"
+      }
+    ],
+    "units": {
+      "E_mmff": "kcal/mol",
+      "E_mmff_relaxed": "kcal/mol",
+      "dE_int": "kcal/mol",
+      "dock_score": "kcal/mol"
+    },
+    "unpaired_sem": {
+      "butanol": 2.4862108865363135,
+      "propanol": 1.872445599681695
+    }
+  },
+  "smeltery": {
+    "commit": "331b72abf7126c0212d8951085e03a196d0d8b37",
+    "dirty": true,
+    "provenance": "INFERRED from the local source directory's current git state",
+    "source": "file:///home/matt/qc/smeltery",
+    "version": "0.0.2.dev383+gae20ca8ef.d20261104"
+  },
+  "smeltery_version": "0.0.2.dev383+gae20ca8ef.d20261104",
+  "started_utc": "2026-11-05T00:44:18Z",
+  "tiers": [
+    {
+      "exhaustiveness": 4,
+      "name": "docking",
+      "provider": "vina",
+      "provider_settings": {
+        "cpu": 1,
+        "engine": "vina",
+        "exhaustiveness": 4,
+        "n_poses": 3,
+        "scoring": "vina"
+      },
+      "score_unit": "kcal/mol",
+      "seeds": [
+        7
+      ]
+    },
+    {
+      "analogue_poses_given": false,
+      "jitter_ang": 0.5,
+      "jitter_deg": 15.0,
+      "mcs_timeout_s": 10,
+      "min_core_heavy": 3,
+      "n_poses": 6,
+      "name": "paired_poses",
+      "parent_poses_given": true,
+      "relax_unmapped": true,
+      "seed": 20261005
+    },
+    {
+      "max_iters": 2000,
+      "name": "forcefield",
+      "path": "mmff",
+      "rdkit": "2026.03.6",
+      "variant": "MMFF94"
+    },
+    {
+      "basis": "sto-3g",
+      "density_conv": 1e-08,
+      "energy_conv": 1e-10,
+      "engine": "ferric",
+      "field": {
+        "center_ang": null,
+        "cutoff_ang": null,
+        "drop_waters": false,
+        "input": "pocket_pep5.pdb",
+        "input_sha256": "79c82e94c241b62cf757d5b9bbe81b4b5adce9676574fb83491e8530c2829fcb",
+        "n_charges": 81,
+        "n_total": 81,
+        "pdb2pqr_ff": "AMBER",
+        "pdb2pqr_version": "pdb2pqr 3.8.0"
+      },
+      "max_iter": null,
+      "method": "RHF",
+      "name": "field_interaction"
+    }
+  ]
+}
