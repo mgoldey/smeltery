@@ -6,7 +6,6 @@ Its own module so the tasks building step views never edit the same file.
 from __future__ import annotations
 
 import json
-import shutil
 import tomllib
 from pathlib import Path
 from typing import Any, Literal
@@ -24,7 +23,7 @@ from smeltery.gui.scenes import (
     CHARGE_ZERO,
     data_uri,
 )
-from smeltery.pocket.loader import PDB2PQR, load_pocket
+from smeltery.pocket.loader import PDB2PQR, load_pocket, pdb2pqr_exe
 
 from . import models as M
 from .common import ports
@@ -57,7 +56,10 @@ def _xyz(v: Any) -> Xyz:
 
 
 def _need_pdb2pqr() -> None:
-    if shutil.which(PDB2PQR) is None:
+    # `pdb2pqr_exe()`, not a bare `which`: it also looks beside `sys.executable`, which is where `pip install
+    # pdb2pqr` puts the script. Running a venv's interpreter does not put that venv's bin on PATH, so a bare
+    # `which` refused a preview the loader would then have charged happily — and it is the loader that does the work.
+    if pdb2pqr_exe() is None:
         raise HTTPException(
             status_code=409,
             detail=f"`{PDB2PQR}` is not on PATH, and a .pdb needs it to assign charges: install it "
