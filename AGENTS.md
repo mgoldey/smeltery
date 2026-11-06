@@ -46,12 +46,14 @@ Never use `pytest -x` when checking for regressions: it hides every failure afte
 
 ## Gates (all must pass before a commit)
 ```
-.venv/bin/python -m ruff check src tests
-.venv/bin/python -m ruff format --check src tests
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
 uvx ty@0.0.96 check
 <the bench gate, plus the table above for core files you touched>
 ```
 `ruff check` passing does not mean `ruff format --check` passes. Run both.
+Run them over `.`, not `src tests`: CI checks the whole repo, and ruff formats python code blocks
+inside markdown, so a docs page can fail a gate that `src tests` passes.
 
 ## Layout facts that cause mistakes
 - `tests/` is not a package; tests import helpers bare (`from gui_fixture import make_run_dir`).
