@@ -1257,8 +1257,25 @@ export interface components {
             description: string;
             /** Id */
             id: string;
+            /**
+             * N Entries
+             * @default 0
+             */
+            n_entries: number;
+            /**
+             * N Runs
+             * @description distinct runs attached to the campaign's entries
+             * @default 0
+             */
+            n_runs: number;
             /** Name */
             name: string;
+            /**
+             * Updated At
+             * @description time of the latest entry, or created_at when there are none
+             * @default
+             */
+            updated_at: string;
         };
         /** CatalogOut */
         CatalogOut: {

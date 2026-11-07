@@ -305,6 +305,11 @@ export function BenchHome() {
                 {campaigns.data.map((c) => (
                   <li key={c.id}>
                     <Link to={`/campaigns/${c.id}`}>{c.name}</Link>
+                    <span style={{ color: "var(--ink-muted)" }}>
+                      {" "}
+                      {c.n_entries} {c.n_entries === 1 ? "entry" : "entries"} · {c.n_runs}{" "}
+                      {c.n_runs === 1 ? "run" : "runs"} · updated {c.updated_at.slice(0, 10)}
+                    </span>
                   </li>
                 ))}
               </ul>

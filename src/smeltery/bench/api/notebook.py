@@ -22,15 +22,23 @@ from .common import ports, row, utc_iso
 router = APIRouter(prefix="/api", tags=["notebook"])
 
 
-def _campaign(c) -> M.CampaignOut:
+def _campaign(request: Request, c) -> M.CampaignOut:
+    es = list(ports(request).project_store.entries(c.id))
+    created = c.created_at or ""
     return M.CampaignOut(
-        id=c.id, name=c.name, description=getattr(c, "description", "") or "", created_at=c.created_at or ""
+        id=c.id,
+        name=c.name,
+        description=getattr(c, "description", "") or "",
+        created_at=created,
+        n_entries=len(es),
+        n_runs=len({a for e in es for a in e.artefacts}),
+        updated_at=max((e.created_at for e in es), default=created),
     )
 
 
 @router.get("/campaigns", response_model=list[M.CampaignOut])
 def list_campaigns(request: Request) -> list[M.CampaignOut]:
-    return [_campaign(c) for c in ports(request).project_store.list_campaigns()]
+    return [_campaign(request, c) for c in ports(request).project_store.list_campaigns()]
 
 
 @router.post("/campaigns", response_model=M.CampaignOut, status_code=201)
@@ -38,7 +46,9 @@ def create_campaign(request: Request, body: M.CampaignIn) -> M.CampaignOut:
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="a campaign needs a name")
     try:
-        return _campaign(ports(request).project_store.create_campaign(body.name.strip(), description=body.description))
+        return _campaign(
+            request, ports(request).project_store.create_campaign(body.name.strip(), description=body.description)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -55,7 +65,7 @@ def _get_campaign(request: Request, campaign_id: str):
 
 @router.get("/campaigns/{campaign_id}", response_model=M.CampaignOut)
 def get_campaign(request: Request, campaign_id: str) -> M.CampaignOut:
-    return _campaign(_get_campaign(request, campaign_id))
+    return _campaign(request, _get_campaign(request, campaign_id))
 
 
 def _entries(request: Request, campaign_id: str) -> list[M.EntryOut]:
