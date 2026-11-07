@@ -18,15 +18,14 @@ classifiers = [
 requires-python = ">=3.11,<3.13"
 dependencies = [
     # ferric publishes only pre-releases so far; the explicit pre-release floor
-    # lets pip select them. For development, [tool.uv.sources] below pins an
-    # exact ferric commit instead.
+    # lets pip select them. The wheel is what a plain install and `uv sync` both
+    # get; [tool.uv.sources] below says how to point at a checkout instead.
     "ferric>=0.1.0rc10",
     "rdkit>=2024.3",
     "numpy>=1.26",
     # Core, not a `gui`/`bench` extra: `smeltery run --out` stages the config's input files, which rewrites
     # their paths while keeping the config's comments. tomllib only reads, so staging needs tomlkit.
     "tomlkit>=0.13",
-    "fastapi>=0.162.0",
 ]
 
 [project.scripts]

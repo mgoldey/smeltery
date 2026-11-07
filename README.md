@@ -111,7 +111,8 @@ uv run smeltery run myrun.toml --out out/myrun
   and doesn't replace CI.
 - **`smeltery bench` exits 2.** The UI isn't built. Run `cd ui && npm ci && npm run build`.
 - **`smeltery gui` says "need exactly one run-\*.json".** Point it at the `--out` directory
-  of a single run, or at that run's `run-*.json` file directly.- **Slow or thrashing SCFs.** Set `OPENBLAS_NUM_THREADS=1`. ferric parallelizes with
+  of a single run, or at that run's `run-*.json` file directly.
+- **Slow or thrashing SCFs.** Set `OPENBLAS_NUM_THREADS=1`. ferric parallelizes with
   Rayon, and BLAS threads on top of that oversubscribe the machine.
 - **Exit codes.** `smeltery run` exits 0 on success, including when it prints `UNRANKED`. It
   exits 2 for a bad config, and 3 when a stage fails (for example no common core or an SCF

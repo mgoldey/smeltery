@@ -2223,7 +2223,6 @@ wheels = [
 name = "smeltery"
 source = { editable = "." }
 dependencies = [
-    { name = "fastapi" },
     { name = "ferric" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -2313,7 +2312,6 @@ requires-dist = [
     { name = "aimnet", marker = "extra == 'aimnet2'", specifier = ">=0.2.0" },
     { name = "anywidget", marker = "extra == 'desktop'", specifier = ">=0.11" },
     { name = "anywidget", marker = "extra == 'gui'", specifier = ">=0.11" },
-    { name = "fastapi", specifier = ">=0.162.0" },
     { name = "fastapi", marker = "extra == 'bench'", specifier = ">=0.120" },
     { name = "ferric", specifier = ">=0.1.0rc10" },
     { name = "gemmi", marker = "extra == 'docking'" },
