@@ -21,6 +21,25 @@ def test_healthz_answers_200(client_for):
     assert c.get("/healthz").status_code == 200
 
 
+def test_livez_and_readyz(client_for, tmp_path):
+    from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
+
+    (tmp_path / "bench-root").mkdir()
+    c, _ = client_for(queue=SubprocessTaskQueue(tmp_path / "q"))
+    assert c.get("/livez").json() == {"status": "ok"}
+    r = c.get("/readyz")
+    assert r.status_code == 200 and r.json()["checks"]["task_db"]["ok"] is True
+
+
+def test_readyz_is_503_when_the_task_db_cannot_open(client_for, tmp_path):
+    class Q:
+        db = tmp_path / "no" / "such" / "dir" / "t.sqlite"
+
+    c, _ = client_for(queue=Q())
+    r = c.get("/readyz")
+    assert r.status_code == 503 and r.json()["checks"]["task_db"]["ok"] is False
+
+
 def test_runs_list_is_served_from_the_run_store(client_for, run_dir):
     c, _ = client_for(run_dir)
     (row,) = c.get("/api/runs").json()

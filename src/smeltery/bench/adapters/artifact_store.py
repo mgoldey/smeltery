@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
+
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 class FilesystemArtifactStore:
@@ -12,9 +15,12 @@ class FilesystemArtifactStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, digest: str) -> Path:
+        if not _DIGEST.fullmatch(digest):
+            raise ValueError(f"not a sha256 hex digest: {digest!r}")
         return self.root / digest[:2] / digest
 
     def path_for(self, digest: str) -> Path:
+        """Where the artifact lives. Does not verify its content; only `get` re-hashes."""
         return self._path(digest)
 
     def put(self, data: bytes | bytearray | str | Path) -> str:

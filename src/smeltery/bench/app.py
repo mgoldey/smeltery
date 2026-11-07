@@ -7,6 +7,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import os
+import shutil
+import sqlite3
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -14,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
@@ -37,6 +41,29 @@ class Settings:
         self.root = Path(self.root)
         if self.cache_dir is None:
             self.cache_dir = self.root / ".smeltery" / "study-cache"
+
+
+MIN_FREE_BYTES = 100 * 2**20
+
+
+def _ready_checks(root: Path, task_queue: Any) -> dict[str, dict[str, Any]]:
+    """Each readiness check as {"ok": bool, "detail": str}. A Temporal-backed queue is not probed: never required."""
+    checks: dict[str, dict[str, Any]] = {}
+    checks["root_writable"] = {"ok": root.is_dir() and os.access(root, os.W_OK), "detail": str(root)}
+    db = getattr(task_queue, "db", None)
+    if db is not None:
+        try:
+            with contextlib.closing(sqlite3.connect(f"file:{db}?mode=rw", uri=True)) as con:
+                con.execute("SELECT 1 FROM tasks LIMIT 1")
+            checks["task_db"] = {"ok": True, "detail": str(db)}
+        except sqlite3.Error as e:
+            checks["task_db"] = {"ok": False, "detail": str(e)}
+    try:
+        free = shutil.disk_usage(root).free
+        checks["disk_free"] = {"ok": free >= MIN_FREE_BYTES, "detail": f"{free // 2**20} MiB free"}
+    except OSError as e:
+        checks["disk_free"] = {"ok": False, "detail": str(e)}
+    return checks
 
 
 def create_app(
@@ -94,6 +121,16 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/livez", include_in_schema=False)
+    def livez() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/readyz", include_in_schema=False)
+    def readyz() -> JSONResponse:
+        checks = _ready_checks(settings.root, task_queue)
+        ok = all(c["ok"] for c in checks.values())
+        return JSONResponse({"status": "ok" if ok else "unavailable", "checks": checks}, status_code=200 if ok else 503)
 
     @app.get("/api/whoami")
     def whoami(request: Request) -> dict[str, str]:
