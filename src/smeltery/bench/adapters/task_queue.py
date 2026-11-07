@@ -237,6 +237,14 @@ class SubprocessTaskQueue:
             _kill_group(pid[0])
         return True
 
+    def ready(self):
+        try:
+            with contextlib.closing(sqlite3.connect(f"file:{self.db}?mode=rw", uri=True)) as con:
+                con.execute("SELECT 1 FROM tasks LIMIT 1")
+        except sqlite3.Error as e:
+            return False, str(e)
+        return True, str(self.db)
+
     def tail_log(self, task_id, lines=40):
         t = self.get(task_id)
         if t is None:
@@ -282,6 +290,9 @@ class TemporalTaskQueue:
         if t is None:
             raise KeyError(task_id)
         return self._m.cancel(task_id)
+
+    def ready(self):
+        return True, "temporal: not probed"
 
     def tail_log(self, task_id, lines=40):
         t = self.get(task_id)

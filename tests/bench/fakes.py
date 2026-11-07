@@ -25,6 +25,9 @@ class FixedClock:
 class FakeTaskQueue:
     """Records what it is asked to run and runs nothing. Submitted tasks are listed as queued."""
 
+    def ready(self):
+        return True, "fake"
+
     def __init__(self, tasks=None):
         self.tasks = list(tasks or [])
         self.submitted = []
