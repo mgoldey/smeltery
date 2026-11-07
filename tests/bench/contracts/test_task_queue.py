@@ -176,6 +176,7 @@ def test_cancel_kills_the_whole_process_group(bench_tmp):
     wait_until(lambda: pidfile.exists() and pidfile.read_text().strip(), timeout=10)
     gc = int(pidfile.read_text())
     assert q.cancel(tid) is True
+    assert q.get(tid).status == "cancelled"
 
     def gone():
         try:

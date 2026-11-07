@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import sqlite3
@@ -48,16 +49,12 @@ MIN_FREE_BYTES = 100 * 2**20
 def _ready_checks(root: Path, task_queue: Any) -> dict[str, dict[str, Any]]:
     """Each readiness check as {"ok": bool, "detail": str}. A Temporal-backed queue is not probed: never required."""
     checks: dict[str, dict[str, Any]] = {}
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        checks["root_writable"] = {"ok": os.access(root, os.W_OK), "detail": str(root)}
-    except OSError as e:
-        checks["root_writable"] = {"ok": False, "detail": str(e)}
+    checks["root_writable"] = {"ok": root.is_dir() and os.access(root, os.W_OK), "detail": str(root)}
     db = getattr(task_queue, "db", None)
     if db is not None:
         try:
-            with sqlite3.connect(db) as con:
-                con.execute("SELECT 1 FROM sqlite_master LIMIT 1")
+            with contextlib.closing(sqlite3.connect(f"file:{db}?mode=rw", uri=True)) as con:
+                con.execute("SELECT 1 FROM tasks LIMIT 1")
             checks["task_db"] = {"ok": True, "detail": str(db)}
         except sqlite3.Error as e:
             checks["task_db"] = {"ok": False, "detail": str(e)}

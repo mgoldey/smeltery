@@ -222,18 +222,19 @@ class SubprocessTaskQueue:
             raise KeyError(task_id)
         if t.status in ("succeeded", "failed", "cancelled"):
             return False
-        # find pid
+        # mark cancelled first: the waiter thread's write is guarded by status NOT IN ('cancelled')
         with sqlite3.connect(self.db) as con:
-            pid = con.execute("SELECT pid FROM tasks WHERE id=?", (task_id,)).fetchone()
-        pid = pid[0] if pid else None
-        if pid:
-            _kill_group(pid)
-        with sqlite3.connect(self.db) as con:
-            con.execute(
-                "UPDATE tasks SET status='cancelled', finished_at=? WHERE id=?",
+            changed = con.execute(
+                "UPDATE tasks SET status='cancelled', finished_at=? "
+                "WHERE id=? AND status NOT IN ('succeeded','failed','cancelled')",
                 (_utc(), task_id),
-            )
+            ).rowcount
+            pid = con.execute("SELECT pid FROM tasks WHERE id=?", (task_id,)).fetchone()
             con.commit()
+        if not changed:
+            return False
+        if pid and pid[0]:
+            _kill_group(pid[0])
         return True
 
     def tail_log(self, task_id, lines=40):

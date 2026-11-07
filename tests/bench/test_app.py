@@ -21,11 +21,14 @@ def test_healthz_answers_200(client_for):
     assert c.get("/healthz").status_code == 200
 
 
-def test_livez_and_readyz(client_for):
-    c, _ = client_for()
+def test_livez_and_readyz(client_for, tmp_path):
+    from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
+
+    (tmp_path / "bench-root").mkdir()
+    c, _ = client_for(queue=SubprocessTaskQueue(tmp_path / "q"))
     assert c.get("/livez").json() == {"status": "ok"}
     r = c.get("/readyz")
-    assert r.status_code == 200 and r.json()["checks"]["root_writable"]["ok"] is True
+    assert r.status_code == 200 and r.json()["checks"]["task_db"]["ok"] is True
 
 
 def test_readyz_is_503_when_the_task_db_cannot_open(client_for, tmp_path):
