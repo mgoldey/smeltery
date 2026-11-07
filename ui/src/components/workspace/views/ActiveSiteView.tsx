@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, reasonOf } from "../../../api/http";
 import type { Schemas } from "../../../api/client";
 import { MolstarViewer } from "../../MolstarViewer";
 import { receptorScene } from "../../scenes";
 import type { StepViewProps } from "./registry";
+import { FilePick } from "../../FilePick";
 
 /** Response types of the two routes this view calls; typed here until the API schema is regenerated. */
 type Preview = {
@@ -73,18 +74,51 @@ function Field({
  * Step 1: the active site, three ways. Each way writes its own sections into the draft through
  * `POST /api/pipelines/active_site`; the preview builds the point-charge field with no docking and no SCF.
  */
+/** The value of `key` in `[table]` of the draft, so the view starts from what the config already says. */
+export function tomlValue(toml: string, table: string, key: string): string {
+  const section = new RegExp(`^\\[${table}\\]\\s*$([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`, "m").exec(toml);
+  const m = new RegExp(`^${key}\\s*=\\s*(.+)$`, "m").exec(section?.[1] ?? "");
+  const raw = m?.[1]?.trim() ?? "";
+  // A quoted value may be followed by a comment, and a comment character may sit inside the quotes.
+  const quoted = /^"([^"]*)"/.exec(raw) ?? /^'([^']*)'/.exec(raw);
+  return quoted ? (quoted[1] ?? "") : raw.replace(/\s*#.*$/, "").trim();
+}
+
 export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   const current = chosen(toml);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [source, setSource] = useState("");
+  // Seeded from the draft, so the View and the Method column show one structure, not two unrelated boxes.
+  const [source, setSource] = useState(() => tomlValue(toml, "structure", "spec"));
   const [info, setInfo] = useState<Opened | null>(null);
-  const [ligand, setLigand] = useState("");
-  const [cutoff, setCutoff] = useState("12");
-  const [file, setFile] = useState("");
-  const [receptor, setReceptor] = useState("");
+  const [ligand, setLigand] = useState(() => tomlValue(toml, "structure", "reference_ligand"));
+  const [cutoff, setCutoff] = useState(() => tomlValue(toml, "structure", "pocket_cutoff") || "12");
+  const [file, setFile] = useState(() => tomlValue(toml, "pocket", "file"));
+  const [receptor, setReceptor] = useState(() => tomlValue(toml, "docking", "receptor"));
   const [boxCenter, setBoxCenter] = useState("");
   const [boxSize, setBoxSize] = useState("24 24 24");
+
+  // The draft is the state, and this view is not remounted when it changes (the Method column's own picker writes
+  // the same keys). One effect follows every field whose config value changed, so the two never show different
+  // structures; a field the config does not set is left alone, so typing is never wiped.
+  const seeded = useRef({ source, ligand, cutoff, file, receptor });
+  useEffect(() => {
+    const now = {
+      source: tomlValue(toml, "structure", "spec"),
+      ligand: tomlValue(toml, "structure", "reference_ligand"),
+      cutoff: tomlValue(toml, "structure", "pocket_cutoff"),
+      file: tomlValue(toml, "pocket", "file"),
+      receptor: tomlValue(toml, "docking", "receptor"),
+    };
+    const was = seeded.current;
+    const set = { source: setSource, ligand: setLigand, cutoff: setCutoff, file: setFile, receptor: setReceptor };
+    for (const k of Object.keys(now) as (keyof typeof now)[]) {
+      if (now[k] !== was[k] && now[k] !== "") set[k](now[k]);
+    }
+    seeded.current = now;
+    // Only the draft drives this; the fields themselves are free to be typed into between drafts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toml]);
 
   const sites = (toml.match(/^\[\[pocket\.site\]\]/gm) ?? []).length;
   const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
@@ -114,12 +148,14 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
     }
   };
 
-  const open = async () => {
+  const open = async (which?: string) => {
+    const from = which ?? source;
     setBusy(true);
     try {
       const r = await post<Opened>("/api/structure", {
-        source,
+        source: from,
         allow_network: false,
+        pipeline, // a relative spec is read from the pipeline folder, as the run reads it
       });
       setInfo(r);
       setLigand(r.dropped.find((d) => !WATER.has(d)) ?? "");
@@ -169,8 +205,18 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
       {way === "structure" ? (
         <section aria-label="Protein structure" data-way="structure">
           <h4>Protein structure</h4>
+          <FilePick
+            pipeline={pipeline}
+            accept=".pdb,.ent,.cif"
+            label="a PDB file"
+            disabled={busy}
+            onPicked={(path) => {
+              setSource(path);
+              void open(path);
+            }}
+          />
           <Field
-            label="Path, PDB id or UniProt accession"
+            label="or a path, PDB id or UniProt accession"
             value={source}
             onChange={setSource}
           />
@@ -237,11 +283,13 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
       {way === "pocket_file" ? (
         <section aria-label="Pocket file" data-way="pocket_file">
           <h4>Pocket file and receptor</h4>
+          <FilePick pipeline={pipeline} accept=".pqr,.pdb" label="a pocket file" disabled={busy} onPicked={setFile} />
           <Field
             label="Pocket file (.pqr or .pdb)"
             value={file}
             onChange={setFile}
           />
+          <FilePick pipeline={pipeline} accept=".pdbqt" label="a receptor" disabled={busy} onPicked={setReceptor} />
           <Field
             label="Receptor (.pdbqt)"
             value={receptor}

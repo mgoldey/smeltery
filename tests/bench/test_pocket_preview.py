@@ -161,3 +161,25 @@ def test_a_relative_pocket_file_resolves_against_the_saved_pipeline_folder(clien
     assert ok.status_code == 200, ok.text
     assert ok.json()["n_charges"] == len(load_pocket(pqr))
     assert c.post("/api/pipelines/pocket_preview", json={"toml": toml}).status_code == 400  # no pipeline: cwd
+
+
+@pytest.mark.parametrize("site", ["file", "structure"])
+def test_a_pdb2pqr_that_is_found_but_cannot_run_is_409_not_500(client_for, monkeypatch, site):
+    # A broken shim (pyenv's, for one) passes the "is it there" check and fails only when the loader runs it.
+    from smeltery.bench.api import active_site
+    from smeltery.pocket.loader import Pdb2PqrUnavailableError
+
+    def broken(*a, **k):
+        raise Pdb2PqrUnavailableError("`/shims/pdb2pqr30` is on PATH but `--version` fails (a broken shim?)")
+
+    monkeypatch.setattr(active_site, "pdb2pqr_exe", lambda: "/shims/pdb2pqr30")
+    monkeypatch.setattr(active_site, "load_pocket", broken)
+    extra = (
+        f'[pocket]\nfile = "{PDB}"\n'
+        if site == "file"
+        else f'[structure]\nspec = "{PDB}"\ncenter = [0.0, 0.0, 0.0]\npocket_cutoff = 8.0\n'
+    )
+    c, _ = client_for()
+    r = c.post("/api/pipelines/pocket_preview", json={"toml": _toml(extra)})
+    assert r.status_code == 409, r.text
+    assert "broken shim" in r.json()["detail"]

@@ -31,7 +31,10 @@ test("with the task queue down, the panel says why and the rest of the app works
   await page.goto("/bench");
   await expect(page.getByRole("alert")).toContainText("temporal is down");
   await expect(page.getByRole("table", { name: "Tasks" })).toHaveCount(0);
-  await page.getByRole("link", { name: (await (await page.request.get("/api/runs")).json())[0].campaign }).first().click();
+  // Scoped to the Runs region: role-name matching is a substring, and a pipeline named after the same campaign
+  // (an earlier spec's copy) is a link too.
+  const campaign = (await (await page.request.get("/api/runs")).json())[0].campaign as string;
+  await page.getByRole("region", { name: "Runs" }).getByRole("link", { name: campaign }).first().click();
   await expect(page.getByRole("region", { name: "Verdict" })).toBeVisible();
   void IDX;
 });

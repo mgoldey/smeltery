@@ -88,6 +88,9 @@ class StepParam(BaseModel):
     changed_from: Any = Field(description="the baseline's value when it differs, else null")
     workspace_default: Any = Field(description="the Methods tab's default for this knob, null when none is set")
     choices: list[Any] = []  # a `choice` knob's options, from the catalog
+    names_file: bool = Field(
+        False, description="the value names an input file (the method's file_knobs): offer a picker"
+    )
 
 
 class StepLink(BaseModel):
@@ -225,6 +228,46 @@ def put_pipeline(request: Request, name: str, body: M.PipelinePut) -> Any:
     return _doc(saved)
 
 
+#: An uploaded input larger than this is refused before it is written (a whole-cell cryo-EM map is not an input).
+MAX_UPLOAD = 64 * 1024 * 1024
+
+
+class AddedFile(BaseModel):
+    path: str = Field(description="the name relative to the pipeline folder; write this into the config")
+
+
+@router.put(
+    "/pipelines/{name}/files/{filename}",
+    response_model=AddedFile,
+    responses={400: {"model": M.Problem}, 404: {"model": M.Problem}, 413: {"model": M.Problem}},
+)
+async def add_pipeline_file(request: Request, name: str, filename: str) -> AddedFile:
+    """A file picked in the browser (a structure, a pocket), stored in the pipeline folder beside config.toml, where
+    `smeltery run` and the preview resolve the config's relative paths. The body is the file's bytes. A different
+    file of the same name is kept, and the new one gets its own name: the response says which name to use."""
+    _get(request, name)
+    too_big = f"{filename}: larger than {MAX_UPLOAD // (1024 * 1024)} MB"
+    # Content-Length first: `request.body()` buffers the whole upload in memory, so refusing after reading it would
+    # protect the disk and not the process. The length is still checked after reading, for a chunked body that has none.
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD:
+        raise HTTPException(status_code=413, detail=too_big)
+    data = await request.body()
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(status_code=413, detail=too_big)
+    try:
+        return AddedFile(path=_store(request).add_file(name, filename, data))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/pipelines/{name}/files", response_model=list[str])
+def list_pipeline_files(request: Request, name: str) -> list[str]:
+    """The input files already in the pipeline folder, for the picker to offer."""
+    _get(request, name)
+    return _store(request).files(name)
+
+
 def _from_run(request: Request, idx: int) -> tuple[str, dict[str, Path], list[str]]:
     """(config text, {relative path: file to copy}, notes) for a new pipeline built from run `idx`."""
     r = row(request, idx)
@@ -342,6 +385,13 @@ def pipeline_impact(request: Request, body: ImpactRequest) -> Any:
     )
 
 
+def _file_knobs(method_key: str) -> tuple[str, ...]:
+    from smeltery.methods import registry
+
+    spec = registry().get(method_key)
+    return tuple(spec.file_knobs) if spec is not None else ()
+
+
 def _issue(x: Any) -> M.Issue:
     return M.Issue(level=x.level, stage=x.stage, message=x.message)
 
@@ -381,7 +431,14 @@ def pipeline_steps(request: Request, body: StepsRequest) -> StepsOut:
             methods=v.methods,
             placed=[m for m in v.methods if m in p.keys()],
             chosen=v.chosen,
-            params=[StepParam(**x, choices=list(method(x["method"]).param(x["name"]).choices)) for x in v.params],
+            params=[
+                StepParam(
+                    **x,
+                    choices=list(method(x["method"]).param(x["name"]).choices),
+                    names_file=x["name"] in _file_knobs(x["method"]),
+                )
+                for x in v.params
+            ],
             issues=[_issue(x) for x in v.issues],
         )
         for v in views

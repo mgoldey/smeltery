@@ -79,14 +79,23 @@ export async function newPipeline(
 }
 
 /** Open a pipeline in the workspace on one step, and wait for the drawing. */
-export async function openWorkspace(page: Page, name: string, step?: string) {
+export async function openWorkspace(page: Page, name: string, step?: string, { unfoldToml = true } = {}) {
   await page.goto(`/pipelines/${name}?run=${IDX.a_resolved}${step ? `&step=${step}` : ""}`);
   await expect(page.getByRole("navigation", { name: "Pipeline steps" }).locator("[data-step]")).toHaveCount(6);
+  // The raw TOML pane is folded under "Edit as TOML" by default; most specs read it, so unfold it for them.
+  if (unfoldToml) await tomlPane(page);
+}
+
+/** The raw TOML pane, unfolding "Edit as TOML" first (it is collapsed by default). */
+export async function tomlPane(page: Page) {
+  const fold = page.locator("details.config-edit");
+  if (!(await fold.evaluate((d) => (d as HTMLDetailsElement).open))) await fold.locator("summary").click();
+  return page.getByRole("textbox", { name: "Pipeline TOML" });
 }
 
 /** Replace everything in the TOML pane with `text`, as typing would. */
 export async function replaceToml(page: Page, text: string) {
-  const pane = page.getByRole("textbox", { name: "Pipeline TOML" });
+  const pane = await tomlPane(page);
   await pane.click();
   await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.press("Delete");

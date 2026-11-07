@@ -445,6 +445,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/{name}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pipeline Files
+         * @description The input files already in the pipeline folder, for the picker to offer.
+         */
+        get: operations["list_pipeline_files_api_pipelines__name__files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/files/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add Pipeline File
+         * @description A file picked in the browser (a structure, a pocket), stored in the pipeline folder beside config.toml, where
+         *     `smeltery run` and the preview resolve the config's relative paths. The body is the file's bytes. A different
+         *     file of the same name is kept, and the new one gets its own name: the response says which name to use.
+         */
+        put: operations["add_pipeline_file_api_pipelines__name__files__filename__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/{name}/launch": {
         parameters: {
             query?: never;
@@ -1157,6 +1199,14 @@ export interface components {
             spec?: string | null;
             /** Toml */
             toml: string;
+        };
+        /** AddedFile */
+        AddedFile: {
+            /**
+             * Path
+             * @description the name relative to the pipeline folder; write this into the config
+             */
+            path: string;
         };
         /** BlankPipeline */
         BlankPipeline: {
@@ -2478,6 +2528,12 @@ export interface components {
             method: string;
             /** Name */
             name: string;
+            /**
+             * Names File
+             * @description the value names an input file (the method's file_knobs): offer a picker
+             * @default false
+             */
+            names_file: boolean;
             /** Value */
             value: unknown;
             /**
@@ -2538,6 +2594,8 @@ export interface components {
              * @default false
              */
             allow_network: boolean;
+            /** Pipeline */
+            pipeline?: string | null;
             /** Source */
             source: string;
         };
@@ -3591,6 +3649,96 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pipeline_files_api_pipelines__name__files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_pipeline_file_api_pipelines__name__files__filename__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedFile"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -106,9 +106,14 @@ def _check_record(record: dict, where: Path) -> None:
     for key in ("campaign", "inputs", "results"):
         if key not in record:
             raise ValueError(f"{where}: not a smeltery run record (no {key!r})")
-    for key in CONTRACT_INPUTS:
-        if key not in record["inputs"]:
-            raise ValueError(f"{where}: run record has no inputs.{key}")
+    missing = [key for key in CONTRACT_INPUTS if key not in record["inputs"]]
+    if missing:
+        raise ValueError(
+            f"{where}: run record has no inputs.{', inputs.'.join(missing)}. It was not written by `smeltery run` "
+            "(examples/mwe_benzoic.py and other scripts write a reduced record). The GUI reads a "
+            "`smeltery run CONFIG --out OUT` directory, for example: "
+            "smeltery run examples/mwe_benzoic.toml --out out/benzoic"
+        )
     results = record["results"]
     for key in _RESULT_KEYS:
         if key not in results:
