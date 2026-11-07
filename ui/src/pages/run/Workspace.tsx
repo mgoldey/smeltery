@@ -302,12 +302,20 @@ function ConfigToolbar({
   onCommit: (text: string) => void;
 }) {
   const download = () => {
+    // The anchor goes into the document and the blob URL is revoked in a later task: Firefox starts the download
+    // after the click handler returns, and revoking in the same task leaves it empty or never started. This is the
+    // only way the config leaves the page now that the text is folded away, so it has to work outside Chromium.
     const url = URL.createObjectURL(new Blob([text], { type: "application/toml" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = `${name}.config.toml`;
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
   };
   return (
     <div className="config-toolbar">

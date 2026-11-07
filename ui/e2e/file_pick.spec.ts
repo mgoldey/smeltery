@@ -57,3 +57,14 @@ test("the home page leads with one numbered way to start", async ({ page }) => {
   const order = await page.locator("h1, h2").allInnerTexts();
   expect(order.indexOf("Start here")).toBeLessThan(order.indexOf("Your work"));
 });
+
+test("picking a file in the Method column updates the View's field, so one structure is named once", async ({ page }) => {
+  const { name } = await newPipeline(page, (t) => `${t}\n[structure]\nspec = "already.pdb"\npocket_cutoff = 9.5\ncenter = [0.0, 0.0, 0.0]\n`);
+  await openWorkspace(page, name, "active_site", { unfoldToml: false });
+  const view = page.locator('[data-view="active_site"]');
+  await expect(view.getByLabel(/^or a path/)).toHaveValue("already.pdb");
+
+  // The Method column writes [structure] spec; the View must follow it rather than keep the value it mounted with.
+  await page.getByRole("region", { name: "Method" }).locator('[data-param="spec"]').getByLabel("file: choose a file").setInputFiles(PDB);
+  await expect(view.getByLabel(/^or a path/)).toHaveValue("pocket_pep5.pdb");
+});

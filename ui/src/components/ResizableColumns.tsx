@@ -65,14 +65,18 @@ export function ResizableColumns({
     const base = weights;
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
+    // One AbortController tears every listener down, so a gesture the browser cancels (touch interrupted, scroll
+    // taken over) cannot leave a stale handler that later saves a width from an old starting point.
+    const stop = new AbortController();
+    const { signal } = stop;
     const move = (ev: globalThis.PointerEvent) => setWeights(shift(base, i, ev.clientX - start));
     const up = (ev: globalThis.PointerEvent) => {
-      target.removeEventListener("pointermove", move);
-      target.removeEventListener("pointerup", up);
+      stop.abort();
       save(shift(base, i, ev.clientX - start));
     };
-    target.addEventListener("pointermove", move);
-    target.addEventListener("pointerup", up);
+    target.addEventListener("pointermove", move, { signal });
+    target.addEventListener("pointerup", up, { signal });
+    target.addEventListener("pointercancel", () => stop.abort(), { signal });
   };
 
   const onKeyDown = (i: number) => (e: KeyboardEvent<HTMLDivElement>) => {

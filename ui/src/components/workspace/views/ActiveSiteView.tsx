@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, reasonOf } from "../../../api/http";
 import type { Schemas } from "../../../api/client";
 import { MolstarViewer } from "../../MolstarViewer";
@@ -97,6 +97,28 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   const [receptor, setReceptor] = useState(() => tomlValue(toml, "docking", "receptor"));
   const [boxCenter, setBoxCenter] = useState("");
   const [boxSize, setBoxSize] = useState("24 24 24");
+
+  // The draft is the state, and this view is not remounted when it changes (the Method column's own picker writes
+  // the same keys). One effect follows every field whose config value changed, so the two never show different
+  // structures; a field the config does not set is left alone, so typing is never wiped.
+  const seeded = useRef({ source, ligand, cutoff, file, receptor });
+  useEffect(() => {
+    const now = {
+      source: tomlValue(toml, "structure", "spec"),
+      ligand: tomlValue(toml, "structure", "reference_ligand"),
+      cutoff: tomlValue(toml, "structure", "pocket_cutoff"),
+      file: tomlValue(toml, "pocket", "file"),
+      receptor: tomlValue(toml, "docking", "receptor"),
+    };
+    const was = seeded.current;
+    const set = { source: setSource, ligand: setLigand, cutoff: setCutoff, file: setFile, receptor: setReceptor };
+    for (const k of Object.keys(now) as (keyof typeof now)[]) {
+      if (now[k] !== was[k] && now[k] !== "") set[k](now[k]);
+    }
+    seeded.current = now;
+    // Only the draft drives this; the fields themselves are free to be typed into between drafts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toml]);
 
   const sites = (toml.match(/^\[\[pocket\.site\]\]/gm) ?? []).length;
   const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
