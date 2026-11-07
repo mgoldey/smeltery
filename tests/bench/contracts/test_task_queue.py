@@ -4,6 +4,7 @@ import contextlib
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -164,3 +165,24 @@ def test_returncode_is_set_when_status_first_turns_terminal(q):
             assert q.get(tid).returncode == 3, (s, q.get(tid).returncode)
             break
     assert terminal is not None, "never reached terminal"
+
+
+def test_cancel_kills_the_whole_process_group(bench_tmp):
+    import os
+
+    q = SubprocessTaskQueue(bench_tmp)
+    pidfile = bench_tmp / "grandchild.pid"
+    tid = q.submit("tree", ["sh", "-c", f"sleep 60 & echo $! > {pidfile}; wait"])
+    wait_until(lambda: pidfile.exists() and pidfile.read_text().strip(), timeout=10)
+    gc = int(pidfile.read_text())
+    assert q.cancel(tid) is True
+
+    def gone():
+        try:
+            os.kill(gc, 0)
+        except ProcessLookupError:
+            return True
+        # a killed but not yet reaped child shows as a zombie
+        return "Z" in Path(f"/proc/{gc}/stat").read_text().rsplit(")", 1)[1].split()[0]
+
+    wait_until(gone, timeout=5)

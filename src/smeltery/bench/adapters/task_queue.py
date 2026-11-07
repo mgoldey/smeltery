@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import threading
@@ -16,6 +18,23 @@ from smeltery.tasks import Task, TemporalTaskManager
 
 def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _kill_group(pgid: int, grace: float = 2.0) -> None:
+    """SIGTERM the task's process group (it is its own session leader), then SIGKILL what is left after `grace`."""
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pgid, signal.SIGKILL)
 
 
 class SubprocessTaskQueue:
@@ -208,10 +227,7 @@ class SubprocessTaskQueue:
             pid = con.execute("SELECT pid FROM tasks WHERE id=?", (task_id,)).fetchone()
         pid = pid[0] if pid else None
         if pid:
-            try:
-                os.killpg(pid, 9) if False else os.kill(pid, 9)
-            except ProcessLookupError:
-                pass
+            _kill_group(pid)
         with sqlite3.connect(self.db) as con:
             con.execute(
                 "UPDATE tasks SET status='cancelled', finished_at=? WHERE id=?",
