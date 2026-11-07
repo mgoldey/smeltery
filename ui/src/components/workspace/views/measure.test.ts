@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bindClicks, dropLine, type PlotDiv, type Sensitivity, sensitivityFailures, sensitivityRows } from "./MeasureView";
+import { dropLine } from "../../DroppedPoses";
+import { bindClicks, type PlotDiv, type Sensitivity, sensitivityFailures, sensitivityRows } from "./MeasureView";
 
 /** A model's entry with the response's defaults filled in. */
 const ms = (m: Partial<Sensitivity>): Sensitivity => ({
