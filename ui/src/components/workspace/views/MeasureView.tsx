@@ -9,7 +9,6 @@ import { DroppedPoses } from "../../DroppedPoses";
 import { ScfLog } from "../../ScfLog";
 import { CorePose, NotRun, useRunDetail } from "./PosesView";
 
-export { dropLine, DroppedPoses, type DroppedPose } from "../../DroppedPoses";
 
 export type Sensitivity = components["schemas"]["ModelSensitivity"];
 
@@ -227,7 +226,7 @@ export function MeasureView({ sourceRun }: StepViewProps) {
               ))}
             </tbody>
           </table>
-          {showLog ? <ScfLog idx={idx} candidate={picked.candidate} position={picked.position} pose={picked.pose} /> : null}
+          {showLog ? <ScfLog idx={idx} candidate={picked.candidate} position={picked.position} /> : null}
           <CorePose idx={sourceRun} candidate={picked.candidate} pose={picked.position} label="measure step" />
         </section>
       ) : null}

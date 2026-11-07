@@ -85,7 +85,7 @@ export function PoseExplorer({
           SCF log
         </button>
       </p>
-      {showLog ? <ScfLog idx={idx} candidate={chosen} position={pose} pose={pose} summary /> : null}
+      {showLog ? <ScfLog idx={idx} candidate={chosen} position={pose} summary /> : null}
       {footer ? footer(chosen, pose) : null}
     </>
   );

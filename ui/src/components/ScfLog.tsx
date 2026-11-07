@@ -1,30 +1,36 @@
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "./workspace/views/PosesView";
 
-type CalcLines = { file: string | null; lines: Record<string, unknown>[] };
+type CalcLines = { file: string | null; pose: number; lines: Record<string, unknown>[] };
 
-/** "3 SCF lines, 2 converged": the lines that carry a boolean `converged` are the SCF legs. */
+/**
+ * "2 legs, 2 converged (3 SCF attempts)". /calcs has one line per remedy-ladder rung and outcome lines (an `outcome`
+ * key, no `converged`); outcomes are not attempts. A leg, (leg, field model), converged if any of its rungs did.
+ */
 export function convergenceSummary(lines: Record<string, unknown>[]): string {
-  const legs = lines.filter((l) => typeof l.converged === "boolean");
-  const ok = legs.filter((l) => l.converged === true).length;
-  return `${lines.length} SCF line${lines.length === 1 ? "" : "s"}, ${ok} of ${legs.length} legs converged`;
+  const attempts = lines.filter((l) => !("outcome" in l));
+  const legs = new Map<string, boolean>();
+  for (const l of attempts) {
+    const k = JSON.stringify([l.leg ?? null, l.field_model ?? null]);
+    legs.set(k, (legs.get(k) ?? false) || l.converged === true);
+  }
+  const ok = [...legs.values()].filter(Boolean).length;
+  return `${legs.size} leg${legs.size === 1 ? "" : "s"}, ${ok} converged (${attempts.length} SCF attempt${attempts.length === 1 ? "" : "s"})`;
 }
 
 /**
  * The lines of the SCF log for one pose of one ligand (`/calcs`, as written). `position` is the record's place in the
- * candidate's poses, as `/scene` takes it; `pose` is only the number the empty-log message names.
+ * candidate's poses, as `/scene` takes it; the log is read at the original pose index the API maps it to.
  */
 export function ScfLog({
   idx,
   candidate,
   position,
-  pose,
   summary = false,
 }: {
   idx: number;
   candidate: string;
   position: number;
-  pose: number;
   summary?: boolean;
 }) {
   const log = useQuery({
@@ -36,7 +42,7 @@ export function ScfLog({
   return (
     <div data-testid="scf-log">
       {log.data.lines.length === 0 ? (
-        <p className="lede">The SCF log ({log.data.file}) has no line for {candidate} pose {pose}.</p>
+        <p className="lede">The SCF log ({log.data.file}) has no line for {candidate} pose {log.data.pose}.</p>
       ) : (
         <>
           {summary ? <p className="lede" data-testid="scf-summary">{convergenceSummary(log.data.lines)}</p> : null}

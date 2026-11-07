@@ -39,7 +39,7 @@ export function Results() {
   const forest = useFigure(idx, "forest", ok);
   const matrix = useFigure(idx, "matrix", ok);
   const perPose = useFigure(idx, "per_pose", ok);
-  const perPoseValues = useFigure(idx, "per_pose_values", ok);
+  const perPoseValues = useFigure(idx, "per_pose_values", ok && !pairs);
   const rows = useQuery({
     queryKey: ["per_pose", idx],
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/per_pose", { params: { path: { idx } } })),
@@ -123,7 +123,7 @@ export function Results() {
                 {perPoseValues.data ? <PlotlyFigure figure={perPoseValues.data} name="per_pose_values" /> : null}
               </>
             )}
-            {rows.isError ? <p className="empty-state">{rows.error.message}</p> : null}
+            {rows.isError && !(pairs ? perPose.isError : perPoseValues.isError) ? <p className="empty-state">{rows.error.message}</p> : null}
             {rows.data ? <PerPoseTable rows={rows.data} unit={table.data.unit} fileName={`per_pose_${idx}.csv`} /> : null}
           </>
         ) : null}
