@@ -23,7 +23,7 @@ from smeltery.gui.scenes import (
     CHARGE_ZERO,
     data_uri,
 )
-from smeltery.pocket.loader import PDB2PQR, load_pocket, pdb2pqr_exe
+from smeltery.pocket.loader import PDB2PQR, Pdb2PqrUnavailableError, load_pocket, pdb2pqr_exe
 
 from . import models as M
 from .common import ports
@@ -146,6 +146,8 @@ def _from_file(cfg: dict, pocket: dict, base: Path) -> PocketPreview:
         _need_pdb2pqr()
     try:
         field = load_pocket(path)
+    except Pdb2PqrUnavailableError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     box = cfg.get("docking", {}).get("box_center")
@@ -186,6 +188,9 @@ def _from_structure(cfg: dict, base: Path) -> PocketPreview:
         pdb.write_text(pdb_text)
         try:
             field = load_pocket(pdb, cutoff_ang=cutoff, center_ang=center)
+        except Pdb2PqrUnavailableError as e:
+            # Found but not runnable (a broken shim): `_need_pdb2pqr` only checks that it exists.
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     ligand = None

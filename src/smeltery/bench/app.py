@@ -159,11 +159,14 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     app = build_app(args.root, studies=tuple(args.study))
+    # uvicorn runs at log_level="warning", so without this line a healthy server prints nothing and looks hung.
+    url = f"http://{args.host}:{args.port}/"
+    print(f"smeltery bench: serving {Path(args.root).resolve()} at {url} (Ctrl+C stops)", file=sys.stderr, flush=True)
     if args.open:
         import threading
         import webbrowser
 
-        threading.Timer(1.0, lambda: webbrowser.open(f"http://{args.host}:{args.port}/")).start()
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
