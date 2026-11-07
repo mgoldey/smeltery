@@ -55,3 +55,28 @@ def test_an_unknown_reason_is_400(run_dir):
     c = TestClient(create_app(**fakes(run_dir)))
     r = c.post("/api/runs/0/decisions", json={"candidate": "4-F", "status": "keep", "reason": "vibes", "note": ""})
     assert r.status_code == 400
+
+
+def test_a_bulk_decision_is_written_once_and_is_all_or_nothing(run_dir):
+    c = TestClient(create_app(**fakes(run_dir)))
+    ok = {"candidates": ["4-F", "4-Cl"], "status": "keep", "reason": "cut_survivor", "note": ""}
+    r = c.post("/api/runs/0/decisions/bulk", json=ok)
+    assert r.status_code == 200 and [d["candidate"] for d in r.json()] == ["4-F", "4-Cl"]
+    before = next(run_dir.glob("decisions-*.json")).read_text()
+    for bad in (
+        {**ok, "candidates": ["4-F", "nope"], "status": "reject"},
+        {**ok, "reason": "other", "status": "reject"},  # note required, applies to all
+    ):
+        assert c.post("/api/runs/0/decisions/bulk", json=bad).status_code == 400
+    assert next(run_dir.glob("decisions-*.json")).read_text() == before
+
+
+def test_decisions_export_as_csv(run_dir):
+    c = TestClient(create_app(**fakes(run_dir)))
+    c.post("/api/runs/0/decisions", json={"candidate": "4-F", "status": "keep", "reason": "cut_survivor", "note": ""})
+    r = c.get("/api/runs/0/decisions.csv")
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"] and ".csv" in r.headers["content-disposition"]
+    lines = r.text.splitlines()
+    assert lines[0] == "candidate,smiles,status,reason,note,user,time" and lines[1].startswith("4-F,")
+    assert "$$$$" in c.get("/api/runs/0/decisions.sdf").text

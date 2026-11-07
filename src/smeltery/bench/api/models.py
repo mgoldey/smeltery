@@ -248,6 +248,13 @@ class DecisionIn(BaseModel):
     note: str = ""
 
 
+class BulkDecisionIn(BaseModel):
+    candidates: list[str]
+    status: str
+    reason: str
+    note: str = ""
+
+
 class DecisionOut(BaseModel):
     candidate: str
     smiles: str

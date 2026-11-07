@@ -134,6 +134,25 @@ class DecisionSet:
             self.decisions[self.decisions.index(old)] = d
         return d
 
+    def set_many(
+        self, candidates: list[str], status: str, reason: str, note: str = "", user: str = ""
+    ) -> list[Decision]:
+        """`set` the same decision on every name in `candidates`, all or nothing: every problem across all of them is
+        gathered into one ValueError and `self` is left unchanged unless every entry is valid."""
+        if not candidates:
+            raise ValueError("no candidates to decide")
+        trial = DecisionSet(self.campaign, self.run, list(self.decisions), dict(self.candidates), self.schema)
+        done, bad = [], []
+        for name in dict.fromkeys(candidates):
+            try:
+                done.append(trial.set(name, status, reason, note, user))
+            except ValueError as e:
+                bad.append(str(e))
+        if bad:
+            raise ValueError("; ".join(bad))
+        self.decisions = trial.decisions
+        return done
+
     def remove(self, candidate: str) -> None:
         """Forget the decision on `candidate`; KeyError if there is none."""
         old = self.get(candidate)
@@ -211,3 +230,41 @@ class DecisionSet:
         path = Path(path)
         path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
         return path
+
+
+CSV_COLUMNS: tuple[str, ...] = ("candidate", "smiles", "status", "reason", "note", "user", "time")
+
+
+def to_csv(ds: DecisionSet) -> str:
+    """The decisions as CSV text, one row per decided candidate in file order, columns `CSV_COLUMNS`."""
+    import csv
+    import io
+
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(CSV_COLUMNS)
+    for d in ds.decisions:
+        w.writerow([getattr(d, k) for k in CSV_COLUMNS])
+    return out.getvalue()
+
+
+def to_sdf(ds: DecisionSet) -> str:
+    """The decisions as SDF text: one 2D record per decided candidate (from its SMILES, name as the title), the
+    other decision fields as properties."""
+    import io
+
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    out = io.StringIO()
+    with Chem.SDWriter(out) as w:
+        for d in ds.decisions:
+            mol = Chem.MolFromSmiles(d.smiles)
+            if mol is None:
+                raise ValueError(f"unparseable SMILES {d.smiles!r} for {d.candidate!r}")
+            AllChem.Compute2DCoords(mol)
+            mol.SetProp("_Name", d.candidate)
+            for k in CSV_COLUMNS:
+                mol.SetProp(k, getattr(d, k))
+            w.write(mol)
+    return out.getvalue()
