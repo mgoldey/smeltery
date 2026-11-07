@@ -20,6 +20,9 @@ difference smaller than the systematic floor under both arms is **not resolved**
 says so per key and in aggregate. That is the same rule `funnel.resolved` applies within a run,
 applied to the only thing comparable across runs.
 
+`candidate_rows` is the exception: it pairs by molecule across two runs of one parent, and says what that does and
+does not mean.
+
 Nothing here ranks arms. It reports per-key differences, how many keys each arm leads, and how many
 the floor can resolve; "unresolved" is an answer.
 """
@@ -251,6 +254,11 @@ class Comparison:
         )
 
 
+SAME_PARENT_NOTE = (
+    "A \u2212 B is the same molecule's paired \u0394\u0394E under each run's conditions (tier, pocket, poses). "
+    "A resolved difference means the runs disagree beyond their own noise and within-run floor; "
+    "that floor does not bound systematic differences between runs."
+)
 DIFFERENT_PARENTS = "different parents: per-candidate ddE is not comparable across runs"
 
 
@@ -262,7 +270,8 @@ def _canonical(smiles: str) -> str:
 
 
 def candidate_rows(ra: Run, rb: Run, z: float = 2.0) -> tuple[list[dict] | None, str | None]:
-    """Per-analogue paired ddE of two runs, or (None, note) when their parents differ.
+    """Per-analogue paired ddE of two runs, or (None, note) when their parents differ. Rows are matched by
+    canonical SMILES, not name (two runs can reuse a name for different molecules); the name shown is A's, else B's.
 
     Each ddE is paired against its own run's parent, so values are comparable across runs only when that
     parent is the same molecule (canonical SMILES). One row per analogue name in either run; an arm that
@@ -271,15 +280,23 @@ def candidate_rows(ra: Run, rb: Run, z: float = 2.0) -> tuple[list[dict] | None,
     """
     if _canonical(ra.candidates[ra.parent]) != _canonical(rb.candidates[rb.parent]):
         return None, DIFFERENT_PARENTS
-    ma = {r["candidate"]: Measurement(r["mean"], r["sem"], r["n"], ()) for r in ddE_table(ra)}
-    mb = {r["candidate"]: Measurement(r["mean"], r["sem"], r["n"], ()) for r in ddE_table(rb)}
+
+    def by_molecule(run: Run) -> dict[str, tuple[str, Measurement]]:
+        return {
+            _canonical(r["smiles"]): (r["candidate"], Measurement(r["mean"], r["sem"], r["n"], ()))
+            for r in ddE_table(run)
+        }
+
+    ma, mb = by_molecule(ra), by_molecule(rb)
     floor = max(ra.floor, rb.floor)
     rows = []
-    for name in sorted(set(ma) | set(mb)):
-        a, b = ma.get(name), mb.get(name)
+    for smi in sorted(set(ma) | set(mb)):
+        a, b = (ma[smi][1] if smi in ma else None), (mb[smi][1] if smi in mb else None)
+        name = ma[smi][0] if smi in ma else mb[smi][0]
         rows.append(
             {
                 "candidate": name,
+                "smiles": smi,
                 "ddE_a": a.mean if a else None,
                 "sem_a": a.sem if a else None,
                 "ddE_b": b.mean if b else None,
@@ -289,4 +306,4 @@ def candidate_rows(ra: Run, rb: Run, z: float = 2.0) -> tuple[list[dict] | None,
                 "resolved": resolved(a, b, z, floor) if a and b else None,
             }
         )
-    return rows, None
+    return rows, SAME_PARENT_NOTE

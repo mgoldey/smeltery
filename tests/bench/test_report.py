@@ -136,7 +136,7 @@ def test_candidates_missing_from_one_run_are_rows_when_parents_match(client_for,
     rec.write_text(json.dumps(data))
     c, _ = client_for(tmp_path)
     body = c.get("/api/compare", params={"a": 0, "b": 1}).json()
-    assert body["candidates_note"] is None
+    assert "does not bound systematic differences" in body["candidates_note"]
     rows = {r["candidate"]: r for r in body["candidates"]}
     assert rows["4-Br"]["ddE_b"] is None and rows["4-Br"]["ddE_a"] is not None and rows["4-Br"]["resolved"] is None
     assert rows["4-F"]["diff_sem"] is not None

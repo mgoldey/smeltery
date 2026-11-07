@@ -5,6 +5,8 @@ import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { Shell } from "../components/Shell";
 
+const withSem = (v: number, sem: number | null) => (sem === null ? v.toFixed(2) : `${v.toFixed(2)} ± ${sem.toFixed(2)}`);
+
 /** Two runs as arms, differenced per key. Arms are chosen, never inferred: guessing is how a comparison becomes a
  * pooling of unlike things. */
 export function Compare() {
@@ -78,10 +80,9 @@ export function Compare() {
                   ))}
                 </tbody>
               </table>
-              <h2>Same candidates in both runs</h2>
-              {cmp.data.candidates === null ? (
-                <p data-testid="compare-candidates-note">{cmp.data.candidates_note}</p>
-              ) : (
+              <h2>Per-candidate ΔΔE (same parent)</h2>
+              {cmp.data.candidates_note ? <p data-testid="compare-candidates-note">{cmp.data.candidates_note}</p> : null}
+              {cmp.data.candidates === null ? null : (
                 <table data-testid="compare-candidates">
                   <thead>
                     <tr>
@@ -97,8 +98,8 @@ export function Compare() {
                     {cmp.data.candidates.map((c) => (
                       <tr key={c.candidate}>
                         <td>{c.candidate}</td>
-                        <td>{c.ddE_a === null ? "not run" : `${c.ddE_a.toFixed(2)} ± ${c.sem_a?.toFixed(2)}`}</td>
-                        <td>{c.ddE_b === null ? "not run" : `${c.ddE_b.toFixed(2)} ± ${c.sem_b?.toFixed(2)}`}</td>
+                        <td>{c.ddE_a === null ? "not run" : withSem(c.ddE_a, c.sem_a)}</td>
+                        <td>{c.ddE_b === null ? "not run" : withSem(c.ddE_b, c.sem_b)}</td>
                         <td>{c.diff === null ? "—" : c.diff.toFixed(2)}</td>
                         <td>{c.diff_sem === null ? "—" : c.diff_sem.toFixed(2)}</td>
                         <td>{c.resolved === null ? "—" : c.resolved ? "yes" : "no"}</td>

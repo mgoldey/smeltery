@@ -644,7 +644,7 @@ def compare(request: Request, a: int, b: int, theme: Theme = "light") -> M.Compa
         )
         for k in cmp.rows()
     ]
-    candidates, note = candidate_rows(ra, rb, cmp.z)
+    candidates, note = candidate_rows(ra, rb, max(ra.z, rb.z))
     return M.Comparison(
         figure=themed(_plain(compare_figure(cmp)), theme),
         caption=comparison_caption(cmp),

@@ -360,6 +360,7 @@ class CandidateRow(BaseModel):
     """One analogue in either run; a null arm did not run it."""
 
     candidate: str
+    smiles: str
     ddE_a: float | None
     sem_a: float | None
     ddE_b: float | None

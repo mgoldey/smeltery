@@ -1281,6 +1281,8 @@ export interface components {
             sem_a: number | null;
             /** Sem B */
             sem_b: number | null;
+            /** Smiles */
+            smiles: string;
         };
         /** CatalogOut */
         CatalogOut: {
