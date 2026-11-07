@@ -7,16 +7,23 @@ only Run is blocked by them.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import tempfile
 import tomllib
+import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
+from smeltery import __version__ as smeltery_version
 from smeltery.bench.ports.pipeline_store import PipelineFile, StaleWrite
 from smeltery.bench.provisional import place_site
 from smeltery.gui import steps as step_model
@@ -24,6 +31,7 @@ from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import method
 from smeltery.gui.config_text import ConfigTextError, apply, diff_lines
 from smeltery.gui.pipeline import Pipeline
+from smeltery.run_inputs import input_paths
 
 from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
@@ -261,11 +269,85 @@ async def add_pipeline_file(request: Request, name: str, filename: str) -> Added
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/pipelines/{name}/files", response_model=list[str])
-def list_pipeline_files(request: Request, name: str) -> list[str]:
-    """The input files already in the pipeline folder, for the picker to offer."""
+class InputFileOut(BaseModel):
+    name: str
+    size: int = Field(description="bytes")
+    mtime: str = Field(description="last modified, ISO 8601 UTC")
+    sha256: str = Field(description="full hex digest of the content")
+
+
+@router.get("/pipelines/{name}/files", response_model=list[InputFileOut])
+def list_pipeline_files(request: Request, name: str) -> list[InputFileOut]:
+    """The input files already in the pipeline folder, newest first, for the picker to offer."""
     _get(request, name)
-    return _store(request).files(name)
+    return [
+        InputFileOut(
+            name=f.name,
+            size=f.size,
+            mtime=datetime.fromtimestamp(f.mtime, UTC).isoformat(),
+            sha256=f.sha256,
+        )
+        for f in _store(request).files(name)
+    ]
+
+
+@router.get("/pipelines/{name}/bundle", responses={404: {"model": M.Problem}})
+def pipeline_bundle(request: Request, name: str) -> FileResponse:
+    """The SAVED config.toml, every input file it names (and the other files in the folder) and a manifest.json
+    (sha256 and size of each) as one zip under `<name>/`. Inputs keep their path relative to the pipeline folder;
+    an absolute path is stored as `inputs/<basename>` and its original path recorded in the manifest."""
+    pf = _get(request, name)
+    sources: dict[str, Path] = {f.name: pf.folder / f.name for f in _store(request).files(name)}
+    originals: dict[str, str] = {}
+    missing: list[str] = []
+    try:
+        cfg = tomllib.loads(pf.text)
+    except tomllib.TOMLDecodeError:
+        cfg = {}
+    for table, key in input_paths():
+        value = (cfg.get(table) or {}).get(key) if isinstance(cfg.get(table), dict) else None
+        if not isinstance(value, str) or not value:
+            continue
+        path = Path(value)
+        if path.is_absolute():
+            rel, src = f"inputs/{path.name}", path
+        else:
+            rel, src = path.as_posix(), (pf.folder / path)
+            if ".." in path.parts:
+                missing.append(value)
+                continue
+        if not src.is_file():
+            # a value such as a PDB id for structure.spec is not a file reference at all
+            if path.is_absolute() or "/" in value or "." in path.name:
+                missing.append(value)
+            continue
+        sources.setdefault(rel, src)
+        if path.is_absolute():
+            originals[rel] = value
+    tmp = tempfile.NamedTemporaryFile(prefix="bundle-", suffix=".zip", delete=False)
+    tmp.close()
+    files: dict[str, Any] = {}
+    config_bytes = pf.text.encode()
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{name}/config.toml", config_bytes)
+        files["config.toml"] = {"sha256": hashlib.sha256(config_bytes).hexdigest(), "size": len(config_bytes)}
+        for rel, src in sources.items():
+            h = hashlib.sha256()
+            with src.open("rb") as r, z.open(f"{name}/{rel}", "w", force_zip64=True) as w:
+                while chunk := r.read(1 << 20):
+                    h.update(chunk)
+                    w.write(chunk)
+            files[rel] = {"sha256": h.hexdigest(), "size": src.stat().st_size}
+            if rel in originals:
+                files[rel]["original_path"] = originals[rel]
+        manifest = {"pipeline": name, "smeltery": smeltery_version, "files": files, "missing": missing}
+        z.writestr(f"{name}/manifest.json", json.dumps(manifest, indent=2))
+    return FileResponse(
+        tmp.name,
+        media_type="application/zip",
+        filename=f"{name}-bundle.zip",
+        background=BackgroundTask(os.unlink, tmp.name),
+    )
 
 
 def _from_run(request: Request, idx: int) -> tuple[str, dict[str, Path], list[str]]:

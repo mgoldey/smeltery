@@ -107,7 +107,11 @@ def test_add_file_stores_bytes_in_the_folder_and_returns_the_relative_name(store
     other = store.add_file("p", "receptor.pdb", b"HETATM\n")  # different bytes never overwrite
     assert other != "receptor.pdb" and other.endswith(".pdb")
     assert (store.get("p").folder / "receptor.pdb").read_bytes() == b"ATOM\n"
-    assert store.files("p") == sorted(["receptor.pdb", other])
+    listed = store.files("p")
+    assert sorted(f.name for f in listed) == sorted(["receptor.pdb", other])
+    first = next(f for f in listed if f.name == "receptor.pdb")
+    assert (first.size, first.sha256) == (5, hashlib.sha256(b"ATOM\n").hexdigest())
+    assert [f.mtime for f in listed] == sorted((f.mtime for f in listed), reverse=True)
 
 
 def test_add_file_refuses_names_that_leave_the_folder_or_replace_the_config(store):

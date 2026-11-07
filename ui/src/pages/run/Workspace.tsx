@@ -19,6 +19,18 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+type Issue = Schemas["Issue"];
+type StepOut = Schemas["StepOut"];
+
+/** One heading per step that has issues (its label, clickable to select it), then the pipeline-level ones. */
+function groupIssues(pipelineIssues: Issue[], steps: StepOut[]) {
+  const groups = steps
+    .filter((s) => s.issues.length)
+    .map((s) => ({ title: s.label, key: s.key as string | null, items: s.issues }));
+  if (pipelineIssues.length) groups.unshift({ title: "Pipeline", key: null, items: pipelineIssues });
+  return groups;
+}
+
 /** The run's "Pipeline" tab: open (or make, the first time) the pipeline that made this run, in the workspace. */
 export function RunPipeline() {
   const idx = useRunIdx();
@@ -225,15 +237,27 @@ export function Workspace() {
             <div>
               {doc.data ? <ConfigToolbar folder={doc.data.folder} text={text} dirty={dirty} name={name} onCommit={(t) => setDraft(t)} /> : null}
               {view && view.pipeline_issues.length ? (
-                <ul className="issues" aria-label="Pipeline issues">
-                  {view.pipeline_issues.map((iss, i) => (
-                    <li key={i} className="issue" data-level={iss.level}>
-                      <span className="issue-level">{iss.level}</span>
-                      {iss.stage ? <span className="mono">{iss.stage}</span> : null}
-                      <span>{iss.message}</span>
-                    </li>
+                <div className="issues-grouped" aria-label="Pipeline issues">
+                  {groupIssues(view.pipeline_issues, steps).map((g) => (
+                    <section key={g.key ?? ""}>
+                      <h3>{g.title}</h3>
+                      <ul className="issues">
+                        {g.items.map((iss, i) => (
+                          <li key={i} className="issue" data-level={iss.level}>
+                            <span className="issue-level">{iss.level}</span>
+                            {g.key ? (
+                              <button type="button" className="link" onClick={() => select(g.key!)}>
+                                {iss.message}
+                              </button>
+                            ) : (
+                              <span>{iss.message}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
                   ))}
-                </ul>
+                </div>
               ) : null}
               {steps.length ? <PipelineDrawing steps={steps} selected={selected} onSelect={select} /> : null}
               {step ? (
@@ -323,6 +347,10 @@ function ConfigToolbar({
         <button type="button" onClick={download}>
           {dirty ? "Download draft config.toml" : "Download config.toml"}
         </button>
+        <a href={`/api/pipelines/${encodeURIComponent(name)}/bundle`} download>
+          Download saved bundle
+        </a>
+        {dirty ? <span className="lede">(unsaved edits not included)</span> : null}
         <span className="lede mono" title={`${folder}/config.toml`}>
           {folder}/config.toml
         </span>

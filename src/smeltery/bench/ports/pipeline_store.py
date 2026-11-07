@@ -25,6 +25,14 @@ class PipelineFile:
     folder: Path
 
 
+@dataclass(frozen=True)
+class InputFile:
+    name: str
+    size: int
+    mtime: float  # seconds since the epoch
+    sha256: str
+
+
 @runtime_checkable
 class PipelineStore(Protocol):
     def list(self) -> builtins.list[str]: ...
@@ -49,6 +57,6 @@ class PipelineStore(Protocol):
         KeyError for no pipeline."""
         ...
 
-    def files(self, name: str) -> builtins.list[str]:
-        """The input files in the pipeline folder (not config.toml), relative to it, sorted."""
+    def files(self, name: str) -> builtins.list[InputFile]:
+        """The input files in the pipeline folder (not config.toml), newest first (ties by name)."""
         ...
