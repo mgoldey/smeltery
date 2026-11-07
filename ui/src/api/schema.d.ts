@@ -385,6 +385,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/ligands/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ligands Import
+         * @description Append the molecules of a CSV (smiles column, optional name column) or SDF to the live text's candidates.
+         *     Rows RDKit cannot read, and names or molecules already present, are returned as `rejected` with the reason.
+         */
+        post: operations["ligands_import_api_pipelines_ligands_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/pocket_preview": {
         parameters: {
             query?: never;
@@ -502,6 +523,46 @@ export interface paths {
          *     Refused, with the number of errors and each one, while `Pipeline.check()` reports an error.
          */
         post: operations["pipeline_launch_api_pipelines__name__launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/ligands.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ligands Csv
+         * @description The saved pipeline's candidates: name, SMILES, role and the RDKit-only checks.
+         */
+        get: operations["ligands_csv_api_pipelines__name__ligands_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/ligands.sdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ligands Sdf
+         * @description The saved pipeline's candidates as 2D structures with the same properties.
+         */
+        get: operations["ligands_sdf_api_pipelines__name__ligands_sdf_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1579,6 +1640,21 @@ export interface components {
             /** Value */
             value: number | null;
         };
+        /** ImportedLigands */
+        ImportedLigands: {
+            /**
+             * Accepted
+             * @description names of the candidates appended
+             */
+            accepted: string[];
+            /** Rejected */
+            rejected: components["schemas"]["RejectedRow"][];
+            /**
+             * Toml
+             * @description the live text with the accepted rows appended
+             */
+            toml: string;
+        };
         /** Issue */
         Issue: {
             /**
@@ -1681,6 +1757,21 @@ export interface components {
              * @description add and set_smiles: the SMILES
              */
             smiles?: string | null;
+            /** Toml */
+            toml: string;
+        };
+        /** LigandsImport */
+        LigandsImport: {
+            /**
+             * Content
+             * @description the file's text
+             */
+            content: string;
+            /**
+             * Filename
+             * @description decides the format: .csv or .sdf
+             */
+            filename: string;
             /** Toml */
             toml: string;
         };
@@ -2304,6 +2395,18 @@ export interface components {
             smiles: string;
             /** Symbols */
             symbols: string[];
+        };
+        /** RejectedRow */
+        RejectedRow: {
+            /** Input */
+            input: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Row
+             * @description 1-based data row of a CSV, or record of an SDF; 0 for the file as a whole
+             */
+            row: number;
         };
         /** Resolved */
         Resolved: {
@@ -3499,6 +3602,57 @@ export interface operations {
             };
         };
     };
+    ligands_import_api_pipelines_ligands_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LigandsImport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportedLigands"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pocket_preview_api_pipelines_pocket_preview_post: {
         parameters: {
             query?: never;
@@ -3783,6 +3937,86 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_csv_api_pipelines__name__ligands_csv_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_sdf_api_pipelines__name__ligands_sdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
