@@ -246,9 +246,15 @@ async def add_pipeline_file(request: Request, name: str, filename: str) -> Added
     `smeltery run` and the preview resolve the config's relative paths. The body is the file's bytes. A different
     file of the same name is kept, and the new one gets its own name: the response says which name to use."""
     _get(request, name)
+    too_big = f"{filename}: larger than {MAX_UPLOAD // (1024 * 1024)} MB"
+    # Content-Length first: `request.body()` buffers the whole upload in memory, so refusing after reading it would
+    # protect the disk and not the process. The length is still checked after reading, for a chunked body that has none.
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD:
+        raise HTTPException(status_code=413, detail=too_big)
     data = await request.body()
     if len(data) > MAX_UPLOAD:
-        raise HTTPException(status_code=413, detail=f"{filename}: larger than {MAX_UPLOAD // (1024 * 1024)} MB")
+        raise HTTPException(status_code=413, detail=too_big)
     try:
         return AddedFile(path=_store(request).add_file(name, filename, data))
     except ValueError as e:

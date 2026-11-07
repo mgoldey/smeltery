@@ -64,3 +64,18 @@ def test_the_steps_mark_the_settings_that_name_an_input_file(client_for):
     assert params[("structure", "spec")] is True
     assert params[("docking", "receptor")] is True
     assert params[("structure", "pocket_cutoff")] is False
+
+
+def test_an_upload_over_the_limit_is_refused_on_its_declared_length(client_for):
+    # Refused from Content-Length, before the body is buffered into memory.
+    from smeltery.bench.api.pipelines import MAX_UPLOAD
+
+    c, _ = client_for()
+    name = _made(c)
+    r = c.put(
+        f"/api/pipelines/{name}/files/huge.pdb",
+        content=b"x",
+        headers={"content-length": str(MAX_UPLOAD + 1)},
+    )
+    assert r.status_code == 413 and "larger than" in r.json()["detail"]
+    assert c.get(f"/api/pipelines/{name}/files").json() == []

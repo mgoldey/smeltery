@@ -117,3 +117,12 @@ def test_add_file_refuses_names_that_leave_the_folder_or_replace_the_config(stor
             store.add_file("p", bad, b"x")
     with pytest.raises(KeyError):
         store.add_file("nope", "x.pdb", b"x")
+
+
+def test_add_file_takes_the_names_browsers_actually_hand_over(store):
+    # A structure downloaded in a browser is often "7lcj (1).pdb" or "my protein.pdb"; refusing those would
+    # leave the picker with no way forward but renaming the file on disk.
+    store.create("p", "a = 1\n", {})
+    for ok in ("7lcj (1).pdb", "my protein.pdb", "4-F analogue.pqr", "A+B.pdbqt"):
+        assert store.add_file("p", ok, ok.encode()) == ok
+        assert (store.get("p").folder / ok).read_bytes() == ok.encode()

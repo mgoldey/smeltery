@@ -16,7 +16,9 @@ from ..ports.pipeline_store import PipelineFile, StaleWrite
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 CONFIG = "config.toml"
 # An uploaded input's name: one path component, no leading dot, so it can neither leave the folder nor hide in it.
-FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+# Spaces and parentheses are allowed because that is what a browser hands over ("7lcj (1).pdb"); what is excluded is
+# the separators and the characters a shell or TOML would have to be escaped for.
+FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()+._-]{0,127}")
 
 
 def _sha(text: str) -> str:
