@@ -26,6 +26,7 @@ dependencies = [
     # Core, not a `gui`/`bench` extra: `smeltery run --out` stages the config's input files, which rewrites
     # their paths while keeping the config's comments. tomllib only reads, so staging needs tomlkit.
     "tomlkit>=0.13",
+    "fastapi>=0.162.0",
 ]
 
 [project.scripts]
@@ -100,10 +101,13 @@ temporal = ["temporalio>=1.35"]
 pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
 
 [tool.uv.sources]
-# An exact commit, not a branch: the run record reports this SHA, read back
-# from the installed package's metadata. To develop against a local ferric
-# checkout instead, point this at it: ferric = { path = "../ferric" }
-ferric = { git = "https://github.com/mgoldey/ferric", rev = "d13daf20e273685e57cd1866795892e536057c26" }
+# ferric comes from its PyPI wheel (the floor above), so `uv sync` / `uv run` never compile Rust or libint2.
+# The run record still gets VERIFIED provenance: an index release is immutable (smeltery/record.py).
+# A git source here would make uv BUILD ferric just to read its metadata whenever it re-locks.
+# To develop against an unreleased ferric, use a local checkout (needs Rust, libint2, OpenBLAS):
+#   ferric = { path = "../ferric" }
+# or an exact commit (the record reports the SHA from direct_url.json):
+#   ferric = { git = "https://github.com/mgoldey/ferric", rev = "<sha>" }
 
 [build-system]
 requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]

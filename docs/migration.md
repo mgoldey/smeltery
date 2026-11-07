@@ -7,8 +7,9 @@ Written for issue #8 (M2-01). Enforced by `tests/test_migration_rules.py`.
 1. ferric imports nothing above it. (Delivered by M2-06 / #13, which deletes
    `tools/` from ferric.)
 2. Every consumer declares ferric explicitly in `pyproject.toml`: a version
-   specifier in `dependencies`, and an exact git `rev` (or an explicit path)
-   in `[tool.uv.sources]`. Never an implicit path.
+   specifier in `dependencies`. A `[tool.uv.sources]` override is optional
+   (smeltery uses the PyPI wheel); if present it is an exact git `rev` or an
+   explicit path. Never an implicit path.
 3. No symlinks anywhere in the repo.
 4. Library code (`src/smeltery/`) must not import an `experiments` package and
    must not name a specific campaign target in executable code. Prose
