@@ -248,6 +248,13 @@ class DecisionIn(BaseModel):
     note: str = ""
 
 
+class BulkDecisionIn(BaseModel):
+    candidates: list[str]
+    status: str
+    reason: str
+    note: str = ""
+
+
 class DecisionOut(BaseModel):
     candidate: str
     smiles: str
@@ -310,6 +317,9 @@ class CampaignOut(BaseModel):
     name: str
     description: str = ""
     created_at: str = ""
+    n_entries: int = 0
+    n_runs: int = Field(0, description="distinct runs attached to the campaign's entries")
+    updated_at: str = Field("", description="time of the latest entry, or created_at when there are none")
 
 
 class EntryIn(BaseModel):
@@ -339,10 +349,46 @@ class StudyCell(BaseModel):
     key: str
 
 
+class CompareRow(BaseModel):
+    """One comparison key. An arm that produced nothing for it has a null median and n == 0 (shown as "not run")."""
+
+    key: str
+    n_a: int
+    n_b: int
+    a: float | None
+    b: float | None
+    #: a - b of the arms' medians; null when unpaired
+    diff: float | None
+    #: SEM of the difference; null when either arm has n < 2
+    sem: float | None
+    #: beyond both the noise and the floor; null when unpaired or no floor is known
+    resolved: bool | None
+    unpaired: bool
+
+
+class CandidateRow(BaseModel):
+    """One analogue in either run; a null arm did not run it."""
+
+    candidate: str
+    smiles: str
+    ddE_a: float | None
+    sem_a: float | None
+    ddE_b: float | None
+    sem_b: float | None
+    diff: float | None
+    diff_sem: float | None
+    resolved: bool | None
+
+
 class Comparison(BaseModel):
     figure: dict[str, Any]
     caption: str
     summary: dict[str, Any]
+    rows: list[CompareRow]
+    unit: str
+    #: null when the runs' parents differ (`candidates_note` says why)
+    candidates: list[CandidateRow] | None
+    candidates_note: str | None
 
 
 class ParamOut(BaseModel):
@@ -476,6 +522,10 @@ class MethodInfo(BaseModel):
     cost_model: str = Field(description="how wall time is estimated, or 'cannot say: ...'")
     memory_model: str = Field(description="how memory is estimated, or 'cannot say: ...'")
     floor: float | None = Field(description="the tier's measured systematic floor; null while it is unmeasured")
+    floor_status: str = Field(
+        description="'measured', 'UNMEASURED', 'unknown' or 'n/a', as docs/tiers/index.md derives it"
+    )
+    tier_doc: str | None = Field(description="repo-relative path of the tier's docs page; null when there is none")
     used_by: list[str] = Field(description="workspace pipelines that place this method")
 
 

@@ -5,19 +5,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Literal, get_args
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from molviewspec.nodes import RepresentationTypeT, validate_state_tree
 from pydantic import BaseModel
 from rdkit import Chem
 
 from smeltery.bench.verdict import verdict_of
-from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet
+from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet, to_csv, to_sdf
 from smeltery.gui import results as R
 from smeltery.gui.compare import Comparison as Cmp
+from smeltery.gui.compare import candidate_rows
 from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, write_report
 from smeltery.gui.scenes import pose_scene
 from smeltery.gui.views._style import themed
@@ -488,12 +491,7 @@ def record_decision(request: Request, idx: int, body: M.DecisionIn) -> M.Decisio
     """Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`."""
     r = run(request, idx)
     p = _decisions_path(r)
-    ds = (
-        DecisionSet.load(p)
-        if p.is_file()
-        else DecisionSet(campaign=r.campaign, run=r.record["input_digest"], candidates=dict(r.candidates))
-    )
-    ds.candidates = dict(r.candidates)
+    ds = _load_decisions(r)
     if body.candidate not in r.candidates:
         raise HTTPException(status_code=400, detail=f"no candidate {body.candidate!r} in this run")
     try:
@@ -502,6 +500,53 @@ def record_decision(request: Request, idx: int, body: M.DecisionIn) -> M.Decisio
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return M.DecisionOut(**d.__dict__)
+
+
+def _load_decisions(r: R.Run) -> DecisionSet:
+    p = _decisions_path(r)
+    ds = (
+        DecisionSet.load(p)
+        if p.is_file()
+        else DecisionSet(campaign=r.campaign, run=r.record["input_digest"], candidates=dict(r.candidates))
+    )
+    ds.candidates = dict(r.candidates)
+    return ds
+
+
+@router.post("/runs/{idx}/decisions/bulk", response_model=list[M.DecisionOut])
+def record_decisions_bulk(request: Request, idx: int, body: M.BulkDecisionIn) -> list[M.DecisionOut]:
+    """One decision applied to many candidates, all or nothing: any unknown candidate or invalid decision is a 400
+    naming every problem, and nothing is written. The file is written once."""
+    r = run(request, idx)
+    unknown = [c for c in body.candidates if c not in r.candidates]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"no candidate {', '.join(map(repr, unknown))} in this run")
+    ds = _load_decisions(r)
+    try:
+        done = ds.set_many(body.candidates, body.status, body.reason, body.note, user=ports(request).identity.current())
+        ds.dump(_decisions_path(r))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return [M.DecisionOut(**d.__dict__) for d in done]
+
+
+def _decisions_download(request: Request, idx: int, ext: str, serialise, media_type: str) -> Response:
+    r = run(request, idx)
+    text = serialise(_load_decisions(r))
+    name = f"decisions-{r.record['input_digest'][:12]}.{ext}"
+    return Response(
+        content=text, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{name}"'}
+    )
+
+
+@router.get("/runs/{idx}/decisions.csv")
+def decisions_csv(request: Request, idx: int) -> Response:
+    return _decisions_download(request, idx, "csv", to_csv, "text/csv; charset=utf-8")
+
+
+@router.get("/runs/{idx}/decisions.sdf")
+def decisions_sdf(request: Request, idx: int) -> Response:
+    return _decisions_download(request, idx, "sdf", to_sdf, "chemical/x-mdl-sdfile")
 
 
 # ---------------------------------------------------------------------------------------------------- comments
@@ -628,6 +673,27 @@ def compare(request: Request, a: int, b: int, theme: Theme = "light") -> M.Compa
     ra, rb = run(request, a), run(request, b)
     label_a, label_b = _arm_labels(ra, rb)
     cmp = Cmp.from_runs({"run": ra}, {"run": rb}, label_a=label_a, label_b=label_b, floor=max(ra.floor, rb.floor))
+    rows = [
+        M.CompareRow(
+            key=k.key,
+            n_a=k.n_a,
+            n_b=k.n_b,
+            a=k.a,
+            b=k.b,
+            diff=k.diff,
+            sem=k.sem if math.isfinite(k.sem) else None,
+            resolved=k.resolved,
+            unpaired=k.unpaired,
+        )
+        for k in cmp.rows()
+    ]
+    candidates, note = candidate_rows(ra, rb, max(ra.z, rb.z))
     return M.Comparison(
-        figure=themed(_plain(compare_figure(cmp)), theme), caption=comparison_caption(cmp), summary=cmp.summary()
+        figure=themed(_plain(compare_figure(cmp)), theme),
+        caption=comparison_caption(cmp),
+        summary=cmp.summary(),
+        rows=rows,
+        unit=cmp.unit,
+        candidates=candidates,
+        candidates_note=note,
     )

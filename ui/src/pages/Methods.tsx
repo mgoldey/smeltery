@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
 
@@ -39,6 +40,11 @@ function parse(p: Param, text: string): { value: unknown } | { error: string } {
   }
 }
 
+/** The workspace default overrides the built-in one for this setting. */
+function differs(p: Param): boolean {
+  return p.kind !== "sites" && p.workspace_default != null && show(p.workspace_default) !== show(p.default);
+}
+
 function MethodCard({ m }: { m: Method }) {
   const qc = useQueryClient();
   const editable = m.params.filter((p) => p.kind !== "sites");
@@ -64,6 +70,15 @@ function MethodCard({ m }: { m: Method }) {
     },
     onError: (e: Error) => setProblem(e.message),
   });
+  const reset = useMutation({
+    mutationFn: (name: string) => {
+      const defaults: Record<string, unknown> = {};
+      for (const p of editable) if (p.name !== name && p.workspace_default != null) defaults[p.name] = p.workspace_default;
+      return unwrap(api.PUT("/api/methods/{key}", { params: { path: { key: m.key } }, body: { defaults } }));
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["methods"] }),
+    onError: (e: Error) => setProblem(e.message),
+  });
   return (
     <section aria-label={`Method ${m.key}`} data-method={m.key} style={{ marginBottom: 32 }}>
       <h2 style={{ marginBottom: 4 }}>{m.label}</h2>
@@ -78,9 +93,25 @@ function MethodCard({ m }: { m: Method }) {
         <dt style={muted}>Memory</dt>
         <dd data-fact="memory">{m.memory_model}</dd>
         <dt style={muted}>Floor</dt>
-        <dd data-fact="floor">{m.floor === null ? "unmeasured" : `${m.floor} kcal/mol`}</dd>
+        <dd data-fact="floor">{m.floor === null ? "unmeasured" : `${m.floor} kcal/mol`}
+          <span style={muted}> ({m.floor_status})</span>
+          {m.tier_doc ? (
+            <>
+              {" "}
+              <span style={muted}>see</span> <code data-fact="tier-doc">{m.tier_doc}</code>
+            </>
+          ) : null}
+        </dd>
         <dt style={muted}>Used by</dt>
-        <dd data-fact="used-by">{m.used_by.length ? m.used_by.join(", ") : "no pipeline in this workspace"}</dd>
+        <dd data-fact="used-by">{m.used_by.length
+            ? m.used_by.map((n, i) => (
+                <span key={n}>
+                  {i ? ", " : ""}
+                  <Link to={`/pipelines/${encodeURIComponent(n)}`}>{n}</Link>
+                </span>
+              ))
+            : "no pipeline in this workspace"}
+        </dd>
       </dl>
       {m.params.length === 0 ? (
         <p style={muted}>This method has no settings.</p>
@@ -96,7 +127,7 @@ function MethodCard({ m }: { m: Method }) {
           </thead>
           <tbody>
             {m.params.map((p) => (
-              <tr key={p.name} data-param={p.name}>
+              <tr key={p.name} data-param={p.name} data-differs={differs(p) || undefined}>
                 <td className="mono">{p.name}</td>
                 <td className="mono" data-cell="default">
                   {show(p.default) || (p.required ? "required" : "unset")}
@@ -126,7 +157,17 @@ function MethodCard({ m }: { m: Method }) {
                     />
                   )}
                 </td>
-                <td data-cell="help">{p.help}</td>
+                <td data-cell="help">
+                  {p.help}
+                  {differs(p) ? (
+                    <>
+                      {" "}
+                      <button disabled={dirty || save.isPending || reset.isPending} onClick={() => reset.mutate(p.name)}>
+                        Reset to built-in
+                      </button>
+                    </>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -134,7 +175,7 @@ function MethodCard({ m }: { m: Method }) {
       )}
       {editable.length ? (
         <p>
-          <button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+          <button className="primary" disabled={!dirty || save.isPending || reset.isPending} onClick={() => save.mutate()}>
             Save defaults for {m.label}
           </button>{" "}
           <span style={muted}>Copied into a step when the method is added; existing steps do not change.</span>

@@ -385,6 +385,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/ligands/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ligands Import
+         * @description Append the molecules of a CSV (smiles column, optional name column) or SDF to the live text's candidates.
+         *     Rows RDKit cannot read, and names or molecules already present, are returned as `rejected` with the reason.
+         */
+        post: operations["ligands_import_api_pipelines_ligands_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/pocket_preview": {
         parameters: {
             query?: never;
@@ -502,6 +523,46 @@ export interface paths {
          *     Refused, with the number of errors and each one, while `Pipeline.check()` reports an error.
          */
         post: operations["pipeline_launch_api_pipelines__name__launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/ligands.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ligands Csv
+         * @description The saved pipeline's candidates: name, SMILES, role and the RDKit-only checks.
+         */
+        get: operations["ligands_csv_api_pipelines__name__ligands_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/ligands.sdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ligands Sdf
+         * @description The saved pipeline's candidates as 2D structures with the same properties.
+         */
+        get: operations["ligands_sdf_api_pipelines__name__ligands_sdf_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -727,6 +788,61 @@ export interface paths {
          * @description Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`.
          */
         post: operations["record_decision_api_runs__idx__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/decisions.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Decisions Csv */
+        get: operations["decisions_csv_api_runs__idx__decisions_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/decisions.sdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Decisions Sdf */
+        get: operations["decisions_sdf_api_runs__idx__decisions_sdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{idx}/decisions/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Decisions Bulk
+         * @description One decision applied to many candidates, all or nothing: any unknown candidate or invalid decision is a 400
+         *     naming every problem, and nothing is written. The file is written once.
+         */
+        post: operations["record_decisions_bulk_api_runs__idx__decisions_bulk_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1219,6 +1335,20 @@ export interface components {
             /** Parent */
             parent: string;
         };
+        /** BulkDecisionIn */
+        BulkDecisionIn: {
+            /** Candidates */
+            candidates: string[];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Reason */
+            reason: string;
+            /** Status */
+            status: string;
+        };
         /**
          * CalcLines
          * @description The SCF log lines of one pose: every line of the run's calc log whose candidate and original pose match.
@@ -1257,8 +1387,49 @@ export interface components {
             description: string;
             /** Id */
             id: string;
+            /**
+             * N Entries
+             * @default 0
+             */
+            n_entries: number;
+            /**
+             * N Runs
+             * @description distinct runs attached to the campaign's entries
+             * @default 0
+             */
+            n_runs: number;
             /** Name */
             name: string;
+            /**
+             * Updated At
+             * @description time of the latest entry, or created_at when there are none
+             * @default
+             */
+            updated_at: string;
+        };
+        /**
+         * CandidateRow
+         * @description One analogue in either run; a null arm did not run it.
+         */
+        CandidateRow: {
+            /** Candidate */
+            candidate: string;
+            /** Dde A */
+            ddE_a: number | null;
+            /** Dde B */
+            ddE_b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Diff Sem */
+            diff_sem: number | null;
+            /** Resolved */
+            resolved: boolean | null;
+            /** Sem A */
+            sem_a: number | null;
+            /** Sem B */
+            sem_b: number | null;
+            /** Smiles */
+            smiles: string;
         };
         /** CatalogOut */
         CatalogOut: {
@@ -1312,18 +1483,50 @@ export interface components {
             /** Id */
             id: string;
         };
+        /**
+         * CompareRow
+         * @description One comparison key. An arm that produced nothing for it has a null median and n == 0 (shown as "not run").
+         */
+        CompareRow: {
+            /** A */
+            a: number | null;
+            /** B */
+            b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Key */
+            key: string;
+            /** N A */
+            n_a: number;
+            /** N B */
+            n_b: number;
+            /** Resolved */
+            resolved: boolean | null;
+            /** Sem */
+            sem: number | null;
+            /** Unpaired */
+            unpaired: boolean;
+        };
         /** Comparison */
         Comparison: {
+            /** Candidates */
+            candidates: components["schemas"]["CandidateRow"][] | null;
+            /** Candidates Note */
+            candidates_note: string | null;
             /** Caption */
             caption: string;
             /** Figure */
             figure: {
                 [key: string]: unknown;
             };
+            /** Rows */
+            rows: components["schemas"]["CompareRow"][];
             /** Summary */
             summary: {
                 [key: string]: unknown;
             };
+            /** Unit */
+            unit: string;
         };
         /** DdeRow */
         DdeRow: {
@@ -1579,6 +1782,21 @@ export interface components {
             /** Value */
             value: number | null;
         };
+        /** ImportedLigands */
+        ImportedLigands: {
+            /**
+             * Accepted
+             * @description names of the candidates appended
+             */
+            accepted: string[];
+            /** Rejected */
+            rejected: components["schemas"]["RejectedRow"][];
+            /**
+             * Toml
+             * @description the live text with the accepted rows appended
+             */
+            toml: string;
+        };
         /** Issue */
         Issue: {
             /**
@@ -1681,6 +1899,21 @@ export interface components {
              * @description add and set_smiles: the SMILES
              */
             smiles?: string | null;
+            /** Toml */
+            toml: string;
+        };
+        /** LigandsImport */
+        LigandsImport: {
+            /**
+             * Content
+             * @description the file's text
+             */
+            content: string;
+            /**
+             * Filename
+             * @description decides the format: .csv or .sdf
+             */
+            filename: string;
             /** Toml */
             toml: string;
         };
@@ -1817,6 +2050,11 @@ export interface components {
              * @description the tier's measured systematic floor; null while it is unmeasured
              */
             floor: number | null;
+            /**
+             * Floor Status
+             * @description 'measured', 'UNMEASURED', 'unknown' or 'n/a', as docs/tiers/index.md derives it
+             */
+            floor_status: string;
             /** Key */
             key: string;
             /** Label */
@@ -1832,6 +2070,11 @@ export interface components {
             quantity: string | null;
             /** Summary */
             summary: string;
+            /**
+             * Tier Doc
+             * @description repo-relative path of the tier's docs page; null when there is none
+             */
+            tier_doc: string | null;
             /**
              * Used By
              * @description workspace pipelines that place this method
@@ -2304,6 +2547,18 @@ export interface components {
             smiles: string;
             /** Symbols */
             symbols: string[];
+        };
+        /** RejectedRow */
+        RejectedRow: {
+            /** Input */
+            input: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Row
+             * @description 1-based data row of a CSV, or record of an SDF; 0 for the file as a whole
+             */
+            row: number;
         };
         /** Resolved */
         Resolved: {
@@ -3499,6 +3754,57 @@ export interface operations {
             };
         };
     };
+    ligands_import_api_pipelines_ligands_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LigandsImport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportedLigands"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pocket_preview_api_pipelines_pocket_preview_post: {
         parameters: {
             query?: never;
@@ -3783,6 +4089,86 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_csv_api_pipelines__name__ligands_csv_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ligands_sdf_api_pipelines__name__ligands_sdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4201,6 +4587,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decisions_csv_api_runs__idx__decisions_csv_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decisions_sdf_api_runs__idx__decisions_sdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_decisions_bulk_api_runs__idx__decisions_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionOut"][];
                 };
             };
             /** @description Validation Error */

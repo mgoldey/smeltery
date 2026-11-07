@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { ApiError, describeReason } from "../../../api/http";
 import { rdkit } from "../../../chem/rdkit";
 import type { StepViewProps } from "./registry";
 
@@ -26,7 +27,7 @@ export type LigandsViewProps = StepViewProps;
 async function post<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = (await r.json().catch(() => ({}))) as { detail?: unknown };
-  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : `${r.status} ${r.statusText}`);
+  if (!r.ok) throw new ApiError(r.status, describeReason(r.status, r.statusText, j));
   return j as T;
 }
 
@@ -177,7 +178,7 @@ function Row({
  * parent, highlighted), and the list edited in place. The text is the only state: an edit goes to the API, which
  * writes `[candidates]` and `parent` into it, and `onToml` replaces the draft. Nothing here runs an SCF or docking.
  */
-export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
+export function LigandsView({ pipeline, toml: live, onToml }: LigandsViewProps) {
   // The check is debounced: typing in the TOML pane must not run a core search per keystroke. The server caches by
   // (parent SMILES, candidate SMILES), so an unchanged pair costs nothing even when the text around it changes.
   const [toml, setToml] = useState(live);
@@ -194,6 +195,7 @@ export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState({ name: "", smiles: "" });
+  const [rejected, setRejected] = useState<{ row: number; input: string; reason: string }[] | null>(null);
   const data = q.data;
   const canEdit = onToml !== undefined;
 
@@ -201,6 +203,7 @@ export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
    * builds the whole list itself (that would drop what was added since). The server refuses duplicates and the parent. */
   async function write(op: Op): Promise<boolean> {
     if (!onToml) return false;
+    setRejected(null); // a later edit makes the last import's report stale
     setBusy(true);
     try {
       const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml: live, ...op });
@@ -210,6 +213,25 @@ export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** A CSV or SDF picked in the browser: the server appends what RDKit reads to the LIVE text and reports the rest. */
+  async function importFile(file: File) {
+    if (!onToml) return;
+    setBusy(true);
+    try {
+      const r = await post<{ toml: string; accepted: string[]; rejected: { row: number; input: string; reason: string }[] }>(
+        "/api/pipelines/ligands/import",
+        { toml: live, filename: file.name, content: await file.text() },
+      );
+      setError(null);
+      setRejected(r.rejected);
+      if (r.accepted.length) onToml(r.toml);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -276,6 +298,49 @@ export function LigandsView({ toml: live, onToml }: LigandsViewProps) {
           ))}
           {data.candidates.flatMap((c) => c.problems.map((p) => <li key={`${c.name}:${p}`}>{p}</li>))}
         </ul>
+      ) : null}
+      <div className="controls">
+        <label>
+          Import CSV/SDF{" "}
+          <input
+            type="file"
+            accept=".csv,.sdf"
+            aria-label="Import CSV or SDF"
+            disabled={busy || !canEdit}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void importFile(f);
+            }}
+          />
+        </label>
+        <a href={`/api/pipelines/${encodeURIComponent(pipeline)}/ligands.csv`} download>
+          Download CSV
+        </a>{" "}
+        <a href={`/api/pipelines/${encodeURIComponent(pipeline)}/ligands.sdf`} download>
+          Download SDF
+        </a>
+        <span className="lede"> (the saved candidates)</span>
+      </div>
+      {rejected && rejected.length ? (
+        <table className="grid" aria-label="Rejected rows" data-testid="ligands-rejected">
+          <thead>
+            <tr>
+              <th className="num">Row</th>
+              <th>Input</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rejected.map((r, i) => (
+              <tr key={i}>
+                <td className="num">{r.row}</td>
+                <td>{r.input}</td>
+                <td>{r.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : null}
       <form
         className="controls"

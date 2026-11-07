@@ -1574,6 +1574,9 @@ VIEWERS = {
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
+    "verify-run": "smeltery.run_tools:verify_run",
+    "inspect": "smeltery.run_tools:inspect_run",
+    "diff-run": "smeltery.run_tools:diff_run",
 }
 
 
@@ -1657,7 +1660,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in VIEWERS:  # imported only when asked for: they need no tier, and gui needs the gui extra
         import importlib
 
-        return importlib.import_module(VIEWERS[argv[0]]).main(argv[1:])
+        module, _, func = VIEWERS[argv[0]].partition(":")  # "module" means module.main; "module:func" names the entry
+        return getattr(importlib.import_module(module), func or "main")(argv[1:])
     ap = argparse.ArgumentParser(prog="smeltery", description="Tiered, measurement-disciplined funnel.")
     sub = ap.add_subparsers(dest="command", required=True)
     sub.add_parser("gui", help="browse a finished run, record decisions (smeltery gui OUT --help)")
@@ -1667,6 +1671,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
+    sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
+    sub.add_parser("inspect", help="plain-text summary of a run record")
+    sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     tw.add_argument("--host", default="127.0.0.1:7233")
     tw.add_argument("--namespace", default="default")
@@ -1840,6 +1847,10 @@ def main(argv: list[str] | None = None) -> int:
             data = json.loads(p.read_text())
             data.get("results", {}).pop("cut", None)
             data.get("results", {}).pop("paired_ddE", None)
+            if "record_sha256" in data:  # the pops changed the record: restamp it, or verify-run reports an edit
+                from .record import _canonical_sha256
+
+                data["record_sha256"] = _canonical_sha256(data)
             new_path.write_text(json.dumps(data, indent=2, sort_keys=True, default=str))
             try:
                 p.unlink()

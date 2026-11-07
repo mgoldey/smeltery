@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, unwrap, type RunSummary } from "../../api/client";
-import { ApiError } from "../../api/http";
+import { ApiError, describeReason } from "../../api/http";
 
 /** The workspace name of the pipeline made from a run: its campaign and digest, so reopening finds the same one. */
 export function pipelineName(run: Pick<RunSummary, "idx" | "campaign" | "digest">): string {
@@ -24,16 +24,10 @@ export async function pipelineForRun(idx: number, runs: RunSummary[]): Promise<s
   // (a recorded input missing from the run directory, 409) are shown as they are.
   const got = await api.GET("/api/pipelines/{name}", { params: { path: { name } } });
   if (got.response.ok) return name;
-  if (got.response.status !== 404) throw new ApiError(got.response.status, reason(got.error, got.response));
+  if (got.response.status !== 404) throw new ApiError(got.response.status, describeReason(got.response.status, got.response.statusText, got.error));
   const made = await api.POST("/api/pipelines", { body: { name, from_run: idx } });
   if (made.response.ok) return name;
-  throw new ApiError(made.response.status, reason(made.error, made.response));
-}
-
-function reason(error: unknown, response: Response): string {
-  const e = error as { detail?: unknown; reason?: unknown } | undefined;
-  const r = e?.detail ?? e?.reason;
-  return typeof r === "string" ? r : r !== undefined ? JSON.stringify(r) : `${response.status} ${response.statusText}`;
+  throw new ApiError(made.response.status, describeReason(made.response.status, made.response.statusText, made.error));
 }
 
 /** Open the workspace on the pipeline that made run `idx`, optionally on one step. */

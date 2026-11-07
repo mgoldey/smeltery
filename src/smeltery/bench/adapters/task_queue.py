@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import threading
@@ -16,6 +18,23 @@ from smeltery.tasks import Task, TemporalTaskManager
 
 def _utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _kill_group(pgid: int, grace: float = 2.0) -> None:
+    """SIGTERM the task's process group (it is its own session leader), then SIGKILL what is left after `grace`."""
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pgid, signal.SIGKILL)
 
 
 class SubprocessTaskQueue:
@@ -203,22 +222,28 @@ class SubprocessTaskQueue:
             raise KeyError(task_id)
         if t.status in ("succeeded", "failed", "cancelled"):
             return False
-        # find pid
+        # mark cancelled first: the waiter thread's write is guarded by status NOT IN ('cancelled')
         with sqlite3.connect(self.db) as con:
-            pid = con.execute("SELECT pid FROM tasks WHERE id=?", (task_id,)).fetchone()
-        pid = pid[0] if pid else None
-        if pid:
-            try:
-                os.killpg(pid, 9) if False else os.kill(pid, 9)
-            except ProcessLookupError:
-                pass
-        with sqlite3.connect(self.db) as con:
-            con.execute(
-                "UPDATE tasks SET status='cancelled', finished_at=? WHERE id=?",
+            changed = con.execute(
+                "UPDATE tasks SET status='cancelled', finished_at=? "
+                "WHERE id=? AND status NOT IN ('succeeded','failed','cancelled')",
                 (_utc(), task_id),
-            )
+            ).rowcount
+            pid = con.execute("SELECT pid FROM tasks WHERE id=?", (task_id,)).fetchone()
             con.commit()
+        if not changed:
+            return False
+        if pid and pid[0]:
+            _kill_group(pid[0])
         return True
+
+    def ready(self):
+        try:
+            with contextlib.closing(sqlite3.connect(f"file:{self.db}?mode=rw", uri=True)) as con:
+                con.execute("SELECT 1 FROM tasks LIMIT 1")
+        except sqlite3.Error as e:
+            return False, str(e)
+        return True, str(self.db)
 
     def tail_log(self, task_id, lines=40):
         t = self.get(task_id)
@@ -265,6 +290,9 @@ class TemporalTaskQueue:
         if t is None:
             raise KeyError(task_id)
         return self._m.cancel(task_id)
+
+    def ready(self):
+        return True, "temporal: not probed"
 
     def tail_log(self, task_id, lines=40):
         t = self.get(task_id)
