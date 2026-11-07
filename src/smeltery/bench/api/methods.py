@@ -49,6 +49,7 @@ def _used_by(request: Request) -> dict[str, list[str]]:
     return used
 
 
+# src/smeltery/bench/api/methods.py -> parents[4] is the repo root (a source checkout; a wheel has no docs/)
 _REPO = Path(__file__).resolve().parents[4]
 
 

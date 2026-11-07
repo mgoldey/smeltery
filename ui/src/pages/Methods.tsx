@@ -20,36 +20,21 @@ function parse(p: Param, text: string): { value: unknown } | { error: string } {
   const nums = (s: string) => s.split(",").map((x) => Number(x.trim()));
   switch (p.kind) {
     case "int":
-      return /^-?\d+$/.test(t)
-        ? { value: Number(t) }
-        : { error: `${p.name} must be a whole number` };
+      return /^-?\d+$/.test(t) ? { value: Number(t) } : { error: `${p.name} must be a whole number` };
     case "float":
-      return t !== "" && Number.isFinite(Number(t))
-        ? { value: Number(t) }
-        : { error: `${p.name} must be a number` };
+      return t !== "" && Number.isFinite(Number(t)) ? { value: Number(t) } : { error: `${p.name} must be a number` };
     case "bool":
-      return t === "true" || t === "false"
-        ? { value: t === "true" }
-        : { error: `${p.name} must be true or false` };
+      return t === "true" || t === "false" ? { value: t === "true" } : { error: `${p.name} must be true or false` };
     case "vec3": {
       const v = nums(t);
-      return v.length === 3 && v.every(Number.isFinite)
-        ? { value: v }
-        : { error: `${p.name} needs three numbers` };
+      return v.length === 3 && v.every(Number.isFinite) ? { value: v } : { error: `${p.name} needs three numbers` };
     }
     case "int_list": {
       const v = nums(t);
-      return v.every(Number.isInteger)
-        ? { value: v }
-        : { error: `${p.name} needs whole numbers, comma separated` };
+      return v.every(Number.isInteger) ? { value: v } : { error: `${p.name} needs whole numbers, comma separated` };
     }
     case "str_list":
-      return {
-        value: t
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean),
-      };
+      return { value: t.split(",").map((x) => x.trim()).filter(Boolean) };
     default:
       return { value: t };
   }
@@ -57,19 +42,13 @@ function parse(p: Param, text: string): { value: unknown } | { error: string } {
 
 /** The workspace default overrides the built-in one for this setting. */
 function differs(p: Param): boolean {
-  return (
-    p.kind !== "sites" &&
-    p.workspace_default != null &&
-    show(p.workspace_default) !== show(p.default)
-  );
+  return p.kind !== "sites" && p.workspace_default != null && show(p.workspace_default) !== show(p.default);
 }
 
 function MethodCard({ m }: { m: Method }) {
   const qc = useQueryClient();
   const editable = m.params.filter((p) => p.kind !== "sites");
-  const saved = Object.fromEntries(
-    editable.map((p) => [p.name, show(p.workspace_default)]),
-  );
+  const saved = Object.fromEntries(editable.map((p) => [p.name, show(p.workspace_default)]));
   const [draft, setDraft] = useState<Record<string, string>>(saved);
   const [problem, setProblem] = useState<string | null>(null);
   const dirty = editable.some((p) => (draft[p.name] ?? "") !== saved[p.name]);
@@ -83,12 +62,7 @@ function MethodCard({ m }: { m: Method }) {
         if ("error" in r) throw new Error(r.error);
         defaults[p.name] = r.value;
       }
-      return unwrap(
-        api.PUT("/api/methods/{key}", {
-          params: { path: { key: m.key } },
-          body: { defaults },
-        }),
-      );
+      return unwrap(api.PUT("/api/methods/{key}", { params: { path: { key: m.key } }, body: { defaults } }));
     },
     onSuccess: () => {
       setProblem(null);
@@ -99,60 +73,37 @@ function MethodCard({ m }: { m: Method }) {
   const reset = useMutation({
     mutationFn: (name: string) => {
       const defaults: Record<string, unknown> = {};
-      for (const p of editable)
-        if (p.name !== name && p.workspace_default != null)
-          defaults[p.name] = p.workspace_default;
-      return unwrap(
-        api.PUT("/api/methods/{key}", {
-          params: { path: { key: m.key } },
-          body: { defaults },
-        }),
-      );
+      for (const p of editable) if (p.name !== name && p.workspace_default != null) defaults[p.name] = p.workspace_default;
+      return unwrap(api.PUT("/api/methods/{key}", { params: { path: { key: m.key } }, body: { defaults } }));
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["methods"] }),
     onError: (e: Error) => setProblem(e.message),
   });
   return (
-    <section
-      aria-label={`Method ${m.key}`}
-      data-method={m.key}
-      style={{ marginBottom: 32 }}
-    >
+    <section aria-label={`Method ${m.key}`} data-method={m.key} style={{ marginBottom: 32 }}>
       <h2 style={{ marginBottom: 4 }}>{m.label}</h2>
       <p className="lede" style={{ marginBottom: 8 }}>
         {m.summary || "No summary."}
       </p>
-      <dl
-        style={{
-          display: "grid",
-          gridTemplateColumns: "max-content 1fr",
-          gap: "2px 16px",
-          margin: "0 0 12px",
-        }}
-      >
+      <dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 16px", margin: "0 0 12px" }}>
         <dt style={muted}>Measures</dt>
-        <dd data-fact="quantity">
-          {m.quantity ?? "nothing (prepares, refuses or decides)"}
-        </dd>
+        <dd data-fact="quantity">{m.quantity ?? "nothing (prepares, refuses or decides)"}</dd>
         <dt style={muted}>Cost</dt>
         <dd data-fact="cost">{m.cost_model}</dd>
         <dt style={muted}>Memory</dt>
         <dd data-fact="memory">{m.memory_model}</dd>
         <dt style={muted}>Floor</dt>
-        <dd data-fact="floor">
-          {m.floor === null ? "unmeasured" : `${m.floor} kcal/mol`}
+        <dd data-fact="floor">{m.floor === null ? "unmeasured" : `${m.floor} kcal/mol`}
           <span style={muted}> ({m.floor_status})</span>
           {m.tier_doc ? (
             <>
               {" "}
-              <span style={muted}>see</span>{" "}
-              <code data-fact="tier-doc">{m.tier_doc}</code>
+              <span style={muted}>see</span> <code data-fact="tier-doc">{m.tier_doc}</code>
             </>
           ) : null}
         </dd>
         <dt style={muted}>Used by</dt>
-        <dd data-fact="used-by">
-          {m.used_by.length
+        <dd data-fact="used-by">{m.used_by.length
             ? m.used_by.map((n, i) => (
                 <span key={n}>
                   {i ? ", " : ""}
@@ -176,11 +127,7 @@ function MethodCard({ m }: { m: Method }) {
           </thead>
           <tbody>
             {m.params.map((p) => (
-              <tr
-                key={p.name}
-                data-param={p.name}
-                data-differs={differs(p) || undefined}
-              >
+              <tr key={p.name} data-param={p.name} data-differs={differs(p) || undefined}>
                 <td className="mono">{p.name}</td>
                 <td className="mono" data-cell="default">
                   {show(p.default) || (p.required ? "required" : "unset")}
@@ -192,15 +139,10 @@ function MethodCard({ m }: { m: Method }) {
                     <select
                       aria-label={`${m.key} ${p.name} workspace default`}
                       value={draft[p.name] ?? ""}
-                      onChange={(e) =>
-                        setDraft({ ...draft, [p.name]: e.target.value })
-                      }
+                      onChange={(e) => setDraft({ ...draft, [p.name]: e.target.value })}
                     >
                       <option value="">(none)</option>
-                      {(p.kind === "bool"
-                        ? ["true", "false"]
-                        : p.choices.map(String)
-                      ).map((c) => (
+                      {(p.kind === "bool" ? ["true", "false"] : p.choices.map(String)).map((c) => (
                         <option key={c} value={c}>
                           {c}
                         </option>
@@ -210,9 +152,7 @@ function MethodCard({ m }: { m: Method }) {
                     <input
                       aria-label={`${m.key} ${p.name} workspace default`}
                       value={draft[p.name] ?? ""}
-                      onChange={(e) =>
-                        setDraft({ ...draft, [p.name]: e.target.value })
-                      }
+                      onChange={(e) => setDraft({ ...draft, [p.name]: e.target.value })}
                       style={{ width: "100%", font: "inherit" }}
                     />
                   )}
@@ -222,10 +162,7 @@ function MethodCard({ m }: { m: Method }) {
                   {differs(p) ? (
                     <>
                       {" "}
-                      <button
-                        disabled={reset.isPending}
-                        onClick={() => reset.mutate(p.name)}
-                      >
+                      <button disabled={dirty || save.isPending || reset.isPending} onClick={() => reset.mutate(p.name)}>
                         Reset to built-in
                       </button>
                     </>
@@ -238,17 +175,10 @@ function MethodCard({ m }: { m: Method }) {
       )}
       {editable.length ? (
         <p>
-          <button
-            className="primary"
-            disabled={!dirty || save.isPending}
-            onClick={() => save.mutate()}
-          >
+          <button className="primary" disabled={!dirty || save.isPending || reset.isPending} onClick={() => save.mutate()}>
             Save defaults for {m.label}
           </button>{" "}
-          <span style={muted}>
-            Copied into a step when the method is added; existing steps do not
-            change.
-          </span>
+          <span style={muted}>Copied into a step when the method is added; existing steps do not change.</span>
         </p>
       ) : null}
       {problem ? (
@@ -262,19 +192,15 @@ function MethodCard({ m }: { m: Method }) {
 
 /** Every method a pipeline can place: what each setting does, what it costs, and the workspace's default for it. */
 export function Methods() {
-  const q = useQuery({
-    queryKey: ["methods"],
-    queryFn: () => unwrap(api.GET("/api/methods")),
-  });
+  const q = useQuery({ queryKey: ["methods"], queryFn: () => unwrap(api.GET("/api/methods")) });
   return (
     <Shell>
       <div className="body">
         <main className="work">
           <h1>Methods</h1>
           <p className="lede">
-            Every method a pipeline can place, with each setting explained. A
-            workspace default is copied into a step when you add the method, so
-            a run can always be redone from its own folder.
+            Every method a pipeline can place, with each setting explained. A workspace default is copied into a step
+            when you add the method, so a run can always be redone from its own folder.
           </p>
           {q.isError ? (
             <div className="banner" role="alert">
@@ -282,10 +208,7 @@ export function Methods() {
             </div>
           ) : null}
           {(q.data ?? []).map((m) => (
-            <MethodCard
-              key={`${m.key}:${JSON.stringify(m.params.map((p) => p.workspace_default))}`}
-              m={m}
-            />
+            <MethodCard key={`${m.key}:${JSON.stringify(m.params.map((p) => p.workspace_default))}`} m={m} />
           ))}
         </main>
       </div>
