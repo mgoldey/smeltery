@@ -19,6 +19,7 @@ from rdkit.Chem import AllChem
 
 from smeltery.funnel import cut
 from smeltery.model import Measurement
+from smeltery.record import _canonical_sha256
 
 CANDIDATES = {
     "benzoic": "OC(=O)c1ccccc1",
@@ -172,6 +173,8 @@ def make_run_dir(root: Path, *, unranked: bool = False) -> Path:
         json.dumps({"inputs": record["inputs"], "tiers": record["tiers"]}, sort_keys=True, default=str).encode()
     ).hexdigest()
     record["input_digest"] = digest
+    record["schema_version"] = 1
+    record["record_sha256"] = _canonical_sha256(record)
     (out / "calcs.jsonl").write_text("")  # no SCF ran in a fixture; the file `results.calcs` names still exists
     (out / f"run-{digest[:12]}.json").write_text(json.dumps(record, indent=2, sort_keys=True, default=str))
     return out
