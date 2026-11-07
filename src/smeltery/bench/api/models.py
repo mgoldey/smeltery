@@ -214,6 +214,8 @@ class Provisional(BaseModel):
 class StructureRequest(BaseModel):
     source: str
     allow_network: bool = False
+    # A relative path is read from this pipeline's folder, as `smeltery run` reads the config's `[structure] spec`.
+    pipeline: str | None = None
 
 
 class StructureText(BaseModel):

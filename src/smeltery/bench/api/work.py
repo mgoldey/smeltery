@@ -294,10 +294,16 @@ def open_structure(request: Request, body: M.StructureRequest) -> M.StructureInf
     """Open a local .pdb path, a PDB id or a UniProt accession. Network sources need allow_network."""
     src = ports(request).structure_source
     looks_like_path = "/" in body.source or body.source.lower().endswith((".pdb", ".ent", ".cif"))
-    if looks_like_path and not Path(body.source).is_file():
+    source = body.source
+    if looks_like_path and body.pipeline is not None and not Path(source).is_absolute():
+        try:
+            source = str(Path(ports(request).pipeline_store.get(body.pipeline).folder) / source)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=404, detail=f"no pipeline {body.pipeline}") from e
+    if looks_like_path and not Path(source).is_file():
         raise HTTPException(status_code=400, detail=f"no such file: {body.source}")
     try:
-        res = src.fetch_result(body.source, allow_network=body.allow_network)
+        res = src.fetch_result(source, allow_network=body.allow_network)
     except PermissionError as e:
         raise HTTPException(status_code=400, detail=f"{body.source}: needs network access, which is off ({e})") from e
     except (OSError, ValueError) as e:

@@ -96,3 +96,24 @@ def test_crlf_and_non_ascii_text_keeps_its_hash_across_put_and_get(store):
     got = store.get("p")
     assert (got.text, got.sha256) == (text + "y = 2\r\n", b.sha256)
     store.put("p", "z = 1\n", got.sha256)
+
+
+def test_add_file_stores_bytes_in_the_folder_and_returns_the_relative_name(store):
+    store.create("p", "a = 1\n", {})
+    rel = store.add_file("p", "receptor.pdb", b"ATOM\n")
+    assert rel == "receptor.pdb"
+    assert (store.get("p").folder / rel).read_bytes() == b"ATOM\n"
+    assert store.add_file("p", "receptor.pdb", b"ATOM\n") == "receptor.pdb"  # same bytes: the same file
+    other = store.add_file("p", "receptor.pdb", b"HETATM\n")  # different bytes never overwrite
+    assert other != "receptor.pdb" and other.endswith(".pdb")
+    assert (store.get("p").folder / "receptor.pdb").read_bytes() == b"ATOM\n"
+    assert store.files("p") == sorted(["receptor.pdb", other])
+
+
+def test_add_file_refuses_names_that_leave_the_folder_or_replace_the_config(store):
+    store.create("p", "a = 1\n", {})
+    for bad in ("../x.pdb", "a/b.pdb", "config.toml", "", ".hidden.pdb"):
+        with pytest.raises(ValueError):
+            store.add_file("p", bad, b"x")
+    with pytest.raises(KeyError):
+        store.add_file("nope", "x.pdb", b"x")
