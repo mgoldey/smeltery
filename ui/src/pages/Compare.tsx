@@ -54,6 +54,30 @@ export function Compare() {
                 {cmp.data.caption}
               </p>
               <PlotlyFigure figure={cmp.data.figure} name="compare" />
+              <table data-testid="compare-rows">
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Arm A median ({cmp.data.unit})</th>
+                    <th>Arm B median ({cmp.data.unit})</th>
+                    <th>A − B ({cmp.data.unit})</th>
+                    <th>SEM of difference ({cmp.data.unit})</th>
+                    <th>Resolved</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cmp.data.rows.map((r) => (
+                    <tr key={r.key}>
+                      <td>{r.key}</td>
+                      <td>{r.a === null ? "not run" : `${r.a.toFixed(2)} (n=${r.n_a})`}</td>
+                      <td>{r.b === null ? "not run" : `${r.b.toFixed(2)} (n=${r.n_b})`}</td>
+                      <td>{r.diff === null ? "—" : r.diff.toFixed(2)}</td>
+                      <td>{r.sem === null ? "—" : r.sem.toFixed(2)}</td>
+                      <td>{r.resolved === null ? "—" : r.resolved ? "yes" : "no"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </>
           ) : null}
         </main>

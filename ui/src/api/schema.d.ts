@@ -1312,6 +1312,30 @@ export interface components {
             /** Id */
             id: string;
         };
+        /**
+         * CompareRow
+         * @description One comparison key. An arm that produced nothing for it has a null median and n == 0 (shown as "not run").
+         */
+        CompareRow: {
+            /** A */
+            a: number | null;
+            /** B */
+            b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Key */
+            key: string;
+            /** N A */
+            n_a: number;
+            /** N B */
+            n_b: number;
+            /** Resolved */
+            resolved: boolean | null;
+            /** Sem */
+            sem: number | null;
+            /** Unpaired */
+            unpaired: boolean;
+        };
         /** Comparison */
         Comparison: {
             /** Caption */
@@ -1320,10 +1344,14 @@ export interface components {
             figure: {
                 [key: string]: unknown;
             };
+            /** Rows */
+            rows: components["schemas"]["CompareRow"][];
             /** Summary */
             summary: {
                 [key: string]: unknown;
             };
+            /** Unit */
+            unit: string;
         };
         /** DdeRow */
         DdeRow: {

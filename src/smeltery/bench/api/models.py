@@ -339,10 +339,29 @@ class StudyCell(BaseModel):
     key: str
 
 
+class CompareRow(BaseModel):
+    """One comparison key. An arm that produced nothing for it has a null median and n == 0 (shown as "not run")."""
+
+    key: str
+    n_a: int
+    n_b: int
+    a: float | None
+    b: float | None
+    #: a - b of the arms' medians; null when unpaired
+    diff: float | None
+    #: SEM of the difference; null when either arm has n < 2
+    sem: float | None
+    #: beyond both the noise and the floor; null when unpaired or no floor is known
+    resolved: bool | None
+    unpaired: bool
+
+
 class Comparison(BaseModel):
     figure: dict[str, Any]
     caption: str
     summary: dict[str, Any]
+    rows: list[CompareRow]
+    unit: str
 
 
 class ParamOut(BaseModel):

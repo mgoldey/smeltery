@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -628,6 +629,24 @@ def compare(request: Request, a: int, b: int, theme: Theme = "light") -> M.Compa
     ra, rb = run(request, a), run(request, b)
     label_a, label_b = _arm_labels(ra, rb)
     cmp = Cmp.from_runs({"run": ra}, {"run": rb}, label_a=label_a, label_b=label_b, floor=max(ra.floor, rb.floor))
+    rows = [
+        M.CompareRow(
+            key=k.key,
+            n_a=k.n_a,
+            n_b=k.n_b,
+            a=k.a,
+            b=k.b,
+            diff=k.diff,
+            sem=k.sem if math.isfinite(k.sem) else None,
+            resolved=k.resolved,
+            unpaired=k.unpaired,
+        )
+        for k in cmp.rows()
+    ]
     return M.Comparison(
-        figure=themed(_plain(compare_figure(cmp)), theme), caption=comparison_caption(cmp), summary=cmp.summary()
+        figure=themed(_plain(compare_figure(cmp)), theme),
+        caption=comparison_caption(cmp),
+        summary=cmp.summary(),
+        rows=rows,
+        unit=cmp.unit,
     )

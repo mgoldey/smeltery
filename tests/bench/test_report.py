@@ -79,6 +79,8 @@ def test_compare_differences_two_runs_and_refuses_one_run_in_both_arms(client_fo
     body = r.json()
     assert body["summary"]["n_paired"] == 1 and body["summary"]["median_per_key_diff"] == -1.0
     assert body["figure"]["data"] and body["caption"]
+    (row,) = body["rows"]
+    assert row["diff"] == -1.0 and not row["unpaired"] and body["unit"]
     same = c.get("/api/compare", params={"a": 0, "b": 0})
     assert same.status_code == 400 and "both arms" in same.json()["detail"]
 
@@ -95,3 +97,21 @@ def test_two_runs_of_one_campaign_are_named_apart_in_the_comparison(client_for, 
     title = body["figure"]["layout"]["title"]["text"]
     assert "A (" in title and "B (" in title, title
     assert "A (" in body["caption"] or "B (" in body["caption"], body["caption"]
+
+
+def test_a_key_one_arm_did_not_run_is_a_row_not_a_crash(client_for, tmp_path):
+    import json
+
+    from gui_fixture import make_run_dir
+
+    make_run_dir(tmp_path / "a")
+    b = make_run_dir(tmp_path / "b")
+    rec = next(b.glob("run-*.json"))
+    data = json.loads(rec.read_text())
+    data["results"]["cut"]["groups"] = []  # data source: arm b ranked no analogues
+    rec.write_text(json.dumps(data))
+    c, _ = client_for(tmp_path)
+    r = c.get("/api/compare", params={"a": 0, "b": 1})
+    assert r.status_code == 200, r.text
+    (row,) = r.json()["rows"]
+    assert row["unpaired"] and row["b"] is None and row["n_b"] == 0 and row["a"] is not None
