@@ -5,7 +5,11 @@ import type { components } from "../../../api/schema";
 import { PlotlyFigure } from "../../PlotlyFigure";
 import { useScheme } from "../../../styles/scheme";
 import type { StepViewProps } from "./registry";
-import { CorePose, getJson, NotRun, useRunDetail } from "./PosesView";
+import { DroppedPoses } from "../../DroppedPoses";
+import { ScfLog } from "../../ScfLog";
+import { CorePose, NotRun, useRunDetail } from "./PosesView";
+
+export { dropLine, DroppedPoses, type DroppedPose } from "../../DroppedPoses";
 
 export type Sensitivity = components["schemas"]["ModelSensitivity"];
 
@@ -115,8 +119,6 @@ export function SensitivityTable({ models, unit, parent }: { models: Record<stri
 
 /** `pose` is the original pose index (the pairing key, the plot's x); `position` the record's place in that ligand's SDF. */
 type Picked = { candidate: string; pose: number; position: number };
-export type DroppedPose = components["schemas"]["DroppedPose"];
-type CalcLines = { file: string | null; lines: Record<string, unknown>[] };
 type ClickEvent = { points: { customdata?: unknown[] }[] };
 export type PlotDiv = HTMLElement & { on?: (name: string, fn: (e: ClickEvent) => void) => void };
 
@@ -134,33 +136,6 @@ export function bindClicks(host: HTMLElement | null, state: { el: PlotDiv | null
     if (d && typeof d[0] === "string" && typeof d[1] === "number")
       onPick({ candidate: d[0], pose: d[1], position: typeof d[4] === "number" ? d[4] : d[1] });
   });
-}
-
-/** One line per dropped leg: which pose, which leg, why, the rungs tried and whose ddE lost it. */
-export function dropLine(d: DroppedPose): string {
-  const leg = d.field_model ? `${d.leg} leg, ${d.field_model}` : `${d.leg} leg`;
-  const rungs = d.rungs_tried?.length ? `; rungs tried ${d.rungs_tried.join(", ")}` : "";
-  const lost = d.dropped_with?.length ? `; dropped from ${d.dropped_with.join(", ")}` : "";
-  return `${d.candidate} pose ${d.pose} (${leg}): ${d.reason ?? d.outcome ?? "no value"}${rungs}${lost}`;
-}
-
-/** `results.dropped_poses`: poses whose SCF failed every rung, dropped pairwise. Nothing when none was. */
-export function DroppedPoses({ dropped }: { dropped: DroppedPose[] | undefined }) {
-  if (!dropped?.length) return null;
-  return (
-    <section aria-label="Dropped poses" data-testid="dropped-poses">
-      <h4>Dropped poses</h4>
-      <p className="lede">
-        These poses gave no value after every SCF remedy. Each is dropped from the ligand and from the poses it is paired with, so
-        the ligands below have fewer points; the x axis keeps each pose's original index.
-      </p>
-      <ul>
-        {dropped.map((d) => (
-          <li key={`${d.candidate}/${d.pose}/${d.leg}/${d.field_model ?? ""}`}>{dropLine(d)}</li>
-        ))}
-      </ul>
-    </section>
-  );
 }
 
 function useClicks(host: React.RefObject<HTMLDivElement | null>, onPick: (p: Picked) => void) {
@@ -201,12 +176,6 @@ export function MeasureView({ sourceRun }: StepViewProps) {
     queryKey: ["dropped_poses", idx],
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/dropped_poses", { params: { path: { idx } } })),
     enabled: sourceRun !== null,
-  });
-  const log = useQuery({
-    queryKey: ["calcs", idx, picked?.candidate, picked?.position],
-    queryFn: () =>
-      getJson<CalcLines>(`/api/runs/${idx}/calcs?candidate=${encodeURIComponent(picked?.candidate ?? "")}&pose=${picked?.position ?? 0}`),
-    enabled: sourceRun !== null && picked !== null && showLog,
   });
   useClicks(host, (p) => {
     setPicked(p);
@@ -258,21 +227,7 @@ export function MeasureView({ sourceRun }: StepViewProps) {
               ))}
             </tbody>
           </table>
-          {showLog ? (
-            log.isError ? (
-              <div className="banner" role="alert">{log.error.message}</div>
-            ) : log.data ? (
-              <div data-testid="scf-log">
-                {log.data.lines.length === 0 ? (
-                  <p className="lede">The SCF log ({log.data.file}) has no line for {picked.candidate} pose {picked.pose}.</p>
-                ) : (
-                  <pre>{log.data.lines.map((l) => JSON.stringify(l)).join("\n")}</pre>
-                )}
-              </div>
-            ) : (
-              <p className="lede">Loading the SCF log.</p>
-            )
-          ) : null}
+          {showLog ? <ScfLog idx={idx} candidate={picked.candidate} position={picked.position} pose={picked.pose} /> : null}
           <CorePose idx={sourceRun} candidate={picked.candidate} pose={picked.position} label="measure step" />
         </section>
       ) : null}

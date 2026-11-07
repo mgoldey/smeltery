@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api, unwrap, type Schemas } from "../api/client";
 import { MolstarViewer } from "./MolstarViewer";
+import { ScfLog } from "./ScfLog";
 
 /** A candidate's pose in the site, with selectors, the pairing stated, and an optional per-pose footer. */
 export function PoseExplorer({
@@ -17,6 +18,7 @@ export function PoseExplorer({
 }) {
   const [candidate, setCandidate] = useState<string | null>(null);
   const [pose, setPose] = useState(0);
+  const [showLog, setShowLog] = useState(false);
   const chosen = candidate ?? detail.analogues[0] ?? null;
   const nPoses = chosen ? (detail.n_poses[chosen] ?? 0) : 0;
   const scene = useQuery({
@@ -44,6 +46,7 @@ export function PoseExplorer({
             onChange={(e) => {
               setCandidate(e.target.value);
               setPose(0);
+              setShowLog(false);
             }}
           >
             {detail.analogues.map((a) => (
@@ -55,7 +58,10 @@ export function PoseExplorer({
         </div>
         <div>
           <label htmlFor={`${label}-pose`}>Pose</label>
-          <select id={`${label}-pose`} value={pose} onChange={(e) => setPose(Number(e.target.value))}>
+          <select id={`${label}-pose`} value={pose} onChange={(e) => {
+              setPose(Number(e.target.value));
+              setShowLog(false);
+            }}>
             {Array.from({ length: nPoses }, (_, i) => (
               <option key={i} value={i}>
                 {i}
@@ -74,6 +80,12 @@ export function PoseExplorer({
         </div>
       ) : null}
       <MolstarViewer state={scene.data} label={label} />
+      <p>
+        <button type="button" aria-pressed={showLog} onClick={() => setShowLog((v) => !v)}>
+          SCF log
+        </button>
+      </p>
+      {showLog ? <ScfLog idx={idx} candidate={chosen} position={pose} pose={pose} summary /> : null}
       {footer ? footer(chosen, pose) : null}
     </>
   );

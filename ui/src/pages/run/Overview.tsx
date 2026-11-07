@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "../../api/client";
+import { DroppedPoses } from "../../components/DroppedPoses";
 import { useRunIdx } from "./RunLayout";
 
 export function Overview() {
@@ -11,6 +12,10 @@ export function Overview() {
   const verdict = useQuery({
     queryKey: ["verdict", idx],
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
+  });
+  const drops = useQuery({
+    queryKey: ["dropped_poses", idx],
+    queryFn: () => unwrap(api.GET("/api/runs/{idx}/dropped_poses", { params: { path: { idx } } })),
   });
   const d = detail.data;
   return (
@@ -55,6 +60,7 @@ export function Overview() {
                 ))}
               </tbody>
             </table>
+            <DroppedPoses dropped={drops.data?.dropped} />
             <h2>Record</h2>
             <p className="mono">{d.path}</p>
             <p className="mono">input digest {d.digest}</p>
