@@ -7,10 +7,8 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import shutil
-import sqlite3
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -50,14 +48,8 @@ def _ready_checks(root: Path, task_queue: Any) -> dict[str, dict[str, Any]]:
     """Each readiness check as {"ok": bool, "detail": str}. A Temporal-backed queue is not probed: never required."""
     checks: dict[str, dict[str, Any]] = {}
     checks["root_writable"] = {"ok": root.is_dir() and os.access(root, os.W_OK), "detail": str(root)}
-    db = getattr(task_queue, "db", None)
-    if db is not None:
-        try:
-            with contextlib.closing(sqlite3.connect(f"file:{db}?mode=rw", uri=True)) as con:
-                con.execute("SELECT 1 FROM tasks LIMIT 1")
-            checks["task_db"] = {"ok": True, "detail": str(db)}
-        except sqlite3.Error as e:
-            checks["task_db"] = {"ok": False, "detail": str(e)}
+    ok, detail = task_queue.ready()
+    checks["task_queue"] = {"ok": ok, "detail": detail}
     try:
         free = shutil.disk_usage(root).free
         checks["disk_free"] = {"ok": free >= MIN_FREE_BYTES, "detail": f"{free // 2**20} MiB free"}

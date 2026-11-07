@@ -28,16 +28,17 @@ def test_livez_and_readyz(client_for, tmp_path):
     c, _ = client_for(queue=SubprocessTaskQueue(tmp_path / "q"))
     assert c.get("/livez").json() == {"status": "ok"}
     r = c.get("/readyz")
-    assert r.status_code == 200 and r.json()["checks"]["task_db"]["ok"] is True
+    assert r.status_code == 200 and r.json()["checks"]["task_queue"]["ok"] is True
 
 
 def test_readyz_is_503_when_the_task_db_cannot_open(client_for, tmp_path):
-    class Q:
-        db = tmp_path / "no" / "such" / "dir" / "t.sqlite"
+    from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
 
-    c, _ = client_for(queue=Q())
+    q = SubprocessTaskQueue(tmp_path / "q")
+    q.db.unlink()
+    c, _ = client_for(queue=q)
     r = c.get("/readyz")
-    assert r.status_code == 503 and r.json()["checks"]["task_db"]["ok"] is False
+    assert r.status_code == 503 and r.json()["checks"]["task_queue"]["ok"] is False
 
 
 def test_runs_list_is_served_from_the_run_store(client_for, run_dir):
