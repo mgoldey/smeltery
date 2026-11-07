@@ -78,6 +78,35 @@ export function Compare() {
                   ))}
                 </tbody>
               </table>
+              <h2>Same candidates in both runs</h2>
+              {cmp.data.candidates === null ? (
+                <p data-testid="compare-candidates-note">{cmp.data.candidates_note}</p>
+              ) : (
+                <table data-testid="compare-candidates">
+                  <thead>
+                    <tr>
+                      <th>Candidate</th>
+                      <th>ΔΔE A ({cmp.data.unit})</th>
+                      <th>ΔΔE B ({cmp.data.unit})</th>
+                      <th>A − B ({cmp.data.unit})</th>
+                      <th>SEM of difference ({cmp.data.unit})</th>
+                      <th>Resolved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cmp.data.candidates.map((c) => (
+                      <tr key={c.candidate}>
+                        <td>{c.candidate}</td>
+                        <td>{c.ddE_a === null ? "not run" : `${c.ddE_a.toFixed(2)} ± ${c.sem_a?.toFixed(2)}`}</td>
+                        <td>{c.ddE_b === null ? "not run" : `${c.ddE_b.toFixed(2)} ± ${c.sem_b?.toFixed(2)}`}</td>
+                        <td>{c.diff === null ? "—" : c.diff.toFixed(2)}</td>
+                        <td>{c.diff_sem === null ? "—" : c.diff_sem.toFixed(2)}</td>
+                        <td>{c.resolved === null ? "—" : c.resolved ? "yes" : "no"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </>
           ) : null}
         </main>

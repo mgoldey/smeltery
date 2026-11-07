@@ -356,12 +356,28 @@ class CompareRow(BaseModel):
     unpaired: bool
 
 
+class CandidateRow(BaseModel):
+    """One analogue in either run; a null arm did not run it."""
+
+    candidate: str
+    ddE_a: float | None
+    sem_a: float | None
+    ddE_b: float | None
+    sem_b: float | None
+    diff: float | None
+    diff_sem: float | None
+    resolved: bool | None
+
+
 class Comparison(BaseModel):
     figure: dict[str, Any]
     caption: str
     summary: dict[str, Any]
     rows: list[CompareRow]
     unit: str
+    #: null when the runs' parents differ (`candidates_note` says why)
+    candidates: list[CandidateRow] | None
+    candidates_note: str | None
 
 
 class ParamOut(BaseModel):

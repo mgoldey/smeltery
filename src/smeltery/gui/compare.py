@@ -31,6 +31,8 @@ import statistics as st
 from dataclasses import dataclass, field
 
 from ..floor import DIFFERENCE, Floor
+from ..funnel import resolved
+from ..model import Measurement
 from .results import Run, ddE_table
 
 #: Below this many molecules an arm's "median" is a draw, not a summary, and no difference involving
@@ -247,3 +249,44 @@ class Comparison:
             f"NOT RESOLVED: median per-key difference {md:+.2f} {unit} is within the {floor:.2f} "
             f"{unit} systematic floor ({counts}), so this comparison does not separate the arms."
         )
+
+
+DIFFERENT_PARENTS = "different parents: per-candidate ddE is not comparable across runs"
+
+
+def _canonical(smiles: str) -> str:
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(smiles)
+    return Chem.MolToSmiles(mol) if mol is not None else smiles
+
+
+def candidate_rows(ra: Run, rb: Run, z: float = 2.0) -> tuple[list[dict] | None, str | None]:
+    """Per-analogue paired ddE of two runs, or (None, note) when their parents differ.
+
+    Each ddE is paired against its own run's parent, so values are comparable across runs only when that
+    parent is the same molecule (canonical SMILES). One row per analogue name in either run; an arm that
+    lacks it has None cells (shown "not run"), never a dropped row. `resolved` is `funnel.resolved`'s rule
+    (z * hypot of the SEMs AND the larger of the two run floors); None when an arm lacks the candidate.
+    """
+    if _canonical(ra.candidates[ra.parent]) != _canonical(rb.candidates[rb.parent]):
+        return None, DIFFERENT_PARENTS
+    ma = {r["candidate"]: Measurement(r["mean"], r["sem"], r["n"], ()) for r in ddE_table(ra)}
+    mb = {r["candidate"]: Measurement(r["mean"], r["sem"], r["n"], ()) for r in ddE_table(rb)}
+    floor = max(ra.floor, rb.floor)
+    rows = []
+    for name in sorted(set(ma) | set(mb)):
+        a, b = ma.get(name), mb.get(name)
+        rows.append(
+            {
+                "candidate": name,
+                "ddE_a": a.mean if a else None,
+                "sem_a": a.sem if a else None,
+                "ddE_b": b.mean if b else None,
+                "sem_b": b.sem if b else None,
+                "diff": a.mean - b.mean if a and b else None,
+                "diff_sem": math.hypot(a.sem, b.sem) if a and b else None,
+                "resolved": resolved(a, b, z, floor) if a and b else None,
+            }
+        )
+    return rows, None

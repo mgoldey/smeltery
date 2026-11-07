@@ -1260,6 +1260,28 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * CandidateRow
+         * @description One analogue in either run; a null arm did not run it.
+         */
+        CandidateRow: {
+            /** Candidate */
+            candidate: string;
+            /** Dde A */
+            ddE_a: number | null;
+            /** Dde B */
+            ddE_b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Diff Sem */
+            diff_sem: number | null;
+            /** Resolved */
+            resolved: boolean | null;
+            /** Sem A */
+            sem_a: number | null;
+            /** Sem B */
+            sem_b: number | null;
+        };
         /** CatalogOut */
         CatalogOut: {
             /** Artefacts */
@@ -1338,6 +1360,10 @@ export interface components {
         };
         /** Comparison */
         Comparison: {
+            /** Candidates */
+            candidates: components["schemas"]["CandidateRow"][] | null;
+            /** Candidates Note */
+            candidates_note: string | null;
             /** Caption */
             caption: string;
             /** Figure */

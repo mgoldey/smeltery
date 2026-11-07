@@ -19,6 +19,7 @@ from smeltery.bench.verdict import verdict_of
 from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet
 from smeltery.gui import results as R
 from smeltery.gui.compare import Comparison as Cmp
+from smeltery.gui.compare import candidate_rows
 from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, write_report
 from smeltery.gui.scenes import pose_scene
 from smeltery.gui.views._style import themed
@@ -643,10 +644,13 @@ def compare(request: Request, a: int, b: int, theme: Theme = "light") -> M.Compa
         )
         for k in cmp.rows()
     ]
+    candidates, note = candidate_rows(ra, rb, cmp.z)
     return M.Comparison(
         figure=themed(_plain(compare_figure(cmp)), theme),
         caption=comparison_caption(cmp),
         summary=cmp.summary(),
         rows=rows,
         unit=cmp.unit,
+        candidates=candidates,
+        candidates_note=note,
     )
