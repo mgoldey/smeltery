@@ -19,7 +19,7 @@ import json
 import platform
 import subprocess
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from importlib import metadata
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -32,6 +32,16 @@ def _git(path: Path, *args: str) -> str | None:
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def strip_credentials(url: str | None) -> str | None:
+    """`https://user:token@host/x` -> `https://host/x`; scp-style and credential-free URLs pass through."""
+    if not url:
+        return None
+    parts = urlparse(url)
+    if "@" in parts.netloc:
+        return parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]).geturl()
+    return url
 
 
 def _ferric_build() -> dict | None:
@@ -95,7 +105,13 @@ def _distribution_identity(name: str, ident: dict) -> dict:
 def smeltery_identity() -> dict:
     """Which smeltery source ran. An editable install reports the checkout's HEAD, not the install-time stamp."""
     ident: dict = {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"}
-    return _distribution_identity("smeltery", ident)
+    ident = _distribution_identity("smeltery", ident)
+    ident["git_remote"] = ident["git_branch"] = None
+    if str(ident["provenance"]).startswith("INFERRED") and ident["source"]:
+        path = Path(unquote(urlparse(ident["source"]).path))
+        ident["git_remote"] = strip_credentials(_git(path, "config", "--get", "remote.origin.url"))
+        ident["git_branch"] = _git(path, "rev-parse", "--abbrev-ref", "HEAD") or None
+    return ident
 
 
 def ferric_identity() -> dict:
@@ -120,6 +136,14 @@ def digest(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
 
 
+SCHEMA_VERSION = 1
+
+
+def _canonical_sha256(d: dict) -> str:
+    """sha256 of the record's canonical JSON, excluding `record_sha256` itself."""
+    return digest({k: v for k, v in d.items() if k != "record_sha256"})
+
+
 @dataclass
 class RunRecord:
     campaign: str
@@ -139,11 +163,13 @@ class RunRecord:
     def to_json(self) -> str:
         d = asdict(self)
         d["input_digest"] = self.input_digest
+        d["schema_version"] = SCHEMA_VERSION
+        d["record_sha256"] = _canonical_sha256(json.loads(json.dumps(d, default=str)))
         return json.dumps(d, indent=2, sort_keys=True, default=str)
 
     @classmethod
     def from_json(cls, s: str) -> RunRecord:
         d = json.loads(s)
-        d.pop("input_digest", None)
         d.setdefault("smeltery", None)  # old records: never invent today's identity
-        return cls(**d)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})  # input_digest, schema_version etc. are derived

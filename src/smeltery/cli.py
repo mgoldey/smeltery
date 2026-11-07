@@ -1559,6 +1559,9 @@ VIEWERS = {
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
+    "verify-run": "smeltery.run_tools",
+    "inspect": "smeltery.run_tools",
+    "diff-run": "smeltery.run_tools",
 }
 
 
@@ -1642,7 +1645,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in VIEWERS:  # imported only when asked for: they need no tier, and gui needs the gui extra
         import importlib
 
-        return importlib.import_module(VIEWERS[argv[0]]).main(argv[1:])
+        mod = importlib.import_module(VIEWERS[argv[0]])
+        return mod.run(argv[0], argv[1:]) if VIEWERS[argv[0]] == "smeltery.run_tools" else mod.main(argv[1:])
     ap = argparse.ArgumentParser(prog="smeltery", description="Tiered, measurement-disciplined funnel.")
     sub = ap.add_subparsers(dest="command", required=True)
     sub.add_parser("gui", help="browse a finished run, record decisions (smeltery gui OUT --help)")
@@ -1652,6 +1656,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
+    sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
+    sub.add_parser("inspect", help="plain-text summary of a run record")
+    sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     tw.add_argument("--host", default="127.0.0.1:7233")
     tw.add_argument("--namespace", default="default")
