@@ -317,6 +317,9 @@ class CampaignOut(BaseModel):
     name: str
     description: str = ""
     created_at: str = ""
+    n_entries: int = 0
+    n_runs: int = Field(0, description="distinct runs attached to the campaign's entries")
+    updated_at: str = Field("", description="time of the latest entry, or created_at when there are none")
 
 
 class EntryIn(BaseModel):

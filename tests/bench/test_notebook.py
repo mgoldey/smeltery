@@ -51,3 +51,13 @@ def test_the_author_comes_from_identity(client_for):
 def test_an_unknown_campaign_is_404(client_for):
     c, _ = client_for()
     assert c.get("/api/campaigns/nope/entries").status_code == 404
+
+
+def test_a_campaign_reports_its_entry_and_run_counts(client_for, run_dir):
+    c, _ = client_for(run_dir)
+    cid = _campaign(c)
+    empty = c.get(f"/api/campaigns/{cid}").json()
+    assert (empty["n_entries"], empty["n_runs"], empty["updated_at"]) == (0, 0, empty["created_at"])
+    e = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "runs": [0]}).json()
+    got = next(x for x in c.get("/api/campaigns").json() if x["id"] == cid)
+    assert (got["n_entries"], got["n_runs"], got["updated_at"]) == (1, 1, e["created_at"])
