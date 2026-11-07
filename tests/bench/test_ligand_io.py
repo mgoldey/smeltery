@@ -2,6 +2,8 @@
 
 import tomllib
 
+from rdkit import Chem
+
 from smeltery.bench import ligand_io
 from tests.bench.test_ligands_check import CANDS, toml_of
 
@@ -10,9 +12,16 @@ def test_csv_and_sdf_parse_and_a_bad_row_is_rejected_with_its_reason():
     rows, bad = ligand_io.parse(
         "x.csv", "ID,SMILES\nbenzoic,OC(=O)c1ccccc1\nbroken,not-a-smiles\n,OC(=O)c1ccc(Cl)cc1\n"
     )
+    assert ligand_io.accept(*ligand_io.parse("x.csv", "name,smiles\nbad\x07name,CCO\n"), {})[1][0].reason.startswith(
+        "the name contains"
+    )
+    m = Chem.MolFromSmiles("CCO")
+    m.SetProp("ID", "z9")
+    blank = Chem.MolToMolBlock(m) + "> <ID>\nz9\n\n$$$$\n"
+    assert [r.name for r in ligand_io.parse("x.sdf", blank)[0]] == ["z9"]
     new, rejected = ligand_io.accept(rows, bad, {"4-F": "OC(=O)c1ccc(F)cc1"})
-    assert list(new) == ["benzoic", "imported_3"]
-    assert [(r.row, r.reason) for r in rejected] == [(2, "RDKit cannot read the SMILES")]
+    assert list(new) == ["benzoic", "imported_4"]
+    assert [(r.row, r.reason) for r in rejected] == [(3, "RDKit cannot read the SMILES")]
     sdf = ligand_io.to_sdf(
         [
             {
@@ -37,7 +46,7 @@ def test_import_appends_to_the_draft_and_duplicates_are_rejected(client_for):
     assert r.status_code == 200, r.text
     got = r.json()
     assert got["accepted"] == ["4-Cl"]
-    assert [x["row"] for x in got["rejected"]] == [1, 3]
+    assert [x["row"] for x in got["rejected"]] == [2, 4]
     assert list(tomllib.loads(got["toml"])["candidates"]) == [*CANDS, "4-Cl"]
 
 

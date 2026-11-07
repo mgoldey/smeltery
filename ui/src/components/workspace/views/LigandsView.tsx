@@ -202,6 +202,7 @@ export function LigandsView({ pipeline, toml: live, onToml }: LigandsViewProps) 
    * builds the whole list itself (that would drop what was added since). The server refuses duplicates and the parent. */
   async function write(op: Op): Promise<boolean> {
     if (!onToml) return false;
+    setRejected(null); // a later edit makes the last import's report stale
     setBusy(true);
     try {
       const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml: live, ...op });

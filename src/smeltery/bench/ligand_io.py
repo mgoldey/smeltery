@@ -41,14 +41,12 @@ def parse_csv(text: str) -> tuple[list[Row], list[Rejected]]:
     nm = next((lower.index(c) for c in NAME_COLUMNS if c in lower), None)
     rows: list[Row] = []
     bad: list[Rejected] = []
-    n = 0
     for fields in reader:
         if not any(f.strip() for f in fields):
             continue
-        n += 1
         smiles = fields[smi].strip() if smi < len(fields) else ""
         name = fields[nm].strip() if nm is not None and nm < len(fields) else ""
-        rows.append(Row(n, name or None, smiles))
+        rows.append(Row(reader.line_num, name or None, smiles))
     return rows, bad
 
 
@@ -61,7 +59,9 @@ def parse_sdf(text: str) -> tuple[list[Row], list[Rejected]]:
         if mol is None:
             bad.append(Rejected(i, f"record {i}", "RDKit cannot read this SDF record"))
             continue
-        name = next((mol.GetProp(k).strip() for k in ("_Name", *NAME_COLUMNS, "Name", "ID") if mol.HasProp(k)), "")
+        name = next(
+            (v for k in ("_Name", *NAME_COLUMNS, "Name", "ID") if mol.HasProp(k) and (v := mol.GetProp(k).strip())), ""
+        )
         rows.append(Row(i, name or None, Chem.MolToSmiles(mol)))
     return rows, bad
 
@@ -87,7 +87,9 @@ def accept(
     for r in rows:
         name = r.name or _fresh(seen_names, f"imported_{r.row}")
         canon = _canon(r.smiles)
-        if canon is None:
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+            reason = "the name contains a control character"
+        elif canon is None:
             reason = "no SMILES" if not r.smiles else "RDKit cannot read the SMILES"
         elif name in seen_names:
             reason = f"a candidate named {name!r} already exists"
