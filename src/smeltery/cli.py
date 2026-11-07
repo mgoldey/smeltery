@@ -17,7 +17,7 @@ One honest path, not a framework. Stages, in order, each a loud failure when it 
 The cut's floor is the tier's own systematic floor. While that is unmeasured
 (both tiers today) the config must state `[cut] floor` explicitly, and the record
 says the floor came from the config. Candidates the cut cannot separate are printed as
-tie groups; a run where nothing can be ordered prints UNRANKED and still exits 0.
+tie groups; a run where nothing can be ordered prints UNRANKED and still exits 0 (4 with `--fail-on-unranked`).
 
 Config (TOML; unknown keys are an error, not ignored):
 
@@ -121,7 +121,8 @@ down it exits 2 naming the docker command; it never falls back to an in-process 
     [field_interaction]
     remedies = [{level_shift = 0.5}, {max_iter = 300, soscf = true}]  # tried in order when an SCF does not converge
 
-Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed.
+Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed, 4 UNRANKED under `--fail-on-unranked`
+(in-process runs; not `--temporal`).
 """
 
 from __future__ import annotations
@@ -1547,7 +1548,21 @@ def write_plan_preview(plan: Plan, digest: str, out_dir: Path, config: Path) -> 
         "poses_key": poses_key(raw, Path(config).resolve().parent),
         "poses": poses,
     }
+    rec = {"status": "ok", **rec}
     (out_dir / "plan.json").write_text(json.dumps(rec, indent=2, sort_keys=True, default=str) + "\n")
+
+
+def write_plan_error(out_dir: Path, message: str, plan: Plan | None = None) -> None:
+    """`--plan --out OUT` that failed: OUT/plan.json says so (`status` "error", the failing `stage` or null, the
+    `message`, the `input_digest` if a plan was built) instead of leaving the last good preview or nothing."""
+    m = re.search(r"stage '([^']+)'", message)
+    digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest if plan is not None else None
+    rec = {"status": "error", "stage": m.group(1) if m else None, "message": message, "input_digest": digest}
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "plan.json").write_text(json.dumps(rec, indent=2, sort_keys=True) + "\n")
+    except OSError as oe:  # never mask the exit code of the failure itself
+        print(f"warning: could not write plan.json: {oe}", file=sys.stderr)
 
 
 #: Subcommands owned by `smeltery.gui`; their own parsers read the rest of the command line.
@@ -1672,6 +1687,10 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="measure one candidate only, writing a partial result",
     )  # noqa: E501
+    run.add_argument(
+        "--fail-on-unranked", dest="fail_on_unranked", action="store_true", help="exit 4 when the cut is UNRANKED"
+    )
+    run.add_argument("--force", action="store_true", help="run into an OUT that already holds a run record")
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
         "--temporal",
@@ -1763,6 +1782,11 @@ def main(argv: list[str] | None = None) -> int:
         args.out = Path("out")
     try:
         config_info = None
+        if explicit_out and not (args.plan or args.combine or args.only_candidate or args.temporal or args.force):
+            if done := sorted(args.out.glob("run-*.json")):  # a re-run would replace it
+                raise ConfigError(
+                    f"{args.out} already holds the run record {done[0].name}; use another --out, or --force to rerun"
+                )
         if explicit_out and not args.combine:
             args.config, config_info = _stage_config(args.config, args.out, temporal=args.temporal)
         elif explicit_out:  # a combine writes its record into OUT
@@ -1883,9 +1907,13 @@ def main(argv: list[str] | None = None) -> int:
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
+        if explicit_out and args.plan:
+            write_plan_error(args.out, str(e), plan)
         return 2
     except StageError as e:
         print(f"error: {e}", file=sys.stderr)
+        if explicit_out and args.plan:
+            write_plan_error(args.out, str(e), plan)
         if explicit_out and e.gates:  # a rejected gate still leaves every pose's result
             try:
                 args.out.mkdir(parents=True, exist_ok=True)
@@ -1902,7 +1930,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
-    return 0
+    return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
 
 
 if __name__ == "__main__":

@@ -103,7 +103,7 @@ def test_launch_is_refused_with_errors_and_stages_inputs_into_out_when_clean(cli
     (name, argv, _cwd, _note) = q.submitted[0]
     from smeltery.bench.use_cases.launch_run import smeltery_command
 
-    assert argv == [*smeltery_command(), "run", str(out / "config.toml"), "--out", str(out)]
+    assert argv == [*smeltery_command(), "run", str(out / "config.toml"), "--out", str(out), "--force"]
     # The venv's own smeltery (or this interpreter running the module), never whatever `smeltery` PATH finds.
     assert Path(argv[0]).parent == Path(sys.executable).parent
     assert Path(out / "config.toml").is_file()

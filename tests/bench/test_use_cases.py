@@ -49,7 +49,14 @@ def test_launch_run_submits_argv_and_executes_nothing(tmp_path, pipeline):
     ).execute(pipeline, out=tmp_path / "out")
     from smeltery.bench.use_cases.launch_run import smeltery_command
 
-    expected = [*smeltery_command(), "run", str(tmp_path / "out" / "config.toml"), "--out", str(tmp_path / "out")]
+    expected = [
+        *smeltery_command(),
+        "run",
+        str(tmp_path / "out" / "config.toml"),
+        "--out",
+        str(tmp_path / "out"),
+        "--force",
+    ]
     assert q.submitted[0][1] == expected
     assert q.executed == []
 

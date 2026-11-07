@@ -66,6 +66,8 @@ class LaunchRun:
             command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
             if uses_temporal(self.task_queue):  # the run itself is then a durable workflow, not one long process
                 command.append("--temporal")
+            else:  # the in-process run refuses an OUT holding a record; a relaunch into a run dir is deliberate
+                command.append("--force")
         task_id = self.task_queue.submit(
             f"run {pipeline.campaign}",
             list(command),

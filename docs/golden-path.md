@@ -26,6 +26,10 @@ OPENBLAS_NUM_THREADS=1 smeltery run myrun.toml --out out/myrun
 
 Writes `out/myrun/run-<digest>.json`, pose SDFs, receptor, and prints the cut (survivors / tie groups / UNRANKED).
 
+A run exits 0 even when the cut is UNRANKED; add `--fail-on-unranked` to exit 4 instead (in-process runs, not
+`--temporal`). `run` refuses an `--out` that already holds a `run-*.json` record; pass `--force` to rerun into it.
+With `--plan --out`, a failed plan still writes `plan.json` (`"status": "error"`, `stage`, `message`).
+
 ## 4. Inspect
 
 ```sh
