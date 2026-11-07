@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, unwrap, type Schemas } from "../../api/client";
 import { Structure2D } from "../../components/Structure2D";
 import { useRunIdx } from "./RunLayout";
@@ -152,6 +152,7 @@ export function Decisions() {
   });
   const d = detail.data;
   const [picked, setPicked] = useState<string[]>([]);
+  useEffect(() => setPicked([]), [idx]);
   const toggle = (n: string, on: boolean) => setPicked((p) => (on ? [...p.filter((x) => x !== n), n] : p.filter((x) => x !== n)));
   const groupOf = new Map<string, string>();
   d?.groups.forEach((g, i) => g.forEach((n) => groupOf.set(n, g.length > 1 ? `tie group ${i + 1} (no order)` : `group ${i + 1}`)));

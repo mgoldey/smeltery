@@ -489,12 +489,7 @@ def record_decision(request: Request, idx: int, body: M.DecisionIn) -> M.Decisio
     """Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`."""
     r = run(request, idx)
     p = _decisions_path(r)
-    ds = (
-        DecisionSet.load(p)
-        if p.is_file()
-        else DecisionSet(campaign=r.campaign, run=r.record["input_digest"], candidates=dict(r.candidates))
-    )
-    ds.candidates = dict(r.candidates)
+    ds = _load_decisions(r)
     if body.candidate not in r.candidates:
         raise HTTPException(status_code=400, detail=f"no candidate {body.candidate!r} in this run")
     try:

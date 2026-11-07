@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -244,7 +245,7 @@ def to_csv(ds: DecisionSet) -> str:
     w = csv.writer(out, lineterminator="\n")
     w.writerow(CSV_COLUMNS)
     for d in ds.decisions:
-        w.writerow([getattr(d, k) for k in CSV_COLUMNS])
+        w.writerow(["'" + v if v.startswith(("=", "+", "-", "@")) else v for v in (getattr(d, k) for k in CSV_COLUMNS)])
     return out.getvalue()
 
 
@@ -265,6 +266,7 @@ def to_sdf(ds: DecisionSet) -> str:
             AllChem.Compute2DCoords(mol)
             mol.SetProp("_Name", d.candidate)
             for k in CSV_COLUMNS:
-                mol.SetProp(k, getattr(d, k))
+                # a blank line would end the SDF property value, so paragraph breaks collapse to one newline
+                mol.SetProp(k, re.sub(r"\n\s*\n", "\n", getattr(d, k)))
             w.write(mol)
     return out.getvalue()

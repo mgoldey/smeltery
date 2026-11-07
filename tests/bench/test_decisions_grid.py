@@ -80,3 +80,16 @@ def test_decisions_export_as_csv(run_dir):
     lines = r.text.splitlines()
     assert lines[0] == "candidate,smiles,status,reason,note,user,time" and lines[1].startswith("4-F,")
     assert "$$$$" in c.get("/api/runs/0/decisions.sdf").text
+
+
+def test_a_note_with_a_paragraph_break_survives_the_sdf(run_dir):
+    from rdkit import Chem
+
+    c = TestClient(create_app(**fakes(run_dir)))
+    note = "first para\n\nsecond para"
+    c.post("/api/runs/0/decisions", json={"candidate": "4-F", "status": "keep", "reason": "other", "note": note})
+    sdf = c.get("/api/runs/0/decisions.sdf").text
+    mol = Chem.SDMolSupplier()
+    mol.SetData(sdf)
+    got = next(iter(mol)).GetProp("note")
+    assert "first para" in got and "second para" in got
