@@ -145,6 +145,7 @@ Running the tests and the other checks is covered in [AGENTS.md](AGENTS.md).
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
+| Look up a term (ddE, floor, tie group, rung) | [docs/glossary.md](docs/glossary.md) |
 | Check tool and data licences | [docs/licensing.md](docs/licensing.md) |
 
 ## Configs beyond the minimal example

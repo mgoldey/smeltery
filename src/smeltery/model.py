@@ -100,6 +100,13 @@ class Measurement:
 
     @classmethod
     def from_samples(cls, samples: list[float] | np.ndarray, unit: str = "kcal/mol") -> Measurement:
+        """Mean and standard error of `samples`; sem = s / sqrt(n), s the ddof=1 standard deviation.
+
+        For a paired difference d_i = analogue_i - parent_i (`funnel.paired_delta`), s is the spread of d, so
+        Var(d) = Var(a) + Var(p) - 2 Cov(a, p): pose effects shared by parent and analogue cancel, and the
+        paired SEM falls below the unpaired one (`funnel.unpaired_delta`) whenever Cov(a, p) > 0.
+        A single sample has no spread, so its sem is NaN.
+        """
         a = np.asarray(samples, dtype=float)
         if a.ndim != 1 or a.size == 0:
             raise ValueError("need a non-empty 1-D sample")
