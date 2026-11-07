@@ -476,6 +476,10 @@ class MethodInfo(BaseModel):
     cost_model: str = Field(description="how wall time is estimated, or 'cannot say: ...'")
     memory_model: str = Field(description="how memory is estimated, or 'cannot say: ...'")
     floor: float | None = Field(description="the tier's measured systematic floor; null while it is unmeasured")
+    floor_status: str = Field(
+        description="'measured', 'UNMEASURED', 'unknown' or 'n/a', as docs/tiers/index.md derives it"
+    )
+    tier_doc: str | None = Field(description="repo-relative path of the tier's docs page; null when there is none")
     used_by: list[str] = Field(description="workspace pipelines that place this method")
 
 

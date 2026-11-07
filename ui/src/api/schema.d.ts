@@ -1817,6 +1817,11 @@ export interface components {
              * @description the tier's measured systematic floor; null while it is unmeasured
              */
             floor: number | null;
+            /**
+             * Floor Status
+             * @description 'measured', 'UNMEASURED', 'unknown' or 'n/a', as docs/tiers/index.md derives it
+             */
+            floor_status: string;
             /** Key */
             key: string;
             /** Label */
@@ -1832,6 +1837,11 @@ export interface components {
             quantity: string | null;
             /** Summary */
             summary: string;
+            /**
+             * Tier Doc
+             * @description repo-relative path of the tier's docs page; null when there is none
+             */
+            tier_doc: string | null;
             /**
              * Used By
              * @description workspace pipelines that place this method

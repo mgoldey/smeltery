@@ -7,11 +7,12 @@ changing it here reaches no pipeline that already has the step.
 from __future__ import annotations
 
 import tomllib
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from smeltery.gui.catalog import Method, catalog, cost_model, measured_floor, memory_model
+from smeltery.gui.catalog import Method, catalog, cost_model, floor_status, measured_floor, memory_model
 from smeltery.gui.config_text import ConfigTextError
 from smeltery.gui.pipeline import Pipeline
 
@@ -48,6 +49,15 @@ def _used_by(request: Request) -> dict[str, list[str]]:
     return used
 
 
+_REPO = Path(__file__).resolve().parents[4]
+
+
+def _tier_doc(m: Method) -> str | None:
+    """The tier's page under docs/tiers, relative to the repo, when that file exists (a wheel has no docs)."""
+    rel = f"docs/tiers/{m.tier}.md"
+    return rel if m.tier and (_REPO / rel).is_file() else None
+
+
 def _view(m: Method, defaults: dict[str, dict], used: dict[str, list[str]]) -> M.MethodInfo:
     mine = defaults.get(m.key, {})
     return M.MethodInfo(
@@ -71,6 +81,8 @@ def _view(m: Method, defaults: dict[str, dict], used: dict[str, list[str]]) -> M
         cost_model=cost_model(m.key),
         memory_model=memory_model(m.key),
         floor=measured_floor(m),
+        floor_status=floor_status(m),
+        tier_doc=_tier_doc(m),
         used_by=sorted(used.get(m.key, [])),
     )
 
