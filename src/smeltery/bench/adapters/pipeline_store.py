@@ -11,7 +11,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from ..ports.pipeline_store import PipelineFile, StaleWrite
+from ..ports.pipeline_store import InputFile, PipelineFile, StaleWrite
 
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 CONFIG = "config.toml"
@@ -23,6 +23,14 @@ FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()+._-]{0,127}")
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _sha_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 class FilesystemPipelineStore:
@@ -115,8 +123,12 @@ class FilesystemPipelineStore:
                     raise
         return dest.name
 
-    def files(self, name: str) -> builtins.list[str]:
+    def files(self, name: str) -> builtins.list[InputFile]:
+        # The hash is streamed per call; a listing of many large PDBs would want a cache keyed on (size, mtime).
         folder = self.get(name).folder
-        return sorted(
-            p.name for p in folder.iterdir() if p.is_file() and p.name != CONFIG and FILENAME.fullmatch(p.name)
-        )
+        out = []
+        for p in folder.iterdir():
+            if p.is_file() and p.name != CONFIG and FILENAME.fullmatch(p.name):
+                st = p.stat()
+                out.append(InputFile(p.name, st.st_size, st.st_mtime, _sha_file(p)))
+        return sorted(out, key=lambda f: (-f.mtime, f.name))

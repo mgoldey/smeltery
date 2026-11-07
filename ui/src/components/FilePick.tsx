@@ -13,6 +13,10 @@ export async function uploadToPipeline(pipeline: string, file: File): Promise<st
   return ((await res.json()) as { path: string }).path;
 }
 
+function fmtSize(n: number): string {
+  return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} kB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /**
  * Pick an input file for a pipeline: choose one from this computer (it is copied into the pipeline folder, beside
  * config.toml, where the run reads it) or reuse one already there. `onPicked` gets the name relative to the folder,
@@ -42,10 +46,10 @@ export function FilePick({
     queryFn: async () => {
       const res = await fetch(`/api/pipelines/${encodeURIComponent(pipeline)}/files`);
       if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
-      return (await res.json()) as string[];
+      return (await res.json()) as { name: string; size: number; mtime: string; sha256: string }[];
     },
   });
-  const here = (existing.data ?? []).filter((f) => exts.some((e) => f.toLowerCase().endsWith(e)));
+  const here = (existing.data ?? []).filter((f) => exts.some((e) => f.name.toLowerCase().endsWith(e)));
 
   const chosen = async (f: File | undefined) => {
     if (!f) return;
@@ -90,8 +94,8 @@ export function FilePick({
           >
             <option value="">a file in this pipeline</option>
             {here.map((f) => (
-              <option key={f} value={f}>
-                {f}
+              <option key={f.name} value={f.name}>
+                {f.name} · {fmtSize(f.size)} · {f.sha256.slice(0, 12)}
               </option>
             ))}
           </select>

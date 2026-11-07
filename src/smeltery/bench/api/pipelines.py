@@ -7,16 +7,22 @@ only Run is blocked by them.
 
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 import re
 import tempfile
 import tomllib
+import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from smeltery import __version__ as smeltery_version
 from smeltery.bench.ports.pipeline_store import PipelineFile, StaleWrite
 from smeltery.bench.provisional import place_site
 from smeltery.gui import steps as step_model
@@ -261,11 +267,49 @@ async def add_pipeline_file(request: Request, name: str, filename: str) -> Added
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/pipelines/{name}/files", response_model=list[str])
-def list_pipeline_files(request: Request, name: str) -> list[str]:
-    """The input files already in the pipeline folder, for the picker to offer."""
+class InputFileOut(BaseModel):
+    name: str
+    size: int = Field(description="bytes")
+    mtime: str = Field(description="last modified, ISO 8601 UTC")
+    sha256: str = Field(description="full hex digest of the content")
+
+
+@router.get("/pipelines/{name}/files", response_model=list[InputFileOut])
+def list_pipeline_files(request: Request, name: str) -> list[InputFileOut]:
+    """The input files already in the pipeline folder, newest first, for the picker to offer."""
     _get(request, name)
-    return _store(request).files(name)
+    return [
+        InputFileOut(
+            name=f.name,
+            size=f.size,
+            mtime=datetime.fromtimestamp(f.mtime, UTC).isoformat(),
+            sha256=f.sha256,
+        )
+        for f in _store(request).files(name)
+    ]
+
+
+@router.get("/pipelines/{name}/bundle", responses={404: {"model": M.Problem}})
+def pipeline_bundle(request: Request, name: str) -> Response:
+    """config.toml, the input files and a manifest.json (sha256 and size of each) as one zip, under `<name>/`."""
+    pf = _get(request, name)
+    members = {"config.toml": pf.text.encode()}
+    for f in _store(request).files(name):
+        members[f.name] = (pf.folder / f.name).read_bytes()
+    manifest = {
+        "pipeline": name,
+        "smeltery": smeltery_version,
+        "files": {n: {"sha256": hashlib.sha256(b).hexdigest(), "size": len(b)} for n, b in members.items()},
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, b in {**members, "manifest.json": json.dumps(manifest, indent=2).encode()}.items():
+            z.writestr(f"{name}/{n}", b)
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}-bundle.zip"'},
+    )
 
 
 def _from_run(request: Request, idx: int) -> tuple[str, dict[str, Path], list[str]]:

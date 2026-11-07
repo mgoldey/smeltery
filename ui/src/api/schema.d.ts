@@ -445,6 +445,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/{name}/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pipeline Bundle
+         * @description config.toml, the input files and a manifest.json (sha256 and size of each) as one zip, under `<name>/`.
+         */
+        get: operations["pipeline_bundle_api_pipelines__name__bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/{name}/files": {
         parameters: {
             query?: never;
@@ -454,7 +474,7 @@ export interface paths {
         };
         /**
          * List Pipeline Files
-         * @description The input files already in the pipeline folder, for the picker to offer.
+         * @description The input files already in the pipeline folder, newest first, for the picker to offer.
          */
         get: operations["list_pipeline_files_api_pipelines__name__files_get"];
         put?: never;
@@ -1578,6 +1598,26 @@ export interface components {
             basis: string;
             /** Value */
             value: number | null;
+        };
+        /** InputFileOut */
+        InputFileOut: {
+            /**
+             * Mtime
+             * @description last modified, ISO 8601 UTC
+             */
+            mtime: string;
+            /** Name */
+            name: string;
+            /**
+             * Sha256
+             * @description full hex digest of the content
+             */
+            sha256: string;
+            /**
+             * Size
+             * @description bytes
+             */
+            size: number;
         };
         /** Issue */
         Issue: {
@@ -3677,6 +3717,46 @@ export interface operations {
             };
         };
     };
+    pipeline_bundle_api_pipelines__name__bundle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_pipeline_files_api_pipelines__name__files_get: {
         parameters: {
             query?: never;
@@ -3694,7 +3774,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["InputFileOut"][];
                 };
             };
             /** @description Validation Error */

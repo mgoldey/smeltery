@@ -20,6 +20,29 @@ function message(e: unknown): string {
 }
 
 /** The run's "Pipeline" tab: open (or make, the first time) the pipeline that made this run, in the workspace. */
+type Issue = Schemas["Issue"];
+type StepOut = Schemas["StepOut"];
+
+/** Issues under one heading per step (its display label), in step order; stage-less ones under "Pipeline". */
+function groupIssues(issues: Issue[], steps: StepOut[]) {
+  const groups: { title: string; key: string | null; items: Issue[] }[] = [];
+  const add = (title: string, key: string | null, iss: Issue) => {
+    const g = groups.find((x) => x.title === title);
+    if (g) g.items.push(iss);
+    else groups.push({ title, key, items: [iss] });
+  };
+  for (const iss of issues) {
+    const st = iss.stage ? steps.find((s) => s.key === iss.stage) : undefined;
+    if (st) add(st.label, st.key, iss);
+    else add(iss.stage ?? "Pipeline", null, iss);
+  }
+  const rank = (g: { key: string | null; title: string }) => {
+    const i = steps.findIndex((s) => s.key === g.key);
+    return g.key === null ? (g.title === "Pipeline" ? -1 : steps.length) : i;
+  };
+  return groups.sort((x, y) => rank(x) - rank(y));
+}
+
 export function RunPipeline() {
   const idx = useRunIdx();
   const open = useOpenRunPipeline(idx);
@@ -178,7 +201,10 @@ export function Workspace() {
       <div className="body">
         <main className="work" data-testid="workspace">
           <h1>
-            Pipeline <span className="mono">{name}</span>
+            Pipeline <span className="mono">{name}</span>{" "}
+            <a className="lede" href={`/api/pipelines/${encodeURIComponent(name)}/bundle`} download>
+              Download bundle
+            </a>
           </h1>
           <p className="lede">
             The steps in the order <code>smeltery run</code> executes them. Open a step to change it in place: edits are a
@@ -225,15 +251,27 @@ export function Workspace() {
             <div>
               {doc.data ? <ConfigToolbar folder={doc.data.folder} text={text} dirty={dirty} name={name} onCommit={(t) => setDraft(t)} /> : null}
               {view && view.pipeline_issues.length ? (
-                <ul className="issues" aria-label="Pipeline issues">
-                  {view.pipeline_issues.map((iss, i) => (
-                    <li key={i} className="issue" data-level={iss.level}>
-                      <span className="issue-level">{iss.level}</span>
-                      {iss.stage ? <span className="mono">{iss.stage}</span> : null}
-                      <span>{iss.message}</span>
-                    </li>
+                <div className="issues-grouped" aria-label="Pipeline issues">
+                  {groupIssues(view.pipeline_issues, steps).map((g) => (
+                    <section key={g.title}>
+                      <h3>{g.title}</h3>
+                      <ul className="issues">
+                        {g.items.map((iss, i) => (
+                          <li key={i} className="issue" data-level={iss.level}>
+                            <span className="issue-level">{iss.level}</span>
+                            {g.key ? (
+                              <button type="button" className="link" onClick={() => select(g.key!)}>
+                                {iss.message}
+                              </button>
+                            ) : (
+                              <span>{iss.message}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
                   ))}
-                </ul>
+                </div>
               ) : null}
               {steps.length ? <PipelineDrawing steps={steps} selected={selected} onSelect={select} /> : null}
               {step ? (
