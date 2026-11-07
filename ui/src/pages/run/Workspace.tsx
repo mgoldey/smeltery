@@ -44,9 +44,10 @@ export function RunPipeline() {
 }
 
 /**
- * The workspace: the pipeline drawn as its steps, the selected step edited in place, what the edit costs, the lines it
- * writes, and the TOML itself beside them. The TOML text is the only state: the draft is text, every step edit is
- * applied to it by the API, Keep saves it as the pipeline's config.toml, and Run runs what was kept.
+ * The workspace: the pipeline drawn as its steps, the selected step edited in place, what the edit costs, and the lines
+ * it writes. The TOML text is the only state: the draft is text, every step edit is applied to it by the API, Keep
+ * saves it as the pipeline's config.toml, and Run runs what was kept. The config leaves as a download (or is typed
+ * under "Edit as TOML"), rather than sitting in a pane that crowds the steps.
  */
 export function Workspace() {
   const { name = "" } = useParams();
@@ -222,6 +223,7 @@ export function Workspace() {
           ) : null}
           <div className="workspace">
             <div>
+              {doc.data ? <ConfigToolbar folder={doc.data.folder} text={text} dirty={dirty} name={name} onCommit={(t) => setDraft(t)} /> : null}
               {view && view.pipeline_issues.length ? (
                 <ul className="issues" aria-label="Pipeline issues">
                   {view.pipeline_issues.map((iss, i) => (
@@ -274,20 +276,53 @@ export function Workspace() {
               {view ? <ConfigDiff diff={view.diff} /> : null}
               {doc.data ? <Launch name={name} errors={keptErrors} dirty={dirty} /> : null}
             </div>
-            <section className="workspace-side" aria-label="Pipeline TOML">
-              <h2>config.toml</h2>
-              {doc.data ? (
-                <>
-                  <p className="lede mono" style={{ wordBreak: "break-all" }}>
-                    {doc.data.folder}/config.toml
-                  </p>
-                  <TomlEditor value={text} onCommit={(t) => setDraft(t)} label="Pipeline TOML" />
-                </>
-              ) : null}
-            </section>
           </div>
         </main>
       </div>
     </Shell>
+  );
+}
+
+/**
+ * The config as a file you take away, not a pane you have to read: a download of exactly the text on screen (the
+ * draft when there are unkept edits, and the button says so), and the raw TOML editor folded away for whoever wants
+ * to type it. The text is still the only state; this is just where it lives on the page.
+ */
+function ConfigToolbar({
+  folder,
+  text,
+  dirty,
+  name,
+  onCommit,
+}: {
+  folder: string;
+  text: string;
+  dirty: boolean;
+  name: string;
+  onCommit: (text: string) => void;
+}) {
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text], { type: "application/toml" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.config.toml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="config-toolbar">
+      <div className="config-toolbar-row">
+        <button type="button" onClick={download}>
+          {dirty ? "Download draft config.toml" : "Download config.toml"}
+        </button>
+        <span className="lede mono" title={`${folder}/config.toml`}>
+          {folder}/config.toml
+        </span>
+      </div>
+      <details className="config-edit">
+        <summary>Edit as TOML</summary>
+        <TomlEditor value={text} onCommit={onCommit} label="Pipeline TOML" />
+      </details>
+    </div>
   );
 }

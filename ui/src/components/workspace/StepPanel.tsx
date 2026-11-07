@@ -2,6 +2,7 @@ import type { Schemas } from "../../api/client";
 import { SitePlacer } from "./SitePlacer";
 import { ParamRow } from "./ParamRow";
 import { STEP_VIEWS } from "./views/registry";
+import { ResizableColumns } from "../ResizableColumns";
 
 type Step = Schemas["StepOut"];
 type Catalog = Schemas["CatalogOut"];
@@ -121,7 +122,7 @@ export function StepPanel({
         </h2>
         <span className="say">{step.summary}</span>
       </div>
-      <div className="step-cols">
+      <ResizableColumns storageKey="step-cols" defaults={[0.75, 1.5, 0.75]} minPx={170} className="step-cols">
         <section aria-label="Inputs">
           <h3>Inputs</h3>
           {step.key === "ligands" && ligands ? (
@@ -195,6 +196,7 @@ export function StepPanel({
                     <ParamRow
                       key={`${p.method}.${p.name}.${JSON.stringify(p.value)}`}
                       p={p}
+                      pipeline={pipeline}
                       disabled={disabled}
                       onSet={(v) => void onEdit("set", k, { params: { [p.name]: v } })}
                     />
@@ -222,7 +224,7 @@ export function StepPanel({
             <p className="lede">What this step produced will be shown here; the step views are not built yet.</p>
           )}
         </section>
-      </div>
+      </ResizableColumns>
       {sites && ligands && parentSmiles ? (
         <div className="step-wide">
           <SitePlacer

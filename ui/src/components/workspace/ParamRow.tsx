@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from "react";
 import type { Schemas } from "../../api/client";
+import { FilePick } from "../FilePick";
 
 export type Param = Schemas["StepParam"];
 type Value = unknown;
@@ -45,7 +46,26 @@ const same = (a: Value, b: Value) => JSON.stringify(a ?? null) === JSON.stringif
  * One knob of a step: its value (editable), the method's own one-line help, and, when it differs, the kept value with
  * a one-click reset and the workspace default from the Methods tab. Every value comes from the steps API.
  */
-export function ParamRow({ p, disabled, onSet }: { p: Param; disabled: boolean; onSet: (v: Value) => void }) {
+/** What each file-naming knob reads, for the picker's filter. Anything else accepts any file. */
+const ACCEPT: Record<string, string> = {
+  "structure.spec": ".pdb,.ent,.cif",
+  "pocket.file": ".pdb,.pqr",
+  "docking.receptor": ".pdbqt",
+  "bound_pose.file": ".xyz",
+};
+
+export function ParamRow({
+  p,
+  disabled,
+  onSet,
+  pipeline,
+}: {
+  p: Param;
+  disabled: boolean;
+  onSet: (v: Value) => void;
+  /** The pipeline whose folder a picked file goes into; without it a file knob is a plain text box. */
+  pipeline?: string;
+}) {
   const id = `param-${p.method}-${p.name}`;
   const [text, setText] = useState(asText(p.value));
   const [bad, setBad] = useState<string | null>(null);
@@ -107,6 +127,20 @@ export function ParamRow({ p, disabled, onSet }: { p: Param; disabled: boolean; 
         {p.name}
       </label>
       {input}
+      {p.names_file && pipeline ? (
+        <div className="param-file">
+          <FilePick
+            pipeline={pipeline}
+            accept={ACCEPT[`${p.method}.${p.name}`] ?? ""}
+            label="file"
+            disabled={disabled}
+            onPicked={(path) => {
+              setText(path);
+              onSet(path);
+            }}
+          />
+        </div>
+      ) : null}
       <span className="help">
         {bad ? <span className="field-error">{bad}</span> : p.help}
         {changed ? (

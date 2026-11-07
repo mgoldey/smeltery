@@ -38,8 +38,10 @@ in the browser.
 
 ### Starting
 
-The Bench home page (`/bench`) lists the runs under ROOT, the pipelines in the workspace, the work
-panel (running and finished tasks, their logs, cancel), campaign notebooks and configured studies.
+The Bench home page (`/bench`) opens on **Start here**: the three numbered ways to start a pipeline,
+with copying a working pipeline marked as the easiest. Below it, **Your work** lists the pipelines in
+the workspace and the runs under ROOT, then the work panel (running and finished tasks, their logs,
+cancel), and last the campaign notebooks and configured studies.
 A pipeline starts in one of three ways. Names are lower case letters, digits, `-` and `_`.
 
 - **Start from a working pipeline.** Five pipelines ship with smeltery. Each is copied into the
@@ -116,7 +118,9 @@ Selecting a step opens its panel:
   poses changed. When poses do not exist yet the strip says "cannot say until poses exist" and offers
   **Preview poses**, which runs `smeltery run --plan` on the kept config as a task. Memory is a
   per-calculation figure; a long run has been measured holding about 11 GB against a prediction of about 2 GB, so leave headroom beyond it.
-- The lines the edit writes to the config, as a diff, and the TOML pane beside the steps.
+- The lines the edit writes to the config, as a diff. The config itself is a **Download config.toml** button above
+  the steps (the draft, when edits are not kept yet), with the raw text folded under **Edit as TOML** for whoever
+  wants to type it.
 
 Edits are a **draft** until you press **Keep**, which saves the text as the pipeline's `config.toml`.
 **Discard** restores the selected step to the kept text, and **Discard all** drops every edit. Keep
@@ -127,8 +131,11 @@ or the draft has edits that are not kept. Saving over a config that changed on d
 opened it is refused rather than overwritten.
 
 Step edits change only the lines they touch, so comments, ordering and layout in the TOML survive.
-The TOML pane edits the same text directly; if it does not parse, step edits stay blocked until it
-does and the error names the line.
+The TOML pane (under **Edit as TOML**) edits the same text directly; if it does not parse, step edits stay blocked
+until it does and the error names the line.
+
+The three columns of a step (Inputs, Method, View) are resized by dragging the dividers between them, by the arrow
+keys when a divider has focus, and reset by double-clicking one. The widths are remembered in that browser only.
 
 **Run** copies every input file the config reads into the run directory and runs from there (see
 Provenance). The run directory defaults to a dated folder under `ROOT/out/`.
@@ -139,6 +146,11 @@ Provenance). The run directory defaults to a dated folder under `ROOT/out/`.
    - a protein structure (`[structure]`): a local `.pdb` (a PDB id or accession only with network
      allowed), its hash and origin, chains and HETATM groups, a reference ligand or a centre and the
      `pocket_cutoff`. "Use as active site" writes `[structure]` and turns docking on;
+     **Choose a PDB file...** copies a file from the browser into the pipeline folder and opens it; the
+     config then names it by its plain name, relative to that folder. Every setting that names an input
+     file (the methods' `file_knobs`: `[structure] spec`, `[pocket] file`, `[docking] receptor`,
+     `[bound_pose] file`) offers the same picker in the Method column, and the field starts from what the
+     config already says, so the Method column and this view never name two different structures;
    - a prepared pocket file with a receptor and box (`[pocket] file` with `[docking]`);
    - hand-placed charges: click two atoms of the parent to place a charge.
    For the first two the view builds the point-charge field without docking or an SCF, draws it in 3D
