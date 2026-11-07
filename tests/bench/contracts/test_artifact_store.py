@@ -68,3 +68,11 @@ def test_adapter_satisfies_the_protocol(astore):
     from smeltery.bench.ports import ArtifactStore
 
     assert isinstance(astore, ArtifactStore)
+
+
+def test_a_digest_that_is_not_64_hex_is_refused(astore):
+    for bad in ("../x", "../" * 3 + "etc/passwd", "ab", "A" * 64):
+        with pytest.raises(ValueError):
+            astore.path_for(bad)
+        with pytest.raises(ValueError):
+            astore.get(bad)
