@@ -115,4 +115,6 @@ class FilesystemPipelineStore:
 
     def files(self, name: str) -> builtins.list[str]:
         folder = self.get(name).folder
-        return sorted(p.name for p in folder.iterdir() if p.is_file() and p.name != CONFIG and FILENAME.fullmatch(p.name))
+        return sorted(
+            p.name for p in folder.iterdir() if p.is_file() and p.name != CONFIG and FILENAME.fullmatch(p.name)
+        )

@@ -88,7 +88,9 @@ class StepParam(BaseModel):
     changed_from: Any = Field(description="the baseline's value when it differs, else null")
     workspace_default: Any = Field(description="the Methods tab's default for this knob, null when none is set")
     choices: list[Any] = []  # a `choice` knob's options, from the catalog
-    names_file: bool = Field(False, description="the value names an input file (the method's file_knobs): offer a picker")
+    names_file: bool = Field(
+        False, description="the value names an input file (the method's file_knobs): offer a picker"
+    )
 
 
 class StepLink(BaseModel):

@@ -43,9 +43,10 @@ class PipelineStore(Protocol):
         ...
 
     def add_file(self, name: str, filename: str, data: bytes) -> str:
-        """Store an input file (an uploaded structure) in the pipeline folder; return its name relative to the folder,
-        which is what the config should point at. A file of that name with different bytes is never overwritten: the
-        new one gets a name of its own. ValueError for a name that is not a plain file name, KeyError for no pipeline."""
+        """Store an input file (an uploaded structure) in the pipeline folder; return its name relative to the
+        folder, which is what the config should point at. A file of that name with different bytes is never
+        overwritten: the new one gets a name of its own. ValueError for a name that is not a plain file name,
+        KeyError for no pipeline."""
         ...
 
     def files(self, name: str) -> builtins.list[str]:
