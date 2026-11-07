@@ -45,3 +45,4 @@ def test_remote_credentials_are_stripped():
 
     assert strip_credentials("https://user:tok@github.com/o/r.git") == "https://github.com/o/r.git"
     assert strip_credentials("git@github.com:o/r.git") == "git@github.com:o/r.git"
+    assert strip_credentials("ssh://git@host/o/r.git") == "ssh://git@host/o/r.git"

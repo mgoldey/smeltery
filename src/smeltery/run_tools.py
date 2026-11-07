@@ -146,12 +146,17 @@ def _run_diff(argv: list[str]) -> int:
     return 0 if same else 1
 
 
-COMMANDS = {"verify-run": _run_verify, "inspect": _run_inspect, "diff-run": _run_diff}
+def _guarded(fn):
+    def entry(argv: list[str]) -> int:
+        try:
+            return fn(argv)
+        except RunToolError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+
+    return entry
 
 
-def run(command: str, argv: list[str]) -> int:
-    try:
-        return COMMANDS[command](argv)
-    except RunToolError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+verify_run = _guarded(_run_verify)
+inspect_run = _guarded(_run_inspect)
+diff_run = _guarded(_run_diff)

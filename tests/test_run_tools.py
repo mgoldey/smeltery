@@ -41,3 +41,13 @@ def test_inspect_is_deterministic_and_diff_run_reports_digest(tmp_path, capsys):
     q = tmp_path / "b.json"
     q.write_text(json.dumps(d))
     assert main(["diff-run", str(out), str(q)]) == 1 and "inputs.parent differs" in capsys.readouterr().out
+
+
+def test_a_partial_record_verifies(tmp_path):
+    from test_run_split import SMALL
+
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(SMALL)
+    out = tmp_path / "out"
+    assert main(["run", str(cfg), "--out", str(out), "--only-candidate", "propanol"]) == 0
+    assert main(["verify-run", str(out / "partial-propanol.json")]) == 0

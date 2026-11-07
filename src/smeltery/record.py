@@ -35,11 +35,11 @@ def _git(path: Path, *args: str) -> str | None:
 
 
 def strip_credentials(url: str | None) -> str | None:
-    """`https://user:token@host/x` -> `https://host/x`; scp-style and credential-free URLs pass through."""
+    """`https://user:token@host/x` -> `https://host/x`; ssh://git@host and scp-style URLs pass through."""
     if not url:
         return None
     parts = urlparse(url)
-    if "@" in parts.netloc:
+    if parts.scheme in ("http", "https") and "@" in parts.netloc:
         return parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]).geturl()
     return url
 
@@ -110,7 +110,8 @@ def smeltery_identity() -> dict:
     if str(ident["provenance"]).startswith("INFERRED") and ident["source"]:
         path = Path(unquote(urlparse(ident["source"]).path))
         ident["git_remote"] = strip_credentials(_git(path, "config", "--get", "remote.origin.url"))
-        ident["git_branch"] = _git(path, "rev-parse", "--abbrev-ref", "HEAD") or None
+        branch = _git(path, "rev-parse", "--abbrev-ref", "HEAD")
+        ident["git_branch"] = None if branch in (None, "", "HEAD") else branch  # HEAD: detached
     return ident
 
 

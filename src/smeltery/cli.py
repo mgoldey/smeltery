@@ -1559,9 +1559,9 @@ VIEWERS = {
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
-    "verify-run": "smeltery.run_tools",
-    "inspect": "smeltery.run_tools",
-    "diff-run": "smeltery.run_tools",
+    "verify-run": "smeltery.run_tools:verify_run",
+    "inspect": "smeltery.run_tools:inspect_run",
+    "diff-run": "smeltery.run_tools:diff_run",
 }
 
 
@@ -1645,8 +1645,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in VIEWERS:  # imported only when asked for: they need no tier, and gui needs the gui extra
         import importlib
 
-        mod = importlib.import_module(VIEWERS[argv[0]])
-        return mod.run(argv[0], argv[1:]) if VIEWERS[argv[0]] == "smeltery.run_tools" else mod.main(argv[1:])
+        module, _, func = VIEWERS[argv[0]].partition(":")  # "module" means module.main; "module:func" names the entry
+        return getattr(importlib.import_module(module), func or "main")(argv[1:])
     ap = argparse.ArgumentParser(prog="smeltery", description="Tiered, measurement-disciplined funnel.")
     sub = ap.add_subparsers(dest="command", required=True)
     sub.add_parser("gui", help="browse a finished run, record decisions (smeltery gui OUT --help)")
@@ -1823,6 +1823,10 @@ def main(argv: list[str] | None = None) -> int:
             data = json.loads(p.read_text())
             data.get("results", {}).pop("cut", None)
             data.get("results", {}).pop("paired_ddE", None)
+            if "record_sha256" in data:  # the pops changed the record: restamp it, or verify-run reports an edit
+                from .record import _canonical_sha256
+
+                data["record_sha256"] = _canonical_sha256(data)
             new_path.write_text(json.dumps(data, indent=2, sort_keys=True, default=str))
             try:
                 p.unlink()
