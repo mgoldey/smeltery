@@ -131,3 +131,10 @@ def test_a_workspace_default_is_copied_into_a_method_added_through_the_edit_rout
     assert tomllib.loads(added["toml"])["field_dft_interaction"] == {"basis": "def2-svp"}
     bare = _edit(c, toml, "add", "field_dft_interaction")
     assert tomllib.loads(bare["toml"])["field_dft_interaction"] == {}
+
+
+def test_floor_provenance_and_tier_doc_are_reported(client_for):
+    c, _ = client_for()
+    m = _methods(c)["field_dft_interaction"]
+    assert m["floor_status"] == "UNMEASURED"
+    assert m["tier_doc"] == "docs/tiers/field_dft_interaction.md"

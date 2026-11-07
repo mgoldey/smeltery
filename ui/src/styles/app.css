@@ -46,6 +46,7 @@ section + section { margin-top: 8px; }
 table.grid { border-collapse: collapse; width: 100%; }
 table.grid th { text-align: left; font-weight: 500; color: var(--ink-muted); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--hairline); }
 table.grid td { padding: 7px 10px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+table.grid tr[data-differs] td { background: var(--changed); }
 table.grid th.num, table.grid td.num { text-align: right; }
 table.grid tbody tr:hover { background: var(--sunken); }
 table.grid tr.selected { background: var(--sunken); }
