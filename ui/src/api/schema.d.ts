@@ -454,7 +454,9 @@ export interface paths {
         };
         /**
          * Pipeline Bundle
-         * @description config.toml, the input files and a manifest.json (sha256 and size of each) as one zip, under `<name>/`.
+         * @description The SAVED config.toml, every input file it names (and the other files in the folder) and a manifest.json
+         *     (sha256 and size of each) as one zip under `<name>/`. Inputs keep their path relative to the pipeline folder;
+         *     an absolute path is stored as `inputs/<basename>` and its original path recorded in the manifest.
          */
         get: operations["pipeline_bundle_api_pipelines__name__bundle_get"];
         put?: never;

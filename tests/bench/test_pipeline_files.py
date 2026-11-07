@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import zipfile
+from pathlib import Path
 
 PDB = (
     "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n"
@@ -102,3 +103,23 @@ def test_bundle_zip_holds_config_inputs_and_a_manifest_that_matches(client_for):
         data = z.read(f"{name}/{n}")
         assert (info["sha256"], info["size"]) == (hashlib.sha256(data).hexdigest(), len(data))
     assert set(manifest["files"]) == {"config.toml", "receptor.pdb"}
+
+
+def test_bundle_includes_nested_and_absolute_inputs_and_lists_missing(client_for, tmp_path):
+    c, _ = client_for()
+    name = _made(c)
+    outside = tmp_path / "pocket.pdb"
+    outside.write_text(PDB)
+    doc = c.get(f"/api/pipelines/{name}").json()
+    nested = Path(doc["folder"]) / "inputs" / "abc"
+    nested.mkdir(parents=True)
+    (nested / "r.pdb").write_text(PDB)
+    toml = doc["toml"].replace("[pocket]\n", f'[pocket]\nfile = "{outside}"\n')
+    toml += '\n[structure]\nspec = "inputs/abc/r.pdb"\n[docking]\nreceptor = "gone.pdb"\n'
+    put = c.put(f"/api/pipelines/{name}", json={"toml": toml, "base_sha256": doc["sha256"]})
+    assert put.status_code == 200, (put.text, doc["toml"])
+    z = zipfile.ZipFile(io.BytesIO(c.get(f"/api/pipelines/{name}/bundle").content))
+    manifest = json.loads(z.read(f"{name}/manifest.json"))
+    assert f"{name}/inputs/abc/r.pdb" in z.namelist() and f"{name}/inputs/pocket.pdb" in z.namelist()
+    assert manifest["files"]["inputs/pocket.pdb"]["original_path"] == str(outside)
+    assert manifest["missing"] == ["gone.pdb"]

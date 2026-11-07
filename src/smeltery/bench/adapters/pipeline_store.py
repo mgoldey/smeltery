@@ -25,7 +25,19 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+_SHA_CACHE: dict[tuple[str, int, int], str] = {}
+
+
 def _sha_file(path: Path) -> str:
+    """sha256 of the file, remembered in-process by (path, size, mtime_ns) so a listing hashes a file once."""
+    st = path.stat()
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    if key not in _SHA_CACHE:
+        _SHA_CACHE[key] = _hash(path)
+    return _SHA_CACHE[key]
+
+
+def _hash(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
         while chunk := f.read(1 << 20):
@@ -124,7 +136,6 @@ class FilesystemPipelineStore:
         return dest.name
 
     def files(self, name: str) -> builtins.list[InputFile]:
-        # The hash is streamed per call; a listing of many large PDBs would want a cache keyed on (size, mtime).
         folder = self.get(name).folder
         out = []
         for p in folder.iterdir():

@@ -43,6 +43,7 @@ export function FilePick({
   const exts = accept.split(",").map((s) => s.trim().toLowerCase());
   const existing = useQuery({
     queryKey: ["pipeline-files", pipeline],
+    staleTime: Infinity, // uploading invalidates it
     queryFn: async () => {
       const res = await fetch(`/api/pipelines/${encodeURIComponent(pipeline)}/files`);
       if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
