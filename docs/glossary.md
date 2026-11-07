@@ -34,7 +34,7 @@ Terms as smeltery uses them. Each entry names the page or source that owns the d
 
 **Funnel.** The staged pipeline that scores a series of analogues and cuts it down. It ranks only what it can resolve. See [README.md](../README.md).
 
-**Gate.** A refusal built into the pipeline: it raises or stops a run instead of producing a number that cannot be trusted. G1 to G9 are listed in [tiers/index.md](tiers/index.md). Gate stages in a run (parity, PoseBusters, MMFF strain) can only reject.
+**Gate.** A named check or refusal around the pipeline, listed as G1 to G9 in [tiers/index.md](tiers/index.md). Most raise an error instead of producing a number that cannot be trusted. G9 (charge sensitivity) refuses nothing: it measures and raises the cut's floor. G6 (same formula) is available to callers; neither `cut` nor the CLI calls it. Gate stages in a run (parity, PoseBusters, MMFF strain) can only reject.
 
 **Golden path.** The documented route from a target to a shareable bundle: check, run, inspect, decide, bundle. See [golden-path.md](golden-path.md).
 
@@ -66,7 +66,7 @@ Terms as smeltery uses them. Each entry names the page or source that owns the d
 
 **Quantity.** A named per-pose value a tier produces, such as `dE_int`, with a declared unit. Differences are only taken within one quantity. See [tiers/index.md](tiers/index.md) (G7, G8).
 
-**Remedy ladder.** The sequence of fallback settings tried for an SCF that does not converge. See [bench.md](bench.md) and [rung](#rung).
+**Remedy ladder.** The sequence of fallback settings tried for an SCF that does not converge. See [bench.md](bench.md).
 
 **Resolved.** Two measurements are resolved when |Δmean| exceeds both z times the root sum of squares of their SEMs and the floor (`funnel.resolved`). A measurement with no SEM never resolves. Also a bench verdict state: a cut with survivors. See [bench.md](bench.md).
 

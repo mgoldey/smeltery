@@ -3,7 +3,7 @@
 All notable changes to smeltery are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions are derived from git tags
 (hatch-vcs), and the project does not yet follow a stable-API promise. Entries are grouped from the merged
-pull requests; the issue numbers refer to the smeltery tracker.
+pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 
 ## [Unreleased]
 

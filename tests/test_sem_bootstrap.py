@@ -21,5 +21,6 @@ def test_paired_sem_matches_bootstrap_and_beats_unpaired():
 
     d = analogue - parent
     boot = [d[rng.integers(0, n, n)].mean() for _ in range(4000)]
+    # 15% checks the formula's form (s/sqrt(n) on the paired differences), not ddof.
     assert abs(paired.sem / np.std(boot, ddof=1) - 1.0) < 0.15
     assert paired.sem < 0.5 * unpaired.sem
