@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { ApiError, describeReason } from "../../../api/http";
 import { rdkit } from "../../../chem/rdkit";
 import type { StepViewProps } from "./registry";
 
@@ -26,7 +27,7 @@ export type LigandsViewProps = StepViewProps;
 async function post<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = (await r.json().catch(() => ({}))) as { detail?: unknown };
-  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : `${r.status} ${r.statusText}`);
+  if (!r.ok) throw new ApiError(r.status, describeReason(r.status, r.statusText, j));
   return j as T;
 }
 

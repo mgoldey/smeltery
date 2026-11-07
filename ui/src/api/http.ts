@@ -37,7 +37,7 @@ export function describeReason(status: number, statusText: string, body: unknown
   if (body && typeof body === "object") {
     const b = body as { detail?: unknown; reason?: unknown };
     const r = b.detail ?? b.reason;
-    if (typeof r === "string" && r) return r;
+    if (typeof r === "string" && r && r !== statusText) return r;
     if (Array.isArray(r)) {
       const v = validationText(r);
       if (v) return v;
