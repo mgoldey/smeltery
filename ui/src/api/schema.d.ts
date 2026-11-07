@@ -1407,6 +1407,30 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * CandidateRow
+         * @description One analogue in either run; a null arm did not run it.
+         */
+        CandidateRow: {
+            /** Candidate */
+            candidate: string;
+            /** Dde A */
+            ddE_a: number | null;
+            /** Dde B */
+            ddE_b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Diff Sem */
+            diff_sem: number | null;
+            /** Resolved */
+            resolved: boolean | null;
+            /** Sem A */
+            sem_a: number | null;
+            /** Sem B */
+            sem_b: number | null;
+            /** Smiles */
+            smiles: string;
+        };
         /** CatalogOut */
         CatalogOut: {
             /** Artefacts */
@@ -1459,18 +1483,50 @@ export interface components {
             /** Id */
             id: string;
         };
+        /**
+         * CompareRow
+         * @description One comparison key. An arm that produced nothing for it has a null median and n == 0 (shown as "not run").
+         */
+        CompareRow: {
+            /** A */
+            a: number | null;
+            /** B */
+            b: number | null;
+            /** Diff */
+            diff: number | null;
+            /** Key */
+            key: string;
+            /** N A */
+            n_a: number;
+            /** N B */
+            n_b: number;
+            /** Resolved */
+            resolved: boolean | null;
+            /** Sem */
+            sem: number | null;
+            /** Unpaired */
+            unpaired: boolean;
+        };
         /** Comparison */
         Comparison: {
+            /** Candidates */
+            candidates: components["schemas"]["CandidateRow"][] | null;
+            /** Candidates Note */
+            candidates_note: string | null;
             /** Caption */
             caption: string;
             /** Figure */
             figure: {
                 [key: string]: unknown;
             };
+            /** Rows */
+            rows: components["schemas"]["CompareRow"][];
             /** Summary */
             summary: {
                 [key: string]: unknown;
             };
+            /** Unit */
+            unit: string;
         };
         /** DdeRow */
         DdeRow: {

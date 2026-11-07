@@ -5,6 +5,8 @@ import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { Shell } from "../components/Shell";
 
+const withSem = (v: number, sem: number | null) => (sem === null ? v.toFixed(2) : `${v.toFixed(2)} ± ${sem.toFixed(2)}`);
+
 /** Two runs as arms, differenced per key. Arms are chosen, never inferred: guessing is how a comparison becomes a
  * pooling of unlike things. */
 export function Compare() {
@@ -54,6 +56,58 @@ export function Compare() {
                 {cmp.data.caption}
               </p>
               <PlotlyFigure figure={cmp.data.figure} name="compare" />
+              <table data-testid="compare-rows">
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Arm A median ({cmp.data.unit})</th>
+                    <th>Arm B median ({cmp.data.unit})</th>
+                    <th>A − B ({cmp.data.unit})</th>
+                    <th>SEM of difference ({cmp.data.unit})</th>
+                    <th>Resolved</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cmp.data.rows.map((r) => (
+                    <tr key={r.key}>
+                      <td>{r.key}</td>
+                      <td>{r.a === null ? "not run" : `${r.a.toFixed(2)} (n=${r.n_a})`}</td>
+                      <td>{r.b === null ? "not run" : `${r.b.toFixed(2)} (n=${r.n_b})`}</td>
+                      <td>{r.diff === null ? "—" : r.diff.toFixed(2)}</td>
+                      <td>{r.sem === null ? "—" : r.sem.toFixed(2)}</td>
+                      <td>{r.resolved === null ? "—" : r.resolved ? "yes" : "no"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <h2>Per-candidate ΔΔE (same parent)</h2>
+              {cmp.data.candidates_note ? <p data-testid="compare-candidates-note">{cmp.data.candidates_note}</p> : null}
+              {cmp.data.candidates === null ? null : (
+                <table data-testid="compare-candidates">
+                  <thead>
+                    <tr>
+                      <th>Candidate</th>
+                      <th>ΔΔE A ({cmp.data.unit})</th>
+                      <th>ΔΔE B ({cmp.data.unit})</th>
+                      <th>A − B ({cmp.data.unit})</th>
+                      <th>SEM of difference ({cmp.data.unit})</th>
+                      <th>Resolved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cmp.data.candidates.map((c) => (
+                      <tr key={c.candidate}>
+                        <td>{c.candidate}</td>
+                        <td>{c.ddE_a === null ? "not run" : withSem(c.ddE_a, c.sem_a)}</td>
+                        <td>{c.ddE_b === null ? "not run" : withSem(c.ddE_b, c.sem_b)}</td>
+                        <td>{c.diff === null ? "—" : c.diff.toFixed(2)}</td>
+                        <td>{c.diff_sem === null ? "—" : c.diff_sem.toFixed(2)}</td>
+                        <td>{c.resolved === null ? "—" : c.resolved ? "yes" : "no"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </>
           ) : null}
         </main>
