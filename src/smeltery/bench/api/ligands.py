@@ -6,20 +6,23 @@ Its own module so the tasks building step views never edit the same file.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Literal, NoReturn
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from rdkit import Chem
 
+from smeltery.bench import ligand_io
 from smeltery.cost import _STO3G_NBF
 from smeltery.gui.config_text import ConfigTextError, apply
+from smeltery.gui.pipeline import Pipeline
 from smeltery.model import Candidate
 from smeltery.tiers import NoCommonCoreError, PairedPoses, _net_charge
 
 from . import models as M
-from .pipelines import EditedText, _parse_or_400
+from .pipelines import MAX_UPLOAD, EditedText, _get, _parse_or_400
 
 router = APIRouter(prefix="/api/pipelines", tags=["ligands"])
 
@@ -215,10 +218,92 @@ def ligands_edit(body: LigandsEdit) -> EditedText:
         cands = {(new if k == name else k): v for k, v in cands.items()}
         if parent == name:
             parent = new
-    target = tomllib.loads(body.toml)
+    return _write_candidates(body.toml, cands, parent)
+
+
+def _write_candidates(toml: str, cands: dict[str, str], parent: str) -> EditedText:
+    """The one writer of `[candidates]` and `parent` into the live text, shared by every route that changes them."""
+    target = tomllib.loads(toml)
     target["candidates"] = cands
     target["parent"] = parent
     try:
-        return EditedText(toml=apply(body.toml, target))
+        return EditedText(toml=apply(toml, target))
     except ConfigTextError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class LigandsImport(BaseModel):
+    toml: str
+    filename: str = Field(description="decides the format: .csv or .sdf")
+    content: str = Field(description="the file's text")
+
+
+class RejectedRow(BaseModel):
+    row: int = Field(description="1-based data row of a CSV, or record of an SDF; 0 for the file as a whole")
+    input: str
+    reason: str
+
+
+class ImportedLigands(BaseModel):
+    toml: str = Field(description="the live text with the accepted rows appended")
+    accepted: list[str] = Field(description="names of the candidates appended")
+    rejected: list[RejectedRow]
+
+
+@router.post(
+    "/ligands/import", response_model=ImportedLigands, responses={400: {"model": M.Problem}, 413: {"model": M.Problem}}
+)
+def ligands_import(body: LigandsImport) -> ImportedLigands:
+    """Append the molecules of a CSV (smiles column, optional name column) or SDF to the live text's candidates.
+    Rows RDKit cannot read, and names or molecules already present, are returned as `rejected` with the reason."""
+    if len(body.content) > MAX_UPLOAD:
+        raise HTTPException(status_code=413, detail=f"{body.filename}: larger than {MAX_UPLOAD // (1024 * 1024)} MB")
+    p = _parse_or_400(body.toml)
+    if p is None:
+        _refuse("this TOML is not a pipeline config; fix it in the TOML pane")
+    rows, bad = ligand_io.parse(body.filename, body.content)
+    new, rejected = ligand_io.accept(rows, bad, dict(p.candidates))
+    out = _write_candidates(body.toml, {**p.candidates, **new}, p.parent) if new else EditedText(toml=body.toml)
+    return ImportedLigands(toml=out.toml, accepted=list(new), rejected=[RejectedRow(**vars(r)) for r in rejected])
+
+
+def _records(p: Pipeline) -> list[dict]:
+    parent = Candidate(p.parent, p.candidates.get(p.parent, ""))
+    out = []
+    for name, smiles in p.candidates.items():
+        c = _check(name, smiles, parent, parent_ok=False)  # the core search is not an export column: skip it
+        out.append(
+            {
+                "name": name,
+                "smiles": smiles,
+                "role": "parent" if c.is_parent else "analogue",
+                "formal_charge": c.formal_charge,
+                "electrons": c.electrons,
+                "electrons_even": c.electrons_even,
+                "sto3g_ok": c.sto3g_ok,
+            }
+        )
+    return out
+
+
+def _attachment(request: Request, name: str, render: Callable[[list[dict]], str], ext: str, media: str) -> Response:
+    p = _parse_or_400(_get(request, name).text)
+    if p is None:
+        _refuse("this pipeline's TOML is not a pipeline config")
+    return Response(
+        render(_records(p)),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{name}-ligands.{ext}"'},
+    )
+
+
+@router.get("/{name}/ligands.csv", responses={404: {"model": M.Problem}})
+def ligands_csv(request: Request, name: str) -> Response:
+    """The saved pipeline's candidates: name, SMILES, role and the RDKit-only checks."""
+    return _attachment(request, name, ligand_io.to_csv, "csv", "text/csv")
+
+
+@router.get("/{name}/ligands.sdf", responses={404: {"model": M.Problem}})
+def ligands_sdf(request: Request, name: str) -> Response:
+    """The saved pipeline's candidates as 2D structures with the same properties."""
+    return _attachment(request, name, ligand_io.to_sdf, "sdf", "chemical/x-mdl-sdfile")
