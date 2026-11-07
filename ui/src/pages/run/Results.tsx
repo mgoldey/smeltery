@@ -2,12 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap } from "../../api/client";
 import { LineageInspector } from "../../components/LineageInspector";
+import { PerPoseTable } from "../../components/PerPoseTable";
 import { PlotlyFigure } from "../../components/PlotlyFigure";
 import { VerdictBanner } from "../../components/VerdictBanner";
 import { useScheme } from "../../styles/scheme";
 import { useRunIdx } from "./RunLayout";
 
-function useFigure(idx: number, name: "forest" | "matrix" | "per_pose", enabled: boolean) {
+function useFigure(idx: number, name: "forest" | "matrix" | "per_pose" | "per_pose_values", enabled: boolean) {
   const theme = useScheme();
   return useQuery({
     queryKey: ["figure", idx, name, theme],
@@ -24,6 +25,7 @@ function groupLabel(group: number, size: number): string {
 export function Results() {
   const idx = useRunIdx();
   const [traced, setTraced] = useState<string | null>(null);
+  const [pairs, setPairs] = useState(true);
   const verdict = useQuery({
     queryKey: ["verdict", idx],
     queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
@@ -37,6 +39,12 @@ export function Results() {
   const forest = useFigure(idx, "forest", ok);
   const matrix = useFigure(idx, "matrix", ok);
   const perPose = useFigure(idx, "per_pose", ok);
+  const perPoseValues = useFigure(idx, "per_pose_values", ok);
+  const rows = useQuery({
+    queryKey: ["per_pose", idx],
+    queryFn: () => unwrap(api.GET("/api/runs/{idx}/per_pose", { params: { path: { idx } } })),
+    enabled: ok,
+  });
   const sizes = new Map<number, number>();
   for (const r of table.data?.rows ?? []) sizes.set(r.group, (sizes.get(r.group) ?? 0) + 1);
 
@@ -94,9 +102,29 @@ export function Results() {
             <p className="lede">The funnel's own test for each pair, at the same z and floor as the cut.</p>
             {matrix.data ? <PlotlyFigure figure={matrix.data} name="matrix" /> : null}
             <h2>Per-pose pairs</h2>
-            <p className="lede">Each line joins an analogue's pose to the parent's pose with the same index; pairing is why the paired SEM is small.</p>
-            {perPose.isError ? <p className="empty-state">{perPose.error.message}</p> : null}
-            {perPose.data ? <PlotlyFigure figure={perPose.data} name="per_pose" /> : null}
+            <div className="controls" role="group" aria-label="Per-pose view">
+              <button type="button" aria-pressed={pairs} onClick={() => setPairs(true)}>
+                Paired lines
+              </button>
+              <button type="button" aria-pressed={!pairs} onClick={() => setPairs(false)}>
+                Values per pose
+              </button>
+            </div>
+            {pairs ? (
+              <>
+                <p className="lede">Each line joins an analogue's pose to the parent's pose with the same index; pairing is why the paired SEM is small.</p>
+                {perPose.isError ? <p className="empty-state">{perPose.error.message}</p> : null}
+                {perPose.data ? <PlotlyFigure figure={perPose.data} name="per_pose" /> : null}
+              </>
+            ) : (
+              <>
+                <p className="lede">The parent's and each analogue's own value at every pose, before pairing.</p>
+                {perPoseValues.isError ? <p className="empty-state">{perPoseValues.error.message}</p> : null}
+                {perPoseValues.data ? <PlotlyFigure figure={perPoseValues.data} name="per_pose_values" /> : null}
+              </>
+            )}
+            {rows.isError ? <p className="empty-state">{rows.error.message}</p> : null}
+            {rows.data ? <PerPoseTable rows={rows.data} unit={table.data.unit} fileName={`per_pose_${idx}.csv`} /> : null}
           </>
         ) : null}
       </main>
