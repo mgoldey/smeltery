@@ -23,7 +23,8 @@ def uses_temporal(task_queue) -> bool:
 
 
 class LiveRunRefused(ValueError):
-    """OUT holds a Temporal run that is still running (or whose server cannot say): nothing was written into it."""
+    """OUT holds a Temporal run that is still running (or whose server cannot say), or (in-process launch) a finished
+    run record: nothing was written into it."""
 
 
 class LaunchRun:
@@ -55,7 +56,10 @@ class LaunchRun:
         # None means the Bench root
         base = Path(config_dir) if config_dir is not None else self.root
         source = text if text is not None else pipeline.to_toml()
-        self._guard(out_dir, source, base, temporal=command is None and uses_temporal(self.task_queue))
+        temporal = command is None and uses_temporal(self.task_queue)
+        self._guard(out_dir, source, base, temporal=temporal)
+        if command is None and not temporal and (done := sorted(out_dir.glob("run-*.json"))):
+            raise LiveRunRefused(f"{out_dir} already holds the run record {done[0].name}; pick another out folder")
         out_dir.mkdir(parents=True, exist_ok=True)
         staged, _ = stage_inputs(source, base, out_dir)
         dest = out_dir / "config.toml"

@@ -672,3 +672,44 @@ def test_stage_seconds_belong_to_their_own_plan(tmp_path):
 
     assert measured(rec_b) >= 0.5 and measured(rec_a) < 0.25
     assert cli._STAGE_SECONDS.get() is a.stage_seconds  # the plan last run is the current one
+
+
+def test_a_failed_plan_out_writes_an_error_plan_json(tmp_path):
+    cfg = tmp_path / "bad.toml"
+    cfg.write_text('campaign = "x"\n')
+    out = tmp_path / "prev"
+    assert main(["run", str(cfg), "--plan", "--out", str(out)]) == 2
+    rec = json.loads((out / "plan.json").read_text())
+    assert rec["status"] == "error" and rec["stage"] is None and rec["input_digest"] is None and rec["message"]
+
+
+def test_fail_on_unranked_exits_4_and_a_rerun_into_a_record_is_refused(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import smeltery.cli as cli
+
+    out = tmp_path / "o"
+    cfg = tmp_path / "c.toml"
+    cfg.write_text("")
+    cut = SimpleNamespace(unranked_at_boundary=True)
+    monkeypatch.setattr(cli, "load_config", lambda p: {})
+    monkeypatch.setattr(cli, "build_plan", lambda cfg, out_dir: object())
+    monkeypatch.setattr(cli, "run_plan", lambda plan: (RunRecord("c", {}, {}, {}), {"cut": cut}))
+    monkeypatch.setattr(cli, "write_outputs", lambda plan, rec, o: o / "run-abc.json")
+    monkeypatch.setattr(cli, "format_table", lambda plan, o: "")
+    monkeypatch.setattr(cli, "_stage_config", lambda c, o, temporal=False: (c, None))
+    assert main(["run", str(cfg), "--out", str(out)]) == 0
+    assert main(["run", str(cfg), "--out", str(out), "--fail-on-unranked"]) == 4
+    out.mkdir()
+    (out / "run-abc.json").write_text("{}")
+    assert main(["run", str(cfg), "--out", str(out)]) == 2  # refused: names the record
+    assert main(["run", str(cfg), "--out", str(out), "--force"]) == 0
+
+
+def test_a_stage_error_plan_json_names_its_stage(tmp_path):
+    from smeltery.cli import StageError, write_plan_error
+
+    e = StageError("stage 'pocket' failed: x", stage="pocket")
+    write_plan_error(tmp_path, str(e), getattr(e, "stage", None))
+    rec = json.loads((tmp_path / "plan.json").read_text())
+    assert rec == {"status": "error", "stage": "pocket", "message": "stage 'pocket' failed: x", "input_digest": None}

@@ -54,6 +54,19 @@ def test_launch_run_submits_argv_and_executes_nothing(tmp_path, pipeline):
     assert q.executed == []
 
 
+def test_launch_run_refuses_an_out_that_holds_a_run_record_and_writes_nothing(tmp_path, pipeline):
+    from smeltery.bench.use_cases.launch_run import LiveRunRefused
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "run-abc123.json").write_text("{}")
+    q = FakeTaskQueue()
+    lr = LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock())
+    with pytest.raises(LiveRunRefused, match="run-abc123.json"):
+        lr.execute(pipeline, out=out)
+    assert q.submitted == [] and not (out / "config.toml").exists()
+
+
 @pytest.fixture
 def pipeline():
     p = Pipeline.minimal("c", "parent", {"parent": "C", "a": "C"})
