@@ -13,8 +13,8 @@ import time
 import uuid
 from pathlib import Path
 
-from smeltery.bench.adapters._sqlite import open_db
-from smeltery.tasks import Task, TemporalTaskManager
+from smeltery.bench.adapters._sqlite import is_duplicate_column, open_db
+from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager
 
 
 def _utc() -> str:
@@ -38,6 +38,19 @@ def _kill_group(pgid: int, grace: float = 2.0) -> None:
         os.killpg(pgid, signal.SIGKILL)
 
 
+_LIVE_WAITERS: set[str] = set()  # task ids whose waiter thread is alive in this process
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 class SubprocessTaskQueue:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
@@ -53,12 +66,36 @@ class SubprocessTaskQueue:
                 """CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
                     created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
-                    log_path TEXT, note TEXT, pid INTEGER)"""
+                    log_path TEXT, note TEXT, pid INTEGER, attempt INTEGER, max_attempts INTEGER,
+                    owner_pid INTEGER)"""
             )
+            # Migrate databases created before retries existed.
+            for col in ("attempt", "max_attempts", "owner_pid"):
+                try:
+                    con.execute(f"ALTER TABLE tasks ADD COLUMN {col} INTEGER")
+                except sqlite3.OperationalError as e:
+                    if not is_duplicate_column(e):
+                        raise
             con.commit()
 
     def _row_to_task(self, row) -> Task:
-        (tid, name, command, cwd, status, created_at, started_at, finished_at, rc, log_path, note, pid) = row
+        (
+            tid,
+            name,
+            command,
+            cwd,
+            status,
+            created_at,
+            started_at,
+            finished_at,
+            rc,
+            log_path,
+            note,
+            pid,
+            attempt,
+            max_attempts,
+            _owner_pid,
+        ) = row
         t = Task(
             id=tid,
             name=name,
@@ -71,6 +108,8 @@ class SubprocessTaskQueue:
             returncode=rc,
             log_path=log_path or "",
             note=note or "",
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
         return t
 
@@ -83,6 +122,17 @@ class SubprocessTaskQueue:
             if status in ("succeeded", "failed", "cancelled"):
                 return
             if pid is None:
+                # Between attempts there is no process; only the waiter thread of the submitting process can
+                # resume the task. If that process is gone (bench restarted), nothing ever will.
+                owner = con.execute("SELECT owner_pid FROM tasks WHERE id=?", (tid,)).fetchone()[0]
+                if owner is None or (_pid_alive(owner) and not (owner == os.getpid() and tid not in _LIVE_WAITERS)):
+                    return
+                con.execute(
+                    "UPDATE tasks SET status='failed', finished_at=?, note=? WHERE id=? AND status='running' "
+                    "AND pid IS NULL",
+                    (_utc(), "bench restarted during retry backoff", tid),
+                )
+                con.commit()
                 return
         # check process
         try:
@@ -126,50 +176,101 @@ class SubprocessTaskQueue:
         new_status = "succeeded" if rc == 0 else "failed"
         with open_db(self.db) as con:
             con.execute(
-                "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status='running'",
-                (new_status, rc, _utc(), tid),
+                "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status='running' AND pid=?",
+                (new_status, rc, _utc(), tid, pid),  # pid guard: a retry may have replaced the dead process
             )
             con.commit()
 
-    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note=""):
+    retry_backoff_s = 1.0  # base delay before a retry; doubles per attempt, capped at 30 s
+
+    def _spawn(self, command, cwd, env_all, log_path: Path, header: str = ""):
+        with open(log_path, "ab") as lf:
+            if header:
+                lf.write(header.encode())
+                lf.flush()
+            return subprocess.Popen(
+                list(command),
+                cwd=str(cwd) if cwd else None,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                env=env_all,
+                start_new_session=True,
+            )
+
+    def _is_running(self, tid: str) -> bool:
+        """False once the task is cancelled or otherwise resolved (e.g. by `_refresh`): stop retrying."""
+        with open_db(self.db) as con:
+            row = con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()
+        return row is not None and row[0] == "running"
+
+    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries: int = 0):
+        if not isinstance(retries, int) or isinstance(retries, bool) or not 0 <= retries <= MAX_RETRIES:
+            raise ValueError(f"retries must be an integer from 0 to {MAX_RETRIES}, got {retries!r}")
+        max_attempts = retries + 1
         tid = uuid.uuid4().hex[:12]
         log_dir = Path(log_dir) if log_dir else self.log_dir
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{tid}.log"
-        lf = open(log_path, "wb")
         env_all = dict(os.environ)
         if env:
             env_all.update(env)
-        proc = subprocess.Popen(
-            list(command),
-            cwd=str(cwd) if cwd else None,
-            stdout=lf,
-            stderr=subprocess.STDOUT,
-            env=env_all,
-            start_new_session=True,
-        )
-        lf.close()
 
-        def _wait():
-            try:
-                rc = proc.wait()
-            except Exception:
-                rc = None
-            new_status = "succeeded" if rc == 0 else "failed"
-            try:
-                with open_db(self.db) as con:
-                    con.execute(
-                        "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status NOT IN ('cancelled')",  # noqa: E501
-                        (new_status, rc, _utc(), tid),
-                    )
-                    con.commit()
-            except Exception:
-                pass
+        def _header(n: int) -> str:
+            return f"--- attempt {n}/{max_attempts} ---\n" if max_attempts > 1 else ""
+
+        proc = self._spawn(command, cwd, env_all, log_path, _header(1))
+
+        def _wait(proc):
+            attempt = 1
+            while True:
+                try:
+                    rc = proc.wait()
+                except Exception:
+                    rc = None
+                if rc != 0 and attempt < max_attempts and self._is_running(tid):
+                    # Between attempts there is no process: pid NULL keeps _refresh from calling the task dead.
+                    try:
+                        with open_db(self.db) as con:
+                            con.execute("UPDATE tasks SET pid=NULL WHERE id=? AND status='running'", (tid,))
+                            con.commit()
+                    except Exception:
+                        pass
+                    deadline = time.monotonic() + min(self.retry_backoff_s * 2 ** (attempt - 1), 30.0)
+                    while time.monotonic() < deadline and self._is_running(tid):
+                        time.sleep(0.05)
+                    if not self._is_running(tid):
+                        return
+                    attempt += 1
+                    try:
+                        proc = self._spawn(command, cwd, env_all, log_path, _header(attempt))
+                        with open_db(self.db) as con:
+                            changed = con.execute(
+                                "UPDATE tasks SET pid=?, attempt=? WHERE id=? AND status='running'",
+                                (proc.pid, attempt, tid),
+                            ).rowcount
+                            con.commit()
+                        if not changed:  # cancelled while the process was starting
+                            _kill_group(proc.pid)
+                            return
+                        continue
+                    except Exception:
+                        rc = None
+                new_status = "succeeded" if rc == 0 else "failed"
+                try:
+                    with open_db(self.db) as con:
+                        con.execute(
+                            "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status NOT IN ('cancelled')",  # noqa: E501
+                            (new_status, rc, _utc(), tid),
+                        )
+                        con.commit()
+                except Exception:
+                    pass
+                return
 
         with open_db(self.db) as con:
             con.execute(
-                "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid,"
+                "attempt,max_attempts,owner_pid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     tid,
                     name or "",
@@ -181,10 +282,21 @@ class SubprocessTaskQueue:
                     str(log_path),
                     note,
                     proc.pid,
+                    1,
+                    max_attempts,
+                    os.getpid(),
                 ),
             )
             con.commit()
-        threading.Thread(target=_wait, daemon=True).start()
+
+        def _run_waiter():
+            try:
+                _wait(proc)
+            finally:
+                _LIVE_WAITERS.discard(tid)
+
+        _LIVE_WAITERS.add(tid)
+        threading.Thread(target=_run_waiter, daemon=True).start()
         return tid
 
     def list(self, status=None):
@@ -263,7 +375,7 @@ class TemporalTaskQueue:
     ) -> None:  # noqa: E501
         self._m = TemporalTaskManager(host=host, namespace=namespace, task_queue=task_queue)
 
-    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note=""):
+    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries: int = 0):
         t = self._m.submit(
             name,
             list(command),
@@ -271,6 +383,7 @@ class TemporalTaskQueue:
             env=env,
             log_dir=str(log_dir) if log_dir else None,
             note=note,
+            retries=retries,
         )
         return t.id if hasattr(t, "id") else str(t)
 

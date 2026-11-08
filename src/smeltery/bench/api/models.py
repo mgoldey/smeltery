@@ -109,12 +109,15 @@ class Task(BaseModel):
     log_path: str = ""
     note: str = ""
     run_id: str | None = None
+    attempt: int | None = None
+    max_attempts: int | None = None
 
 
 class TaskSubmit(BaseModel):
     name: str = ""
     command: list[str] | str
     cwd: str | None = None
+    retries: int = Field(default=0, ge=0, le=5, description="extra attempts after a failure; 0 runs once")
 
 
 class TaskLog(BaseModel):

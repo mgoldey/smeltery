@@ -3127,6 +3127,8 @@ export interface components {
         };
         /** Task */
         Task: {
+            /** Attempt */
+            attempt?: number | null;
             /** Command */
             command: string[];
             /** Created At */
@@ -3142,6 +3144,8 @@ export interface components {
              * @default
              */
             log_path: string;
+            /** Max Attempts */
+            max_attempts?: number | null;
             /** Name */
             name: string;
             /**
@@ -3174,6 +3178,12 @@ export interface components {
              * @default
              */
             name: string;
+            /**
+             * Retries
+             * @description extra attempts after a failure; 0 runs once
+             * @default 0
+             */
+            retries: number;
         };
         /** UnmeasuredLimit */
         UnmeasuredLimit: {

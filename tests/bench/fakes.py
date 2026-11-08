@@ -34,12 +34,22 @@ class FakeTaskQueue:
         self.executed = []
         self.logs = {}
 
-    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note=""):
+    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries=0):
         from smeltery.tasks import Task
 
         tid = f"t{len(self.submitted)}"
         self.submitted.append((name, list(command), cwd, note))
-        self.tasks.append(Task(id=tid, name=name, command=list(command), cwd=cwd or "", status="queued", note=note))
+        self.tasks.append(
+            Task(
+                id=tid,
+                name=name,
+                command=list(command),
+                cwd=cwd or "",
+                status="queued",
+                note=note,
+                max_attempts=retries + 1,
+            )
+        )
         return tid
 
     def list(self, status=None):

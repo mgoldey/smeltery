@@ -27,6 +27,9 @@ WORKFLOW_TYPE = "ShellTaskWorkflow"
 _TaskList = list["Task"]
 
 
+MAX_RETRIES = 5
+
+
 class TemporalUnavailable(RuntimeError):
     """Raised when the Temporal server cannot be reached."""
 
@@ -53,6 +56,8 @@ class Task:
     log_path: str = ""
     note: str = ""
     run_id: str | None = None
+    attempt: int | None = None  # current attempt, 1-based; None when the backend cannot say
+    max_attempts: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +73,8 @@ class Task:
             "log_path": self.log_path,
             "note": self.note,
             "run_id": self.run_id,
+            "attempt": self.attempt,
+            "max_attempts": self.max_attempts,
         }
 
 
@@ -111,12 +118,22 @@ try:  # temporalio is an optional runtime dependency for environments without it
     class ShellTaskWorkflow:
         @workflow.run
         async def run(self, spec: dict) -> int:
-            return await workflow.execute_activity(
-                run_shell_activity,
-                spec,
-                start_to_close_timeout=timedelta(hours=24),
-                retry_policy=RetryPolicy(maximum_attempts=1),
-            )
+            # The activity reports failure as a non-zero return code rather than by raising, so Temporal's own
+            # RetryPolicy would never fire; retries are a loop here. A cancel during the sleep ends the workflow.
+            max_attempts = int(spec.get("retries") or 0) + 1
+            rc = 0
+            for attempt in range(1, max_attempts + 1):
+                rc = await workflow.execute_activity(
+                    run_shell_activity,
+                    spec,
+                    start_to_close_timeout=timedelta(hours=24),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
+                if rc == 0 or attempt == max_attempts:
+                    break
+                await workflow.sleep(timedelta(seconds=min(2 ** (attempt - 1), 30)))
+                workflow.upsert_memo({"attempt": attempt + 1})
+            return rc
 
     TEMPORAL_AVAILABLE = True
 except Exception:  # pragma: no cover - import guard
@@ -174,7 +191,9 @@ class TemporalTaskManager:
             raise RuntimeError("TemporalTaskManager sync API called from a running event loop; use async methods")
         return asyncio.run(coro)
 
-    async def submit_async(self, name, command, *, cwd=None, env=None, log_dir=None, note=""):
+    async def submit_async(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries: int = 0):
+        if not isinstance(retries, int) or isinstance(retries, bool) or not 0 <= retries <= MAX_RETRIES:
+            raise ValueError(f"retries must be an integer from 0 to {MAX_RETRIES}, got {retries!r}")
         client = await self._client_or_connect()
         tid = f"smeltery-task-{uuid.uuid4().hex[:12]}"
         cwd_path = str(Path(cwd or ".").resolve())
@@ -188,13 +207,20 @@ class TemporalTaskManager:
             "cwd": cwd_path,
             "env": dict(env or {}),
             "log_path": log_path,
+            "retries": retries,
         }
         handle = await client.start_workflow(
             WORKFLOW_TYPE,
             spec,
             id=tid,
             task_queue=self.task_queue,
-            memo={"name": name or " ".join(command), "command": list(command), "cwd": cwd_path, "log_path": log_path},
+            memo={
+                "name": name or " ".join(command),
+                "command": list(command),
+                "cwd": cwd_path,
+                "log_path": log_path,
+                "max_attempts": retries + 1,
+            },
         )
         return Task(
             id=tid,
@@ -205,6 +231,7 @@ class TemporalTaskManager:
             created_at=_iso(datetime.now(timezone.utc)),
             log_path=log_path,
             note=note,
+            max_attempts=retries + 1,
             run_id=handle.run_id if hasattr(handle, "run_id") else None,
         )
 
@@ -335,6 +362,8 @@ class TemporalTaskManager:
         command = _m("command") or []
         cwd = _m("cwd") or ""
         log_path = _m("log_path") or ""
+        max_attempts = _m("max_attempts")
+        attempt = _m("attempt", 1 if isinstance(max_attempts, int) else None)
         if not isinstance(command, list):
             command = list(command) if command else []
         status_raw = getattr(desc, "status", None)
@@ -363,6 +392,8 @@ class TemporalTaskManager:
             finished_at=_iso(close_time),
             returncode=None,
             log_path=log_path if isinstance(log_path, str) else str(log_path),
+            attempt=attempt if isinstance(attempt, int) else None,
+            max_attempts=max_attempts if isinstance(max_attempts, int) else None,
             run_id=run_id or getattr(desc, "run_id", None),
         )
 
