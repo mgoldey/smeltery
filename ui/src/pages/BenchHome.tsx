@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, unwrap } from "../api/client";
+import { ImportBundle } from "../components/ImportBundle";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
 
@@ -252,6 +253,7 @@ export function BenchHome() {
             ) : (
               <p className="empty-state">No pipelines yet. Start one above.</p>
             )}
+            <ImportBundle />
           </section>
           <section aria-labelledby="runs-h">
             <h3 id="runs-h">Runs</h3>

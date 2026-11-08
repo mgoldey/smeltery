@@ -143,3 +143,26 @@ class FilesystemPipelineStore:
                 st = p.stat()
                 out.append(InputFile(p.name, st.st_size, st.st_mtime, _sha_file(p)))
         return sorted(out, key=lambda f: (-f.mtime, f.name))
+
+    def rename(self, old: str, new: str) -> PipelineFile:
+        src, dst = self._folder(old), self._folder(new)
+        with self._lock:
+            if not (src / CONFIG).is_file():
+                raise KeyError(old)
+            if dst.exists():
+                raise FileExistsError(new)
+            src.rename(dst)
+        return self.get(new)
+
+    def clone(self, src: str, new: str) -> PipelineFile:
+        source, dst = self.get(src).folder, self._folder(new)
+        with self._lock:
+            if dst.exists():
+                raise FileExistsError(new)
+            try:
+                # `preview/` is derived from the config (and owned by a preview task), so a copy starts without it
+                shutil.copytree(source, dst, ignore=shutil.ignore_patterns("preview", ".config-*.tmp", ".upload-*.tmp"))
+            except BaseException:
+                shutil.rmtree(dst, ignore_errors=True)
+                raise
+        return self.get(new)

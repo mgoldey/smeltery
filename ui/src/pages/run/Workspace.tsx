@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, unwrap, type Schemas } from "../../api/client";
 import { ApiError } from "../../api/http";
 import { Shell } from "../../components/Shell";
@@ -325,6 +325,29 @@ function ConfigToolbar({
   name: string;
   onCommit: (text: string) => void;
 }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const lifecycle = async (op: "rename" | "clone") => {
+    const next = window.prompt(
+      op === "rename"
+        ? `Rename ${name} to (a-z, 0-9, _ and -). Unsaved edits to the draft are lost.`
+        : `Clone ${name} as (a-z, 0-9, _ and -). Only the saved config is copied, not unsaved edits.`,
+      `${name}-${op === "clone" ? "copy" : "renamed"}`,
+    )?.trim();
+    if (!next) return;
+    try {
+      const args = { params: { path: { name } }, body: { new_name: next } };
+      const made = await unwrap(
+        op === "rename" ? api.POST("/api/pipelines/{name}/rename", args) : api.POST("/api/pipelines/{name}/clone", args),
+      );
+      setLifecycleError(null);
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      navigate(`/pipelines/${made.name}`);
+    } catch (e) {
+      setLifecycleError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const download = () => {
     // The anchor goes into the document and the blob URL is revoked in a later task: Firefox starts the download
     // after the click handler returns, and revoking in the same task leaves it empty or never started. This is the
@@ -351,10 +374,21 @@ function ConfigToolbar({
           Download saved bundle
         </a>
         {dirty ? <span className="lede">(unsaved edits not included)</span> : null}
+        <button type="button" onClick={() => void lifecycle("rename")}>
+          Rename…
+        </button>
+        <button type="button" onClick={() => void lifecycle("clone")}>
+          Clone…
+        </button>
         <span className="lede mono" title={`${folder}/config.toml`}>
           {folder}/config.toml
         </span>
       </div>
+      {lifecycleError ? (
+        <p className="field-error" role="alert">
+          {lifecycleError}
+        </p>
+      ) : null}
       <details className="config-edit">
         <summary>Edit as TOML</summary>
         <TomlEditor value={text} onCommit={onCommit} label="Pipeline TOML" />

@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from smeltery import __version__ as smeltery_version
+from smeltery.bench.adapters.pipeline_store import NAME
 from smeltery.bench.ports.pipeline_store import PipelineFile, StaleWrite
 from smeltery.bench.provisional import place_site
 from smeltery.gui import steps as step_model
@@ -33,6 +34,7 @@ from smeltery.gui.config_text import ConfigTextError, apply, diff_lines
 from smeltery.gui.pipeline import Pipeline
 from smeltery.run_inputs import input_paths
 
+from ..use_cases import bundle_import
 from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
 from . import models as M
@@ -434,6 +436,173 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
         if staging is not None:
             staging.cleanup()
     return _doc(made, notes)
+
+
+class NewName(BaseModel):
+    new_name: str
+
+
+def _busy_with(request: Request, folder: Path, name: str) -> list[str]:
+    """Ids of the queued or running tasks that work in this pipeline: its preview, or anything whose cwd is inside it
+    (a prebuilt example run lives under `run/`). Launched runs are NOT tied to the pipeline: they stage their own
+    copy of the config and inputs into OUT, and a run record stores no pipeline name, so no run is orphaned by a
+    rename."""
+    out = []
+    for t in ports(request).task_queue.list():
+        if t.status not in ("queued", "running"):
+            continue
+        cwd = Path(t.cwd) if t.cwd else None
+        if t.name == f"preview {name}" or (cwd is not None and (cwd == folder or folder in cwd.parents)):
+            out.append(t.id)
+    return out
+
+
+def _lifecycle(request: Request, name: str, new_name: str, op: Literal["rename", "clone"]) -> Any:
+    f = _get(request, name)
+    if not NAME.fullmatch(new_name):
+        raise HTTPException(
+            status_code=400, detail=f"invalid pipeline name {new_name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}"
+        )
+    if new_name == name:
+        raise HTTPException(status_code=400, detail="the new name is the same as the old one")
+    if op == "rename":
+        busy = _busy_with(request, f.folder, name)
+        if busy:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "reason": f"pipeline {name} has tasks queued or running ({', '.join(busy)}): wait or cancel them"
+                },
+            )
+    try:
+        made = getattr(_store(request), op)(name, new_name)
+    except FileExistsError:
+        return JSONResponse(status_code=409, content={"reason": f"pipeline {new_name} already exists"})
+    return _doc(made)
+
+
+@router.post(
+    "/pipelines/{name}/rename",
+    response_model=M.PipelineDoc,
+    responses={400: {"model": M.Problem}, 409: {"model": M.Problem}},
+)
+def rename_pipeline(request: Request, name: str, body: NewName) -> Any:
+    """Move the pipeline's folder to a new name. Refused (409) while a task of this pipeline is queued or running.
+    Runs are unaffected: they keep their own staged copy and record no pipeline name."""
+    return _lifecycle(request, name, body.new_name, "rename")
+
+
+@router.post(
+    "/pipelines/{name}/clone",
+    response_model=M.PipelineDoc,
+    status_code=201,
+    responses={400: {"model": M.Problem}, 409: {"model": M.Problem}},
+)
+def clone_pipeline(request: Request, name: str, body: NewName) -> Any:
+    """A copy of the pipeline's folder (config, inputs, everything but `preview/`) under a new name."""
+    return _lifecycle(request, name, body.new_name, "clone")
+
+
+#: A bundle larger than this is refused while it streams in (before it is unpacked).
+MAX_BUNDLE = bundle_import.MAX_TOTAL
+
+
+class ImportedFile(BaseModel):
+    path: str
+    ok: bool
+    message: str | None = None
+
+
+class ImportResult(BaseModel):
+    pipeline: M.PipelineDoc | None = Field(description="null when anything was refused: nothing is created then")
+    files: list[ImportedFile]
+    notes: list[str] = []
+
+
+def _unique_name(store: Any, base: str) -> str:
+    taken = set(store.list())
+    if base not in taken:
+        return base
+    for i in range(2, 1000):
+        cand = f"{base[: 64 - len(str(i)) - 1]}-{i}"
+        if cand not in taken:
+            return cand
+    raise HTTPException(status_code=409, detail=f"no free name starting with {base}")
+
+
+@router.post(
+    "/pipelines/import",
+    response_model=ImportResult,
+    status_code=201,
+    responses={
+        400: {"model": M.Problem},
+        409: {"model": M.Problem},
+        413: {"model": M.Problem},
+        422: {"model": ImportResult},
+    },
+)
+async def import_pipeline(request: Request, name: str | None = None) -> Any:
+    """Create a pipeline from a bundle zip (the body is the zip's bytes, as an upload's is). The name is `name`, else
+    the bundle's own, made unique with a -2, -3 suffix when taken; a `name` that is taken is a 409. Any bad entry
+    (path trickery, a sha256 that does not match the manifest) refuses the whole bundle with a 422 listing each one.
+    An input exported from an absolute path is rewritten to its imported `inputs/<basename>`."""
+    store = _store(request)
+    if name is not None and not NAME.fullmatch(name):
+        raise HTTPException(status_code=400, detail=f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}")
+    if name is not None and name in store.list():
+        return JSONResponse(status_code=409, content={"reason": f"pipeline {name} already exists"})
+    with tempfile.TemporaryDirectory(prefix="smeltery-import-") as tmp:
+        zpath = Path(tmp) / "bundle.zip"
+        size = 0
+        with zpath.open("wb") as w:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_BUNDLE:
+                    raise HTTPException(status_code=413, detail=f"bundle larger than {MAX_BUNDLE // (1024 * 1024)} MB")
+                w.write(chunk)
+        staging = Path(tmp) / "staged"
+        staging.mkdir()
+        try:
+            u = bundle_import.unpack(zpath, staging)
+        except bundle_import.BundleRefused as e:
+            raise HTTPException(status_code=e.status, detail=str(e)) from e
+        errors = list(u.errors)
+        text = u.config
+        if not errors:
+            try:
+                _validate(text)
+            except ConfigTextError as e:
+                errors.append(("config.toml", str(e)))
+        notes: list[str] = []
+        if not errors:
+            for rel, original in u.originals.items():
+                for q in ('"', "'"):
+                    if f"{q}{original}{q}" in text:
+                        text = text.replace(f"{q}{original}{q}", f"{q}{rel}{q}")
+                        notes.append(f"{original} -> {rel}")
+                        break
+                else:
+                    errors.append((rel, f"the config does not name {original}"))
+        if errors:
+            bad = {p for p, _ in errors}
+            files = [ImportedFile(path=p, ok=False, message=m) for p, m in errors]
+            files += [ImportedFile(path=r, ok=True) for r in u.files if r not in bad]
+            return JSONResponse(
+                status_code=422, content=ImportResult(pipeline=None, files=files).model_dump(mode="json")
+            )
+        target = name
+        if target is None:
+            base = re.sub(r"[^a-z0-9_-]+", "-", (u.pipeline or u.top).lower()).strip("-_")[:64]
+            if not NAME.fullmatch(base):
+                raise HTTPException(status_code=400, detail="the bundle's name is not usable: give one with ?name=")
+            target = _unique_name(store, base)
+        try:
+            made = store.create(target, text, u.files)
+        except FileExistsError:
+            return JSONResponse(status_code=409, content={"reason": f"pipeline {target} already exists"})
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    return ImportResult(pipeline=_doc(made), files=[ImportedFile(path=r, ok=True) for r in u.files], notes=notes)
 
 
 def _preview_task(request: Request, name: str) -> str | None:
