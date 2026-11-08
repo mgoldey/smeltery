@@ -11,9 +11,8 @@ import tempfile
 import threading
 from pathlib import Path
 
-from ..ports.pipeline_store import InputFile, PipelineFile, StaleWrite
+from ..ports.pipeline_store import NAME, InputFile, PipelineFile, StaleWrite
 
-NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 CONFIG = "config.toml"
 # An uploaded input's name: one path component, no leading dot, so it can neither leave the folder nor hide in it.
 # Spaces and parentheses are allowed because that is what a browser hands over ("7lcj (1).pdb"); what is excluded is
@@ -161,7 +160,12 @@ class FilesystemPipelineStore:
                 raise FileExistsError(new)
             try:
                 # `preview/` is derived from the config (and owned by a preview task), so a copy starts without it
-                shutil.copytree(source, dst, ignore=shutil.ignore_patterns("preview", ".config-*.tmp", ".upload-*.tmp"))
+                shutil.copytree(
+                    source,
+                    dst,
+                    symlinks=True,
+                    ignore=shutil.ignore_patterns("preview", ".config-*.tmp", ".upload-*.tmp"),
+                )
             except BaseException:
                 shutil.rmtree(dst, ignore_errors=True)
                 raise

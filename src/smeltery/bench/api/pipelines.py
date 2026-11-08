@@ -19,13 +19,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from smeltery import __version__ as smeltery_version
-from smeltery.bench.adapters.pipeline_store import NAME
-from smeltery.bench.ports.pipeline_store import PipelineFile, StaleWrite
+from smeltery.bench.ports.pipeline_store import NAME, PipelineFile, StaleWrite
 from smeltery.bench.provisional import place_site
 from smeltery.gui import steps as step_model
 from smeltery.gui._toml import dumps
@@ -323,9 +323,14 @@ def pipeline_bundle(request: Request, name: str) -> FileResponse:
             if path.is_absolute() or "/" in value or "." in path.name:
                 missing.append(value)
             continue
-        sources.setdefault(rel, src)
         if path.is_absolute():
+            # two different absolute files may share a basename: the later one gets a name of its own
+            n = 1
+            while rel in sources and sources[rel] != src:
+                n += 1
+                rel = f"inputs/{n}-{path.name}"
             originals[rel] = value
+        sources.setdefault(rel, src)
     tmp = tempfile.NamedTemporaryFile(prefix="bundle-", suffix=".zip", delete=False)
     tmp.close()
     files: dict[str, Any] = {}
@@ -544,8 +549,9 @@ def _unique_name(store: Any, base: str) -> str:
 async def import_pipeline(request: Request, name: str | None = None) -> Any:
     """Create a pipeline from a bundle zip (the body is the zip's bytes, as an upload's is). The name is `name`, else
     the bundle's own, made unique with a -2, -3 suffix when taken; a `name` that is taken is a 409. Any bad entry
-    (path trickery, a sha256 that does not match the manifest) refuses the whole bundle with a 422 listing each one.
-    An input exported from an absolute path is rewritten to its imported `inputs/<basename>`."""
+    (path trickery, a sha256 that does not match the manifest, damage) refuses the whole bundle with a 422 listing
+    each one. An input exported from an absolute path is rewritten to its imported `inputs/<basename>`; any other
+    absolute or `..` input path is refused, so a hostile config cannot point a run at a file outside the pipeline."""
     store = _store(request)
     if name is not None and not NAME.fullmatch(name):
         raise HTTPException(status_code=400, detail=f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}")
@@ -559,50 +565,76 @@ async def import_pipeline(request: Request, name: str | None = None) -> Any:
                 size += len(chunk)
                 if size > MAX_BUNDLE:
                     raise HTTPException(status_code=413, detail=f"bundle larger than {MAX_BUNDLE // (1024 * 1024)} MB")
-                w.write(chunk)
-        staging = Path(tmp) / "staged"
-        staging.mkdir()
+                await run_in_threadpool(w.write, chunk)
+        return await run_in_threadpool(_import_bundle, store, zpath, Path(tmp) / "staged", name)
+
+
+def _escapes(value: str) -> bool:
+    p = Path(value)
+    return p.is_absolute() or ".." in p.parts or value.startswith("~") or bool(re.match(r"^[A-Za-z]:", value))
+
+
+def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> Any:
+    """The blocking half of an import: unpack, verify, rewrite, create."""
+    from smeltery.gui.config_text import set_value
+
+    staging.mkdir()
+    try:
+        u = bundle_import.unpack(zpath, staging)
+    except bundle_import.BundleRefused as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
+    errors = list(u.errors)
+    text = u.config
+    notes: list[str] = []
+    if not errors:
         try:
-            u = bundle_import.unpack(zpath, staging)
-        except bundle_import.BundleRefused as e:
-            raise HTTPException(status_code=e.status, detail=str(e)) from e
-        errors = list(u.errors)
-        text = u.config
-        if not errors:
-            try:
-                _validate(text)
-            except ConfigTextError as e:
-                errors.append(("config.toml", str(e)))
-        notes: list[str] = []
-        if not errors:
-            for rel, original in u.originals.items():
-                for q in ('"', "'"):
-                    if f"{q}{original}{q}" in text:
-                        text = text.replace(f"{q}{original}{q}", f"{q}{rel}{q}")
-                        notes.append(f"{original} -> {rel}")
-                        break
-                else:
-                    errors.append((rel, f"the config does not name {original}"))
-        if errors:
-            bad = {p for p, _ in errors}
-            files = [ImportedFile(path=p, ok=False, message=m) for p, m in errors]
-            files += [ImportedFile(path=r, ok=True) for r in u.files if r not in bad]
-            return JSONResponse(
-                status_code=422, content=ImportResult(pipeline=None, files=files).model_dump(mode="json")
-            )
-        target = name
-        if target is None:
-            base = re.sub(r"[^a-z0-9_-]+", "-", (u.pipeline or u.top).lower()).strip("-_")[:64]
-            if not NAME.fullmatch(base):
-                raise HTTPException(status_code=400, detail="the bundle's name is not usable: give one with ?name=")
-            target = _unique_name(store, base)
+            _validate(text)
+        except ConfigTextError as e:
+            errors.append(("config.toml", str(e)))
+    if not errors:
+        cfg = tomllib.loads(text)
+        by_original = {orig: rel for rel, orig in u.originals.items()}
+        used: set[str] = set()
+        for table, key in input_paths():
+            value = (cfg.get(table) or {}).get(key) if isinstance(cfg.get(table), dict) else None
+            if not isinstance(value, str):
+                continue
+            if value in by_original:
+                text = set_value(text, f"{table}.{key}", by_original[value])
+                notes.append(f"{table}.{key}: {value} -> {by_original[value]}")
+                used.add(value)
+            elif _escapes(value):
+                errors.append((f"{table}.{key}", f"{value!r} points outside the bundle and was not exported with it"))
+        errors += [(rel, f"the config does not name {orig}") for orig, rel in by_original.items() if orig not in used]
+    if not errors:
         try:
-            made = store.create(target, text, u.files)
-        except FileExistsError:
-            return JSONResponse(status_code=409, content={"reason": f"pipeline {target} already exists"})
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-    return ImportResult(pipeline=_doc(made), files=[ImportedFile(path=r, ok=True) for r in u.files], notes=notes)
+            _validate(text)
+        except ConfigTextError as e:
+            errors.append(("config.toml", f"after rewriting input paths: {e}"))
+    if errors:
+        bad = {p for p, _ in errors}
+        files = [ImportedFile(path=p, ok=False, message=m) for p, m in errors]
+        files += [ImportedFile(path=r, ok=True) for r in u.files if r not in bad]
+        return JSONResponse(status_code=422, content=ImportResult(pipeline=None, files=files).model_dump(mode="json"))
+    notes += [f"not found when the bundle was exported: {m}" for m in u.missing]
+    target = name
+    if target is None:
+        base = re.sub(r"[^a-z0-9_-]+", "-", (u.pipeline or u.top).lower()).strip("-_")[:64]
+        if not NAME.fullmatch(base):
+            raise HTTPException(status_code=400, detail="the bundle's name is not usable: give one with ?name=")
+        target = _unique_name(store, base)
+    try:
+        made = store.create(target, text, u.files)
+    except FileExistsError:
+        return JSONResponse(status_code=409, content={"reason": f"pipeline {target} already exists"})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return JSONResponse(
+        status_code=201,
+        content=ImportResult(
+            pipeline=_doc(made), files=[ImportedFile(path=r, ok=True) for r in u.files], notes=notes
+        ).model_dump(mode="json"),
+    )
 
 
 def _preview_task(request: Request, name: str) -> str | None:

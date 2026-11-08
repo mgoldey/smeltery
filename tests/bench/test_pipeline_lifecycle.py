@@ -213,3 +213,100 @@ def test_oversize_bundles_are_refused(client_for, monkeypatch):
     monkeypatch.setattr(api, "MAX_BUNDLE", 50)
     assert _import(c, data).status_code == 413  # refused while streaming in
     assert c.get("/api/pipelines").json() == []
+
+
+# ------------------------------------------------------------------------------------------------ review fixes
+
+
+def _zip(entries: list[tuple[str, bytes]], man: dict, top="t", compression=zipfile.ZIP_STORED) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression) as z:
+        for rel, b in entries:
+            z.writestr(f"{top}/{rel}" if not rel.startswith(top + "/") else rel, b)
+        z.writestr(f"{top}/manifest.json", json.dumps(man))
+    return buf.getvalue()
+
+
+def _man(files: dict[str, bytes], **extra) -> dict:
+    return {"pipeline": "t", "files": {k: {"sha256": _sha(v)} for k, v in files.items()}, **extra}
+
+
+def test_a_corrupt_entry_is_a_per_file_422_not_a_500(client_for):
+    c, _ = client_for()
+    data = bytearray(_bundle({"config.toml": CFG, "r.pdb": PDB.encode()}, top="t"))
+    at = bytes(data).index(PDB.encode())
+    data[at] ^= 0xFF  # stored, so the bytes are there to damage: the CRC no longer matches
+    r = _import(c, bytes(data))
+    assert r.status_code == 422, r.text
+    assert [f["path"] for f in r.json()["files"] if not f["ok"]] == ["r.pdb"]
+    assert c.get("/api/pipelines").json() == []
+
+
+def test_a_file_and_a_folder_of_the_same_name_are_refused_not_a_500(client_for):
+    files = {"config.toml": CFG, "inputs": b"a file", "inputs/x.pdb": PDB.encode()}
+    r = _import(client_for()[0], _bundle(files, top="t"))
+    assert r.status_code == 422, r.text
+    assert any(not f["ok"] for f in r.json()["files"])
+
+
+def test_duplicate_and_unnormalised_entry_names_are_refused(client_for):
+    c, _ = client_for()
+    files = {"config.toml": CFG, "x.pdb": PDB.encode()}
+    for dup in ("t/x.pdb", "t/./x.pdb"):
+        r = _import(c, _bundle(files, top="t", extra={dup: b"other"}))
+        assert r.status_code == 422, (dup, r.text)
+        assert dup in {f["path"] for f in r.json()["files"] if not f["ok"]}
+
+
+def test_a_non_object_manifest_entry_is_an_error(client_for):
+    man = _man({"config.toml": CFG})
+    man["files"]["r.pdb"] = "oops"
+    r = _import(client_for()[0], _zip([("config.toml", CFG), ("r.pdb", b"x")], man))
+    assert r.status_code == 422 and "r.pdb" in {f["path"] for f in r.json()["files"] if not f["ok"]}
+
+
+def test_a_bad_name_query_is_a_400(client_for):
+    c, _ = client_for()
+    data = _bundle({"config.toml": CFG})
+    for bad in ("../x", "A b", "x" * 65):
+        assert _import(c, data, name=bad).status_code == 400
+
+
+def test_a_hostile_absolute_input_not_in_the_bundle_is_refused(client_for):
+    c, _ = client_for()
+    cfg = b'campaign = "x"\n[structure]\nspec = "/home/victim/.ssh/id_rsa"\n'
+    r = _import(c, _bundle({"config.toml": cfg}))
+    assert r.status_code == 422, r.text
+    assert any("structure.spec" in f["path"] for f in r.json()["files"] if not f["ok"])
+    cfg = b'campaign = "x"\n[structure]\nspec = "../../secret.pdb"\n'
+    assert _import(c, _bundle({"config.toml": cfg})).status_code == 422
+    assert c.get("/api/pipelines").json() == []
+
+
+def test_missing_inputs_from_the_export_are_surfaced_as_notes(client_for):
+    man = _man({"config.toml": CFG}, missing=["gone.pdb"])
+    r = _import(client_for()[0], _zip([("config.toml", CFG)], man))
+    assert r.status_code == 201, r.text
+    assert any("gone.pdb" in n for n in r.json()["notes"])
+
+
+def test_two_absolute_inputs_sharing_a_basename_keep_their_own_content(client_for, tmp_path):
+    c, _ = client_for()
+    _made(c)
+    a, b = tmp_path / "a" / "x.pdb", tmp_path / "b" / "x.pdb"
+    a.parent.mkdir()
+    b.parent.mkdir()
+    a.write_text(PDB)
+    b.write_text(PDB + "TER\n")
+    doc = c.get("/api/pipelines/p").json()
+    toml = doc["toml"].replace("[pocket]\n", f'[pocket]\nfile = "{b}"\n') + f'\n[structure]\nspec = "{a}"\n'
+    assert c.put("/api/pipelines/p", json={"toml": toml, "base_sha256": doc["sha256"]}).status_code == 200
+    r = _import(c, c.get("/api/pipelines/p/bundle").content, name="q")
+    assert r.status_code == 201, r.text
+    import tomllib
+
+    got = tomllib.loads(r.json()["pipeline"]["toml"])
+    folder = Path(r.json()["pipeline"]["folder"])
+    assert (folder / got["structure"]["spec"]).read_text() == PDB
+    assert (folder / got["pocket"]["file"]).read_text() == PDB + "TER\n"
+    assert got["structure"]["spec"] != got["pocket"]["file"]

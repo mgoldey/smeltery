@@ -11,6 +11,7 @@ import json
 import re
 import stat
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -19,6 +20,7 @@ COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()+._-]{0,127}")
 MAX_ENTRIES = 500
 MAX_FILE = 64 * 1024 * 1024
 MAX_TOTAL = 256 * 1024 * 1024
+_DAMAGED = (zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError, OSError)
 
 
 class BundleRefused(Exception):
@@ -37,6 +39,7 @@ class Unpacked:
     files: dict[str, Path]  # relative path -> staged file (config.toml and manifest.json excluded)
     originals: dict[str, str]  # relative path -> the absolute path the config named when it was exported
     errors: list[tuple[str, str]] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)  # inputs the exporter could not find
 
 
 def _bad_name(name: str) -> str | None:
@@ -68,6 +71,9 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
         entries: dict[str, zipfile.ZipInfo] = {}
         for i in infos:
             why = _bad_name(i.filename)
+            norm = PurePosixPath(i.filename).as_posix()
+            if why is None and norm in entries:
+                why = f"repeats the entry {norm}" if norm == i.filename else f"names the same file as {norm}"
             if why is None and stat.S_ISLNK(i.external_attr >> 16):
                 why = "symbolic link"
             if why is None and i.file_size > max_file:
@@ -75,7 +81,7 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
             if why is not None:
                 errors.append((i.filename, why))
             else:
-                entries[i.filename] = i
+                entries[norm] = i
         if errors:  # name problems make "the single top folder" meaningless: report them as they are
             return Unpacked("", None, "", {}, {}, errors)
         tops = {PurePosixPath(n).parts[0] for n in entries}
@@ -89,9 +95,12 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
         try:
             manifest = json.loads(z.read(entries[f"{top}/manifest.json"]).decode("utf-8"))
             listed = manifest["files"]
-            assert isinstance(listed, dict)
-        except (ValueError, KeyError, AssertionError) as e:
+        except (ValueError, KeyError, TypeError) as e:
             raise BundleRefused("manifest.json is not a bundle manifest") from e
+        except _DAMAGED as e:
+            raise BundleRefused(f"manifest.json cannot be read from the zip: {e}") from e
+        if not isinstance(listed, dict):
+            raise BundleRefused("manifest.json is not a bundle manifest")
         rels = {n[len(top) + 1 :]: i for n, i in entries.items()}
         for rel in rels:
             if rel != "manifest.json" and rel not in listed:
@@ -105,22 +114,29 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
         spent = 0
         for rel, info in rels.items():
             meta = listed.get(rel)
-            if rel == "manifest.json" or not isinstance(meta, dict):
+            if rel == "manifest.json" or rel not in listed:
+                continue
+            if not isinstance(meta, dict):
+                errors.append((rel, "its manifest.json entry is not an object"))
                 continue
             if rel != "config.toml" and not all(COMPONENT.fullmatch(c) for c in PurePosixPath(rel).parts):
                 errors.append((rel, "file name not allowed (plain names only, no leading dot)"))
                 continue
             dest = staging / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
             h, n = hashlib.sha256(), 0
-            with z.open(info) as r, dest.open("wb") as w:
-                while chunk := r.read(1 << 20):  # count what is really there: the declared size can lie
-                    n += len(chunk)
-                    spent += len(chunk)
-                    if n > max_file or spent > max_total:
-                        raise BundleRefused("the bundle expands to more than its declared size", 413)
-                    h.update(chunk)
-                    w.write(chunk)
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(info) as r, dest.open("wb") as w:
+                    while chunk := r.read(1 << 20):  # count what is really there: the declared size can lie
+                        n += len(chunk)
+                        spent += len(chunk)
+                        if n > max_file or spent > max_total:
+                            raise BundleRefused("the bundle expands to more than its declared size", 413)
+                        h.update(chunk)
+                        w.write(chunk)
+            except _DAMAGED as e:  # bad CRC, encrypted, unsupported compression, a file where a folder is needed
+                errors.append((rel, f"cannot be extracted: {e}"))
+                continue
             if h.hexdigest() != meta.get("sha256"):
                 errors.append((rel, "sha256 does not match manifest.json"))
                 continue
@@ -134,4 +150,5 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
             if isinstance(meta.get("original_path"), str):
                 originals[rel] = meta["original_path"]
     pipeline = manifest.get("pipeline")
-    return Unpacked(top, pipeline if isinstance(pipeline, str) else None, config, files, originals, errors)
+    missing = [m for m in manifest.get("missing") or [] if isinstance(m, str)] if isinstance(manifest, dict) else []
+    return Unpacked(top, pipeline if isinstance(pipeline, str) else None, config, files, originals, errors, missing)

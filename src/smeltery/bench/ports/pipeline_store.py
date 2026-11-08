@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import builtins
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
 class StaleWrite(Exception):
