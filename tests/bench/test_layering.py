@@ -26,8 +26,9 @@ def test_no_sqlite_or_temporal_outside_the_adapters():
     root = pathlib.Path("src/smeltery")
     bad = []
     for p in root.rglob("*.py"):
-        # tasks.py and temporal_run.py are the CLI's own Temporal adapters (shell tasks; pipeline runs)
-        if "bench/adapters" in p.as_posix() or p.name in ("tasks.py", "temporal_run.py"):
+        # tasks.py and temporal_run.py are the CLI's own Temporal adapters (shell tasks; pipeline runs);
+        # backup.py is the CLI's sqlite snapshot for `smeltery backup`
+        if "bench/adapters" in p.as_posix() or p.name in ("tasks.py", "temporal_run.py", "backup.py"):
             continue
         if re.search(r"^\s*import\s+sqlite3|^\s*(from|import)\s+temporalio", p.read_text(), re.M):
             bad.append(p.relative_to(root).as_posix())
