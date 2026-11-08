@@ -80,7 +80,12 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
                 y=[y[i] for i in idx],
                 mode="markers",
                 name=name,
-                marker={"size": 10, "symbol": symbol, "color": colour, "line": {"width": 2, "color": "white"}},
+                marker={
+                    "size": 12 if symbol == "x" else 10,  # a thin x is easily lost under the error bar
+                    "symbol": symbol,
+                    "color": colour,
+                    "line": {"width": 1 if symbol == "x" else 2, "color": "white"},
+                },
                 error_x={
                     "type": "data",
                     "symmetric": False,

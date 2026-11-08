@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 
@@ -14,6 +15,15 @@ class StructureCheck:
     warnings: list[str] = field(default_factory=list)
 
 
+_SSSEQ = re.compile(r"^-?\d+[A-Z]?$")
+
+
+def _close(gaps: list[str], chain: str, run: list[int]) -> None:
+    if not run or run == [0]:  # numbering -1 -> 1 skips 0 by convention
+        return
+    gaps.append(f"{chain} {run[0]}-{run[-1]}" if len(run) > 1 else f"{chain} {run[0]}")
+
+
 def check_pdb(text: str) -> StructureCheck:
     residues: dict[str, list[int]] = {}
     seen: set[tuple[str, int, str]] = set()
@@ -22,11 +32,14 @@ def check_pdb(text: str) -> StructureCheck:
     altlocs = 0
     n465: int | None = None
     in465 = False
+    het_seq: dict[str, set[int]] = {}
     for line in text.splitlines():
+        if line.startswith("ENDMDL"):  # NMR ensembles repeat the model; count the first only
+            break
         if line.startswith("REMARK 465"):
             parts = line[10:].split()
             # data rows are "<resname> <chain> <seq>"; the header and legend lines fail the int test
-            if len(parts) >= 3 and parts[-1].lstrip("-").isdigit() and len(parts[0]) <= 4 and in465:
+            if len(parts) >= 3 and _SSSEQ.match(parts[-1]) and len(parts[0]) <= 4 and in465:
                 n465 = (n465 or 0) + 1
             elif "RES C SSSEQ" in line:
                 in465 = True
@@ -44,6 +57,8 @@ def check_pdb(text: str) -> StructureCheck:
             continue
         if line[16:17].strip():
             altlocs += 1
+        if line.startswith("HETATM"):
+            het_seq.setdefault(line[21:22].strip() or "_", set()).add(seq)  # e.g. MSE inside the chain
         if line.startswith("ATOM"):
             key = (line[21:22].strip() or "_", seq, line[26:27])
             if key not in seen:
@@ -53,9 +68,15 @@ def check_pdb(text: str) -> StructureCheck:
     gaps: list[str] = []
     for c, seqs in residues.items():
         have = sorted(set(seqs))
-        for a, b in zip(have, have[1:]):
-            if b - a > 1:
-                gaps.append(f"{c} {a + 1}-{b - 1}" if b - a > 2 else f"{c} {a + 1}")
+        occupied = set(have) | het_seq.get(c, set())
+        run: list[int] = []
+        for n in range(have[0], have[-1] + 1):
+            if n not in occupied:
+                run.append(n)
+                continue
+            _close(gaps, c, run)
+            run = []
+        _close(gaps, c, run)
     warnings = []
     if bad:
         warnings.append(f"{bad} ATOM/HETATM line(s) failed to parse (non-numeric residue number or coordinates)")

@@ -462,8 +462,7 @@ def test_forest_status_is_not_encoded_by_colour_alone(run):
 
     fig = forest_figure(results.ddE_table(run), run)
     sym = {t.name: t.marker.symbol for t in fig.data if t.name != "one pose"}
-    assert sym["kept by the cut"] == STATUS_SYMBOL[True]
-    assert sym["dropped by the cut"] == STATUS_SYMBOL[False]
+    assert sym == {"kept by the cut": "circle", "dropped by the cut": "x"}
     assert len(set(STATUS_SYMBOL.values())) == 3  # kept, dropped and not-cut are all pairwise distinguishable
     assert all(t.showlegend is not False for t in fig.data if t.name in sym)
 

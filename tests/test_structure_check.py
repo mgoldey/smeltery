@@ -43,3 +43,30 @@ def test_check_pdb_clean_file_has_no_warnings_and_no_remark_465_is_none():
 def test_remark_465_header_without_rows_means_zero_missing():
     c = check_pdb("REMARK 465   M RES C SSSEQI\n" + _atom("ATOM", 1, "CA", "ALA", "A", 1, 1.0))
     assert c.missing_residues == 0
+
+
+def test_hetatm_residue_inside_a_chain_is_not_a_gap():
+    pdb = "\n".join(
+        [_atom("ATOM", 1, "CA", "ALA", "A", 44, 1.0), _atom("HETATM", 2, "SE", "MSE", "A", 45, 2.0)]
+        + [_atom("ATOM", 3, "CA", "ALA", "A", 46, 3.0)]
+    )
+    c = check_pdb(pdb)
+    assert c.possible_gaps == [] and c.n_hetatm == 1
+
+
+def test_remark_465_rows_with_insertion_codes_are_counted():
+    c = check_pdb("REMARK 465   M RES C SSSEQI\nREMARK 465     SER A    52A\nREMARK 465     GLY A    53\n")
+    assert c.missing_residues == 2
+
+
+def test_only_the_first_model_is_counted():
+    model = _atom("ATOM", 1, "CA", "ALA", "A", 1, 1.0, alt="A") + "\n" + _atom("HETATM", 2, "O", "HOH", "A", 9, 2.0)
+    c = check_pdb(f"MODEL 1\n{model}\nENDMDL\nMODEL 2\n{model}\nENDMDL")
+    assert c.n_hetatm == 1 and c.warnings == [
+        "1 atom record(s) carry an alternate-location flag; only one conformer is used"
+    ]
+
+
+def test_a_gap_that_is_only_residue_zero_is_not_reported():
+    pdb = _atom("ATOM", 1, "CA", "ALA", "A", -1, 1.0) + "\n" + _atom("ATOM", 2, "CA", "ALA", "A", 1, 2.0)
+    assert check_pdb(pdb).possible_gaps == []
