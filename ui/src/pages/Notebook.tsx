@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { Shell } from "../components/Shell";
 
 /**
@@ -86,7 +87,9 @@ export function Notebook() {
               </li>
             ))}
           </ol>
-          {entries.data && entries.data.length === 0 ? <p className="empty-state">No entries yet. Write the first one below.</p> : null}
+          {entries.data && entries.data.length === 0 ? <EmptyState action={{ label: "Write the first entry", onClick: () => document.getElementById("entry-title")?.focus() }}>
+              No entries yet: record what you decided and why.
+            </EmptyState> : null}
           <section aria-label="New entry">
             <h2>{supersedes ? `Correct “${titleOf.get(supersedes)}”` : "New entry"}</h2>
             <form

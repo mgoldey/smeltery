@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
+import { EmptyState } from "../components/EmptyState";
 
 type Method = Schemas["MethodInfo"];
 type Param = Schemas["MethodParam"];
@@ -114,7 +115,7 @@ function MethodCard({ m }: { m: Method }) {
         </dd>
       </dl>
       {m.params.length === 0 ? (
-        <p style={muted}>This method has no settings.</p>
+        <EmptyState>This method has no settings; nothing to default here.</EmptyState>
       ) : (
         <table className="grid">
           <thead>
@@ -206,6 +207,12 @@ export function Methods() {
             <div className="banner" role="alert">
               {q.error.message}
             </div>
+          ) : null}
+          {q.data && q.data.length === 0 ? (
+            <EmptyState action={{ label: "Go to Bench", to: "/bench" }}>
+              No methods are registered, so a pipeline has nothing to place. Check that smeltery is installed with its method
+              modules, then reload.
+            </EmptyState>
           ) : null}
           {(q.data ?? []).map((m) => (
             <MethodCard key={`${m.key}:${JSON.stringify(m.params.map((p) => p.workspace_default))}`} m={m} />

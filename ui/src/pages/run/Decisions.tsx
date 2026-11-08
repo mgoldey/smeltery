@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, unwrap, type Schemas } from "../../api/client";
 import { Structure2D } from "../../components/Structure2D";
+import { EmptyState } from "../../components/EmptyState";
 import { useRunIdx } from "./RunLayout";
 
 type Decision = Schemas["DecisionOut"];
@@ -180,10 +181,15 @@ export function Decisions() {
             Download enriched pose SDF
           </a>
         </p>
+        {d && d.analogues.length === 0 ? (
+          <EmptyState action={{ label: "Open the run overview", to: `/run/${idx}/overview` }}>
+            This run has no analogues to decide on: it holds only the parent, or it has not finished.
+          </EmptyState>
+        ) : null}
         {d && vocab.data && decisions.data && picked.length ? (
           <BulkBar idx={idx} selected={picked} vocab={vocab.data} onDone={() => setPicked([])} />
         ) : null}
-        {d && vocab.data && decisions.data ? (
+        {d && d.analogues.length > 0 && vocab.data && decisions.data ? (
           <table className="grid" aria-label="Decisions">
             <thead>
               <tr>
