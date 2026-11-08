@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
+from smeltery.bench.adapters._sqlite import open_db
 from smeltery.gui.results import Run, load_run
 
 
@@ -20,7 +20,7 @@ class FilesystemRunStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self._db) as con:
+        with open_db(self._db, wal=True) as con:
             con.execute(
                 "CREATE TABLE IF NOT EXISTS runs (path TEXT PRIMARY KEY, campaign TEXT, digest TEXT, indexed_at TEXT)"
             )
@@ -92,7 +92,7 @@ class FilesystemRunStore:
         p = Path(path)
         run = load_run(p)
         digest = run.record.get("input_digest", "")
-        with sqlite3.connect(self._db) as con:
+        with open_db(self._db) as con:
             con.execute(
                 "INSERT OR REPLACE INTO runs (path, campaign, digest, indexed_at) VALUES (?,?,?,?)",
                 (str(p), run.campaign, digest, None),

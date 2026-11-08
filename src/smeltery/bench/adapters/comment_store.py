@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from smeltery.bench.adapters._sqlite import is_duplicate_column, open_db
 from smeltery.bench.ports.comment_store import Comment
 
 
@@ -17,25 +18,22 @@ class SqliteCommentStore:
         self._init()
 
     def _conn(self):
-        return sqlite3.connect(self.db_path)
+        return open_db(self.db_path)
 
     def _init(self):
-        with self._conn() as con:
-            try:
-                con.execute("ALTER TABLE comments ADD COLUMN run TEXT")
-            except Exception:
-                pass
-            try:
-                con.execute("ALTER TABLE comments ADD COLUMN anchor TEXT")
-            except Exception:
-                pass
-        with self._conn() as con:
+        with open_db(self.db_path, wal=True) as con:
             con.execute(
                 """CREATE TABLE IF NOT EXISTS comments (
                     id TEXT PRIMARY KEY, run TEXT, anchor_type TEXT, anchor_id TEXT, author TEXT,
                     body TEXT, created_at TEXT, parent_id TEXT, anchor TEXT)"""
             )
-            con.commit()
+            # Migrate databases created before these columns existed.
+            for col in ("run", "anchor"):
+                try:
+                    con.execute(f"ALTER TABLE comments ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError as e:
+                    if not is_duplicate_column(e):
+                        raise
 
     def add(self, anchor_type=None, anchor_id=None, author="", body="", *, parent_id=None, run=None, anchor=None, **kw):
         if anchor is not None and anchor_type is None and run is None:
