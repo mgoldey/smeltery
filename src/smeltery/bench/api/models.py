@@ -38,6 +38,7 @@ class RunDetail(BaseModel):
     survivors: list[str] | None
     floor: float
     floor_source: str
+    floor_statement: str = Field(description="the floor, its source and the claim it forbids, as one passage")
     z: float
     keep: int
     unranked: bool
@@ -538,3 +539,25 @@ class MethodDefaultsPut(BaseModel):
     """The workspace defaults of one method, replacing what was there; `{}` clears them."""
 
     defaults: dict[str, Any]
+
+
+class MeasuredLimit(BaseModel):
+    id: str
+    limit: str
+    magnitude: str
+    measured_on: str
+    source: str
+    forbids: str
+
+
+class UnmeasuredLimit(BaseModel):
+    id: str
+    limit: str
+    status: str
+    tracked_in: str
+    forbids: str
+
+
+class Limits(BaseModel):
+    measured: list[MeasuredLimit]
+    unmeasured: list[UnmeasuredLimit]

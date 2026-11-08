@@ -21,6 +21,7 @@ from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet, to
 from smeltery.gui import results as R
 from smeltery.gui.compare import Comparison as Cmp
 from smeltery.gui.compare import candidate_rows
+from smeltery.gui.limits import floor_statement
 from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, write_report
 from smeltery.gui.scenes import pose_scene
 from smeltery.gui.views._style import themed
@@ -100,6 +101,7 @@ def run_detail(request: Request, idx: int) -> M.RunDetail:
         survivors=list(r.survivors) if r.survivors is not None else None,
         floor=r.floor,
         floor_source=r.floor_source,
+        floor_statement=floor_statement(r.floor, _unit(r), r.floor_source, r.z),
         z=r.z,
         keep=r.keep,
         unranked=r.unranked,
@@ -639,7 +641,13 @@ def snapshot(request: Request, idx: int) -> M.Snapshot:
     external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load."""
     r = run(request, idx)
     path = Path(r.out_dir) / f"report-{r.record['input_digest'][:12]}.html"
-    write_report(r, path)
+    digest = r.record["input_digest"]
+    comments = [
+        {"anchor": c.anchor_text or "run", "author": c.author, "time": utc_iso(c.created_at), "body": c.body}
+        for c in ports(request).comment_store.for_run(digest)
+    ]
+    decisions = [d.__dict__ for d in _load_decisions(r).decisions]
+    write_report(r, path, comments, decisions)
     data = path.read_bytes()
     found = sorted(set(re.findall(rb"https?://[^\s\"'<>)]+", data)))
     return M.Snapshot(

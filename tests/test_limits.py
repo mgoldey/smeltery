@@ -7,16 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from smeltery.gui.limits import table_rows as _table
+
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs" / "limits.md"
 SOURCE_PATH = re.compile(r"`([^`]+\.(?:json|md|py))`")
 ISSUE = re.compile(r"issue #\d+")
-
-
-def _table(text: str, heading: str) -> list[list[str]]:
-    section = text.split(f"## {heading}", 1)[1].split("\n## ", 1)[0]
-    rows = [ln for ln in section.splitlines() if ln.startswith("|")][2:]
-    return [[c.strip() for c in ln.strip("|").split("|")] for ln in rows]
 
 
 def check_measured(rows: list[list[str]], root: Path = ROOT) -> list[str]:

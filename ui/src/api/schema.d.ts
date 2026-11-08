@@ -131,6 +131,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Limits
+         * @description docs/limits.md as data, for "what this result cannot tell you". Null when the page is absent (a wheel).
+         */
+        get: operations["limits_api_limits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/methods": {
         parameters: {
             query?: never;
@@ -1976,6 +1996,13 @@ export interface components {
             /** Toml */
             toml: string;
         };
+        /** Limits */
+        Limits: {
+            /** Measured */
+            measured: components["schemas"]["MeasuredLimit"][];
+            /** Unmeasured */
+            unmeasured: components["schemas"]["UnmeasuredLimit"][];
+        };
         /**
          * Lineage
          * @description What made one candidate's paired ΔΔE: its poses, the steps that ran, and what the run recorded about itself.
@@ -2069,6 +2096,21 @@ export interface components {
             } | null;
             /** Stage */
             stage: string;
+        };
+        /** MeasuredLimit */
+        MeasuredLimit: {
+            /** Forbids */
+            forbids: string;
+            /** Id */
+            id: string;
+            /** Limit */
+            limit: string;
+            /** Magnitude */
+            magnitude: string;
+            /** Measured On */
+            measured_on: string;
+            /** Source */
+            source: string;
         };
         /**
          * MethodDefaultsPut
@@ -2625,6 +2667,11 @@ export interface components {
             floor: number;
             /** Floor Source */
             floor_source: string;
+            /**
+             * Floor Statement
+             * @description the floor, its source and the claim it forbids, as one passage
+             */
+            floor_statement: string;
             /** Groups */
             groups: string[][];
             /** Has Pose Output */
@@ -2995,6 +3042,19 @@ export interface components {
              */
             name: string;
         };
+        /** UnmeasuredLimit */
+        UnmeasuredLimit: {
+            /** Forbids */
+            forbids: string;
+            /** Id */
+            id: string;
+            /** Limit */
+            limit: string;
+            /** Status */
+            status: string;
+            /** Tracked In */
+            tracked_in: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -3291,6 +3351,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Vocabulary"];
+                };
+            };
+        };
+    };
+    limits_api_limits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Limits"] | null;
                 };
             };
         };
