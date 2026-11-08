@@ -69,7 +69,12 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 20
 
 
 def _upload(c, name, data):
-    return c.post("/api/notebook/artifacts", params={"filename": name}, content=data)
+    return c.post(
+        "/api/notebook/artifacts",
+        params={"filename": name},
+        content=data,
+        headers={"content-type": "application/octet-stream"},
+    )
 
 
 def test_a_file_attaches_round_trips_and_is_not_counted_as_a_run(client_for, run_dir):
@@ -120,15 +125,10 @@ def test_an_entry_cannot_reference_a_file_that_was_never_uploaded(client_for):
     )
 
 
-def test_an_empty_upload_is_400_and_a_client_media_type_is_ignored(client_for):
+def test_an_empty_upload_is_400_and_a_path_in_the_filename_is_stripped(client_for):
     c, _ = client_for()
     assert _upload(c, "a.png", b"").status_code == 400
-    ref = c.post(
-        "/api/notebook/artifacts",
-        params={"filename": "../../a.html"},
-        content=b"x",
-        headers={"content-type": "image/png"},
-    ).json()
+    ref = _upload(c, "../../a.html", b"x").json()
     assert ref["filename"] == "a.html" and ref["media_type"] == "application/octet-stream"
 
 
@@ -169,3 +169,21 @@ def test_a_database_made_before_files_existed_is_migrated_in_place(tmp_path):
     con.close()
     (e,) = SqliteProjectStore(db).entries("c")
     assert e.artefacts == ("a" * 64,) and e.files == ()
+
+
+def test_a_non_ascii_filename_downloads_with_an_rfc5987_header(client_for):
+    c, _ = client_for()
+    for name, quoted in (("图表.png", "%E5%9B%BE%E8%A1%A8.png"), ("café.csv", "caf%C3%A9.csv")):
+        ref = _upload(c, name, PNG).json()
+        got = c.get(f"/api/notebook/artifacts/{ref['digest']}", params={"name": name})
+        assert got.status_code == 200 and got.content == PNG
+        cd = got.headers["content-disposition"]
+        assert f"filename*=UTF-8''{quoted}" in cd and "?" not in cd and cd.isascii()
+
+
+def test_an_upload_must_be_octet_stream_so_a_cross_site_form_cannot_write(client_for):
+    c, _ = client_for()
+    for ctype in ("text/plain", "multipart/form-data; boundary=x", None):
+        h = {"content-type": ctype} if ctype else {}
+        r = c.post("/api/notebook/artifacts", params={"filename": "a.png"}, content=PNG, headers=h)
+        assert r.status_code == 415

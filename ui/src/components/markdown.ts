@@ -17,7 +17,7 @@ export type Block =
   | { t: "p"; children: Inline[] };
 
 export function isSafeUrl(url: string): boolean {
-  return /^https?:\/\/[^\s]+$/i.test(url) || /^(#|\.{1,2}\/|\/(?!\/))[^\s]*$/.test(url);
+  return /^https?:\/\/[^\s]+$/i.test(url) || /^(#|\.{1,2}\/|\/(?![/\\]))[^\s\\]*$/.test(url);
 }
 
 /** Index of the closing single `*` at or after `from`, stepping over `**` pairs so emphasis can nest bold. */
@@ -64,7 +64,7 @@ export function parseInline(s: string): Inline[] {
         continue;
       }
     } else if (c === "[") {
-      const m = /^\[([^\]]+)\]\(([^)\s]+)\)/.exec(s.slice(i));
+      const m = /^\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/.exec(s.slice(i));
       if (m) {
         const [, label = "", url = ""] = m;
         if (isSafeUrl(url)) {

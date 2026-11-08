@@ -12,7 +12,7 @@ describe("parseMarkdown", () => {
   });
 
   it("does not linkify javascript:, data: or protocol-relative targets, but keeps their text", () => {
-    for (const bad of ["javascript:alert(1)", "JaVaScRiPt:x", "data:text/html,x", "//evil.example/x"]) {
+    for (const bad of ["javascript:alert(1)", "JaVaScRiPt:x", "data:text/html,x", "//evil.example/x", "/\\evil.com", "/\\/evil.com", "./a\\b"]) {
       expect(isSafeUrl(bad)).toBe(false);
       const out = parseInline(`[click](${bad})`);
       expect(out.some((n) => n.t === "link")).toBe(false);
@@ -20,6 +20,9 @@ describe("parseMarkdown", () => {
     }
     expect(parseInline("[a](https://x.org/p?q=1)")).toEqual([
       { t: "link", href: "https://x.org/p?q=1", children: [{ t: "text", text: "a" }] },
+    ]);
+    expect(parseInline("[t](https://en.wikipedia.org/wiki/Foo_(bar))")).toEqual([
+      { t: "link", href: "https://en.wikipedia.org/wiki/Foo_(bar)", children: [{ t: "text", text: "t" }] },
     ]);
     expect(isSafeUrl("/runs/3")).toBe(true);
     expect(isSafeUrl("#entry-1")).toBe(true);

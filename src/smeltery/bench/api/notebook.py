@@ -11,6 +11,7 @@ import importlib
 import mimetypes
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -158,11 +159,25 @@ def _safe_name(filename: str) -> str:
     return name[:200] or "file"
 
 
-@router.post("/notebook/artifacts", response_model=M.FileRef, status_code=201, responses={413: {"model": M.Problem}})
+def _disposition(kind: str, fname: str) -> str:
+    """Header values are latin-1: a non-ASCII name goes in the RFC 5987 `filename*` form, with an ASCII fallback."""
+    fallback = fname.encode("ascii", "replace").decode().replace("?", "_")
+    return f"{kind}; filename=\"{fallback}\"; filename*=UTF-8''{quote(fname, safe='')}"
+
+
+@router.post(
+    "/notebook/artifacts",
+    response_model=M.FileRef,
+    status_code=201,
+    responses={413: {"model": M.Problem}, 415: {"model": M.Problem}},
+)
 async def upload_notebook_file(request: Request, filename: str) -> M.FileRef:
     """A figure, PDF or CSV for a notebook entry. The body is the file's bytes; it is stored by sha256, and the response
     is what to put in the entry's `files`. The media type comes from the filename, never from the client's header."""
     name = _safe_name(filename)
+    # text/plain and friends are CORS "simple" requests (no preflight), so any website could write here
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/octet-stream":
+        raise HTTPException(status_code=415, detail="upload the file's bytes as Content-Type: application/octet-stream")
     too_big = f"{name}: larger than {MAX_UPLOAD // (1024 * 1024)} MB"
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD:
@@ -194,7 +209,7 @@ def get_notebook_file(request: Request, digest: str, name: str = "") -> Response
         content=data,
         media_type=media,
         headers={
-            "Content-Disposition": f'{disposition}; filename="{fname}"',
+            "Content-Disposition": _disposition(disposition, fname),
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox; default-src 'none'",
         },
