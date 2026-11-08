@@ -2867,6 +2867,13 @@ export interface components {
         StructureInfo: {
             /** Attribution */
             attribution?: string | null;
+            /**
+             * Chains
+             * @default {}
+             */
+            chains: {
+                [key: string]: number;
+            };
             /** Dropped */
             dropped: string[];
             /** File Url */
@@ -2875,14 +2882,31 @@ export interface components {
             license?: string | null;
             /** Mean Plddt */
             mean_plddt?: number | null;
+            /** Missing Residues */
+            missing_residues?: number | null;
             /** N Atoms */
             n_atoms: number;
+            /**
+             * N Hetatm
+             * @default 0
+             */
+            n_hetatm: number;
             /** Origin */
             origin: string;
+            /**
+             * Possible Gaps
+             * @default []
+             */
+            possible_gaps: string[];
             /** Sha256 */
             sha256: string;
             /** Source */
             source: string;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
         };
         /** StructureRequest */
         StructureRequest: {

@@ -84,6 +84,36 @@ export function tomlValue(toml: string, table: string, key: string): string {
   return quoted ? (quoted[1] ?? "") : raw.replace(/\s*#.*$/, "").trim();
 }
 
+/** Compact validation summary of the opened PDB; anything worth a second look is flagged as a warning. */
+function StructureChecks({ info }: { info: Opened }) {
+  const chains = Object.entries(info.chains ?? {});
+  const flags = [
+    ...(info.warnings ?? []),
+    ...(info.missing_residues
+      ? [`${info.missing_residues} residue(s) listed missing in REMARK 465`]
+      : []),
+    ...((info.possible_gaps ?? []).length
+      ? [`possible numbering gaps: ${(info.possible_gaps ?? []).join("; ")}`]
+      : []),
+  ];
+  return (
+    <div data-testid="structure-checks">
+      <p className="lede">
+        Chains:{" "}
+        {chains.map(([c, n]) => `${c} (${n} residues)`).join(", ") || "none"} ·{" "}
+        {info.n_hetatm ?? 0} HETATM
+      </p>
+      {flags.length ? (
+        <ul role="alert" data-testid="structure-warnings">
+          {flags.map((w) => (
+            <li key={w}>Warning: {w}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   const current = chosen(toml);
   const [error, setError] = useState<string | null>(null);
@@ -235,6 +265,7 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
                 </span>{" "}
                 · {info.origin} · {info.n_atoms} atoms
               </p>
+              <StructureChecks info={info} />
               <MolstarViewer
                 state={receptorScene(info.file_url)}
                 label="active site structure"

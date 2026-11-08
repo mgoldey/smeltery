@@ -452,3 +452,28 @@ def test_smeltery_gui_subcommand_reaches_the_app_parser(tmp_path, capsys):
         cli.main(["gui", "--help"])
     assert e.value.code == 0 and "--desktop" in capsys.readouterr().out
     assert cli.main(["gui", str(tmp_path / "nothing"), "--no-browser"]) == 2
+
+
+def test_forest_status_is_not_encoded_by_colour_alone(run):
+    """Kept and dropped differ in marker shape as well as colour (A11Y-002); the legend entry carries both."""
+    pytest.importorskip("plotly")
+    from smeltery.gui import results
+    from smeltery.gui.views.forest import STATUS_SYMBOL, forest_figure
+
+    fig = forest_figure(results.ddE_table(run), run)
+    sym = {t.name: t.marker.symbol for t in fig.data if t.name != "one pose"}
+    assert sym == {"kept by the cut": "circle", "dropped by the cut": "x"}
+    assert len(set(STATUS_SYMBOL.values())) == 3  # kept, dropped and not-cut are all pairwise distinguishable
+    assert all(t.showlegend is not False for t in fig.data if t.name in sym)
+
+
+def test_matrix_cells_carry_text_as_well_as_colour(run):
+    pytest.importorskip("plotly")
+    from smeltery.gui import results
+    from smeltery.gui.views.matrix import matrix_figure
+
+    names, m = results.resolved_matrix(run)
+    cells = matrix_figure(names, m).data[0].text
+    for i in range(len(names)):
+        for j in range(len(names)):
+            assert cells[i][j] == ("" if i == j else ("resolved" if m[i][j] else "not resolved"))
