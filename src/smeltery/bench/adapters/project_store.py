@@ -30,6 +30,8 @@ class SqliteProjectStore:
                     id TEXT PRIMARY KEY, campaign_id TEXT, title TEXT, body TEXT, author TEXT,
                     created_at TEXT, artefacts TEXT, supersedes TEXT)"""
             )
+            if "files" not in {r[1] for r in con.execute("PRAGMA table_info(entries)")}:
+                con.execute("ALTER TABLE entries ADD COLUMN files TEXT")  # old rows: NULL, read as no files
             con.execute(
                 """CREATE TABLE IF NOT EXISTS proposals (
                     id TEXT PRIMARY KEY, run TEXT, smiles TEXT, reason TEXT, note TEXT, candidate TEXT,
@@ -142,6 +144,7 @@ class SqliteProjectStore:
             author = kw.pop("author", "")
             supersedes = kw.pop("supersedes", None)
             artefacts = kw.pop("artefacts", ())
+            files = kw.pop("files", ())
             created_at = kw.pop("created_at", utc_now())
             eid = kw.pop("id", None) or make_entry_id(str(campaign_id), str(title), str(created_at))
             e = NotebookEntry(
@@ -153,6 +156,7 @@ class SqliteProjectStore:
                 created_at=created_at,
                 artefacts=tuple(artefacts) if not isinstance(artefacts, tuple) else artefacts,
                 supersedes=supersedes,
+                files=tuple(files),
             )
         if isinstance(entry, dict):
             e = NotebookEntry.from_dict(entry)
@@ -163,8 +167,8 @@ class SqliteProjectStore:
             if exists:
                 raise ValueError(f"entry {e.id} already exists; create a new entry that supersedes it")
             con.execute(
-                "INSERT INTO entries (id,campaign_id,title,body,author,created_at,artefacts,supersedes) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT INTO entries (id,campaign_id,title,body,author,created_at,artefacts,supersedes,files) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     e.id,
                     e.campaign_id,
@@ -174,6 +178,7 @@ class SqliteProjectStore:
                     e.created_at,
                     json.dumps(list(e.artefacts)),
                     e.supersedes,
+                    json.dumps([dict(f) for f in e.files]),
                 ),
             )
             con.commit()
@@ -185,7 +190,7 @@ class SqliteProjectStore:
     def list_entries(self, campaign_id):
         with self._conn() as con:
             rows = con.execute(
-                "SELECT id,campaign_id,title,body,author,created_at,artefacts,supersedes "
+                "SELECT id,campaign_id,title,body,author,created_at,artefacts,supersedes,files "
                 "FROM entries WHERE campaign_id=? ORDER BY created_at",
                 (campaign_id,),
             ).fetchall()
@@ -201,6 +206,7 @@ class SqliteProjectStore:
                     created_at=r[5],
                     artefacts=tuple(json.loads(r[6] or "[]")),
                     supersedes=r[7],
+                    files=tuple(json.loads(r[8] or "[]")),
                 )
             )
         return out

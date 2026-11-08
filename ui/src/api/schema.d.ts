@@ -186,6 +186,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notebook/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Notebook File
+         * @description A figure, PDF or CSV for a notebook entry. The body is the file's bytes; it is stored by sha256, and the response
+         *     is what to put in the entry's `files`. The media type comes from the filename, never from the client's header.
+         */
+        post: operations["upload_notebook_file_api_notebook_artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notebook/artifacts/{digest}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notebook File
+         * @description The stored bytes, re-hashed on the way out. Only png/jpeg/gif/webp are inline; everything else is an attachment
+         *     (SVG and HTML included), with nosniff and a sandboxing CSP so a hostile upload cannot run in this origin.
+         */
+        get: operations["get_notebook_file_api_notebook_artifacts__digest__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/check": {
         parameters: {
             query?: never;
@@ -1800,6 +1842,12 @@ export interface components {
              */
             body: string;
             /**
+             * Files
+             * @description files already uploaded to /notebook/artifacts
+             * @default []
+             */
+            files: components["schemas"]["FileRef"][];
+            /**
              * Runs
              * @default []
              */
@@ -1811,7 +1859,10 @@ export interface components {
         };
         /** EntryOut */
         EntryOut: {
-            /** Artefacts */
+            /**
+             * Artefacts
+             * @description digests of the attached runs' records (kind run)
+             */
             artefacts: string[];
             /** Author */
             author: string;
@@ -1821,6 +1872,11 @@ export interface components {
             campaign_id: string;
             /** Created At */
             created_at: string;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["FileRef"][];
             /** Id */
             id: string;
             /** Superseded By */
@@ -1829,6 +1885,24 @@ export interface components {
             supersedes: string | null;
             /** Title */
             title: string;
+        };
+        /** FileRef */
+        FileRef: {
+            /**
+             * Digest
+             * @description sha256 of the file's bytes, in the artifact store
+             */
+            digest: string;
+            /** Filename */
+            filename: string;
+            /**
+             * Kind
+             * @default file
+             * @constant
+             */
+            kind: "file";
+            /** Media Type */
+            media_type: string;
         };
         /** GateRow */
         GateRow: {
@@ -3592,6 +3666,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_notebook_file_api_notebook_artifacts_post: {
+        parameters: {
+            query: {
+                filename: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileRef"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notebook_file_api_notebook_artifacts__digest__get: {
+        parameters: {
+            query?: {
+                name?: string;
+            };
+            header?: never;
+            path: {
+                digest: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };

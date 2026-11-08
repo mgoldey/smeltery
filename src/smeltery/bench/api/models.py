@@ -328,10 +328,18 @@ class CampaignOut(BaseModel):
     updated_at: str = Field("", description="time of the latest entry, or created_at when there are none")
 
 
+class FileRef(BaseModel):
+    digest: str = Field(description="sha256 of the file's bytes, in the artifact store")
+    filename: str
+    media_type: str
+    kind: Literal["file"] = "file"
+
+
 class EntryIn(BaseModel):
     title: str
     body: str = ""
     runs: list[int] = []
+    files: list[FileRef] = Field(default=[], description="files already uploaded to /notebook/artifacts")
     supersedes: str | None = None
 
 
@@ -342,7 +350,8 @@ class EntryOut(BaseModel):
     body: str
     author: str
     created_at: str
-    artefacts: list[str]
+    artefacts: list[str] = Field(description="digests of the attached runs' records (kind run)")
+    files: list[FileRef] = []
     supersedes: str | None
     superseded_by: str | None = None
 
