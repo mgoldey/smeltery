@@ -376,8 +376,9 @@ export interface paths {
          * Import Pipeline
          * @description Create a pipeline from a bundle zip (the body is the zip's bytes, as an upload's is). The name is `name`, else
          *     the bundle's own, made unique with a -2, -3 suffix when taken; a `name` that is taken is a 409. Any bad entry
-         *     (path trickery, a sha256 that does not match the manifest) refuses the whole bundle with a 422 listing each one.
-         *     An input exported from an absolute path is rewritten to its imported `inputs/<basename>`.
+         *     (path trickery, a sha256 that does not match the manifest, damage) refuses the whole bundle with a 422 listing
+         *     each one. An input exported from an absolute path is rewritten to its imported `inputs/<basename>`; any other
+         *     absolute or `..` input path is refused, so a hostile config cannot point a run at a file outside the pipeline.
          */
         post: operations["import_pipeline_api_pipelines_import_post"];
         delete?: never;
