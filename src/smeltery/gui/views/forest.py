@@ -14,6 +14,9 @@ from __future__ import annotations
 
 from ._style import BAND, BAND_ALT, INK, INK_MUTED, KEPT, NEUTRAL, NOT_KEPT, UNRANKED, layout
 
+#: The second channel for the cut's status, so it survives colour-vision loss and greyscale print; the legend shows it.
+STATUS_SYMBOL = {True: "circle", False: "x", None: "diamond"}
+
 
 def group_label(index: int, size: int) -> str:
     """'tie group 2 (no order)' for a group of several, 'group 1' for one candidate. 1-based for people."""
@@ -61,8 +64,13 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
                 hovertemplate="pose %{customdata}: %{x:.3f} " + unit + "<extra></extra>",
             )
         )
-    status = {True: ("kept by the cut", KEPT), False: ("dropped by the cut", NOT_KEPT), None: ("not cut", NEUTRAL)}
-    for flag, (name, colour) in status.items():
+    # colour is never the only channel: each status also has its own marker shape (see STATUS_SYMBOL)
+    status = {
+        True: ("kept by the cut", KEPT, STATUS_SYMBOL[True]),
+        False: ("dropped by the cut", NOT_KEPT, STATUS_SYMBOL[False]),
+        None: ("not cut", NEUTRAL, STATUS_SYMBOL[None]),
+    }
+    for flag, (name, colour, symbol) in status.items():
         idx = [i for i, r in enumerate(rows) if r["survivor"] is flag]
         if not idx:
             continue
@@ -72,7 +80,7 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
                 y=[y[i] for i in idx],
                 mode="markers",
                 name=name,
-                marker={"size": 10, "color": colour, "line": {"width": 2, "color": "white"}},
+                marker={"size": 10, "symbol": symbol, "color": colour, "line": {"width": 2, "color": "white"}},
                 error_x={
                     "type": "data",
                     "symmetric": False,
