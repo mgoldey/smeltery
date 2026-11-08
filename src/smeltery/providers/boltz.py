@@ -270,6 +270,7 @@ class BoltzProvider:
             text=text,
             kind="PREDICTED",
             source=f"boltz predict ({self.accelerator})",
+            provider=self.name,
             license_id=BOLTZ_LICENSE_ID,
             attribution=attribution,
             plddt=plddt,

@@ -97,3 +97,42 @@ def test_plddt_reads_ca_only():
 def test_live_afdb_hemoglobin_beta():
     res = AfdbProvider().predict("P68871")
     assert res is not None and res.kind == "PREDICTED" and res.mean_plddt > 70
+
+
+def _clock(monkeypatch, stamps):
+    it = iter(stamps)
+    monkeypatch.setattr("smeltery.providers.structure._utc_now", lambda: next(it))
+
+
+def test_a_network_fetch_records_provider_and_fetch_time_but_the_dict_stays_timeless(monkeypatch):
+    _clock(monkeypatch, ["2026-11-07T10:00:00Z", "2026-11-08T11:00:00Z"])
+    a = AfdbProvider(fetch=_afdb_fetch).predict("P69905")
+    b = AfdbProvider(fetch=_afdb_fetch).predict("P69905")
+    assert (a.provider, a.fetched_utc) == ("afdb", "2026-11-07T10:00:00Z")
+    assert a.fetch_record() == {"provider": "afdb", "source": ENTRY[0]["pdbUrl"], "fetched_utc": a.fetched_utc}
+    assert a.to_dict()["provider"] == "afdb" and "fetched_utc" not in a.to_dict()
+    assert a.to_dict() == b.to_dict()  # fetched a day apart, identical digestable dict
+
+
+def test_rcsb_fetch_carries_the_header_revision_and_a_missing_header_is_just_omitted(monkeypatch):
+    _clock(monkeypatch, ["2026-11-07T10:00:00Z", "2026-11-07T10:00:01Z"])
+    header = "REVDAT   3   24-FEB-09 1ABC    1       VERSN\nREVDAT   2   01-JAN-05 1ABC    1       JRNL\n"
+    atom = "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n"
+    r = PdbProvider(fetch=lambda url: (header + atom).encode()).predict("1abc")
+    assert r.provider == "pdb" and r.fetched_utc == "2026-11-07T10:00:00Z"
+    assert r.metadata == {"pdb_id": "1ABC", "revision": 3, "revision_date": "24-FEB-09"}
+    bare = PdbProvider(fetch=lambda url: atom.encode()).predict("1abc")
+    assert "revision" not in bare.metadata and bare.fetched_utc
+
+
+def test_a_local_file_has_a_provider_but_no_fetch_time(tmp_path):
+    f = tmp_path / "x.pdb"
+    f.write_text("ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n")
+    r = PdbProvider(fetch=lambda url: pytest.fail("network touched")).predict(str(f))
+    assert r.provider == "pdb" and r.fetched_utc is None and r.fetch_record() is None
+    assert r.to_dict()["metadata"] == {}
+
+
+def test_a_failed_fetch_records_no_time(monkeypatch):
+    _clock(monkeypatch, [])  # any call would raise StopIteration
+    assert AfdbProvider(fetch=_afdb_fetch).predict("Q99999") is None
