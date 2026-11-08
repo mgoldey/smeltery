@@ -4,12 +4,18 @@ import json
 import re
 import zipfile
 
-import pytest
 from fastapi.testclient import TestClient
 
 from bench.fakes import FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
 from smeltery.bench.app import create_app
-from smeltery.bench.pymol_export import DROPPED_COLOR, GROUP_COLORS, PARENT_COLOR, candidate_colors, pymol_session
+from smeltery.bench.pymol_export import (
+    DROPPED_COLOR,
+    GROUP_COLORS,
+    PARENT_COLOR,
+    candidate_colors,
+    ligand_stems,
+    pymol_session,
+)
 
 NAMES = ["parent", "a", "b", "c", "d"]
 GROUPS = [["a", "b"], ["c"], ["d"]]
@@ -45,9 +51,24 @@ def test_session_loads_relative_paths_colours_ligand_carbons_and_shows_the_pocke
     assert lines[0].startswith("#") and any("Legend" in x for x in lines[:3]) and "parent parent" in pml
 
 
-def test_names_that_collide_after_sanitising_are_refused():
-    with pytest.raises(ValueError, match="one PyMOL object name"):
-        pymol_session(["4-Cl", "4_Cl"], "4-Cl", [["4_Cl"]], ["4_Cl"], False)
+def test_names_that_clash_after_sanitising_or_by_case_get_numbered_suffixes():
+    stems = ligand_stems(["4-Cl", "4_Cl", "4_cl", "x y", "x/y"])
+    assert stems == {"4-Cl": "4_Cl", "4_Cl": "4_Cl_2", "4_cl": "4_cl_3", "x y": "x_y", "x/y": "x_y_2"}
+    assert len({v.lower() for v in stems.values()}) == 5
+
+
+def test_control_characters_in_names_cannot_start_a_command_in_a_comment():
+    evil = "a\nquit"
+    pml = pymol_session(["parent", evil], "parent", [[evil]], [evil], False)
+    assert all(line.startswith("#") or line.split(" ")[0] != "quit" for line in pml.splitlines())
+    assert "quit" not in [line.strip() for line in pml.splitlines()]
+
+
+def test_session_changes_directory_to_the_script_folder_before_loading():
+    lines = pymol_session(["parent"], "parent", [], [], False).splitlines()
+    cd = next(i for i, x in enumerate(lines) if "cmd.cd(" in x and "__script__" in x)
+    assert lines.index("reinitialize") < cd < lines.index("load receptor.pdb, receptor")
+    assert lines[cd - 2] == "python" and lines[cd + 1] == "python end"
 
 
 # ----------------------------------------------------------------------------------------------------- the route
@@ -124,3 +145,46 @@ def test_a_record_that_predates_pose_output_is_409(tmp_path):
     path.write_text(json.dumps(rec))
     r = client(run_dir).get("/api/runs/0/pymol.zip")
     assert r.status_code == 409 and "predates pose output" in r.json()["detail"]
+
+
+def test_awkward_candidate_names_give_flat_unique_zip_entries_and_matching_load_lines(tmp_path):
+    from gui_fixture import make_run_dir
+
+    from smeltery.record import _canonical_sha256
+
+    run_dir = make_run_dir(tmp_path)
+    path = next(run_dir.glob("run-*.json"))
+    rec = json.loads(path.read_text())
+    awkward = ["a b", "a/b", "it's", 'q"uote', "x+y", "caf\u00e9", "Case", "case"]
+    old = list(rec["results"]["poses"])
+    template = rec["results"]["poses"][old[1]]
+    for n in awkward:
+        rec["results"]["poses"][n] = dict(template)
+        rec["inputs"]["candidates"][n] = rec["inputs"]["candidates"][old[1]]
+    rec["results"]["candidate_order"] += awkward
+    rec["record_sha256"] = _canonical_sha256(rec)
+    path.write_text(json.dumps(rec, indent=2, sort_keys=True))
+    give_receptor(run_dir)
+    r = client(run_dir).get("/api/runs/0/pymol.zip")
+    assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    sdfs = [n for n in z.namelist() if n.endswith(".sdf")]
+    assert len(sdfs) == len(old) + len(awkward)
+    assert all(re.fullmatch(r"ligands/[A-Za-z0-9_-]+\.sdf", n) for n in sdfs)
+    assert len({n.lower() for n in sdfs}) == len(sdfs)  # unique even on a case-folding filesystem
+    pml = z.read("session.pml").decode()
+    loads = [ln.split()[1].rstrip(",") for ln in pml.splitlines() if ln.startswith("load ligands/")]
+    assert sorted(loads) == sorted(sdfs)
+
+
+def test_a_record_without_a_cut_is_409_not_500(tmp_path):
+    from gui_fixture import make_run_dir
+
+    run_dir = make_run_dir(tmp_path)
+    give_receptor(run_dir)
+    path = next(run_dir.glob("run-*.json"))
+    rec = json.loads(path.read_text())
+    del rec["results"]["cut"]
+    path.write_text(json.dumps(rec))
+    c = client(run_dir)
+    assert c.get("/api/runs/0/pymol.zip").status_code == 409

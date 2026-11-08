@@ -132,7 +132,7 @@ def test_the_fetch_time_is_in_the_plan_but_never_in_the_input_digest(tmp_path, m
     assert a.inputs["structure"]["structure"]["provider"] == "pdb"
     digest = lambda p: RunRecord("c", p.inputs, p.tiers, {}).input_digest  # noqa: E731
     assert digest(a) == digest(b)
-    assert _plan(tmp_path).structure_fetch is None  # a local file was not fetched
+    assert _plan(tmp_path).structure_fetch["fetched_utc"] is None  # a local file was not fetched
 
 
 def test_a_structure_plan_is_reproduced_by_a_rerun_in_another_directory(tmp_path):

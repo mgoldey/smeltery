@@ -62,6 +62,9 @@ class StructureResult:
     #: `to_dict()`: that dict lands in `inputs.structure`, which `input_digest` hashes, and a wall-clock time
     #: there would give two runs of identical inputs different digests. `fetch_record()` carries it instead.
     fetched_utc: str | None = None
+    #: Extra facts about the fetch (RCSB pdb_id and header revision). Like `fetched_utc` and `provider`, kept out of
+    #: `to_dict()` so that `input_digest` is unchanged for every existing structure config.
+    fetch_info: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.kind not in ("EXPERIMENTAL", "PREDICTED"):
@@ -86,7 +89,6 @@ class StructureResult:
 
         return {
             "kind": self.kind,
-            "provider": self.provider,
             "source": self.source,
             "license_id": self.license_id,
             "attribution": self.attribution,
@@ -97,12 +99,10 @@ class StructureResult:
             "metadata": self.metadata,
         }
 
-    def fetch_record(self) -> dict | None:
-        """When this structure was fetched, for the run record's `results` (outside the input digest); None when
-        nothing was fetched from the network."""
-        if self.fetched_utc is None:
-            return None
-        return {"provider": self.provider, "source": self.source, "fetched_utc": self.fetched_utc}
+    def fetch_record(self) -> dict:
+        """How this structure was obtained, for the run record's `results.structure_fetch` (outside the input
+        digest): provider, source, `fetched_utc` (None for a local file) and any RCSB pdb_id/revision."""
+        return {"provider": self.provider, "source": self.source, "fetched_utc": self.fetched_utc, **self.fetch_info}
 
 
 @runtime_checkable
@@ -172,12 +172,12 @@ class PdbProvider:
             if not path.is_file():
                 self.last_error = f"no such file: {spec}"
                 return None
-            text, source, fetched, meta = path.read_text(), f"file:{path.name}", None, {}
+            text, source, fetched, info = path.read_text(), f"file:{path.name}", None, {}
         elif _PDB_ID_RE.match(spec):
             url = RCSB_PDB.format(pdb_id=spec.upper())
             try:
                 text, source = self._fetch(url).decode(), url
-                fetched, meta = _utc_now(), {"pdb_id": spec.upper(), **rcsb_revision(text)}
+                fetched, info = _utc_now(), {"pdb_id": spec.upper(), **rcsb_revision(text)}
             except (urllib.error.URLError, OSError) as e:
                 self.last_error = f"could not fetch {url}: {e}"
                 return None
@@ -188,7 +188,7 @@ class PdbProvider:
             self.last_error = f"{source}: no ATOM/HETATM records"
             return None
         return StructureResult(
-            text=text, kind="EXPERIMENTAL", source=source, metadata=meta, provider=self.name, fetched_utc=fetched
+            text=text, kind="EXPERIMENTAL", source=source, fetch_info=info, provider=self.name, fetched_utc=fetched
         )
 
 

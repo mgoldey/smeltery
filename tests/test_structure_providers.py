@@ -110,7 +110,7 @@ def test_a_network_fetch_records_provider_and_fetch_time_but_the_dict_stays_time
     b = AfdbProvider(fetch=_afdb_fetch).predict("P69905")
     assert (a.provider, a.fetched_utc) == ("afdb", "2026-11-07T10:00:00Z")
     assert a.fetch_record() == {"provider": "afdb", "source": ENTRY[0]["pdbUrl"], "fetched_utc": a.fetched_utc}
-    assert a.to_dict()["provider"] == "afdb" and "fetched_utc" not in a.to_dict()
+    assert not {"provider", "fetched_utc"} & set(a.to_dict())  # digest-visible dict is unchanged by provenance
     assert a.to_dict() == b.to_dict()  # fetched a day apart, identical digestable dict
 
 
@@ -120,19 +120,51 @@ def test_rcsb_fetch_carries_the_header_revision_and_a_missing_header_is_just_omi
     atom = "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n"
     r = PdbProvider(fetch=lambda url: (header + atom).encode()).predict("1abc")
     assert r.provider == "pdb" and r.fetched_utc == "2026-11-07T10:00:00Z"
-    assert r.metadata == {"pdb_id": "1ABC", "revision": 3, "revision_date": "24-FEB-09"}
+    assert r.fetch_record() == {
+        "provider": "pdb",
+        "source": "https://files.rcsb.org/download/1ABC.pdb",
+        "fetched_utc": "2026-11-07T10:00:00Z",
+        "pdb_id": "1ABC",
+        "revision": 3,
+        "revision_date": "24-FEB-09",
+    }
     bare = PdbProvider(fetch=lambda url: atom.encode()).predict("1abc")
-    assert "revision" not in bare.metadata and bare.fetched_utc
+    assert "revision" not in bare.fetch_record() and bare.fetched_utc
 
 
 def test_a_local_file_has_a_provider_but_no_fetch_time(tmp_path):
     f = tmp_path / "x.pdb"
     f.write_text("ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n")
     r = PdbProvider(fetch=lambda url: pytest.fail("network touched")).predict(str(f))
-    assert r.provider == "pdb" and r.fetched_utc is None and r.fetch_record() is None
+    assert r.provider == "pdb" and r.fetched_utc is None
+    assert r.fetch_record() == {"provider": "pdb", "source": "file:x.pdb", "fetched_utc": None}
     assert r.to_dict()["metadata"] == {}
+    assert set(r.to_dict()) == {  # exactly the pre-SCI-007 keys: input_digest of every structure config is unchanged
+        "kind", "source", "license_id", "attribution", "weights_source", "n_residues_with_plddt", "mean_plddt",
+        "sha256", "metadata",
+    }  # fmt: skip
 
 
 def test_a_failed_fetch_records_no_time(monkeypatch):
     _clock(monkeypatch, [])  # any call would raise StopIteration
     assert AfdbProvider(fetch=_afdb_fetch).predict("Q99999") is None
+
+
+def test_a_run_record_carries_structure_fetch_outside_the_inputs():
+    """The plumbing without docking: a plan that obtained a structure writes results.structure_fetch."""
+    import tomllib
+
+    from test_cli import BASE
+
+    from smeltery.cli import build_plan, run_plan
+
+    plan = build_plan(tomllib.loads(BASE))
+    plan.structure_fetch = {"provider": "pdb", "source": "file:x.pdb", "fetched_utc": None}
+
+    def measure(p):
+        for c in p.candidates:
+            c.per_pose["dE_int"] = [float(i) for i in range(len(c.poses))]
+
+    rec, _ = run_plan(plan, measure=measure)
+    assert rec.results["structure_fetch"] == plan.structure_fetch
+    assert "structure_fetch" not in json.dumps(rec.inputs)

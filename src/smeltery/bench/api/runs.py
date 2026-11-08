@@ -18,7 +18,7 @@ from molviewspec.nodes import RepresentationTypeT, validate_state_tree
 from pydantic import BaseModel
 from rdkit import Chem
 
-from smeltery.bench.pymol_export import ligand_filename, pymol_session
+from smeltery.bench.pymol_export import ligand_filename, ligand_stems, pymol_session
 from smeltery.bench.verdict import verdict_of
 from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet, to_csv, to_sdf
 from smeltery.gui import results as R
@@ -481,16 +481,25 @@ def run_pymol(request: Request, idx: int) -> Response:
         if receptor is None:
             raise HTTPException(status_code=409, detail="this run has no receptor PDB, so there is no PyMOL scene")
         names = [n for n in r.candidates if n in r.record["results"]["poses"]]
+        if not names:
+            raise HTTPException(
+                status_code=409, detail="this run recorded no pose files, so there is nothing to export"
+            )
         sdfs = {n: R.pose_sdf(r, n) for n in names}
         session = pymol_session(names, r.parent, r.groups, r.survivors, r.unranked)
+    except KeyError as e:  # a record without results.cut (or another contract key)
+        raise HTTPException(
+            status_code=409, detail=f"the run record lacks {e}; it cannot be coloured by the cut"
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("session.pml", session)
         z.writestr("receptor.pdb", receptor)
+        stems = ligand_stems(names)
         for n, text in sdfs.items():
-            z.writestr(f"ligands/{ligand_filename(n)}", text)
+            z.writestr(ligand_filename(stems[n]), text)
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",
