@@ -175,6 +175,7 @@ def report_data(run, comments: list[dict] | None = None, decisions: list[dict] |
     else:
         ferric_s = "" if ferric is None else str(ferric)
 
+    unit = (res.get("units") or {}).get(QUANTITY, "kcal/mol")
     return {
         "campaign": run.campaign,
         "parent": run.parent,
@@ -182,15 +183,13 @@ def report_data(run, comments: list[dict] | None = None, decisions: list[dict] |
         "candidates": run.candidates,
         "floor": run.floor,
         "floor_source": run.floor_source,
-        "floor_statement": floor_statement(
-            run.floor, (res.get("units") or {}).get(QUANTITY, "kcal/mol"), run.floor_source
-        ),
+        "floor_statement": floor_statement(run.floor, unit, run.floor_source, run.z),
         "limits": load_limits(),
         "comments": comments,
         "decisions": decisions,
         "z": run.z,
         "keep": run.keep,
-        "unit": (res.get("units") or {}).get(QUANTITY, "kcal/mol"),
+        "unit": unit,
         "groups": run.groups,
         "survivors": run.survivors,
         "unranked": run.unranked,

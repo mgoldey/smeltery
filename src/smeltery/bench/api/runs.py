@@ -101,7 +101,7 @@ def run_detail(request: Request, idx: int) -> M.RunDetail:
         survivors=list(r.survivors) if r.survivors is not None else None,
         floor=r.floor,
         floor_source=r.floor_source,
-        floor_statement=floor_statement(r.floor, _unit(r), r.floor_source),
+        floor_statement=floor_statement(r.floor, _unit(r), r.floor_source, r.z),
         z=r.z,
         keep=r.keep,
         unranked=r.unranked,

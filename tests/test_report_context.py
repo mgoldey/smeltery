@@ -9,19 +9,20 @@ from smeltery.gui import report, results
 from smeltery.gui.limits import floor_statement, load_limits, parse_limits
 
 
-def test_floor_sentence_states_value_unit_source_and_what_it_forbids():
-    s = floor_statement(4.07, "kcal/mol", "config [cut] floor")
-    assert "4.07 kcal/mol" in s and "(config [cut] floor)" in s
-    assert "Differences smaller than 4.07 kcal/mol are reported as ties, not rankings" in s
+def test_floor_sentence_states_the_resolved_rule_not_just_the_floor():
+    s = floor_statement(4.07, "kcal/mol", "config [cut] floor", 2.0)
+    assert "The floor is 4.07 kcal/mol." in s and "Source: config [cut] floor." in s
+    assert "exceeds both 4.07 kcal/mol and z" in s and "(z = 2)" in s
+    assert "4.07 kcal/mol or less is always a tie" in s and "still a tie when its uncertainty is wide" in s
 
 
-def test_unmeasured_or_zero_floor_says_so_and_claims_no_threshold():
+def test_unmeasured_or_zero_floor_says_so_and_names_the_consequence():
     for bad in (None, math.nan):
-        s = floor_statement(bad, "kcal/mol", "x")
-        assert "unmeasured" in s and "reported as ties" not in s
-    assert "0 kcal/mol" in floor_statement(0.0, "kcal/mol", "x") and "no systematic bound" in floor_statement(
-        0.0, "kcal/mol", ""
-    )
+        s = floor_statement(bad, "kcal/mol", "x", 2.0)
+        assert "unmeasured" in s and "may sit inside a systematic error" in s and "always a tie" not in s
+    zero = floor_statement(0.0, "kcal/mol", "config (explicit; unmeasured)", 2.0)
+    assert zero.startswith("The floor is 0 kcal/mol, so no systematic bound")
+    assert "may sit inside a systematic error" in zero and "Source: config (explicit; unmeasured)." in zero
 
 
 def test_limits_parse_from_the_real_doc():
@@ -63,4 +64,5 @@ def test_report_states_a_measured_floor_from_the_record(tmp_path):
     rec["inputs"]["floor"] = {"value": 4.07, "source": "DDE_NOISE_FLOOR_KCAL_MOL"}
     p.write_text(json.dumps(rec))
     html = report.render_html(results.load_run(out))
-    assert "The floor is 4.07 kcal/mol (DDE_NOISE_FLOOR_KCAL_MOL). Differences smaller than 4.07 kcal/mol" in html
+    assert "The floor is 4.07 kcal/mol. Source: DDE_NOISE_FLOOR_KCAL_MOL. A pair is ranked only when" in html
+    assert "(z = 2)" in html

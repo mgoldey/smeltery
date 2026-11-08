@@ -49,17 +49,23 @@ def load_limits(path: Path | None = None) -> dict[str, list[dict[str, str]]] | N
     return parsed if parsed["measured"] or parsed["unmeasured"] else None
 
 
-def floor_statement(floor: float | None, unit: str, source: str) -> str:
-    """The floor, its source, and what it forbids, in one place for the report page and the archived snapshot."""
+def floor_statement(floor: float | None, unit: str, source: str, z: float) -> str:
+    """The floor, its source, and what it forbids, in one place for the report page and the archived snapshot.
+    Mirrors `funnel.resolved`: a pair is ranked only when its difference exceeds both z*hypot(SEM) and the floor."""
+    src = f" Source: {source}." if source else ""
     if floor is None or not math.isfinite(floor):
         return (
             "The floor is unmeasured for this run, so no systematic bound was applied: only the statistical "
-            "interval separates candidates, and a difference the pose noise cannot see is not ruled out."
+            "interval separates candidates, and a ranking may sit inside a systematic error the pose noise "
+            "cannot see."
         )
-    src = f" ({source})" if source else ""
     if floor <= 0:
-        return f"The floor is 0 {unit}{src}: no systematic bound was applied, only the statistical interval."
+        return (
+            f"The floor is 0 {unit}, so no systematic bound was applied and a ranking may sit inside a systematic "
+            f"error the pose noise cannot see.{src}"
+        )
     return (
-        f"The floor is {floor:g} {unit}{src}. Differences smaller than {floor:g} {unit} are reported as ties, "
-        "not rankings."
+        f"The floor is {floor:g} {unit}.{src} A pair is ranked only when its difference exceeds both {floor:g} {unit} "
+        f"and z\u00b7\u221a(SEM_a\u00b2+SEM_b\u00b2) (z = {z:g}). A difference of {floor:g} {unit} or less is always "
+        "a tie, and a larger one is still a tie when its uncertainty is wide."
     )
