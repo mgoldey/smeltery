@@ -90,7 +90,7 @@ def test_split_then_combine_gives_the_same_record_as_one_process(tmp_path):
     a = json.loads(Path(combined).read_text())
     b = json.loads(Path(single).read_text())
     for o in (a, b):
-        for k in ("started_utc", "finished_utc"):
+        for k in ("started_utc", "finished_utc", "record_sha256"):  # the self-hash covers the timestamps
             o.pop(k, None)
         o["results"] = results_without_timing(o["results"])  # wall-clock seconds differ between two runs
     assert a == b

@@ -218,6 +218,10 @@ class ConfigError(ValueError):
     """The config is malformed or names something that does not exist. Exit code 2."""
 
 
+class OutGuardRefused(ConfigError):
+    """The live-run guard refused OUT: nothing may be written there, not even an error plan.json."""
+
+
 class StageError(RuntimeError):
     """A pipeline stage failed. Exit code 3.
 
@@ -1643,7 +1647,7 @@ def _guard_out(out_dir: Path, staged_sha, temporal: bool = False) -> None:
 
     why = guard_out(Path(out_dir), staged_sha, temporal)
     if why:
-        raise ConfigError(why)
+        raise OutGuardRefused(why)
 
 
 def partial_digest(plan: Plan, parent: str, name: str) -> str:
@@ -1943,7 +1947,7 @@ def main(argv: list[str] | None = None) -> int:
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
-        if explicit_out and args.plan:
+        if explicit_out and args.plan and not isinstance(e, OutGuardRefused):
             write_plan_error(args.out, str(e))
         return 2
     except StageError as e:

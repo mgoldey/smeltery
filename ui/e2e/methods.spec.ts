@@ -39,7 +39,9 @@ test("a model that cannot say shows 'cannot say', never a number", async ({ page
   await page.goto("/methods");
   const docking = page.getByRole("region", { name: "Method docking" });
   await expect(docking.locator('[data-fact="cost"]')).toContainText("cannot say");
-  await expect(docking.locator('[data-fact="floor"]')).toHaveText("unmeasured");
+  const floor = docking.locator('[data-fact="floor"]');
+  await expect(floor).toContainText("unmeasured");
+  await expect(floor).not.toContainText(/\d/);
 });
 
 test("a workspace default is saved, survives a reload, and can be cleared", async ({ page }) => {
