@@ -1594,6 +1594,7 @@ VIEWERS = {
     "verify-run": "smeltery.run_tools:verify_run",
     "inspect": "smeltery.run_tools:inspect_run",
     "diff-run": "smeltery.run_tools:diff_run",
+    "export-sdf": "smeltery.sdf_export",
 }
 
 
@@ -1690,6 +1691,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
+    sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
     sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     tw.add_argument("--host", default="127.0.0.1:7233")

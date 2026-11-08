@@ -34,6 +34,7 @@ from smeltery.gui.views.matrix import matrix_figure
 from smeltery.gui.views.per_pose import per_pose_figure
 from smeltery.gui.views.per_pose_values import per_pose_values_figure
 from smeltery.project import Proposal, make_entry_id
+from smeltery.sdf_export import enriched_sdf
 
 from . import models as M
 from .common import ports, record, row, rows, run, utc_iso
@@ -590,6 +591,23 @@ def decisions_csv(request: Request, idx: int) -> Response:
 @router.get("/runs/{idx}/decisions.sdf")
 def decisions_sdf(request: Request, idx: int) -> Response:
     return _decisions_download(request, idx, "sdf", to_sdf, "chemical/x-mdl-sdfile")
+
+
+@router.get("/runs/{idx}/export.sdf")
+def export_sdf(request: Request, idx: int) -> Response:
+    """Every pose of the run as one 3D SDF, with ddE, tie group, survivor, gate results and decisions as properties
+    (`smeltery.sdf_export`). Unlike decisions.sdf (2D, one record per decided candidate) this is the poses."""
+    r = run(request, idx)
+    try:
+        text = enriched_sdf(r, _load_decisions(r))
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    name = f"poses-{r.record['input_digest'][:12]}.sdf"
+    return Response(
+        content=text,
+        media_type="chemical/x-mdl-sdfile",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 # ---------------------------------------------------------------------------------------------------- comments

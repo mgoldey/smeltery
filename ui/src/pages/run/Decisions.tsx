@@ -175,6 +175,9 @@ export function Decisions() {
           </a>{" "}
           <a href={`/api/runs/${idx}/decisions.sdf`} download>
             Download SDF
+          </a>{" "}
+          <a href={`/api/runs/${idx}/export.sdf`} download title="3D poses with ddE, tie group, gates and decisions as properties">
+            Download enriched pose SDF
           </a>
         </p>
         {d && vocab.data && decisions.data && picked.length ? (
