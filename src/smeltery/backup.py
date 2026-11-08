@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import io
 import json
 import os
 import re
@@ -40,19 +41,14 @@ class BackupError(Exception):
     pass
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _is_sqlite(path: Path) -> bool:
     if path.suffix not in DB_SUFFIXES:
         return False
-    with path.open("rb") as f:
-        return f.read(16) == b"SQLite format 3\x00"
+    try:
+        with path.open("rb") as f:
+            return f.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
 
 
 def _snapshot_db(src: Path, dst: Path) -> None:
@@ -60,60 +56,108 @@ def _snapshot_db(src: Path, dst: Path) -> None:
         s.backup(d)
 
 
-def _walk(root: Path, skip: Path | None, warn):
+def _is_sidecar(p: Path) -> bool:
+    """X-wal, X-shm, X-journal of a SQLite database X that exists; any other file of that name is data."""
+    for sfx in SIDECARS:
+        if p.name.endswith(sfx):
+            base = p.with_name(p.name[: -len(sfx)])
+            return base.is_file() and _is_sqlite(base)
+    return False
+
+
+def _walk(root: Path, skip: frozenset[Path], warn):
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         here = Path(dirpath)
         keep = []
         for d in sorted(dirnames):
             if (here / d).is_symlink():
                 warn(f"skipped symlink {(here / d).relative_to(root).as_posix()}")
-            elif d not in SKIP_DIRS:
+            elif d not in SKIP_DIRS and (here / d).resolve() not in skip:
                 keep.append(d)
         dirnames[:] = keep
         for name in sorted(filenames):
             p = here / name
             if p.is_symlink():
                 warn(f"skipped symlink {p.relative_to(root).as_posix()}")
-            elif name.endswith(SIDECARS) or (skip is not None and p == skip) or not p.is_file():
+            elif _is_sidecar(p) or p.resolve() in skip or not p.is_file():
                 continue
             else:
                 yield p
 
 
-def backup(root: Path, out: Path, warn=lambda m: print(f"warning: {m}", file=sys.stderr)) -> dict:
+class _Hashing:
+    """Reads pass through and are hashed: the manifest hash is of exactly the bytes the archive got."""
+
+    def __init__(self, f):
+        self.f, self.h = f, hashlib.sha256()
+
+    def read(self, n=-1):
+        data = self.f.read(n)
+        self.h.update(data)
+        return data
+
+
+def _after_stat(path: Path) -> None:
+    """Called between a file's fstat and its read; a seam for tests (a live log grows exactly there)."""
+
+
+def _add_file(tar: tarfile.TarFile, src: Path, arcname: str) -> dict:
+    """Add `src` reading it once: the size comes from one fstat, exactly that many bytes are streamed and hashed."""
+    with src.open("rb") as f:
+        ti = tar.gettarinfo(arcname=arcname, fileobj=f)
+        ti.name = arcname
+        _after_stat(src)
+        reader = _Hashing(f)
+        try:
+            tar.addfile(ti, reader)  # type: ignore[arg-type]  # tarfile only calls .read
+        except OSError as e:
+            raise BackupError(f"{src} changed while it was read (shorter than its size): {e}") from e
+        return {"size": ti.size, "sha256": reader.h.hexdigest()}
+
+
+def backup(
+    root: Path, out: Path, warn=lambda m: print(f"warning: {m}", file=sys.stderr), *, force: bool = False
+) -> dict:
     """Write the archive and return its manifest. Raises BackupError."""
     from . import __version__
 
     root, out = Path(root).resolve(), Path(out).absolute()
     if not root.is_dir():
         raise BackupError(f"{root} is not a directory")
+    if out.exists() and not force:
+        raise BackupError(f"{out} exists: pass --force to overwrite it")
     out.parent.mkdir(parents=True, exist_ok=True)
     files: dict[str, dict] = {}
     tmp_out = out.with_name(out.name + ".part")
+    scratch = Path(tempfile.mkdtemp(prefix=".smeltery-backup-", dir=out.parent))
+    skip = frozenset({out.resolve(), tmp_out.resolve(), scratch.resolve()})
     try:
-        with tempfile.TemporaryDirectory(prefix="smeltery-backup-") as scratch, tarfile.open(tmp_out, "w:gz") as tar:
-            for i, p in enumerate(_walk(root, out.resolve(), warn)):
+        with tarfile.open(tmp_out, "w:gz") as tar:
+            for i, p in enumerate(_walk(root, skip, warn)):
                 rel = p.relative_to(root).as_posix()
-                src = p
                 if _is_sqlite(p):
-                    src = Path(scratch) / f"{i}.db"
-                    _snapshot_db(p, src)
-                files[rel] = {"size": src.stat().st_size, "sha256": _sha256(src)}
-                tar.add(src, arcname=f"{PREFIX}/{rel}", recursive=False)
+                    snap = scratch / f"{i}.db"
+                    _snapshot_db(p, snap)
+                    files[rel] = _add_file(tar, snap, f"{PREFIX}/{rel}")
+                    snap.unlink()
+                else:
+                    files[rel] = _add_file(tar, p, f"{PREFIX}/{rel}")
             manifest = {
                 "smeltery_version": __version__,
                 "created_utc": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "files": files,
             }
             blob = json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n"
-            mpath = Path(scratch) / MANIFEST
-            mpath.write_bytes(blob)
-            tar.add(mpath, arcname=MANIFEST, recursive=False)
+            ti = tarfile.TarInfo(MANIFEST)
+            ti.size, ti.mtime = len(blob), int(dt.datetime.now(dt.UTC).timestamp())
+            ti.mode = 0o644
+            tar.addfile(ti, io.BytesIO(blob))
         os.replace(tmp_out, out)
     except (OSError, sqlite3.Error) as e:
         raise BackupError(str(e)) from e
     finally:
         tmp_out.unlink(missing_ok=True)
+        shutil.rmtree(scratch, ignore_errors=True)
     return manifest
 
 
@@ -174,6 +218,7 @@ def _stage(archive: Path, stage: Path) -> list[str]:
         for rel, m in sorted(rels.items()):
             meta = listed.get(rel)
             if not isinstance(meta, dict):
+                problems.append(f"{rel}: its {MANIFEST} entry is not an object")
                 continue
             dest = stage / rel
             h, n = hashlib.sha256(), 0
@@ -225,9 +270,10 @@ def backup_main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="smeltery backup", description="Archive a Bench workspace with a hash manifest.")
     ap.add_argument("root", help="the Bench workspace root")
     ap.add_argument("--out", required=True, help="archive to write (.tar.gz)")
+    ap.add_argument("--force", action="store_true", help="overwrite --out if it exists")
     args = ap.parse_args(argv)
     try:
-        m = backup(Path(args.root), Path(args.out))
+        m = backup(Path(args.root), Path(args.out), force=args.force)
     except BackupError as e:
         print(f"smeltery backup: {e}", file=sys.stderr)
         return 1

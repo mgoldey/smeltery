@@ -5,6 +5,8 @@ import sqlite3
 import tarfile
 from pathlib import Path
 
+import pytest
+
 from smeltery import backup as bk
 from smeltery.cli import main
 
@@ -148,4 +150,80 @@ def test_not_an_archive(tmp_path, capsys):
     junk = tmp_path / "junk.tar.gz"
     junk.write_bytes(b"nope")
     assert main(["restore", str(junk), "--into", str(tmp_path / "o")]) == 1
+    assert not (tmp_path / "o").exists()
+
+
+def test_archive_inside_root_restores(tmp_path):
+    root = make_workspace(tmp_path / "ws")
+    arc = root / "b.tar.gz"
+    m = bk.backup(root, arc, warn=lambda m: None)
+    assert not any(k.startswith("b.tar.gz") or ".smeltery-backup-" in k for k in m["files"])
+    assert bk.restore(arc, tmp_path / "out")
+    assert list(root.glob(".smeltery-backup-*")) == []
+
+
+def test_file_growing_during_backup_still_restores(tmp_path, monkeypatch):
+    root = make_workspace(tmp_path / "ws")
+    log = root / "run.log"
+    log.write_text("line\n")
+
+    def grow(path):
+        if path == log:
+            with log.open("a") as f:
+                f.write("more\n")
+
+    monkeypatch.setattr(bk, "_after_stat", grow)
+    arc = tmp_path / "b.tar.gz"
+    m = bk.backup(root, arc, warn=lambda m: None)
+    assert m["files"]["run.log"]["size"] == 5
+    bk.restore(arc, tmp_path / "out")
+    assert (tmp_path / "out/run.log").read_text() == "line\n"
+
+
+def test_file_shrinking_during_backup_fails(tmp_path, monkeypatch):
+    root = make_workspace(tmp_path / "ws")
+    log = root / "run.log"
+    log.write_text("long line\n")
+    monkeypatch.setattr(bk, "_after_stat", lambda p: log.write_text("x") if p == log else None)
+    arc = tmp_path / "b.tar.gz"
+    with pytest.raises(bk.BackupError, match="run.log"):
+        bk.backup(root, arc, warn=lambda m: None)
+    assert not arc.exists() and not list(tmp_path.glob("*.part")) and not list(tmp_path.glob(".smeltery-backup-*"))
+
+
+def test_journal_named_plain_file_is_backed_up_but_sqlite_sidecars_are_not(tmp_path):
+    root = make_workspace(tmp_path / "ws")
+    (root / "run-journal").write_text("keep me")
+    (root / ".smeltery/bench/projects.sqlite-wal").write_bytes(b"wal")
+    m = bk.backup(root, tmp_path / "b.tar.gz", warn=lambda m: None)
+    assert "run-journal" in m["files"]
+    assert not any(k.endswith("-wal") for k in m["files"])
+
+
+def test_existing_out_needs_force(tmp_path, capsys):
+    root = make_workspace(tmp_path / "ws")
+    arc = tmp_path / "b.tar.gz"
+    arc.write_text("precious")
+    assert main(["backup", str(root), "--out", str(arc)]) == 1
+    assert "--force" in capsys.readouterr().err
+    assert arc.read_text() == "precious"
+    assert main(["backup", str(root), "--out", str(arc), "--force"]) == 0
+
+
+def test_non_object_manifest_entry_is_a_problem(tmp_path, capsys):
+    arc = tmp_path / "b.tar.gz"
+    bk.backup(make_workspace(tmp_path / "ws"), arc, warn=lambda m: None)
+    bad = tmp_path / "bad.tar.gz"
+
+    def edit(m, data):
+        if m.name == "MANIFEST.json":
+            d = json.loads(data)
+            d["files"]["methods.toml"] = "oops"
+            data = json.dumps(d).encode()
+            m.size = len(data)
+        return m, data
+
+    rewrite(arc, bad, edit)
+    assert main(["restore", str(bad), "--into", str(tmp_path / "o")]) == 1
+    assert "methods.toml" in capsys.readouterr().err
     assert not (tmp_path / "o").exists()
