@@ -30,6 +30,8 @@ class NotebookEntry:
     created_at: str
     artefacts: tuple[str, ...] = ()  # sha256 digests
     supersedes: str | None = None
+    # attached files: {"digest", "filename", "media_type", "kind": "file"}; `artefacts` stay the attached runs
+    files: tuple[dict[str, str], ...] = ()
 
     def problems(self) -> list[str]:
         out = []
@@ -52,6 +54,10 @@ class NotebookEntry:
         for a in self.artefacts:
             if not isinstance(a, str) or len(a) != 64:
                 out.append(f"artefact ref {a!r} is not a sha256 hex digest")
+        for f in self.files:
+            d = f.get("digest") if isinstance(f, dict) else None
+            if not isinstance(d, str) or len(d) != 64 or not f.get("filename"):
+                out.append(f"file attachment {f!r} needs a sha256 digest and a filename")
         return out
 
     def validate(self) -> "NotebookEntry":
@@ -61,13 +67,15 @@ class NotebookEntry:
         return self
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self) | {"artefacts": list(self.artefacts)}
+        return dataclasses.asdict(self) | {"artefacts": list(self.artefacts), "files": [dict(f) for f in self.files]}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NotebookEntry":
         d = dict(data)
         if "artefacts" in d and isinstance(d["artefacts"], list):
             d["artefacts"] = tuple(d["artefacts"])
+        if isinstance(d.get("files"), list):
+            d["files"] = tuple(d["files"])
         return cls(**d).validate()
 
 

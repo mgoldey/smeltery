@@ -2,8 +2,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
+import { ApiError, reasonOf } from "../api/http";
 import { EmptyState } from "../components/EmptyState";
+import { Markdown } from "../components/Markdown";
 import { Shell } from "../components/Shell";
+
+type FileRef = { digest: string; filename: string; media_type: string; kind: "file" };
+const INLINE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const fileUrl = (f: FileRef) => `/api/notebook/artifacts/${f.digest}?name=${encodeURIComponent(f.filename)}`;
+
+async function uploadNotebookFile(file: File): Promise<FileRef> {
+  const res = await fetch(`/api/notebook/artifacts?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
+  return (await res.json()) as FileRef;
+}
 
 /**
  * A campaign's notebook. Entries are append-only: there is no way to edit one. A correction is a new entry that
@@ -25,19 +41,23 @@ export function Notebook() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [attach, setAttach] = useState<number[]>([]);
+  const [files, setFiles] = useState<FileRef[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [supersedes, setSupersedes] = useState<string | null>(null);
   const add = useMutation({
     mutationFn: () =>
       unwrap(
         api.POST("/api/campaigns/{campaign_id}/entries", {
           params: { path: { campaign_id: id } },
-          body: { title, body, runs: attach, supersedes },
+          body: { title, body, runs: attach, files, supersedes },
         }),
       ),
     onSuccess: () => {
       setTitle("");
       setBody("");
       setAttach([]);
+      setFiles([]);
       setSupersedes(null);
       return qc.invalidateQueries({ queryKey: ["entries", id] });
     },
@@ -70,12 +90,29 @@ export function Notebook() {
                   {e.author}, {e.created_at.replace("T", " ").replace("Z", "")}
                   {e.supersedes ? `, correcting “${titleOf.get(e.supersedes) ?? e.supersedes}”` : ""}
                 </p>
-                <p className="entry-body">{e.body}</p>
+                <Markdown source={e.body} />
                 {e.artefacts.length ? (
                   <ul className="artefacts" aria-label="Attached runs">
                     {e.artefacts.map((h) => (
                       <li key={h} className="mono" data-artefact={h}>
                         {h}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {e.files.length ? (
+                  <ul className="artefacts files" aria-label="Attached files">
+                    {e.files.map((f) => (
+                      <li key={f.digest + f.filename} data-file={f.digest}>
+                        {INLINE_IMAGES.has(f.media_type) ? (
+                          <a href={fileUrl(f)} target="_blank" rel="noopener noreferrer">
+                            <img className="thumb" src={fileUrl(f)} alt={f.filename} loading="lazy" />
+                          </a>
+                        ) : (
+                          <a href={fileUrl(f)} download={f.filename}>
+                            {f.filename}
+                          </a>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -116,8 +153,43 @@ export function Notebook() {
                   </label>
                 ))}
               </fieldset>
+              <fieldset className="attach">
+                <legend>Attach files (figures, PDFs, CSVs)</legend>
+                <input
+                  type="file"
+                  aria-label="Attach a file"
+                  disabled={uploading}
+                  onChange={async (ev) => {
+                    const f = ev.target.files?.[0];
+                    ev.target.value = "";
+                    if (!f) return;
+                    setUploading(true);
+                    setUploadError(null);
+                    try {
+                      const ref = await uploadNotebookFile(f);
+                      setFiles((a) => (a.some((x) => x.digest === ref.digest && x.filename === ref.filename) ? a : [...a, ref]));
+                    } catch (err) {
+                      setUploadError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setUploading(false);
+                    }
+                  }}
+                />
+                {uploading ? <span className="lede"> Uploading…</span> : null}
+                {uploadError ? <p className="field-error">{uploadError}</p> : null}
+                <ul>
+                  {files.map((f) => (
+                    <li key={f.digest + f.filename}>
+                      {f.filename}{" "}
+                      <button type="button" onClick={() => setFiles((a) => a.filter((x) => x !== f))} aria-label={`Remove ${f.filename}`}>
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </fieldset>
               <p>
-                <button className="primary" type="submit" disabled={add.isPending || !title.trim()}>
+                <button className="primary" type="submit" disabled={add.isPending || uploading || !title.trim()}>
                   {supersedes ? "Add correction" : "Add entry"}
                 </button>{" "}
                 {supersedes ? (
