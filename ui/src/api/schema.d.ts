@@ -973,6 +973,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/export.sdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Sdf
+         * @description Every pose of the run as one 3D SDF, with ddE, tie group, survivor, gate results and decisions as properties
+         *     (`smeltery.sdf_export`). Unlike decisions.sdf (2D, one record per decided candidate) this is the poses.
+         */
+        get: operations["export_sdf_api_runs__idx__export_sdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/figures/{name}": {
         parameters: {
             query?: never;
@@ -5177,6 +5198,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoseDrops"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_sdf_api_runs__idx__export_sdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
