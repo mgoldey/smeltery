@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import builtins
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
 class StaleWrite(Exception):
@@ -59,4 +62,13 @@ class PipelineStore(Protocol):
 
     def files(self, name: str) -> builtins.list[InputFile]:
         """The input files in the pipeline folder (not config.toml), newest first (ties by name)."""
+        ...
+
+    def rename(self, old: str, new: str) -> PipelineFile:
+        """Move the folder to a new name. KeyError for no pipeline `old`, FileExistsError if `new` is taken,
+        ValueError for an invalid name."""
+        ...
+
+    def clone(self, src: str, new: str) -> PipelineFile:
+        """Copy the whole folder (config, inputs, anything else kept there; not `preview/`) to `new`. Same errors."""
         ...

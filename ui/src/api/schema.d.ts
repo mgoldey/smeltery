@@ -363,6 +363,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Pipeline
+         * @description Create a pipeline from a bundle zip (the body is the zip's bytes, as an upload's is). The name is `name`, else
+         *     the bundle's own, made unique with a -2, -3 suffix when taken; a `name` that is taken is a 409. Any bad entry
+         *     (path trickery, a sha256 that does not match the manifest) refuses the whole bundle with a 422 listing each one.
+         *     An input exported from an absolute path is rewritten to its imported `inputs/<basename>`.
+         */
+        post: operations["import_pipeline_api_pipelines_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/ligands": {
         parameters: {
             query?: never;
@@ -508,6 +531,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/{name}/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clone Pipeline
+         * @description A copy of the pipeline's folder (config, inputs, everything but `preview/`) under a new name.
+         */
+        post: operations["clone_pipeline_api_pipelines__name__clone_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/{name}/files": {
         parameters: {
             query?: never;
@@ -625,6 +668,27 @@ export interface paths {
          * @description Submit `smeltery run config.toml --plan --out <folder>/preview`: poses, digest, seconds and memory, no SCF.
          */
         post: operations["pipeline_preview_api_pipelines__name__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/{name}/rename": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Pipeline
+         * @description Move the pipeline's folder to a new name. Refused (409) while a task of this pipeline is queued or running.
+         *     Runs are unaffected: they keep their own staged copy and record no pipeline name.
+         */
+        post: operations["rename_pipeline_api_pipelines__name__rename_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1824,6 +1888,27 @@ export interface components {
             /** Value */
             value: number | null;
         };
+        /** ImportResult */
+        ImportResult: {
+            /** Files */
+            files: components["schemas"]["ImportedFile"][];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            /** @description null when anything was refused: nothing is created then */
+            pipeline: components["schemas"]["PipelineDoc"] | null;
+        };
+        /** ImportedFile */
+        ImportedFile: {
+            /** Message */
+            message?: string | null;
+            /** Ok */
+            ok: boolean;
+            /** Path */
+            path: string;
+        };
         /** ImportedLigands */
         ImportedLigands: {
             /**
@@ -2316,6 +2401,11 @@ export interface components {
             spearman?: number | null;
             /** Stage */
             stage?: string | null;
+        };
+        /** NewName */
+        NewName: {
+            /** New Name */
+            new_name: string;
         };
         /** ParamOut */
         ParamOut: {
@@ -3816,6 +3906,64 @@ export interface operations {
             };
         };
     };
+    import_pipeline_api_pipelines_import_post: {
+        parameters: {
+            query?: {
+                name?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+        };
+    };
     ligands_check_api_pipelines_ligands_post: {
         parameters: {
             query?: never;
@@ -4159,6 +4307,59 @@ export interface operations {
             };
         };
     };
+    clone_pipeline_api_pipelines__name__clone_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_pipeline_files_api_pipelines__name__files_get: {
         parameters: {
             query?: never;
@@ -4391,6 +4592,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreviewStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_pipeline_api_pipelines__name__rename_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Validation Error */

@@ -130,3 +130,35 @@ def test_add_file_takes_the_names_browsers_actually_hand_over(store):
     for ok in ("7lcj (1).pdb", "my protein.pdb", "4-F analogue.pqr", "A+B.pdbqt"):
         assert store.add_file("p", ok, ok.encode()) == ok
         assert (store.get("p").folder / ok).read_bytes() == ok.encode()
+
+
+def test_rename_moves_the_folder_and_its_files(store):
+    store.create("a", "x = 1\n", {})
+    store.add_file("a", "r.pdb", b"data")
+    got = store.rename("a", "b")
+    assert got.name == "b" and store.list() == ["b"]
+    assert (got.folder / "r.pdb").read_bytes() == b"data"
+
+
+def test_clone_copies_inputs_but_not_preview_and_leaves_the_source(store):
+    src = store.create("a", "x = 1\n", {})
+    store.add_file("a", "r.pdb", b"data")
+    (src.folder / "preview").mkdir()
+    (src.folder / "preview" / "p.json").write_text("{}")
+    got = store.clone("a", "b")
+    assert sorted(store.list()) == ["a", "b"]
+    assert (got.folder / "r.pdb").read_bytes() == b"data" and not (got.folder / "preview").exists()
+    assert (src.folder / "preview" / "p.json").exists()
+
+
+def test_rename_and_clone_errors(store):
+    store.create("a", "", {})
+    store.create("b", "", {})
+    for op in (store.rename, store.clone):
+        with pytest.raises(FileExistsError):
+            op("a", "b")
+        with pytest.raises(KeyError):
+            op("nope", "c")
+        with pytest.raises(ValueError):
+            op("a", "../x")
+    assert sorted(store.list()) == ["a", "b"]
