@@ -102,23 +102,9 @@ uv run smeltery run myrun.toml --out out/myrun
 
 ### Troubleshooting
 
-- **`uv sync` or `uv run` is compiling ferric.** Something is pointing `[tool.uv.sources]` at
-  a git commit or a local path. That setup is only for developing against unreleased ferric,
-  and it needs Rust, libint2 and OpenBLAS (see ferric's README). Remove it to get the wheel.
-- **Not on Linux x86_64.** ferric publishes no wheels for other platforms yet, so you'd have
-  to build it from source as above. `scripts/dev-check.sh` runs the tests against a labelled
-  ferric stub instead. Tests marked `needs_ferric` are skipped, not failed. It's a smoke check
-  and doesn't replace CI.
-- **`smeltery bench` exits 2.** The UI isn't built. Run `cd ui && npm ci && npm run build`.
-- **`smeltery gui` says "need exactly one run-\*.json".** Point it at the `--out` directory
-  of a single run, or at that run's `run-*.json` file directly.
-- **Slow or thrashing SCFs.** Set `OPENBLAS_NUM_THREADS=1`. ferric parallelizes with
-  Rayon, and BLAS threads on top of that oversubscribe the machine.
-- **Exit codes.** `smeltery run` exits 0 on success, including when it prints `UNRANKED`. It
-  exits 2 for a bad config, and 3 when a stage fails (for example no common core or an SCF
-  that didn't converge); the message names the stage. With `--fail-on-unranked` an `UNRANKED`
-  result exits 4 instead (in-process runs and `--combine`, not `--temporal`). `smeltery run`
-  refuses (exit 2) an `--out` that already holds a `run-*.json`; pass `--force` to overwrite.
+The common failures (ferric compiling or missing wheels, `smeltery bench` exiting 2, `smeltery gui`
+not finding a run, thrashing SCFs, exit codes 0/2/3/4 and `--force`) are in
+[docs/troubleshooting.md](docs/troubleshooting.md), with the messages as the code prints them.
 
 Running the tests and the other checks is covered in [AGENTS.md](AGENTS.md).
 
@@ -147,6 +133,7 @@ Running the tests and the other checks is covered in [AGENTS.md](AGENTS.md).
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
+| Fix an error message | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Look up a term (ddE, floor, tie group, rung) | [docs/glossary.md](docs/glossary.md) |
 | Check tool and data licences | [docs/licensing.md](docs/licensing.md) |
 
