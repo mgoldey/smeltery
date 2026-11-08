@@ -707,7 +707,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
                 )
         empty = [k for k, v in pose_index.items() if not v]
         if empty:
-            raise StageError(f"stage 'pairing' failed: every pose of {', '.join(empty)} was dropped")
+            raise StageError(f"stage 'pairing' failed: every pose of {', '.join(empty)} was dropped", stage="pairing")
 
     remedies = bool(plan.tier.remedies)
 
@@ -730,7 +730,9 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
         measured = {m: v for m, v in values.items() if work["model_owner"].get(m) == spec.key}
         got = fn(plan, rec, measured)
         if not isinstance(got, dict):
-            raise StageError(f"stage {spec.key!r} failed: summarize returns a dict, got {type(got).__name__}")
+            raise StageError(
+                f"stage {spec.key!r} failed: summarize returns a dict, got {type(got).__name__}", stage=spec.key
+            )
         rec.results[spec.key] = {**(rec.results.get(spec.key) or {}), **got}
     if dropped:
         rec.results["dropped_poses"] = dropped

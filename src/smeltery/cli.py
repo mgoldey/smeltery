@@ -226,6 +226,11 @@ class StageError(RuntimeError):
     """
 
     gates: dict | None = None
+    stage: str | None = None  # the failing stage's name, when known
+
+    def __init__(self, *args, stage: str | None = None):
+        super().__init__(*args)
+        self.stage = stage
 
 
 @dataclass
@@ -625,7 +630,7 @@ def _stage(name: str, fn, log: list | None = None):
     except (ConfigError, StageError):
         raise
     except Exception as e:
-        raise StageError(f"stage {name!r} failed: {type(e).__name__}: {e}") from e
+        raise StageError(f"stage {name!r} failed: {type(e).__name__}: {e}", stage=name) from e
     finally:
         secs[name] = secs.get(name, 0.0) + (time.perf_counter() - t0)
         for e in log or []:
@@ -670,7 +675,8 @@ def _check_parity(candidates: list[Candidate]) -> None:
         if electrons % 2:
             raise StageError(
                 f"stage 'parity' failed: {c.name} has {electrons} electrons at charge {_net_charge(c.smiles):+d}; "
-                "the field-interaction tier is closed-shell RHF and is undefined for an odd electron count"
+                "the field-interaction tier is closed-shell RHF and is undefined for an odd electron count",
+                stage="parity",
             )
 
 
@@ -703,7 +709,8 @@ def _dock_parent(cfg: dict, parent: Candidate, log: list, extra: dict, prepared=
         if outside.any():
             raise StageError(
                 f"stage 'docking' failed: {int(outside.sum())} of {len(parent.poses)} docked pose(s) have "
-                "their centroid outside the search box; the receptor and the box are not in one frame"
+                "their centroid outside the search box; the receptor and the box are not in one frame",
+                stage="docking",
             )
     scores = [float(x) for x in parent.per_pose[tier.QUANTITY]]
     extra["docking"] = {
@@ -749,7 +756,7 @@ def _load_field(
         raise ConfigError(f"[pocket] file {str(path)!r} does not exist")
     field = load_pocket(path)
     if not len(field):
-        raise StageError("stage 'pocket' failed: the pocket file produced no point charges")
+        raise StageError("stage 'pocket' failed: the pocket file produced no point charges", stage="pocket")
     extra["pocket"] = dict(field.provenance)
     _log(log, "pocket", f"pocket {path.name}: {len(field)} point charges", n_c, n_c, "field")
     return field, path
@@ -843,7 +850,7 @@ def _run_gates(
             )
         recorded.append(ff)
     if failures:
-        err = StageError("\n".join(failures))
+        err = StageError("\n".join(failures), stage="gates")
         err.gates = results
         raise err
     if gates.get("xtb"):
@@ -912,7 +919,7 @@ def _hook_poses(spec: MethodSpec, cfg: dict, parent: Candidate, ctx: dict) -> No
     def run():
         got = list(hook.parent_poses(cfg, parent, ctx))
         if not got:
-            raise StageError(f"stage {spec.key!r} failed: it gave no parent pose")
+            raise StageError(f"stage {spec.key!r} failed: it gave no parent pose", stage=spec.key)
         parent.poses = got
 
     _stage(spec.key, run, ctx["log"])
@@ -925,7 +932,7 @@ def _hook_field(spec: MethodSpec, cfg: dict, parent: Candidate, ctx: dict):
     hook = cast(FieldSource, spec.hook)
     field = _stage(spec.key, lambda: hook.field(cfg, parent, ctx), ctx["log"])
     if not len(field):
-        raise StageError(f"stage {spec.key!r} failed: it gave no point charges")
+        raise StageError(f"stage {spec.key!r} failed: it gave no point charges", stage=spec.key)
     if getattr(field, "provenance", None) is not None:
         ctx["extra"].setdefault(spec.key, {})["field"] = dict(field.provenance)
     if not any(e["stage"] == spec.key for e in ctx["log"]):
@@ -1054,10 +1061,13 @@ def per_pose_results(plan: Plan) -> tuple[dict, dict]:
         per_pose[c.name] = {}
         for q, values in c.per_pose.items():
             if q not in declared:
-                raise StageError(f"stage 'outputs' failed: {c.name} carries {q!r}, which no tier that ran declares")
+                raise StageError(
+                    f"stage 'outputs' failed: {c.name} carries {q!r}, which no tier that ran declares", stage="outputs"
+                )
             if len(values) != len(c.poses):
                 raise StageError(
-                    f"stage 'outputs' failed: {c.name} has {len(values)} {q!r} value(s) for {len(c.poses)} pose(s)"
+                    f"stage 'outputs' failed: {c.name} has {len(values)} {q!r} value(s) for {len(c.poses)} pose(s)",
+                    stage="outputs",
                 )
             per_pose[c.name][q] = [float(x) for x in values]
             units[q] = declared[q]
@@ -1147,7 +1157,9 @@ def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict) -> No
     hook = cast(Analysis, spec.hook)
     got = _stage(spec.key, lambda: hook.run(plan, rec, ctx))
     if not isinstance(got, dict):
-        raise StageError(f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}")
+        raise StageError(
+            f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}", stage=spec.key
+        )
     rec.results[spec.key] = {**(rec.results.get(spec.key) or {}), **got}
 
 
@@ -1192,7 +1204,8 @@ def pose_mol(c: Candidate) -> Chem.Mol:
         if tuple(pose.symbols) != symbols:
             raise StageError(
                 f"stage 'outputs' failed: {c.name} pose {i} atoms {''.join(pose.symbols)} are not its SMILES-with-H "
-                f"order {''.join(symbols)}; refusing to write coordinates onto the wrong atoms"
+                f"order {''.join(symbols)}; refusing to write coordinates onto the wrong atoms",
+                stage="outputs",
             )
         conf = Chem.Conformer(len(symbols))
         for k, xyz in enumerate(np.asarray(pose.coords_ang, dtype=float)):
@@ -1215,7 +1228,8 @@ def write_pose_sdfs(plan: Plan, results: dict, out_dir: Path) -> dict:
         if f in names:
             raise StageError(
                 f"stage 'outputs' failed: candidates {names[f]!r} and {c.name!r} both sanitise to pose file {f!r}; "
-                "rename one"
+                "rename one",
+                stage="outputs",
             )
         names[f] = c.name
     mols = {c.name: pose_mol(c) for c in plan.candidates}  # all checked before the first write
@@ -1552,12 +1566,11 @@ def write_plan_preview(plan: Plan, digest: str, out_dir: Path, config: Path) -> 
     (out_dir / "plan.json").write_text(json.dumps(rec, indent=2, sort_keys=True, default=str) + "\n")
 
 
-def write_plan_error(out_dir: Path, message: str, plan: Plan | None = None) -> None:
+def write_plan_error(out_dir: Path, message: str, stage: str | None = None) -> None:
     """`--plan --out OUT` that failed: OUT/plan.json says so (`status` "error", the failing `stage` or null, the
-    `message`, the `input_digest` if a plan was built) instead of leaving the last good preview or nothing."""
-    m = re.search(r"stage '([^']+)'", message)
-    digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest if plan is not None else None
-    rec = {"status": "error", "stage": m.group(1) if m else None, "message": message, "input_digest": digest}
+    `message`) instead of leaving the last good preview or nothing. `input_digest` is always null: a failure leaves
+    no finished plan to digest (the key is there so readers of an ok plan.json find the same keys)."""
+    rec = {"status": "error", "stage": stage, "message": message, "input_digest": None}
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "plan.json").write_text(json.dumps(rec, indent=2, sort_keys=True) + "\n")
@@ -1789,7 +1802,9 @@ def main(argv: list[str] | None = None) -> int:
         args.out = Path("out")
     try:
         config_info = None
-        if explicit_out and not (args.plan or args.combine or args.only_candidate or args.temporal or args.force):
+        if explicit_out and not (
+            args.plan or args.combine or args.only_candidate is not None or args.temporal or args.force
+        ):
             if done := sorted(args.out.glob("run-*.json")):  # a re-run would replace it
                 raise ConfigError(
                     f"{args.out} already holds the run record {done[0].name}; use another --out, or --force to rerun"
@@ -1904,7 +1919,7 @@ def main(argv: list[str] | None = None) -> int:
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
-            return 0
+            return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
         plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
             digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
@@ -1919,12 +1934,12 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan:
-            write_plan_error(args.out, str(e), plan)
+            write_plan_error(args.out, str(e))
         return 2
     except StageError as e:
         print(f"error: {e}", file=sys.stderr)
         if explicit_out and args.plan:
-            write_plan_error(args.out, str(e), plan)
+            write_plan_error(args.out, str(e), getattr(e, "stage", None))
         if explicit_out and e.gates:  # a rejected gate still leaves every pose's result
             try:
                 args.out.mkdir(parents=True, exist_ok=True)

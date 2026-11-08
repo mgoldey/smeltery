@@ -116,7 +116,9 @@ uv run smeltery run myrun.toml --out out/myrun
   Rayon, and BLAS threads on top of that oversubscribe the machine.
 - **Exit codes.** `smeltery run` exits 0 on success, including when it prints `UNRANKED`. It
   exits 2 for a bad config, and 3 when a stage fails (for example no common core or an SCF
-  that didn't converge); the message names the stage.
+  that didn't converge); the message names the stage. With `--fail-on-unranked` an `UNRANKED`
+  result exits 4 instead (in-process runs and `--combine`, not `--temporal`). `smeltery run`
+  refuses (exit 2) an `--out` that already holds a `run-*.json`; pass `--force` to overwrite.
 
 Running the tests and the other checks is covered in [AGENTS.md](AGENTS.md).
 

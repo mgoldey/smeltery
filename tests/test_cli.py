@@ -704,3 +704,12 @@ def test_fail_on_unranked_exits_4_and_a_rerun_into_a_record_is_refused(tmp_path,
     (out / "run-abc.json").write_text("{}")
     assert main(["run", str(cfg), "--out", str(out)]) == 2  # refused: names the record
     assert main(["run", str(cfg), "--out", str(out), "--force"]) == 0
+
+
+def test_a_stage_error_plan_json_names_its_stage(tmp_path):
+    from smeltery.cli import StageError, write_plan_error
+
+    e = StageError("stage 'pocket' failed: x", stage="pocket")
+    write_plan_error(tmp_path, str(e), getattr(e, "stage", None))
+    rec = json.loads((tmp_path / "plan.json").read_text())
+    assert rec == {"status": "error", "stage": "pocket", "message": "stage 'pocket' failed: x", "input_digest": None}
