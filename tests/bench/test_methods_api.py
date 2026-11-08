@@ -1,9 +1,12 @@
 """The Methods tab over HTTP: every wired method with its settings explained, workspace defaults, and who uses it."""
 
+import sys
 import tomllib
+import types
 from pathlib import Path
 
 from smeltery.gui.catalog import catalog
+from smeltery.methods import registry
 
 BLANK = {"campaign": "cdk2", "parent": "a", "candidates": {"a": "CCO", "b": "CCN"}}
 
@@ -138,3 +141,41 @@ def test_floor_provenance_and_tier_doc_are_reported(client_for):
     m = _methods(c)["field_dft_interaction"]
     assert m["floor_status"] == "UNMEASURED"
     assert m["tier_doc"] == "docs/tiers/field_dft_interaction.md"
+
+
+def _doc_example(monkeypatch) -> dict:
+    """Run the 'Registering from outside the package' code block of docs/methods.md; return its namespace."""
+    import re
+
+    docs = Path(__file__).resolve().parents[2] / "docs" / "methods.md"
+    section = docs.read_text().split("### Registering from outside the package", 1)[1]
+    code = re.search(r"```python\n(.*?)```", section, re.S).group(1)
+    mod = types.ModuleType("doc_echo_method")  # dataclasses resolve annotations through sys.modules
+    monkeypatch.setitem(sys.modules, mod.__name__, mod)
+    exec(compile(code, "docs/methods.md", "exec"), mod.__dict__)
+    return mod.__dict__
+
+
+def test_a_method_registered_from_outside_the_package_reaches_the_methods_api(client_for, request, monkeypatch):
+    ns = _doc_example(monkeypatch)
+    ns["install"]()
+    request.addfinalizer(lambda: "echo" in registry() and ns["uninstall"]())
+    c, ports = client_for()
+
+    echo = _methods(c)["echo"]
+    assert echo["label"] == "Echo" and echo["cost_model"] == "negligible: no SCF"
+    params = {p["name"]: p for p in echo["params"]}
+    assert params["label"]["default"] == "hello" and params["repeat"]["default"] == 2
+    assert all(p["workspace_default"] is None for p in params.values())
+
+    r = c.put("/api/methods/echo", json={"defaults": {"repeat": 5}})
+    assert r.status_code == 200, r.text
+    assert {p["name"]: p["workspace_default"] for p in r.json()["params"]} == {"label": None, "repeat": 5}
+    text = Path(ports["settings"].root, ".smeltery", "bench", "methods.toml").read_text()
+    assert tomllib.loads(text) == {"echo": {"repeat": 5}}
+    bad = c.put("/api/methods/echo", json={"defaults": {"nope": 1}})
+    assert bad.status_code == 400
+
+    ns["uninstall"]()
+    assert "echo" not in _methods(c)
+    assert c.put("/api/methods/echo", json={"defaults": {}}).status_code == 404

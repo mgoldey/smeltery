@@ -139,6 +139,63 @@ shape: `methods/bound_pose.py` (a `pose_source` with `file_knobs`, `exclusive`, 
 `methods/charge_sensitivity.py` (an `analysis` with `validate` and a re-measuring interface). A knob that names a file must be listed in `file_knobs`, or the file is neither staged nor in the digest. Run the
 tests for the files you touch (see `AGENTS.md`).
 
+### Registering from outside the package
+
+Methods have no entry-point group yet (providers do: `smeltery.providers`), so an out-of-tree method cannot be
+discovered by installing it. Its module must call `register()` itself, at import time or from a function the host
+program calls, and `unregister()` removes it again (what a test does in a finalizer). Discovery of `methods/*.py`
+modules is for in-tree methods only.
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from smeltery.methods import MethodSpec, register, unregister
+
+
+@dataclass(frozen=True)
+class EchoKnobs:
+    label: str = "hello"
+    repeat: int = 2
+
+
+class Echo:
+    """The `analysis` hook: its dict is merged into results["echo"]."""
+
+    def run(self, plan, rec, ctx: dict) -> dict:
+        k = EchoKnobs(**plan.cfg["echo"])
+        return {"text": k.label * k.repeat}
+
+
+ECHO = MethodSpec(
+    "echo",
+    "Echo",
+    "check",
+    "recorded",
+    step="measure",
+    slot="analysis",
+    section="echo",
+    knobs=EchoKnobs,
+    order=170,
+    hook=Echo(),
+    summary="Repeats a label; a third-party method in its smallest form.",
+    cost_model=lambda: "negligible: no SCF",
+)
+
+
+def install() -> None:
+    register(ECHO)
+
+
+def uninstall() -> None:
+    unregister("echo")
+```
+
+After `install()`, `echo` is in the catalog, the execution order, the CLI's top-level keys, `smeltery methods` and the
+Bench Methods tab (`GET /api/methods`), where its settings and defaults come from `EchoKnobs` and a workspace default
+can be set with `PUT /api/methods/echo`. `tests/bench/test_methods_api.py` runs this block and checks exactly that.
+
 ## `[bound_pose]`: the parent's poses from a bound conformer
 
 `methods/bound_pose.py`. A `pose_source` in the `geometry` rung, step `poses`, order 25, `exclusive` with docking
