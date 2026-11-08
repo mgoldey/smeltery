@@ -53,9 +53,8 @@ installed as an extra (it conflicts with ferric's gemmi); see [boltz.md](boltz.m
 
 A `.pdb` pocket (or a `[structure]` section) is charged by `pdb2pqr30`. Install it with
 `pip install pdb2pqr`, or point `[pocket] file` at a `.pqr`. If the text says it "is on PATH but
-`--version` fails", the script is a broken shim: reinstall it. Because CI digest mismatches have
-usually been a missing tool and not float drift, check this first when a digest differs between
-machines ([glossary.md](glossary.md)).
+`--version` fails", the script is a broken shim: reinstall it. If a digest differs between
+machines, first check that `pdb2pqr30` is installed on both ([glossary.md](glossary.md)).
 
 ## Config (exit 2)
 
@@ -148,7 +147,7 @@ error: ... MCS search timed out after mcs_timeout_s=... s; an unfinished core is
 
 The MCS gate refuses an analogue it cannot align on the parent, rather than build a degraded
 pairing. Check the SMILES for a scaffold change that leaves too little in common, or raise
-`PairedPoses` `mcs_timeout_s` for drug-sized molecules. See
+`[poses] mcs_timeout_s` (default 10 s) for drug-sized molecules. See
 [glossary.md](glossary.md) and [limits.md](limits.md).
 
 ### An odd electron count
@@ -182,18 +181,20 @@ timeouts are retried by running the same command again
 The KS-DFT tier refuses before its first SCF. The first message is the fixed `memory_budget_gb`:
 use a smaller basis, or raise it (and `FERRIC_MEM_BUDGET_GB`) if the machine really has the
 memory; `check_memory = false` runs anyway. The second is `require_free_gb`, checked against the
-memory actually free: free some and retry, or lower it. A long run holds several times its
-per-calculation prediction, so leave headroom. `smeltery run --plan` prints
+memory actually free: free some and retry, or lower it. A long run has been measured holding
+~11 GB against a ~2 GB prediction, so leave headroom. `smeltery run --plan` prints
 `memory (...): ... the run will refuse before its first SCF` ahead of time.
 
 ### A gate rejected a pose
 
 ```text
-error: stage 'gates' failed: ...
+error: stage 'posebusters' failed: ...
+error: stage 'forcefield' failed: ... have MMFF94 strain ... kcal/mol > the configured max_strain_kcal ...
 config error: [gates] ... must be true or false
 ```
 
-PoseBusters, the MMFF strain record or the xtb record rejected poses before the SCFs. A rejected
+PoseBusters, or the MMFF94 strain limit `max_strain_kcal`, rejected poses before the SCFs (the xtb
+record only records an energy and rejects nothing; its own failure reads `stage 'xtb' failed: ...`). A rejected
 gate still leaves every pose's result in `gates.json` in `--out`; read it to see which pose failed
 which check. `[poses] relax_unmapped = true` relaxes only the new substituent, which otherwise
 fails PoseBusters at its junction with the copied core ([README](../README.md)).
