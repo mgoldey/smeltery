@@ -4,9 +4,11 @@ top (decisions, comments, proposals). Every number comes from `smeltery.gui.resu
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import re
+import zipfile
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -16,6 +18,7 @@ from molviewspec.nodes import RepresentationTypeT, validate_state_tree
 from pydantic import BaseModel
 from rdkit import Chem
 
+from smeltery.bench.pymol_export import ligand_filename, pymol_session
 from smeltery.bench.verdict import verdict_of
 from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet, to_csv, to_sdf
 from smeltery.gui import results as R
@@ -463,6 +466,35 @@ def run_pose_atoms(request: Request, idx: int, candidate: str) -> M.PoseAtoms:
         candidate=candidate,
         symbols=[a.GetSymbol() for a in mol.GetAtoms()],
         source=r.record["results"]["poses"][candidate]["file"],
+    )
+
+
+@router.get("/runs/{idx}/pymol.zip")
+def run_pymol(request: Request, idx: int) -> Response:
+    """The run's poses as a PyMOL bundle: receptor.pdb, one SDF per candidate (the run's own pose files, unchanged,
+    sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut."""
+    r = run(request, idx)
+    if not r.has_pose_output:
+        raise HTTPException(status_code=409, detail="this run record predates pose output; it has no poses to export")
+    try:
+        receptor = R.receptor_pdb(r)
+        if receptor is None:
+            raise HTTPException(status_code=409, detail="this run has no receptor PDB, so there is no PyMOL scene")
+        names = [n for n in r.candidates if n in r.record["results"]["poses"]]
+        sdfs = {n: R.pose_sdf(r, n) for n in names}
+        session = pymol_session(names, r.parent, r.groups, r.survivors, r.unranked)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("session.pml", session)
+        z.writestr("receptor.pdb", receptor)
+        for n, text in sdfs.items():
+            z.writestr(f"ligands/{ligand_filename(n)}", text)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="pymol-{r.record["input_digest"][:12]}.zip"'},
     )
 
 

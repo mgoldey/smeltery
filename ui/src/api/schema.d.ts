@@ -1021,6 +1021,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{idx}/pymol.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Pymol
+         * @description The run's poses as a PyMOL bundle: receptor.pdb, one SDF per candidate (the run's own pose files, unchanged,
+         *     sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut.
+         */
+        get: operations["run_pymol_api_runs__idx__pymol_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{idx}/resolved": {
         parameters: {
             query?: never;
@@ -5029,6 +5050,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_pymol_api_runs__idx__pymol_zip_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idx: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

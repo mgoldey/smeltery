@@ -35,3 +35,9 @@ test("a run without pose output says so instead of showing an empty canvas", asy
   await expect(page.getByRole("alert")).toContainText("predates pose output");
   await expect(page.locator("[data-viewer]")).toHaveCount(0);
 });
+
+test("the Poses page links the run's PyMOL session download", async ({ page }) => {
+  await page.goto(`/run/${IDX.a_resolved}/poses`);
+  const link = page.getByRole("link", { name: "Download PyMOL session" });
+  await expect(link).toHaveAttribute("href", `/api/runs/${IDX.a_resolved}/pymol.zip`);
+});
