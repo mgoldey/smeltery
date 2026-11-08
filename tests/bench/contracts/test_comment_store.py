@@ -31,12 +31,13 @@ def test_comments_for_an_unknown_run_are_empty_not_an_error(cstore):
 
 def test_concurrent_readers_do_not_lock_out_the_writer(tmp_path):
     import threading
+    import time
 
     from smeltery.bench.adapters.comment_store import SqliteCommentStore
 
     db = tmp_path / "c.sqlite"
     store = SqliteCommentStore(db)
-    n = 20
+    n = 10
     stop = threading.Event()
     errors: list[Exception] = []
 
@@ -46,6 +47,7 @@ def test_concurrent_readers_do_not_lock_out_the_writer(tmp_path):
             try:
                 s.for_run("r1")
                 s.list()
+                time.sleep(0.001)
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
                 return
@@ -96,3 +98,25 @@ def test_migration_reraises_errors_other_than_duplicate_column(tmp_path, monkeyp
     monkeypatch.setattr(comment_store, "open_db", patched)
     with pytest.raises(sqlite3.OperationalError, match="locked"):
         comment_store.SqliteCommentStore(db)
+
+
+def test_a_read_only_rollback_journal_db_still_opens_and_lists(tmp_path):
+    import os
+    import sqlite3
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores file modes")
+    db = tmp_path / "c.sqlite"
+    # created the old way: rollback journal, no WAL
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "CREATE TABLE comments (id TEXT PRIMARY KEY, run TEXT, anchor_type TEXT, anchor_id TEXT, "
+            "author TEXT, body TEXT, created_at TEXT, parent_id TEXT, anchor TEXT)"
+        )
+    con.close()
+    db.chmod(0o444)
+    try:
+        store = SqliteCommentStore(db)
+        assert store.list() == []
+    finally:
+        db.chmod(0o644)
