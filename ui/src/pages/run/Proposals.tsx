@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "../../api/client";
+import { EmptyState } from "../../components/EmptyState";
 import { Structure2D } from "../../components/Structure2D";
 import { useRunIdx } from "./RunLayout";
 
@@ -18,7 +19,9 @@ export function Proposals() {
       <main className="work">
         <h1>Proposals</h1>
         <p className="lede">Candidates proposed from this run's report. Add one to the next pipeline's candidates if you agree.</p>
-        {proposals.data && proposals.data.length === 0 ? <p className="empty-state">No proposals yet.</p> : null}
+        {proposals.data && proposals.data.length === 0 ? <EmptyState action={{ label: "Open the report", to: `/report/${idx}` }}>
+            Nothing has been proposed from this run yet. Bench chemists propose candidates after reading its report.
+          </EmptyState> : null}
         {proposals.data && proposals.data.length ? (
           <table className="grid" aria-label="Review queue">
             <thead>

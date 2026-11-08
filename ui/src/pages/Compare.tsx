@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap } from "../api/client";
 import { PlotlyFigure } from "../components/PlotlyFigure";
+import { EmptyState } from "../components/EmptyState";
 import { useScheme } from "../styles/scheme";
 import { Shell } from "../components/Shell";
 
@@ -30,6 +31,12 @@ export function Compare() {
             Choose the two arms. Each analogue's paired ΔΔE is compared against its own run's parent, and the difference
             between arms is judged against the larger of their floors.
           </p>
+          {runs.data && usable.length < 2 ? (
+            <EmptyState action={{ label: "Go to Bench", to: "/bench" }}>
+              Comparing needs at least two finished runs; {usable.length === 0 ? "none is" : "only one is"} ready. Run a pipeline
+              to completion, then come back.
+            </EmptyState>
+          ) : null}
           <div className="controls">
             {(["A", "B"] as const).map((arm) => (
               <div key={arm}>

@@ -16,3 +16,12 @@ test("the same run in both arms is refused, and nothing is drawn", async ({ page
   await expect(page.getByRole("alert")).toContainText("both arms");
   await expect(page.locator('[data-figure="compare"]')).toHaveCount(0);
 });
+
+test("with fewer than two finished runs the page says what to do and links to Bench", async ({ page }) => {
+  await page.route("**/api/runs", (route) => route.fulfill({ json: [] }));
+  await page.goto("/compare");
+  const empty = page.getByTestId("empty-state");
+  await expect(empty).toContainText("at least two finished runs");
+  await empty.getByRole("link", { name: "Go to Bench" }).click();
+  await expect(page).toHaveURL(/\/bench$/);
+});
