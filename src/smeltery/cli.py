@@ -1595,6 +1595,8 @@ VIEWERS = {
     "inspect": "smeltery.run_tools:inspect_run",
     "diff-run": "smeltery.run_tools:diff_run",
     "export-sdf": "smeltery.sdf_export",
+    "backup": "smeltery.backup:backup_main",
+    "restore": "smeltery.backup:restore_main",
 }
 
 
@@ -1693,6 +1695,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
     sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
+    sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
+    sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     tw.add_argument("--host", default="127.0.0.1:7233")
     tw.add_argument("--namespace", default="default")
