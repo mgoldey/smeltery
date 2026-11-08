@@ -183,7 +183,7 @@ export function Decisions() {
         </p>
         {d && d.analogues.length === 0 ? (
           <EmptyState action={{ label: "Open the run overview", to: `/run/${idx}/overview` }}>
-            This run has no analogues to decide on: it holds only the parent, or it has not finished.
+            This run holds only the parent; there are no analogues to decide on.
           </EmptyState>
         ) : null}
         {d && vocab.data && decisions.data && picked.length ? (

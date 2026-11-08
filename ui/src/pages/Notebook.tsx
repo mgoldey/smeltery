@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
@@ -21,6 +21,7 @@ export function Notebook() {
     queryFn: () => unwrap(api.GET("/api/campaigns/{campaign_id}/entries", { params: { path: { campaign_id: id } } })),
   });
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+  const titleRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [attach, setAttach] = useState<number[]>([]);
@@ -87,7 +88,7 @@ export function Notebook() {
               </li>
             ))}
           </ol>
-          {entries.data && entries.data.length === 0 ? <EmptyState action={{ label: "Write the first entry", onClick: () => document.getElementById("entry-title")?.focus() }}>
+          {entries.data && entries.data.length === 0 ? <EmptyState action={{ label: "Write the first entry", onClick: () => titleRef.current?.focus() }}>
               No entries yet: record what you decided and why.
             </EmptyState> : null}
           <section aria-label="New entry">
@@ -99,7 +100,7 @@ export function Notebook() {
               }}
             >
               <label htmlFor="entry-title">Title</label>
-              <input id="entry-title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", maxWidth: "64ch" }} />
+              <input id="entry-title" ref={titleRef} value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", maxWidth: "64ch" }} />
               <label htmlFor="entry-body">Entry</label>
               <textarea id="entry-body" rows={4} value={body} onChange={(e) => setBody(e.target.value)} style={{ width: "100%", maxWidth: "64ch" }} />
               <fieldset className="attach">

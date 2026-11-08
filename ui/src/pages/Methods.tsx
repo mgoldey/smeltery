@@ -115,7 +115,7 @@ function MethodCard({ m }: { m: Method }) {
         </dd>
       </dl>
       {m.params.length === 0 ? (
-        <EmptyState>This method has no settings; nothing to default here.</EmptyState>
+        <p style={muted}>This method has no settings.</p>
       ) : (
         <table className="grid">
           <thead>
@@ -209,7 +209,7 @@ export function Methods() {
             </div>
           ) : null}
           {q.data && q.data.length === 0 ? (
-            <EmptyState action={{ label: "Go to Bench", to: "/bench" }}>
+            <EmptyState>
               No methods are registered, so a pipeline has nothing to place. Check that smeltery is installed with its method
               modules, then reload.
             </EmptyState>

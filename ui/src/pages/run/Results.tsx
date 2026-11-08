@@ -62,10 +62,10 @@ export function Results() {
             </p>
             {table.data.rows.length === 0 ? (
               <EmptyState action={{ label: "Open the run overview", to: `/run/${idx}/overview` }}>
-                No analogue has a paired ΔΔE yet; the parent alone gives nothing to compare.
+                No analogue has a paired ΔΔE in this run; the parent alone gives nothing to compare.
               </EmptyState>
             ) : null}
-            {forest.data ? <PlotlyFigure figure={forest.data} name="forest" /> : null}
+            {forest.data && table.data.rows.length ? <PlotlyFigure figure={forest.data} name="forest" /> : null}
             {table.data.rows.length ? (
               <table className="grid" aria-label="Paired ΔΔE">
                 <thead>
@@ -108,7 +108,7 @@ export function Results() {
             ) : null}
             <h2>Can these two be told apart?</h2>
             <p className="lede">The funnel's own test for each pair, at the same z and floor as the cut.</p>
-            {matrix.data ? <PlotlyFigure figure={matrix.data} name="matrix" /> : null}
+            {matrix.data && table.data.rows.length ? <PlotlyFigure figure={matrix.data} name="matrix" /> : null}
             <h2>Per-pose pairs</h2>
             <div className="controls" role="group" aria-label="Per-pose view">
               <button type="button" aria-pressed={pairs} onClick={() => setPairs(true)}>
@@ -122,13 +122,13 @@ export function Results() {
               <>
                 <p className="lede">Each line joins an analogue's pose to the parent's pose with the same index; pairing is why the paired SEM is small.</p>
                 {perPose.isError ? <p className="empty-state">{perPose.error.message}</p> : null}
-                {perPose.data ? <PlotlyFigure figure={perPose.data} name="per_pose" /> : null}
+                {perPose.data && table.data.rows.length ? <PlotlyFigure figure={perPose.data} name="per_pose" /> : null}
               </>
             ) : (
               <>
                 <p className="lede">The parent's and each analogue's own value at every pose, before pairing.</p>
                 {perPoseValues.isError ? <p className="empty-state">{perPoseValues.error.message}</p> : null}
-                {perPoseValues.data ? <PlotlyFigure figure={perPoseValues.data} name="per_pose_values" /> : null}
+                {perPoseValues.data && table.data.rows.length ? <PlotlyFigure figure={perPoseValues.data} name="per_pose_values" /> : null}
               </>
             )}
             {rows.isError && !(pairs ? perPose.isError : perPoseValues.isError) ? <p className="empty-state">{rows.error.message}</p> : null}
