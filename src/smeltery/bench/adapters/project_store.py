@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
 from pathlib import Path
 
+from smeltery.bench.adapters._sqlite import open_db
 from smeltery.project import Campaign, NotebookEntry, Proposal
 
 
@@ -17,10 +17,10 @@ class SqliteProjectStore:
         self._init()
 
     def _conn(self):
-        return sqlite3.connect(self.db_path)
+        return open_db(self.db_path)
 
     def _init(self):
-        with self._conn() as con:
+        with open_db(self.db_path, wal=True) as con:
             con.execute(
                 """CREATE TABLE IF NOT EXISTS campaigns (
                     id TEXT PRIMARY KEY, name TEXT, created_at TEXT, description TEXT, run_paths TEXT)"""

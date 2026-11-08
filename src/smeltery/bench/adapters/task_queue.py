@@ -13,6 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
+from smeltery.bench.adapters._sqlite import open_db
 from smeltery.tasks import Task, TemporalTaskManager
 
 
@@ -47,7 +48,7 @@ class SubprocessTaskQueue:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db, wal=True) as con:
             con.execute(
                 """CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
@@ -74,7 +75,7 @@ class SubprocessTaskQueue:
         return t
 
     def _refresh(self, task_id: str) -> None:
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             row = con.execute("SELECT id,status,pid,started_at FROM tasks WHERE id=?", (task_id,)).fetchone()
             if not row:
                 return
@@ -97,7 +98,7 @@ class SubprocessTaskQueue:
         # Give it a brief window so a successful task is never observed as failed.
         for _ in range(50):
             time.sleep(0.01)
-            with sqlite3.connect(self.db) as con:
+            with open_db(self.db) as con:
                 row = con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()
             if row and row[0] in ("succeeded", "failed", "cancelled"):
                 return
@@ -123,7 +124,7 @@ class SubprocessTaskQueue:
         except (ChildProcessError, OSError):
             rc = None
         new_status = "succeeded" if rc == 0 else "failed"
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             con.execute(
                 "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status='running'",
                 (new_status, rc, _utc(), tid),
@@ -156,7 +157,7 @@ class SubprocessTaskQueue:
                 rc = None
             new_status = "succeeded" if rc == 0 else "failed"
             try:
-                with sqlite3.connect(self.db) as con:
+                with open_db(self.db) as con:
                     con.execute(
                         "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status NOT IN ('cancelled')",  # noqa: E501
                         (new_status, rc, _utc(), tid),
@@ -165,7 +166,7 @@ class SubprocessTaskQueue:
             except Exception:
                 pass
 
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             con.execute(
                 "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -187,7 +188,7 @@ class SubprocessTaskQueue:
         return tid
 
     def list(self, status=None):
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             if status:
                 rows = con.execute("SELECT * FROM tasks WHERE status=?", (status,)).fetchall()
             else:
@@ -195,7 +196,7 @@ class SubprocessTaskQueue:
         for r in rows:
             self._refresh(r[0])
         # re-read
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             if status:
                 rows = con.execute("SELECT * FROM tasks WHERE status=?", (status,)).fetchall()
             else:
@@ -204,7 +205,7 @@ class SubprocessTaskQueue:
 
     def get(self, task_id):
         self._refresh(task_id)
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             row = con.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
         if not row:
             return None
@@ -223,7 +224,7 @@ class SubprocessTaskQueue:
         if t.status in ("succeeded", "failed", "cancelled"):
             return False
         # mark cancelled first: the waiter thread's write is guarded by status NOT IN ('cancelled')
-        with sqlite3.connect(self.db) as con:
+        with open_db(self.db) as con:
             changed = con.execute(
                 "UPDATE tasks SET status='cancelled', finished_at=? "
                 "WHERE id=? AND status NOT IN ('succeeded','failed','cancelled')",
