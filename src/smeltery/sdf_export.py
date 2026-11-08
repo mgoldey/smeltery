@@ -17,9 +17,6 @@ from rdkit import Chem
 from .decisions import DecisionSet
 from .gui import results as R
 
-#: per-pose quantities of the run that get a stable gate alias (the originals stay on the record too)
-_PER_POSE_GATES = {"dock_score": "vina_score", "E_gfn2": "xtb_energy"}
-
 
 def _line(value: object) -> str:
     """A property value on one line: a newline would end the SDF value (a blank line, the whole property)."""
@@ -43,7 +40,8 @@ def candidate_props(run: R.Run, candidate: str, decisions: DecisionSet | None = 
     """The properties to add to each pose record of `candidate` (record i -> dict i), in the order written."""
     res = run.record["results"]
     n = res["poses"][candidate]["n_poses"]
-    common: dict[str, str] = {"smeltery_units": "kcal/mol (energies)"}
+    units = {"ddE": "kcal/mol", **(res.get("units") or {})}
+    common: dict[str, str] = {"smeltery_units": _line("; ".join(f"{k}={v}" for k, v in units.items()))}
     paired = (res.get("paired_ddE") or {}).get(candidate)
     if isinstance(paired, dict):
         common["smeltery_ddE"] = _num(paired["mean"])
@@ -60,20 +58,18 @@ def candidate_props(run: R.Run, candidate: str, decisions: DecisionSet | None = 
         for k in ("status", "reason", "note", "user", "time"):
             common[f"smeltery_decision_{k}"] = _line(getattr(d, k))
     gates = res.get("gates") or {}
-    per_pose = (res.get("per_pose") or {}).get(candidate) or {}
+    orig = R.pose_indices(run, candidate, n)  # gates cover the original poses; record i is original pose orig[i]
     pb = ((gates.get("posebusters") or {}).get(candidate) or {}).get("poses")
     strain = (gates.get("strain_kcal") or {}).get(candidate)
     rows = []
     for i in range(n):
         p = dict(common)
-        for q, alias in _PER_POSE_GATES.items():
-            if q in per_pose and i < len(per_pose[q]):
-                p[f"smeltery_gate_{alias}"] = _num(per_pose[q][i])
-        if strain is not None and i < len(strain):
-            p["smeltery_gate_strain_kcal"] = _num(strain[i])
-        if pb is not None and i < len(pb):
-            p["smeltery_gate_posebusters_pass"] = "1" if pb[i]["passed"] else "0"
-            p["smeltery_gate_posebusters_failed_checks"] = _line(", ".join(pb[i].get("failed_checks") or []))
+        o = orig[i]
+        if strain is not None and o < len(strain):
+            p["smeltery_gate_strain_kcal"] = _num(strain[o])
+        if pb is not None and o < len(pb):
+            p["smeltery_gate_posebusters_pass"] = "1" if pb[o]["passed"] else "0"
+            p["smeltery_gate_posebusters_failed_checks"] = _line(", ".join(pb[o].get("failed_checks") or []))
         rows.append(p)
     return rows
 

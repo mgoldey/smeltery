@@ -36,7 +36,7 @@ def test_every_pose_keeps_its_properties_and_gains_the_cut_results(run_dir):
         p = props(m)
         c = p["smeltery_candidate"]
         assert "dE_int" in p and "smeltery_pose_index" in p
-        assert p["smeltery_units"].startswith("kcal/mol")
+        assert "ddE=kcal/mol" in p["smeltery_units"]
         if c == PARENT:
             assert "smeltery_ddE" not in p and "smeltery_group" not in p
             continue
@@ -89,9 +89,6 @@ def add_gates(run_dir):
         },
         "strain_kcal": {c: [1.5 + i for i in range(n)] for c in res["poses"]},
     }
-    for c in res["poses"]:
-        res["per_pose"][c]["dock_score"] = [-7.0 - i for i in range(n)]
-        res["per_pose"][c]["E_gfn2"] = [-20.0 - i for i in range(n)]
     p.write_text(json.dumps(rec))  # no self-hash recheck on read
 
 
@@ -107,8 +104,7 @@ def test_gate_results_become_per_pose_properties(run_dir):
         assert rows[0]["smeltery_gate_posebusters_failed_checks"] == "bond_lengths"
         assert rows[1]["smeltery_gate_posebusters_pass"] == "1"
         assert float(rows[1]["smeltery_gate_strain_kcal"]) == pytest.approx(2.5)
-        assert float(rows[1]["smeltery_gate_vina_score"]) == pytest.approx(-8.0)
-        assert float(rows[1]["smeltery_gate_xtb_energy"]) == pytest.approx(-21.0)
+    assert not any("vina" in k or "xtb" in k for rows in by_cand.values() for k in rows[0])
 
 
 def test_cli_writes_the_file_and_a_non_run_fails_cleanly(run_dir, tmp_path, capsys):
@@ -134,3 +130,24 @@ def test_bench_route_serves_it(run_dir):
     r = c.get("/api/runs/0/export.sdf")
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     assert any(props(m).get("smeltery_decision_note") == "a b" for m in records(r.text))
+
+
+def test_units_come_from_the_record(run_dir):
+    run = R.load_run(run_dir)
+    assert props(records(enriched_sdf(run))[0])["smeltery_units"] == "ddE=kcal/mol; dE_int=kcal/mol"
+
+
+def test_gates_follow_original_pose_index_after_a_pairwise_drop(run_dir):
+    p = next(run_dir.glob("run-*.json"))
+    rec = json.loads(p.read_text())
+    res = rec["results"]
+    n = res["poses"][PARENT]["n_poses"]
+    assert n >= 4
+    # gates ran on every original pose; the record kept only originals 1..n-1 (SDF records still n: slice by index)
+    keep = list(range(1, n))
+    res["gates"] = {"strain_kcal": {c: [10.0 * k for k in range(n)] for c in res["poses"]}}
+    res["pose_index"] = {c: keep + [keep[-1]] * (n - len(keep)) for c in res["poses"]}
+    p.write_text(json.dumps(rec))
+    got = [float(props(m)["smeltery_gate_strain_kcal"]) for m in records(enriched_sdf(R.load_run(run_dir)))]
+    per = n
+    assert got[:per] == [10.0 * k for k in res["pose_index"][PARENT]]
