@@ -116,6 +116,25 @@ def test_the_record_says_experimental_and_carries_the_source_and_the_cutoff(tmp_
     assert frame["field_covers_box_corners"] is False
 
 
+def test_the_fetch_time_is_in_the_plan_but_never_in_the_input_digest(tmp_path, monkeypatch):
+    from smeltery.record import RunRecord
+
+    text = CONFIG.replace(f'spec = "{PEP5}"', 'spec = "1abc"').replace(
+        "[structure]", "[structure]\nallow_network = true"
+    )
+    plans = []
+    for stamp in ("2026-11-07T10:00:00Z", "2026-11-09T10:00:00Z"):
+        monkeypatch.setattr("smeltery.providers.structure._utc_now", lambda stamp=stamp: stamp)
+        plans.append(_plan(tmp_path, text, out=stamp[:10], fetch=lambda url: PEP5.read_bytes()))
+    a, b = plans
+    assert a.structure_fetch["fetched_utc"] != b.structure_fetch["fetched_utc"]
+    assert "fetched_utc" not in json.dumps(a.inputs)
+    assert a.inputs["structure"]["structure"]["provider"] == "pdb"
+    digest = lambda p: RunRecord("c", p.inputs, p.tiers, {}).input_digest  # noqa: E731
+    assert digest(a) == digest(b)
+    assert _plan(tmp_path).structure_fetch["fetched_utc"] is None  # a local file was not fetched
+
+
 def test_a_structure_plan_is_reproduced_by_a_rerun_in_another_directory(tmp_path):
     from smeltery.record import RunRecord
 

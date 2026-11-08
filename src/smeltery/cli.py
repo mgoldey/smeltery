@@ -247,6 +247,7 @@ class Plan:
     decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
     gate_results: dict = dataclasses.field(default_factory=dict)  # results["gates"]: per-pose gate results that ran
     stage_seconds: dict = dataclasses.field(default_factory=dict)  # this plan's wall time per stage (`_stage`)
+    structure_fetch: dict | None = None  # results["structure_fetch"]: when [structure] was fetched (not an input)
 
     @property
     def inputs(self) -> dict:
@@ -991,6 +992,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
     plan.gate_results = gate_results
     plan.stage_seconds = stage_seconds
+    plan.structure_fetch = prepared.fetch if prepared is not None else None
     return plan
 
 
@@ -1132,6 +1134,8 @@ def run_plan(
     )
     if plan.decisions_in is not None:
         results["decisions_in"] = dict(plan.decisions_in)
+    if plan.structure_fetch is not None:  # a wall-clock time: in results, never in inputs (the digest)
+        results["structure_fetch"] = dict(plan.structure_fetch)
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
     if not partial:  # an analysis reads the whole measurement; a combine of the partials runs it
         for spec in active_hooks("analysis", plan.cfg):

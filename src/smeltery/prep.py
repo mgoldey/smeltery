@@ -68,6 +68,7 @@ class PreparedTarget:
     field: list  # PocketField
     record: dict = field(default_factory=dict)  # what goes into the run's inputs
     summary: str = ""
+    fetch: dict | None = None  # when the structure was fetched; kept out of `record`, which the input digest hashes
 
 
 def _atoms(text: str):
@@ -317,4 +318,4 @@ def prepare_target_from_structure(
         f"({centre_rec['mode']}); receptor {receptor_pdbqt.name} sha256 {record['artefacts']['receptor.pdbqt'][:12]}; "
         f"pocket {len(pocket)}/{pocket.provenance['n_total']} charges within {cutoff:g} A"
     )
-    return PreparedTarget(receptor_pdb, receptor_pdbqt, center, pocket, record, summary)
+    return PreparedTarget(receptor_pdb, receptor_pdbqt, center, pocket, record, summary, result.fetch_record())

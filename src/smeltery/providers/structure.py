@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -55,6 +56,15 @@ class StructureResult:
     plddt: tuple[tuple[int, float], ...] | None = None
     weights_source: str | None = None
     metadata: dict = field(default_factory=dict)
+    #: Stable id of the provider that produced this result ("pdb", "afdb", "boltz2").
+    provider: str | None = None
+    #: ISO UTC time a network fetch actually happened; None for a local file or a local prediction. It is NOT in
+    #: `to_dict()`: that dict lands in `inputs.structure`, which `input_digest` hashes, and a wall-clock time
+    #: there would give two runs of identical inputs different digests. `fetch_record()` carries it instead.
+    fetched_utc: str | None = None
+    #: Extra facts about the fetch (RCSB pdb_id and header revision). Like `fetched_utc` and `provider`, kept out of
+    #: `to_dict()` so that `input_digest` is unchanged for every existing structure config.
+    fetch_info: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.kind not in ("EXPERIMENTAL", "PREDICTED"):
@@ -89,6 +99,11 @@ class StructureResult:
             "metadata": self.metadata,
         }
 
+    def fetch_record(self) -> dict:
+        """How this structure was obtained, for the run record's `results.structure_fetch` (outside the input
+        digest): provider, source, `fetched_utc` (None for a local file) and any RCSB pdb_id/revision."""
+        return {"provider": self.provider, "source": self.source, "fetched_utc": self.fetched_utc, **self.fetch_info}
+
 
 @runtime_checkable
 class StructureProvider(Protocol):
@@ -111,6 +126,20 @@ def plddt_from_pdb(text: str) -> tuple[tuple[int, float], ...]:
         if line.startswith("ATOM") and line[12:16].strip() == "CA":
             out.append((int(line[22:26]), float(line[60:66])))
     return tuple(out)
+
+
+def _utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+_REVDAT_RE = re.compile(r"^REVDAT\s+(\d+)\s+(\d{2}-[A-Z]{3}-\d{2})", re.M)
+
+
+def rcsb_revision(text: str) -> dict:
+    """The entry's latest revision from the PDB header's first REVDAT line (`{}` when the file has none).
+    The header arrives with the coordinates, so this costs no extra request."""
+    m = _REVDAT_RE.search(text)
+    return {} if m is None else {"revision": int(m.group(1)), "revision_date": m.group(2)}
 
 
 def _urlopen_bytes(url: str) -> bytes:
@@ -143,11 +172,12 @@ class PdbProvider:
             if not path.is_file():
                 self.last_error = f"no such file: {spec}"
                 return None
-            text, source = path.read_text(), f"file:{path.name}"
+            text, source, fetched, info = path.read_text(), f"file:{path.name}", None, {}
         elif _PDB_ID_RE.match(spec):
             url = RCSB_PDB.format(pdb_id=spec.upper())
             try:
                 text, source = self._fetch(url).decode(), url
+                fetched, info = _utc_now(), {"pdb_id": spec.upper(), **rcsb_revision(text)}
             except (urllib.error.URLError, OSError) as e:
                 self.last_error = f"could not fetch {url}: {e}"
                 return None
@@ -157,7 +187,9 @@ class PdbProvider:
         if not any(line.startswith(("ATOM", "HETATM")) for line in text.splitlines()):
             self.last_error = f"{source}: no ATOM/HETATM records"
             return None
-        return StructureResult(text=text, kind="EXPERIMENTAL", source=source)
+        return StructureResult(
+            text=text, kind="EXPERIMENTAL", source=source, fetch_info=info, provider=self.name, fetched_utc=fetched
+        )
 
 
 class AfdbProvider:
@@ -187,6 +219,7 @@ class AfdbProvider:
             entry = entries[0]
             pdb_url = entry["pdbUrl"]
             text = self._fetch(pdb_url).decode()
+            fetched = _utc_now()
         except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as e:
             self.last_error = f"AFDB lookup for {spec} failed: {type(e).__name__}: {e}"
             return None
@@ -207,4 +240,6 @@ class AfdbProvider:
                 "model_version": entry.get("latestVersion"),
                 "entry_id": entry.get("entryId"),
             },
+            provider=self.name,
+            fetched_utc=fetched,
         )

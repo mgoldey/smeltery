@@ -15,6 +15,12 @@ export function Poses() {
             {detail.error.message}
           </div>
         ) : null}
+        <p>
+          <a href={`/api/runs/${idx}/pymol.zip`} download>
+            Download PyMOL session
+          </a>{" "}
+          (receptor, every candidate's poses and a session.pml; unzip, then open session.pml in a fresh PyMOL: <code>pymol session.pml</code>; it replaces any open session)
+        </p>
         {detail.data ? <PoseExplorer idx={idx} detail={detail.data} /> : null}
       </main>
     </div>
