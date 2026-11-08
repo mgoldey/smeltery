@@ -29,43 +29,39 @@ def test_comments_for_an_unknown_run_are_empty_not_an_error(cstore):
     assert cstore.for_run("nope") == []
 
 
-def test_concurrent_readers_do_not_lock_out_the_writer(tmp_path):
+def test_a_long_read_transaction_does_not_block_the_writer(tmp_path):
+    """Under a rollback journal an open reader blocks the writer's commit until the 5 s default
+    busy timeout (the old "database is locked"); with WAL the writer is unaffected."""
+    import sqlite3
     import threading
-    import time
 
     from smeltery.bench.adapters.comment_store import SqliteCommentStore
 
     db = tmp_path / "c.sqlite"
     store = SqliteCommentStore(db)
-    n = 10
-    stop = threading.Event()
-    errors: list[Exception] = []
+    store.add(run="r1", author="a", body="seed")
+    holding, release = threading.Event(), threading.Event()
 
-    def poll():
-        s = SqliteCommentStore(db)
-        while not stop.is_set():
-            try:
-                s.for_run("r1")
-                s.list()
-                time.sleep(0.001)
-            except Exception as e:  # noqa: BLE001
-                errors.append(e)
-                return
+    def hold_read():
+        con = sqlite3.connect(db, isolation_level=None)
+        try:
+            con.execute("BEGIN")
+            con.execute("SELECT * FROM comments").fetchall()  # takes the read lock
+            holding.set()
+            release.wait(timeout=6)  # longer than the old 5 s busy timeout
+        finally:
+            con.close()
 
-    readers = [threading.Thread(target=poll) for _ in range(3)]
-    for t in readers:
-        t.start()
+    t = threading.Thread(target=hold_read)
+    t.start()
+    assert holding.wait(timeout=10)
     try:
-        for i in range(n):
+        for i in range(5):
             store.add(run="r1", author="a", body=f"c{i}")
-    except Exception as e:  # noqa: BLE001
-        errors.append(e)
+        assert len(store.for_run("r1")) == 6
     finally:
-        stop.set()
-        for t in readers:
-            t.join()
-    assert not errors
-    assert len(store.for_run("r1")) == n
+        release.set()
+        t.join()
 
 
 def test_migration_reraises_errors_other_than_duplicate_column(tmp_path, monkeypatch):
