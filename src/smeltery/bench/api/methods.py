@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from smeltery.gui.catalog import Method, catalog, cost_model, floor_status, measured_floor, memory_model
 from smeltery.gui.config_text import ConfigTextError
+from smeltery.gui.limits import load_limits
 from smeltery.gui.pipeline import Pipeline
 
 from . import models as M
@@ -126,3 +127,10 @@ def put_method_defaults(request: Request, key: str, body: M.MethodDefaultsPut) -
     except ConfigTextError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     return _view(m, workspace_defaults(request), _used_by(request))
+
+
+@router.get("/limits", response_model=M.Limits | None)
+def limits() -> M.Limits | None:
+    """docs/limits.md as data, for "what this result cannot tell you". Null when the page is absent (a wheel)."""
+    data = load_limits()
+    return M.Limits(**data) if data else None

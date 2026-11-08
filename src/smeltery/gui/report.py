@@ -31,6 +31,8 @@ import time
 from importlib import metadata
 from pathlib import Path
 
+from .limits import floor_statement, load_limits
+
 #: Exact pinned CDN files. Versions and file paths were checked against the npm registry tarballs, which jsdelivr
 #: serves unmodified; the hashes are sha384 of those tarball files.
 RDKIT_VERSION = "2026.9.1"
@@ -126,9 +128,13 @@ def _read_receptor(run, rec: object) -> tuple[str | None, str | None]:
         return None, f"receptor could not be read ({e}); not shown"
 
 
-def report_data(run) -> dict:
+def report_data(run, comments: list[dict] | None = None, decisions: list[dict] | None = None) -> dict:
     """Everything the page shows, as plain data. Raises nothing for missing optional parts (per-pose values, pose
-    files, receptor): each absence becomes a note the page displays."""
+    files, receptor): each absence becomes a note the page displays.
+
+    `comments` (`anchor`, `author`, `time`, `body`) and `decisions` (`candidate`, `status`, `reason`, `note`, `user`,
+    `time`) are the judgement layered on the run; None (the CLI) leaves that section out, an empty list says there
+    are none."""
     from . import results
 
     rec = run.record
@@ -176,6 +182,12 @@ def report_data(run) -> dict:
         "candidates": run.candidates,
         "floor": run.floor,
         "floor_source": run.floor_source,
+        "floor_statement": floor_statement(
+            run.floor, (res.get("units") or {}).get(QUANTITY, "kcal/mol"), run.floor_source
+        ),
+        "limits": load_limits(),
+        "comments": comments,
+        "decisions": decisions,
         "z": run.z,
         "keep": run.keep,
         "unit": (res.get("units") or {}).get(QUANTITY, "kcal/mol"),
@@ -465,6 +477,56 @@ def _header_html(d: dict) -> str:
     return f'<dl class="meta">{dl}</dl>'
 
 
+def _comments_html(d: dict) -> str:
+    if d["comments"] is None:
+        return ""
+    if not d["comments"]:
+        return '<section><h2>Comments</h2><p class="note">No comments on this run.</p></section>'
+    items = "".join(
+        f'<li><strong>{_e(c["author"])}</strong> <span class="note">{_e(c["time"])} on {_e(c["anchor"])}</span>'
+        f"<br>{_e(c['body'])}</li>"
+        for c in d["comments"]
+    )
+    return f'<section><h2>Comments</h2><ul class="judgement">{items}</ul></section>'
+
+
+def _decisions_html(d: dict) -> str:
+    if d["decisions"] is None:
+        return ""
+    if not d["decisions"]:
+        return '<section><h2>Decisions</h2><p class="note">No decisions recorded.</p></section>'
+    head = "".join(f"<th>{h}</th>" for h in ("Candidate", "Status", "Reason", "Note", "By", "When"))
+    body = "".join(
+        "<tr>"
+        + "".join(f"<td>{_e(x[k])}</td>" for k in ("candidate", "status", "reason", "note", "user", "time"))
+        + "</tr>"
+        for x in d["decisions"]
+    )
+    return f"<section><h2>Decisions</h2><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></section>"
+
+
+def _limits_html(d: dict) -> str:
+    lim = d["limits"]
+    if not lim:
+        return ""
+    m = "".join(
+        f"<tr><td>{_e(r['id'])}</td><td>{_e(r['limit'])}</td><td>{_e(r['magnitude'])}</td><td>{_e(r['forbids'])}</td></tr>"
+        for r in lim["measured"]
+    )
+    u = "".join(
+        f"<tr><td>{_e(r['id'])}</td><td>{_e(r['limit'])}</td><td>{_e(r['status'])}</td><td>{_e(r['forbids'])}</td></tr>"
+        for r in lim["unmeasured"]
+    )
+    th = lambda *h: "<thead><tr>" + "".join(f"<th>{x}</th>" for x in h) + "</tr></thead>"  # noqa: E731
+    return (
+        '<section><details><summary><h2 style="display:inline">What this result cannot tell you</h2></summary>'
+        '<p class="note">Measured limits of the funnel, from docs/limits.md. Each rests on one system or one model '
+        f"pair.</p><table>{th('ID', 'Limit', 'Magnitude', 'Claim it forbids')}<tbody>{m}</tbody></table>"
+        f"<h3>Not yet measured</h3><table>{th('ID', 'Limit', 'Status', 'Claim it forbids until measured')}"
+        f"<tbody>{u}</tbody></table></details></section>"
+    )
+
+
 def _verdict_html(d: dict) -> str:
     if d["unranked"]:
         return (
@@ -502,6 +564,7 @@ cdn.jsdelivr.net.</p>
 
 
 _CSS = """
+.judgement{padding-left:1.2em}.judgement li{margin:.5em 0}
 :root{color-scheme:light;--bg:#fcfcfb;--card:#ffffff;--ink:#0b0b0b;--ink2:#52514e;--muted:#8a8984;--line:#e4e3df;
 --band-a:#f3f2ee;--band-b:#ffffff;--accent:#2a78d6;--warn-bg:#fff1e8;--warn-ink:#8a2c00;--warn-line:#eb6834;
 --floor:#2a78d633;--pos:#2a78d6;--neg:#e34948;--ok-bg:#eef5fd}
@@ -665,9 +728,9 @@ withTimeout(loadScript(CDN.molstar_js),30000,'Mol*').then(function(){
 """
 
 
-def render_html(run) -> str:
+def render_html(run, comments: list[dict] | None = None, decisions: list[dict] | None = None) -> str:
     """The report page as a string. See the module docstring for what it shows and refuses to show."""
-    d = report_data(run)
+    d = report_data(run, comments, decisions)
     cdn = {
         "rdkit_js": RDKIT_JS,
         "rdkit_wasm": RDKIT_WASM,
@@ -721,7 +784,7 @@ def render_html(run) -> str:
 <main>
 <h1>{_e(title)}</h1>
 {_verdict_html(d)}
-<section><h2>Run</h2>{_header_html(d)}{notes}</section>
+<section><h2>Run</h2>{_header_html(d)}<p>{_e(d["floor_statement"])}</p>{notes}</section>
 <section><h2>Paired ΔΔE by analogue</h2>
 <p class="note">Rows are in the cut's order. Shaded bands are tie groups: the cut could not separate their members,
 so inside a band rows are sorted by name and the order means nothing.</p>
@@ -740,6 +803,9 @@ so inside a band rows are sorted by name and the order means nothing.</p>
 </section>
 {pp_section}
 <section><h2>Funnel</h2>{_funnel_html(d)}</section>
+{_decisions_html(d)}
+{_comments_html(d)}
+{_limits_html(d)}
 <section id="pose-section"><h2>Poses</h2>{_viewer_html(d)}</section>
 <p class="print-only note">The interactive pose viewer is left out of the printed report.</p>
 </main>
@@ -751,14 +817,16 @@ so inside a band rows are sorted by name and the order means nothing.</p>
 """
 
 
-def write_report(run, path: str | Path) -> Path:
+def write_report(
+    run, path: str | Path, comments: list[dict] | None = None, decisions: list[dict] | None = None
+) -> Path:
     """Write the self-contained HTML report of `run` (a `smeltery.gui.results.Run`) to `path`; return the path.
 
     Raises what `smeltery.gui.results` raises for a record it cannot read. Missing per-pose values, pose files or a
     receptor do not raise: the report says each was not recorded (or did not verify) and shows everything else."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(render_html(run), encoding="utf-8")
+    p.write_text(render_html(run, comments, decisions), encoding="utf-8")
     return p
 
 

@@ -41,6 +41,10 @@ export function Report() {
   const snapshot = useMutation({
     mutationFn: () => unwrap(api.POST("/api/runs/{idx}/snapshot", { params: { path: { idx } } })),
   });
+  const limits = useQuery({
+    queryKey: ["limits"],
+    queryFn: () => unwrap(api.GET("/api/limits")),
+  });
   const d = detail.data;
   const sizes = new Map<number, number>();
   for (const r of table.data?.rows ?? []) sizes.set(r.group, (sizes.get(r.group) ?? 0) + 1);
@@ -50,6 +54,11 @@ export function Report() {
       <div className="body">
         <main className="work report">
           <VerdictBanner idx={idx} />
+          {d ? (
+            <p className="lede" data-testid="floor-statement">
+              {d.floor_statement}
+            </p>
+          ) : null}
           {ok && forest.data ? (
             <section aria-label="Result plot">
               <h2>Paired ΔΔE against the parent</h2>
@@ -95,6 +104,57 @@ export function Report() {
             <h2>Discussion</h2>
             <CommentThread idx={idx} anchor="run" title="this run" />
           </section>
+          {limits.data ? (
+            <section aria-label="What this result cannot tell you">
+              <details>
+                <summary>
+                  <h2 style={{ display: "inline" }}>What this result cannot tell you</h2>
+                </summary>
+                <p className="lede">Measured limits of the funnel (docs/limits.md). Each rests on one system or one model pair.</p>
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Limit</th>
+                      <th>Magnitude</th>
+                      <th>Claim it forbids</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {limits.data.measured.map((l) => (
+                      <tr key={l.id}>
+                        <td>{l.id}</td>
+                        <td>{l.limit}</td>
+                        <td>{l.magnitude}</td>
+                        <td>{l.forbids}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <h3>Not yet measured</h3>
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Limit</th>
+                      <th>Status</th>
+                      <th>Claim it forbids until measured</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {limits.data.unmeasured.map((l) => (
+                      <tr key={l.id}>
+                        <td>{l.id}</td>
+                        <td>{l.limit}</td>
+                        <td>{l.status}</td>
+                        <td>{l.forbids}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+            </section>
+          ) : null}
           {ok ? (
             <section aria-label="Archive">
               <h2>Archive</h2>

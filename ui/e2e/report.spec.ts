@@ -72,3 +72,13 @@ test("the archived snapshot is the run's numbers, and its only external referenc
   const urls = new Set(html.match(/https?:\/\/[^\s"'<>)]+/g) ?? []);
   for (const u of urls) expect(snap.external, u).toContain(u);
 });
+
+test("the report states the floor and lists what the result cannot tell you", async ({ page }) => {
+  await page.goto(`/report/${RUN}`);
+  await expect(page.getByTestId("floor-statement")).toContainText("The floor is");
+  const section = page.getByRole("region", { name: "What this result cannot tell you" });
+  await expect(section.locator("details")).not.toHaveAttribute("open", "");
+  await section.locator("summary").click();
+  await expect(section.getByRole("cell", { name: "L1", exact: true })).toBeVisible();
+  await expect(section.getByRole("cell", { name: "U1", exact: true })).toBeVisible();
+});
