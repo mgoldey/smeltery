@@ -68,6 +68,7 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
                   <span className="status" data-state={t.status}>
                     {t.status}
                   </span>
+                  {(t.max_attempts ?? 1) > 1 ? ` attempt ${t.attempt ?? 1}/${t.max_attempts}` : ""}
                 </td>
                 <td className="num" data-testid="elapsed">
                   {fmt(seconds(t.started_at ?? t.created_at, t.finished_at, now))}
@@ -106,6 +107,7 @@ export function TaskInspector({ id, onClose }: { id: string; onClose: () => void
             <span className="status" data-state={task.status}>
               {task.status}
             </span>
+            {(task.max_attempts ?? 1) > 1 ? ` attempt ${task.attempt ?? 1}/${task.max_attempts}` : ""}
             {task.returncode !== null && task.returncode !== undefined ? ` with exit code ${task.returncode}` : ""}
           </p>
           {LIVE.has(task.status) ? (

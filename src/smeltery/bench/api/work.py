@@ -56,7 +56,7 @@ def submit_task(request: Request, body: M.TaskSubmit) -> Any:
         raise HTTPException(status_code=400, detail="command required")
     q = ports(request).task_queue
     try:
-        tid = q.submit(body.name or command[0], command, cwd=body.cwd)
+        tid = q.submit(body.name or command[0], command, cwd=body.cwd, retries=body.retries)
         t = q.get(tid)
     except Exception as e:  # noqa: BLE001
         return JSONResponse(status_code=503, content={"reason": str(e)})

@@ -187,3 +187,107 @@ def test_cancel_kills_the_whole_process_group(bench_tmp):
         return "Z" in Path(f"/proc/{gc}/stat").read_text().rsplit(")", 1)[1].split()[0]
 
     wait_until(gone, timeout=5)
+
+
+# ---- retries (HPC-003): subprocess adapter ----
+
+
+def _flaky(counter: Path, fail_times: int) -> list[str]:
+    """Fails `fail_times` times, then succeeds; the counter file survives across attempts."""
+    script = (
+        f"n=$(cat {counter} 2>/dev/null || echo 0); n=$((n+1)); echo $n > {counter}; "
+        f'echo "run $n"; [ $n -gt {fail_times} ]'
+    )
+    return ["bash", "-c", script]
+
+
+def _fast(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.retry_backoff_s = 0.05
+    return q
+
+
+def test_a_task_failing_twice_then_succeeding_with_two_retries_succeeds_on_attempt_three(bench_tmp):
+    q = _fast(bench_tmp)
+    tid = q.submit("flaky", _flaky(bench_tmp / "n", 2), retries=2)
+    wait_until(lambda: q.status(tid) in ("succeeded", "failed"))
+    t = q.get(tid)
+    assert (t.status, t.returncode, t.attempt, t.max_attempts) == ("succeeded", 0, 3, 3)
+    log = q.tail_log(tid, lines=50)
+    assert "--- attempt 1/3 ---" in log and "--- attempt 3/3 ---" in log and "run 3" in log
+
+
+def test_retries_are_exhausted_and_the_last_failure_is_reported(bench_tmp):
+    q = _fast(bench_tmp)
+    tid = q.submit("never", ["bash", "-c", "exit 4"], retries=1)
+    wait_until(lambda: q.status(tid) in ("succeeded", "failed"))
+    t = q.get(tid)
+    assert (t.status, t.returncode, t.attempt, t.max_attempts) == ("failed", 4, 2, 2)
+
+
+def test_zero_retries_runs_once_with_todays_behaviour(bench_tmp):
+    q = _fast(bench_tmp)
+    counter = bench_tmp / "n"
+    tid = q.submit("once", _flaky(counter, 5))
+    wait_until(lambda: q.status(tid) in ("succeeded", "failed"))
+    t = q.get(tid)
+    assert (t.status, t.attempt, t.max_attempts) == ("failed", 1, 1)
+    assert counter.read_text().strip() == "1"
+    assert "attempt" not in q.tail_log(tid)
+
+
+def test_cancel_while_running_is_never_retried(bench_tmp):
+    q = _fast(bench_tmp)
+    counter = bench_tmp / "n"
+    tid = q.submit("slow", ["bash", "-c", f"echo x >> {counter}; sleep 60"], retries=3)
+    wait_until(lambda: counter.exists(), timeout=10)
+    assert q.cancel(tid) is True
+    time.sleep(0.5)
+    assert q.get(tid).status == "cancelled"
+    assert counter.read_text().count("x") == 1
+
+
+def test_cancel_during_backoff_stops_the_retry(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.retry_backoff_s = 20.0
+    counter = bench_tmp / "n"
+    tid = q.submit("fail", ["bash", "-c", f"echo x >> {counter}; exit 1"], retries=3)
+    wait_until(lambda: counter.exists() and q.get(tid).attempt == 1, timeout=10)
+    time.sleep(1.0)  # the first attempt has failed; the queue is now backing off
+    assert q.get(tid).status == "running"
+    assert q.cancel(tid) is True
+    time.sleep(1.0)
+    assert q.get(tid).status == "cancelled"
+    assert counter.read_text().count("x") == 1
+
+
+@pytest.mark.parametrize("bad", [-1, 6, True, "2"])
+def test_out_of_range_retries_are_refused(bench_tmp, bad):
+    with pytest.raises(ValueError):
+        SubprocessTaskQueue(bench_tmp).submit("x", ["true"], retries=bad)
+
+
+def test_an_old_schema_database_gains_the_attempt_columns(bench_tmp):
+    import sqlite3
+
+    root = bench_tmp / "old"
+    root.mkdir()
+    with contextlib.closing(sqlite3.connect(root / "tasks.sqlite")) as con:
+        con.execute(
+            """CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
+                created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
+                log_path TEXT, note TEXT, pid INTEGER)"""
+        )
+        con.execute(
+            "INSERT INTO tasks (id,name,command,cwd,status,returncode) "
+            "VALUES ('old1','o','[\"true\"]','','succeeded',0)"
+        )
+        con.commit()
+    q = SubprocessTaskQueue(root)
+    SubprocessTaskQueue(root)  # a second open must tolerate the columns already being there
+    t = q.get("old1")
+    assert (t.status, t.attempt, t.max_attempts) == ("succeeded", None, None)
+    tid = q.submit("new", ["true"])
+    wait_until(lambda: q.status(tid) == "succeeded")
+    assert q.get(tid).max_attempts == 1

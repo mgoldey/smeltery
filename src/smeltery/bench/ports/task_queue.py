@@ -19,8 +19,9 @@ class TaskQueue(Protocol):
         env: dict[str, str] | None = None,
         log_dir: str | Path | None = None,
         note: str = "",
+        retries: int = 0,
     ) -> str:
-        """Submit work; return a task id."""
+        """Submit work; return a task id. `retries` (0..5) re-runs a failed task; a cancelled one is never retried."""
         ...
 
     def list(self, status: str | None = None) -> List[Task]: ...

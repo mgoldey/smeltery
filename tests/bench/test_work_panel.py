@@ -50,3 +50,17 @@ def test_a_real_subprocess_queue_runs_and_reports_the_exit_code(client_for, tmp_
         time.sleep(0.1)
     assert (t["status"], t["returncode"]) == ("failed", 3)
     assert "hi" in c.get(f"/api/tasks/{tid}/log").json()["log"]
+
+
+def test_retries_pass_through_and_are_reported_as_max_attempts(client_for):
+    c, _ = client_for(queue=FakeTaskQueue())
+    r = c.post("/api/tasks", json={"command": "true", "retries": 2})
+    assert r.status_code == 201 and r.json()["max_attempts"] == 3
+    r = c.post("/api/tasks", json={"command": "true"})
+    assert r.json()["max_attempts"] == 1
+
+
+def test_out_of_range_retries_are_a_422(client_for):
+    c, _ = client_for(queue=FakeTaskQueue())
+    for bad in (-1, 6):
+        assert c.post("/api/tasks", json={"command": "true", "retries": bad}).status_code == 422
