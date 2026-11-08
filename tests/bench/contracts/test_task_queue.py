@@ -252,8 +252,8 @@ def test_cancel_during_backoff_stops_the_retry(bench_tmp):
     q.retry_backoff_s = 20.0
     counter = bench_tmp / "n"
     tid = q.submit("fail", ["bash", "-c", f"echo x >> {counter}; exit 1"], retries=3)
-    wait_until(lambda: counter.exists() and q.get(tid).attempt == 1, timeout=10)
-    time.sleep(1.0)  # the first attempt has failed; the queue is now backing off
+    # attempt 1 has exited once the waiter clears the pid: the queue is now backing off
+    wait_until(lambda: counter.exists() and _pid(q, tid) is None, timeout=10)
     assert q.get(tid).status == "running"
     assert q.cancel(tid) is True
     time.sleep(1.0)
@@ -291,3 +291,37 @@ def test_an_old_schema_database_gains_the_attempt_columns(bench_tmp):
     tid = q.submit("new", ["true"])
     wait_until(lambda: q.status(tid) == "succeeded")
     assert q.get(tid).max_attempts == 1
+
+
+def _pid(q, tid):
+    import sqlite3
+
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        return con.execute("SELECT pid FROM tasks WHERE id=?", (tid,)).fetchone()[0]
+
+
+def test_a_task_in_backoff_whose_owner_process_died_is_failed_by_a_new_queue(bench_tmp):
+    import sqlite3
+    import subprocess
+
+    q = SubprocessTaskQueue(bench_tmp)
+    q.retry_backoff_s = 30.0
+    tid = q.submit("fail", ["bash", "-c", "exit 1"], retries=2)
+    wait_until(lambda: _pid(q, tid) is None, timeout=10)
+    dead = subprocess.Popen(["true"])
+    dead.wait()  # a reaped child's pid: certainly not alive
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        con.execute("UPDATE tasks SET owner_pid=? WHERE id=?", (dead.pid, tid))
+        con.commit()
+    t = SubprocessTaskQueue(bench_tmp).get(tid)
+    assert t.status == "failed" and "bench restarted" in t.note
+    assert q.get(tid).status == "failed"
+
+
+def test_a_task_in_backoff_with_a_live_owner_is_left_running(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.retry_backoff_s = 30.0
+    tid = q.submit("fail", ["bash", "-c", "exit 1"], retries=2)
+    wait_until(lambda: _pid(q, tid) is None, timeout=10)
+    assert SubprocessTaskQueue(bench_tmp).get(tid).status == "running"
+    q.cancel(tid)

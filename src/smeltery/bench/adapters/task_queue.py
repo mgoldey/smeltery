@@ -38,6 +38,19 @@ def _kill_group(pgid: int, grace: float = 2.0) -> None:
         os.killpg(pgid, signal.SIGKILL)
 
 
+_LIVE_WAITERS: set[str] = set()  # task ids whose waiter thread is alive in this process
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 class SubprocessTaskQueue:
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
@@ -53,10 +66,11 @@ class SubprocessTaskQueue:
                 """CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
                     created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
-                    log_path TEXT, note TEXT, pid INTEGER, attempt INTEGER, max_attempts INTEGER)"""
+                    log_path TEXT, note TEXT, pid INTEGER, attempt INTEGER, max_attempts INTEGER,
+                    owner_pid INTEGER)"""
             )
             # Migrate databases created before retries existed.
-            for col in ("attempt", "max_attempts"):
+            for col in ("attempt", "max_attempts", "owner_pid"):
                 try:
                     con.execute(f"ALTER TABLE tasks ADD COLUMN {col} INTEGER")
                 except sqlite3.OperationalError as e:
@@ -80,6 +94,7 @@ class SubprocessTaskQueue:
             pid,
             attempt,
             max_attempts,
+            _owner_pid,
         ) = row
         t = Task(
             id=tid,
@@ -107,6 +122,17 @@ class SubprocessTaskQueue:
             if status in ("succeeded", "failed", "cancelled"):
                 return
             if pid is None:
+                # Between attempts there is no process; only the waiter thread of the submitting process can
+                # resume the task. If that process is gone (bench restarted), nothing ever will.
+                owner = con.execute("SELECT owner_pid FROM tasks WHERE id=?", (tid,)).fetchone()[0]
+                if owner is None or (_pid_alive(owner) and not (owner == os.getpid() and tid not in _LIVE_WAITERS)):
+                    return
+                con.execute(
+                    "UPDATE tasks SET status='failed', finished_at=?, note=? WHERE id=? AND status='running' "
+                    "AND pid IS NULL",
+                    (_utc(), "bench restarted during retry backoff", tid),
+                )
+                con.commit()
                 return
         # check process
         try:
@@ -171,10 +197,11 @@ class SubprocessTaskQueue:
                 start_new_session=True,
             )
 
-    def _is_cancelled(self, tid: str) -> bool:
+    def _is_running(self, tid: str) -> bool:
+        """False once the task is cancelled or otherwise resolved (e.g. by `_refresh`): stop retrying."""
         with open_db(self.db) as con:
             row = con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()
-        return row is None or row[0] == "cancelled"
+        return row is not None and row[0] == "running"
 
     def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries: int = 0):
         if not isinstance(retries, int) or isinstance(retries, bool) or not 0 <= retries <= MAX_RETRIES:
@@ -200,7 +227,7 @@ class SubprocessTaskQueue:
                     rc = proc.wait()
                 except Exception:
                     rc = None
-                if rc != 0 and attempt < max_attempts and not self._is_cancelled(tid):
+                if rc != 0 and attempt < max_attempts and self._is_running(tid):
                     # Between attempts there is no process: pid NULL keeps _refresh from calling the task dead.
                     try:
                         with open_db(self.db) as con:
@@ -209,9 +236,9 @@ class SubprocessTaskQueue:
                     except Exception:
                         pass
                     deadline = time.monotonic() + min(self.retry_backoff_s * 2 ** (attempt - 1), 30.0)
-                    while time.monotonic() < deadline and not self._is_cancelled(tid):
+                    while time.monotonic() < deadline and self._is_running(tid):
                         time.sleep(0.05)
-                    if self._is_cancelled(tid):
+                    if not self._is_running(tid):
                         return
                     attempt += 1
                     try:
@@ -243,7 +270,7 @@ class SubprocessTaskQueue:
         with open_db(self.db) as con:
             con.execute(
                 "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid,"
-                "attempt,max_attempts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "attempt,max_attempts,owner_pid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     tid,
                     name or "",
@@ -257,10 +284,19 @@ class SubprocessTaskQueue:
                     proc.pid,
                     1,
                     max_attempts,
+                    os.getpid(),
                 ),
             )
             con.commit()
-        threading.Thread(target=_wait, args=(proc,), daemon=True).start()
+
+        def _run_waiter():
+            try:
+                _wait(proc)
+            finally:
+                _LIVE_WAITERS.discard(tid)
+
+        _LIVE_WAITERS.add(tid)
+        threading.Thread(target=_run_waiter, daemon=True).start()
         return tid
 
     def list(self, status=None):

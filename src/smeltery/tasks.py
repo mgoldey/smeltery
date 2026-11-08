@@ -132,6 +132,7 @@ try:  # temporalio is an optional runtime dependency for environments without it
                 if rc == 0 or attempt == max_attempts:
                     break
                 await workflow.sleep(timedelta(seconds=min(2 ** (attempt - 1), 30)))
+                workflow.upsert_memo({"attempt": attempt + 1})
             return rc
 
     TEMPORAL_AVAILABLE = True
@@ -362,6 +363,7 @@ class TemporalTaskManager:
         cwd = _m("cwd") or ""
         log_path = _m("log_path") or ""
         max_attempts = _m("max_attempts")
+        attempt = _m("attempt", 1 if isinstance(max_attempts, int) else None)
         if not isinstance(command, list):
             command = list(command) if command else []
         status_raw = getattr(desc, "status", None)
@@ -390,6 +392,7 @@ class TemporalTaskManager:
             finished_at=_iso(close_time),
             returncode=None,
             log_path=log_path if isinstance(log_path, str) else str(log_path),
+            attempt=attempt if isinstance(attempt, int) else None,
             max_attempts=max_attempts if isinstance(max_attempts, int) else None,
             run_id=run_id or getattr(desc, "run_id", None),
         )
