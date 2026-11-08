@@ -233,6 +233,11 @@ class StructureInfo(BaseModel):
     dropped: list[str]
     n_atoms: int
     file_url: str
+    chains: dict[str, int] = {}
+    n_hetatm: int = 0
+    missing_residues: int | None = None
+    possible_gaps: list[str] = []
+    warnings: list[str] = []
 
 
 class Vocabulary(BaseModel):

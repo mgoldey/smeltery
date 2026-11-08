@@ -22,6 +22,7 @@ from smeltery.bench.use_cases.launch_run import LaunchRun, LiveRunRefused
 from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import catalog, catalog_json, method
 from smeltery.gui.pipeline import Pipeline
+from smeltery.structure_check import check_pdb
 
 from . import models as M
 from .common import ports, run
@@ -276,6 +277,7 @@ def _describe(request: Request, source: str, text: str, res: Any = None) -> M.St
     if n_atoms == 0:
         raise HTTPException(status_code=400, detail=f"{source}: no ATOM or HETATM records; is this a PDB file?")
     ports(request).structures[sha] = text
+    check = check_pdb(text)
     return M.StructureInfo(
         source=source,
         sha256=sha,
@@ -286,6 +288,11 @@ def _describe(request: Request, source: str, text: str, res: Any = None) -> M.St
         dropped=dropped,
         n_atoms=n_atoms,
         file_url=f"/api/structure/{sha}.pdb",
+        chains=check.chains,
+        n_hetatm=check.n_hetatm,
+        missing_residues=check.missing_residues,
+        possible_gaps=check.possible_gaps,
+        warnings=check.warnings,
     )
 
 

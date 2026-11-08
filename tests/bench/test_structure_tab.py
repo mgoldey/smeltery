@@ -43,6 +43,13 @@ def test_what_was_dropped_is_listed(pdb_path):
     assert "HOH" in r.text
 
 
+def test_the_preview_carries_the_validation_summary(pdb_path):
+    c = TestClient(create_app(**fakes()))
+    j = c.post("/api/structure", json={"source": str(pdb_path)}).json()
+    assert j["chains"] == {"A": 1} and j["n_hetatm"] == 2
+    assert j["missing_residues"] is None and j["possible_gaps"] == [] and j["warnings"] == []
+
+
 def test_network_source_without_permission_is_400():
     c = TestClient(create_app(**fakes()))
     r = c.post("/api/structure", json={"source": "1ABC"})
