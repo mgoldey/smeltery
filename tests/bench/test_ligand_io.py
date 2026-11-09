@@ -4,8 +4,8 @@ import tomllib
 
 from rdkit import Chem
 
+from bench.test_ligands_check import CANDS, toml_of
 from smeltery.bench import ligand_io
-from tests.bench.test_ligands_check import CANDS, toml_of
 
 
 def test_csv_and_sdf_parse_and_a_bad_row_is_rejected_with_its_reason():
