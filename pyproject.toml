@@ -123,6 +123,13 @@ packages = ["src/smeltery"]
 # puts it back. CI and release run `npm run build` in ui/ before building the wheel.
 artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**"]
 
+# The SAME artifacts, because `python -m build` (what release.yml runs) builds the sdist first and then the wheel
+# FROM that sdist: anything the sdist drops is missing from the wheel too. Declaring these only on the wheel target
+# is what published nothing for v0.1.0 -- the sdist carried 0 of the 59 bench/web files, so the wheel built from it
+# failed the bench extra's own `index.html` check. tests/test_wheel_smoke.py keeps the two lists equal.
+[tool.hatch.build.targets.sdist]
+artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The repo root is on sys.path so `experiments.danuglipron...` imports resolve (no packages needed).

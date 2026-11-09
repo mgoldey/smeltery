@@ -77,6 +77,26 @@ def test_an_extra_the_wheel_does_not_have_and_an_unsmoked_extra_are_refused_befo
     assert "no smoke checks defined" in capsys.readouterr().err
 
 
+def test_the_sdist_ships_the_same_gitignored_artifacts_as_the_wheel():
+    """`python -m build` builds the wheel FROM the sdist, so an artifact the sdist drops is absent from the wheel.
+
+    `release.yml` runs plain `python -m build` (sdist + wheel); CI's wheel-build runs `--wheel`. That difference
+    published nothing for v0.1.0: `src/smeltery/bench/web` is gitignored build output, hatch leaves ignored files out
+    by default, and `artifacts` was declared only on the wheel target. The sdist therefore carried 0 of the 59 UI
+    files, and the wheel built from it asserted `bench/web/index.html` missing. Both targets must list the same
+    artifacts, or the two build commands disagree about what ships.
+    """
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["hatch"]["build"]["targets"]
+    wheel_artifacts = set(cfg.get("wheel", {}).get("artifacts", []))
+    sdist_artifacts = set(cfg.get("sdist", {}).get("artifacts", []))
+    assert wheel_artifacts, "the wheel target must declare the gitignored build output it ships"
+    assert sdist_artifacts == wheel_artifacts, (
+        "[tool.hatch.build.targets.sdist] artifacts must match the wheel's, or `python -m build` (which builds the "
+        f"wheel from the sdist) ships a wheel without them. Missing from sdist: "
+        f"{sorted(wheel_artifacts - sdist_artifacts)}; extra in sdist: {sorted(sdist_artifacts - wheel_artifacts)}."
+    )
+
+
 def test_a_heavy_extra_is_only_resolved_unless_full_is_asked_for():
     assert ws.HEAVY_EXTRAS, "the table of heavy extras must not be empty (ml-potential pulls torch)"
     heavy = next(iter(ws.HEAVY_EXTRAS))
