@@ -129,7 +129,10 @@ def test_the_fetch_time_is_in_the_plan_but_never_in_the_input_digest(tmp_path, m
     a, b = plans
     assert a.structure_fetch["fetched_utc"] != b.structure_fetch["fetched_utc"]
     assert "fetched_utc" not in json.dumps(a.inputs)
-    assert a.inputs["structure"]["structure"]["provider"] == "pdb"
+    # `provider` lives in results.structure_fetch, NOT in inputs: it is how the structure was obtained, and the
+    # digest must not change because the same file came from a different route. `record_inputs()` has no such key.
+    assert a.structure_fetch["provider"] == "pdb"
+    assert "provider" not in a.inputs["structure"]["structure"]
     digest = lambda p: RunRecord("c", p.inputs, p.tiers, {}).input_digest  # noqa: E731
     assert digest(a) == digest(b)
     assert _plan(tmp_path).structure_fetch["fetched_utc"] is None  # a local file was not fetched
