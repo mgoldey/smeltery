@@ -45,3 +45,13 @@ completed", not retried. If the full danuglipron pair does not finish inside its
 ## Not done here
 
 No pocket-context claim, no cation, no statement about other anions, and no change to the earlier rule or to the recorded +7.3.
+
+## The drug-sized carboxylate, named before any energy (plan: "Species and references")
+
+**Indomethacin** (`CO c1ccc2c(c1)c(CC(=O)O)c(C)n2C(=O)c1ccc(Cl)cc1`, spaces removed), 25 heavy atoms, and its
+carboxylate. Chosen because it is the only one of the four candidates considered (ibuprofen 15, naproxen 17,
+diclofenac 19, indomethacin 25 heavy atoms) that falls inside this plan's 20-35 heavy-atom window, and because its
+elements (C, N, O, Cl) are all in `AIMNET2_ELEMENTS`. Named here before its AIMNet2 or DFT energy is computed, and
+not to be swapped afterwards.
+
+Chosen by the assistant, at the project owner's instruction, on 2026-11-09.
