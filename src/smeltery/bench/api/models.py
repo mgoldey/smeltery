@@ -111,6 +111,14 @@ class Task(BaseModel):
     run_id: str | None = None
     attempt: int | None = None
     max_attempts: int | None = None
+    heartbeat_at: str | None = Field(default=None, description="when the task last showed it was alive")
+    heartbeat_age_s: float | None = Field(default=None, description="seconds since heartbeat_at")
+    stalled: bool = Field(
+        default=False, description="a running task silent past the threshold; silence is not death, so status stands"
+    )
+    peak_rss_gb: float | None = Field(default=None, description="largest resident set observed, GB")
+    oom: bool = Field(default=False, description="killed for exceeding memory_limit_gb")
+    memory_limit_gb: float | None = Field(default=None, description="the cap it was submitted with, GB")
 
 
 class TaskSubmit(BaseModel):
@@ -118,6 +126,9 @@ class TaskSubmit(BaseModel):
     command: list[str] | str
     cwd: str | None = None
     retries: int = Field(default=0, ge=0, le=5, description="extra attempts after a failure; 0 runs once")
+    memory_limit_gb: float | None = Field(
+        default=None, gt=0, description="kill the task over this resident size, in GB; omit for no cap"
+    )
 
 
 class TaskLog(BaseModel):
