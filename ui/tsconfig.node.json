@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
     "types": [
       "node",
       "vite/client"
@@ -17,7 +19,8 @@
     "src/types/*.d.ts",
     "e2e/**/*.ts",
     "playwright.config.ts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "scripts/*.mjs"
   ],
   "exclude": []
 }

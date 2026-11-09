@@ -325,3 +325,127 @@ def test_a_task_in_backoff_with_a_live_owner_is_left_running(bench_tmp):
     wait_until(lambda: _pid(q, tid) is None, timeout=10)
     assert SubprocessTaskQueue(bench_tmp).get(tid).status == "running"
     q.cancel(tid)
+
+
+# ---------------------------------------------------------------- HPC-004: heartbeat age
+
+
+def test_a_running_task_reports_a_heartbeat_that_advances_as_it_writes(bench_tmp):
+    """A subprocess has no heartbeat protocol, so its liveness is what it observably does: write output.
+
+    `heartbeat_at` is the last time the task's log grew. A long SCF that prints nothing is a different
+    condition from a dead one, and `stalled` is what says which -- see the stall test below.
+    """
+    q = SubprocessTaskQueue(bench_tmp)
+    chatty = "import time,sys\nfor _ in range(40):\n print('tick');sys.stdout.flush();time.sleep(0.1)"
+    tid = q.submit("chatty", ["python", "-c", chatty])
+    wait_until(lambda: q.get(tid).heartbeat_at is not None)
+    first = q.get(tid).heartbeat_at
+    wait_until(lambda: (q.get(tid).heartbeat_at or first) > first, timeout=10)
+    assert q.get(tid).heartbeat_at > first
+    q.cancel(tid)
+
+
+def test_a_task_is_stalled_once_its_output_is_older_than_the_threshold(bench_tmp):
+    # `_utc()` stamps whole seconds, so a sub-second threshold cannot be expressed: age jumps 0 -> 1 -> 2.
+    # 4 s is the smallest that leaves room to observe "not yet stalled" first without the test being slow.
+    q = SubprocessTaskQueue(bench_tmp)
+    q.stall_after_s = 4.0  # the real default is minutes; a test must not wait them out
+    tid = q.submit("quiet", ["python", "-c", "import time; print('one', flush=True); time.sleep(60)"])
+    wait_until(lambda: q.get(tid).heartbeat_at is not None)
+    assert q.get(tid).stalled is False, "a task that just wrote is not stalled"
+    wait_until(lambda: q.get(tid).stalled is True, timeout=20)
+    t = q.get(tid)
+    assert t.status == "running", "stalled describes silence, not death: the task is still running"
+    assert t.heartbeat_age_s is not None and t.heartbeat_age_s >= 4.0
+    q.cancel(tid)
+
+
+def test_a_finished_task_is_never_stalled(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.stall_after_s = 1.0
+    tid = q.submit("quick", ["python", "-c", "print('done')"])
+    wait_until(lambda: q.get(tid).status == "succeeded")
+    time.sleep(2.5)  # well past the threshold: a terminal task must not drift into "stalled"
+    t = q.get(tid)
+    assert t.stalled is False and t.status == "succeeded"
+
+
+# ---------------------------------------------------------------- HPC-002: memory limit and OOM
+
+
+def test_a_task_over_its_memory_limit_is_killed_and_reported_as_oom(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.sample_interval_s = 0.05
+    # Allocate steadily until killed. 64 MB is far under any real SCF and far over this limit.
+    grow = "a=[]\nimport time\nwhile True:\n a.append(bytearray(4_000_000)); time.sleep(0.02)"
+    tid = q.submit("hog", ["python", "-c", grow], memory_limit_gb=0.064)
+    wait_until(lambda: q.get(tid).status in ("failed", "succeeded"), timeout=60)
+    t = q.get(tid)
+    assert t.status == "failed", f"an over-limit task must fail, not {t.status}"
+    assert t.oom is True
+    assert t.peak_rss_gb is not None and t.peak_rss_gb > 0
+    assert "OOM at" in t.note and "GB" in t.note, t.note
+
+
+def test_a_task_within_its_memory_limit_succeeds_and_records_its_peak(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.sample_interval_s = 0.05
+    tidy = "x=bytearray(8_000_000); import time; time.sleep(0.4); print('ok')"
+    tid = q.submit("tidy", ["python", "-c", tidy], memory_limit_gb=2.0)
+    wait_until(lambda: q.get(tid).status == "succeeded", timeout=60)
+    t = q.get(tid)
+    assert t.oom is False and t.peak_rss_gb is not None and t.peak_rss_gb > 0
+
+
+def test_no_memory_limit_means_no_cap_and_the_peak_is_still_recorded(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    q.sample_interval_s = 0.05
+    tid = q.submit("unbounded", ["python", "-c", "x=bytearray(8_000_000); import time; time.sleep(0.3)"])
+    wait_until(lambda: q.get(tid).status == "succeeded", timeout=60)
+    t = q.get(tid)
+    assert t.oom is False and t.peak_rss_gb is not None
+
+
+@pytest.mark.parametrize("bad", [-1.0, 0.0, "2", True])
+def test_an_invalid_memory_limit_is_refused(bench_tmp, bad):
+    q = SubprocessTaskQueue(bench_tmp)
+    with pytest.raises(ValueError, match="memory_limit_gb"):
+        q.submit("x", ["python", "-c", "pass"], memory_limit_gb=bad)
+
+
+def test_an_old_schema_database_gains_the_health_columns(bench_tmp):
+    import sqlite3
+
+    db = Path(bench_tmp) / "tasks.sqlite"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute(
+        "CREATE TABLE tasks (id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,"
+        " created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER, log_path TEXT, note TEXT,"
+        " pid INTEGER)"
+    )
+    con.commit()
+    con.close()
+    q = SubprocessTaskQueue(bench_tmp)  # must migrate, not raise
+    tid = q.submit("after-migration", ["python", "-c", "print('ok')"])
+    wait_until(lambda: q.get(tid).status == "succeeded")
+    assert q.get(tid).peak_rss_gb is not None
+
+
+def test_an_oom_kill_is_never_retried(bench_tmp):
+    """Exceeding the cap is a verdict about the command: running it again would exceed it again.
+
+    The waiter thread sees a non-zero exit from the kill and would normally retry, so this guards the
+    ordering in `_kill_for_oom` -- terminal first, kill second.
+    """
+    q = SubprocessTaskQueue(bench_tmp)
+    q.sample_interval_s = 0.05
+    grow = "a=[]\nimport time\nwhile True:\n a.append(bytearray(4_000_000)); time.sleep(0.02)"
+    tid = q.submit("hog-retry", ["python", "-c", grow], retries=3, memory_limit_gb=0.064)
+    wait_until(lambda: q.get(tid).oom is True, timeout=60)
+    t0 = q.get(tid)
+    time.sleep(1.5)  # long enough for a retry to have been spawned and recorded
+    t1 = q.get(tid)
+    assert t1.status == "failed" and t1.oom is True
+    assert t1.attempt == t0.attempt, f"an OOM was retried: attempt went {t0.attempt} -> {t1.attempt}"

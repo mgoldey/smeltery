@@ -322,5 +322,22 @@ Every other path serves the app.
 
 Core modules never import `smeltery.bench`. Ports declare Protocols only. Adapters are the
 only place with sqlite3, Path.home, or Temporal references, with one named exception:
-`src/smeltery/tasks.py` also imports temporalio for the Temporal task backend. A task runs
-at most once; a dead worker's task is reported failed, not retried.
+`src/smeltery/tasks.py` also imports temporalio for the Temporal task backend. A task runs once
+unless it was submitted with `retries` (0-5); a dead worker's task is reported failed, never retried
+on the orchestrator's own initiative.
+
+### Worker health
+
+The work panel reports what a running task is actually doing, because "running" alone cannot tell a
+long SCF from a hung one:
+
+- **Last output** is the age of the task's most recent write to its log. A plain subprocess speaks no
+  heartbeat protocol, so what it writes is the only liveness it gives for free.
+- **stalled** marks a running task silent for longer than the queue's threshold (`stall_after_s`,
+  five minutes by default). It is a place to look, not a verdict: an SCF can legitimately print
+  nothing for hours, so the status stays `running` and nothing is killed.
+- **Peak memory** is the largest resident set seen for the task *and its children*, sampled every
+  `sample_interval_s`. A cap that ignored children would never fire, since smeltery's tasks shell out.
+- **OOM** marks a task killed for exceeding the `memory_limit_gb` it was submitted with, and its note
+  says how far over it went. Exceeding the cap is a verdict about that command, so it is never
+  retried. The Temporal queue refuses a limit rather than accepting one it cannot enforce.

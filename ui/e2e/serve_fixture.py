@@ -103,6 +103,12 @@ def main() -> int:
         json.dumps({"root": str(root), "runs": runs, "study": "bench.study_dag_fixture", "pdb": str(pdb)}, indent=1)
     )
     app = build_app(root, studies=("bench.study_dag_fixture", "bench.study_fixture"))
+    # The production stall threshold is minutes, which no browser test can wait out, and the sampler's default
+    # interval is a second. Both are shortened here so HPC-004/HPC-002 are reachable; nothing else depends on them.
+    queue = app.state.task_queue
+    if hasattr(queue, "stall_after_s"):
+        queue.stall_after_s = 3.0
+        queue.sample_interval_s = 0.1
     from fastapi.testclient import TestClient
 
     made = TestClient(app).post("/api/pipelines", json={"name": "e2e", "from_run": 0})  # e2e/bench.ts PIPELINE

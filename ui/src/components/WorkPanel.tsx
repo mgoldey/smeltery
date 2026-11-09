@@ -4,6 +4,9 @@ import { api, unwrap, type Schemas } from "../api/client";
 
 type Task = Schemas["Task"];
 const LIVE = new Set(["queued", "running"]);
+const STALLED_HELP =
+  "No output for longer than the queue's threshold. A long SCF can legitimately print nothing, so this is a " +
+  "place to look, not a verdict: the task is still running.";
 
 function seconds(from: string | null | undefined, to: string | null | undefined, now: number): number | null {
   if (!from) return null;
@@ -18,6 +21,15 @@ function fmt(s: number | null): string {
   return m < 60 ? `${m} min ${s % 60} s` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
+/**
+ * How long a running task has been silent, in seconds, counted from the browser's clock so it advances between
+ * polls. `heartbeat_age_s` is the server's age at the moment it answered, so the time since that answer is added.
+ */
+function silenceFor(t: Task, now: number, fetchedAt: number): number | null {
+  if (!LIVE.has(t.status) || t.heartbeat_age_s === null || t.heartbeat_age_s === undefined) return null;
+  return Math.max(0, Math.round(t.heartbeat_age_s + (now - fetchedAt) / 1000));
+}
+
 /** The tasks the queue knows, refreshed while any is queued or running. A dead backend degrades this panel only. */
 export function WorkPanel({ selected, onSelect }: { selected: string | null; onSelect: (id: string | null) => void }) {
   const [now, setNow] = useState(Date.now());
@@ -26,6 +38,7 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
     queryFn: () => unwrap(api.GET("/api/tasks")),
     refetchInterval: (q) => ((q.state.data ?? []).some((t) => LIVE.has(t.status)) ? 1500 : 10_000),
   });
+  const fetchedAt = tasks.dataUpdatedAt || Date.now();
   const live = (tasks.data ?? []).some((t) => LIVE.has(t.status));
   useEffect(() => {
     if (!live) return;
@@ -53,6 +66,8 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
               <th>Task</th>
               <th>Status</th>
               <th className="num">Elapsed</th>
+              <th className="num">Last output</th>
+              <th className="num">Peak memory</th>
               <th className="num">Exit code</th>
             </tr>
           </thead>
@@ -69,9 +84,25 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
                     {t.status}
                   </span>
                   {(t.max_attempts ?? 1) > 1 ? ` attempt ${t.attempt ?? 1}/${t.max_attempts}` : ""}
+                  {t.stalled ? (
+                    <span className="status" data-state="stalled" data-testid="stalled" title={STALLED_HELP}>
+                      stalled
+                    </span>
+                  ) : null}
+                  {t.oom ? (
+                    <span className="status" data-state="oom" data-testid="oom" title={t.note}>
+                      OOM
+                    </span>
+                  ) : null}
                 </td>
                 <td className="num" data-testid="elapsed">
                   {fmt(seconds(t.started_at ?? t.created_at, t.finished_at, now))}
+                </td>
+                <td className="num" data-testid="silence">
+                  {fmt(silenceFor(t, now, fetchedAt))}
+                </td>
+                <td className="num" data-testid="peak-rss">
+                  {t.peak_rss_gb === null || t.peak_rss_gb === undefined ? "" : `${t.peak_rss_gb.toFixed(2)} GB`}
                 </td>
                 <td className="num">{t.returncode ?? ""}</td>
               </tr>
@@ -108,6 +139,14 @@ export function TaskInspector({ id, onClose }: { id: string; onClose: () => void
               {task.status}
             </span>
             {(task.max_attempts ?? 1) > 1 ? ` attempt ${task.attempt ?? 1}/${task.max_attempts}` : ""}
+          </p>
+          <p className="lede" data-testid="task-health">
+            {task.peak_rss_gb === null || task.peak_rss_gb === undefined
+              ? "Peak memory not sampled."
+              : `Peak memory ${task.peak_rss_gb.toFixed(2)} GB` +
+                (task.memory_limit_gb ? ` of a ${task.memory_limit_gb.toFixed(2)} GB limit.` : ", no limit set.")}
+            {task.oom ? ` ${task.note}` : ""}
+            {task.stalled ? ` No output for ${fmt(Math.round(task.heartbeat_age_s ?? 0))}. ${STALLED_HELP}` : ""}
             {task.returncode !== null && task.returncode !== undefined ? ` with exit code ${task.returncode}` : ""}
           </p>
           {LIVE.has(task.status) ? (

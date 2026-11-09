@@ -58,6 +58,20 @@ class Task:
     run_id: str | None = None
     attempt: int | None = None  # current attempt, 1-based; None when the backend cannot say
     max_attempts: int | None = None
+    #: When the task last showed it was alive. A subprocess speaks no heartbeat protocol, so this is the last time
+    #: its log grew: the only liveness a plain command gives for free. None when the backend cannot say.
+    heartbeat_at: str | None = None
+    #: Seconds since `heartbeat_at`, computed on read so a client need not know the server's clock.
+    heartbeat_age_s: float | None = None
+    #: True while a RUNNING task has been silent longer than the queue's threshold. Silence is not death -- a long
+    #: SCF prints nothing for hours -- so this never changes `status`; it says where to look.
+    stalled: bool = False
+    #: Largest resident set seen while sampling, in GB. None when nothing sampled it.
+    peak_rss_gb: float | None = None
+    #: True when the task was killed for exceeding `memory_limit_gb`. A plain failure leaves it False.
+    oom: bool = False
+    #: The cap this task was submitted with, in GB; None for no cap.
+    memory_limit_gb: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +89,12 @@ class Task:
             "run_id": self.run_id,
             "attempt": self.attempt,
             "max_attempts": self.max_attempts,
+            "heartbeat_at": self.heartbeat_at,
+            "heartbeat_age_s": self.heartbeat_age_s,
+            "stalled": self.stalled,
+            "peak_rss_gb": self.peak_rss_gb,
+            "oom": self.oom,
+            "memory_limit_gb": self.memory_limit_gb,
         }
 
 

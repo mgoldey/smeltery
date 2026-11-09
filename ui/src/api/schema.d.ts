@@ -3211,6 +3211,16 @@ export interface components {
             cwd: string;
             /** Finished At */
             finished_at?: string | null;
+            /**
+             * Heartbeat Age S
+             * @description seconds since heartbeat_at
+             */
+            heartbeat_age_s?: number | null;
+            /**
+             * Heartbeat At
+             * @description when the task last showed it was alive
+             */
+            heartbeat_at?: string | null;
             /** Id */
             id: string;
             /**
@@ -3220,6 +3230,11 @@ export interface components {
             log_path: string;
             /** Max Attempts */
             max_attempts?: number | null;
+            /**
+             * Memory Limit Gb
+             * @description the cap it was submitted with, GB
+             */
+            memory_limit_gb?: number | null;
             /** Name */
             name: string;
             /**
@@ -3227,10 +3242,27 @@ export interface components {
              * @default
              */
             note: string;
+            /**
+             * Oom
+             * @description killed for exceeding memory_limit_gb
+             * @default false
+             */
+            oom: boolean;
+            /**
+             * Peak Rss Gb
+             * @description largest resident set observed, GB
+             */
+            peak_rss_gb?: number | null;
             /** Returncode */
             returncode?: number | null;
             /** Run Id */
             run_id?: string | null;
+            /**
+             * Stalled
+             * @description a running task silent past the threshold; silence is not death, so status stands
+             * @default false
+             */
+            stalled: boolean;
             /** Started At */
             started_at?: string | null;
             /** Status */
@@ -3247,6 +3279,11 @@ export interface components {
             command: string[] | string;
             /** Cwd */
             cwd?: string | null;
+            /**
+             * Memory Limit Gb
+             * @description kill the task over this resident size, in GB; omit for no cap
+             */
+            memory_limit_gb?: number | null;
             /**
              * Name
              * @default
