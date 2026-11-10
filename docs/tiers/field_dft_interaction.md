@@ -15,7 +15,7 @@
 
 ## Native settings
 
-`FieldDftInteraction.settings()` reports `method`, `functional`, `dispersion`, `basis`, `energy_conv`, `density_conv`, `max_iter`, `memory_budget_gb`, `require_free_gb`, `engine` and `field`.
+`FieldDftInteraction.settings()` reports `method`, `functional`, `dispersion`, `basis`, `energy_conv`, `density_conv`, `max_iter`, `memory_budget_gb`, `require_free_gb`, `engine` and `field`, plus `k_builder` only when one is set.
 
 | key | default |
 |---|---|
@@ -32,6 +32,8 @@
 | `field` | provenance of the pocket field after a run (file digest, pdb2pqr30 version, cutoff); `None` before |
 
 `max_iter=None` leaves ferric's own iteration limit in force, and a value is passed to every SCF of the tier, vacuum and field. `memory_budget_gb` is checked before the first SCF when `check_memory` is true (its default): a run whose AO cache plus packed RI tensor exceeds it raises `DftMemoryError` rather than letting ferric spill the tensor to disk and re-read it every iteration. `check_memory=False` skips that gate entirely and sets the reported `memory_budget_gb` to `None`.
+
+`k_builder` selects ferric's exchange builder: `None` (the default) leaves ferric's own choice, which stores an RI-K tensor; `'cosx'` (chain-of-spheres), `'direct'` (recompute the integrals each Fock build) and `'link'` (screened) do not. It trades wall-clock for memory **without changing the basis**, so unlike shrinking `basis` it does not change the numbers being compared, and it is recorded in `settings()` either way so two runs that differ only in the builder are distinguishable. Measured peak RSS per builder, and the finding that on a 714-bf anion the builder is *not* the memory lever (the grid block, RI-J and DIIS working set together are), is in `docs/benchmarks/dft_k_builder_memory.md`.
 
 `require_free_gb` answers a different question from `memory_budget_gb`, which is a fixed prediction for one calculation and so cannot see a machine that has no memory left. When set, the tier reads `MemAvailable` from `/proc/meminfo` and refuses to start below that figure, because a DFT process that outgrows free memory does not degrade gradually: it pages the RI tensor off disk on every SCF iteration. It is `None` by default, so no existing caller changes behaviour, and a platform with no `/proc` reads as "cannot tell" and proceeds rather than failing.
 

@@ -839,6 +839,11 @@ class FieldDftInteraction:
     max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
     check_memory: bool = True
     memory_budget_gb: float = 8.0  # ferric's own default [memory] budget; raise only if the box really has it
+    #: ferric's exchange builder: None leaves its default (a stored RI-K tensor), 'cosx' (chain-of-spheres) and
+    #: 'direct' (recompute each Fock build) never store it, 'link' screens it. This trades wall-clock for memory
+    #: WITHOUT changing the basis, so unlike shrinking `basis` it does not change the numbers being compared.
+    #: Measured peak RSS per builder on a 714-bf anion: docs/benchmarks/dft_k_builder_memory.md.
+    k_builder: str | None = None
     #: Refuse to start unless the machine has at least this much memory FREE (not merely within
     #: `memory_budget_gb`, which is a fixed prediction and cannot see a loaded box). None disables it.
     require_free_gb: float | None = None
@@ -848,7 +853,13 @@ class FieldDftInteraction:
     calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def settings(self) -> dict:
+        # `k_builder` is reported ONLY when set. `settings()` is hashed into `input_digest`, the identity every
+        # run record is addressed by, so adding an always-present key would re-address every existing record for
+        # a default nobody chose. An unset builder IS ferric's default, so omitting it leaves those digests
+        # byte-identical; setting one is a different calculation path and SHOULD get a different identity.
+        extra = {} if self.k_builder is None else {"k_builder": self.k_builder}
         return {
+            **extra,
             "method": f"KS-DFT {self.functional} + D3(BJ)",
             "functional": self.functional,
             "dispersion": "D3(BJ), reported as E_d3; cancels in dE_int at fixed geometry",
@@ -963,8 +974,14 @@ class FieldDftInteraction:
                     f"(AO cache {mem['ao_cache_gb']:.1f} + RI tensor {mem['ri_tensor_gb']:.1f}), over the "
                     f"{self.memory_budget_gb:.1f} GB budget. ferric would spill the RI tensor to disk and "
                     "re-read it EVERY SCF iteration (~1 min/iteration at 150 MB/s), so this is a cliff, not "
-                    "a slowdown. Use a smaller basis, or raise memory_budget_gb (and FERRIC_MEM_BUDGET_GB) "
-                    "if the machine really has the memory. Pass check_memory=False to run anyway."
+                    "a slowdown. Remedies: pass k_builder='direct' (recompute the integrals each Fock build) "
+                    "or 'cosx' (chain-of-spheres) so the K tensor is never stored -- but measure first, because "
+                    "on a 429-bf anion 'direct' did NOT cut peak RSS at all (the grid block, RI-J and DIIS "
+                    "working set dominate, not the K tensor) and 'cosx' ran over 2x longer than the default "
+                    "without finishing; "
+                    "use a smaller df_k_aux; raise memory_budget_gb (and FERRIC_MEM_BUDGET_GB) if the machine "
+                    "really has the memory; or use a smaller basis -- but note that changing the basis changes "
+                    "the numbers, while changing the K builder does not. Pass check_memory=False to run anyway."
                 )
             # The budget check above is against a FIXED number, so it passes on a machine that has no
             # memory free right now -- which is how a 2 GB-predicted run thrashed on a box with 4 GB
@@ -995,6 +1012,8 @@ class FieldDftInteraction:
                 kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
                 if self.max_iter is not None:
                     kw["max_iter"] = self.max_iter
+                if self.k_builder is not None:
+                    kw["k_builder"] = self.k_builder
                 t0 = time.perf_counter()
                 vac = ferric.run_dft(mol, bs, functional=self.functional, **kw)
                 t1 = time.perf_counter()

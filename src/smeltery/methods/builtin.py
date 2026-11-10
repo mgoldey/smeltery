@@ -314,6 +314,14 @@ def builtin_specs() -> list[MethodSpec]:
                     "functional": "libxc name ferric accepts; D3(BJ) is added separately, not by a -D3 suffix",
                     "memory_budget_gb": "refuse before the first SCF if the largest pose is predicted not to fit",
                     "require_free_gb": "refuse unless this much memory is actually free (unset: no check)",
+                    "k_builder": (
+                        "ferric exchange builder: unset leaves its default (a stored RI-K tensor), 'direct' "
+                        "recomputes the integrals each Fock build, 'cosx' is chain-of-spheres, 'link' screens. "
+                        "Changes cost, not the basis, so the numbers stay comparable -- but measure first: on a "
+                        "429-bf anion 'direct' cut peak memory by 0.03 GB (nothing) while running 22% faster, "
+                        "and 'cosx' ran over 2x longer without finishing "
+                        "(docs/benchmarks/dft_k_builder_memory.md)"
+                    ),
                     **_SCF_HELP,
                     "check_memory": "false skips the pre-SCF memory check, so memory_budget_gb is not enforced",
                 },

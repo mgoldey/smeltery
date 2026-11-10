@@ -356,3 +356,62 @@ def test_a_size_past_the_calibration_ceiling_is_disclosed_as_a_lower_bound():
     note = cal.extrapolation_note(235)
     assert "LOWER BOUND" in note and "2.5x" in note and "79 iterations" in note
     assert cal.extrapolation_note(93) == "" and cal.extrapolation_note(21) == ""
+
+
+def test_the_over_budget_refusal_names_the_k_builder_remedy():
+    """The refusal must offer the remedy that does NOT change the numbers.
+
+    It used to say only "use a smaller basis, or raise memory_budget_gb". A smaller basis changes the energies
+    being compared, so on a measurement it needs its own pre-declared plan; `k_builder='cosx'`/`'direct'` trades
+    wall-clock for memory and leaves the comparison intact. Omitting it sent at least one measurement down the
+    "needs a bigger machine" path when a flag would have done (issue #22, the indomethacin anion).
+    """
+    from smeltery.tiers import DftMemoryError
+
+    tier = FieldDftInteraction(memory_budget_gb=0.001)
+    with pytest.raises(DftMemoryError) as e:
+        tier.run([_posed(n=1)], {"field": []})
+    msg = str(e.value)
+    assert "k_builder" in msg
+    assert "cosx" in msg and "direct" in msg
+    # and it must say why the builder is preferable to shrinking the basis
+    assert "changes the numbers" in msg
+
+
+def test_k_builder_is_passed_to_ferric_and_recorded():
+    """A knob that is advertised but not plumbed is worse than no knob: it reads as a fix that does nothing."""
+    import ferric  # `tiers.run` imports ferric inside the method, so patch the module it reaches
+
+    seen: list[dict] = []
+
+    class _Res:
+        total_energy = -1.0
+        converged = True
+        iterations = 1
+        exit_reason = "Converged"
+
+    def fake_run_dft(mol, bs, **kw):
+        seen.append(kw)
+        return _Res()
+
+    tier = FieldDftInteraction(k_builder="cosx", check_memory=False)
+    assert tier.settings()["k_builder"] == "cosx"
+    real = ferric.run_dft
+    try:
+        ferric.run_dft = fake_run_dft
+        tier.run([_posed(n=1)], {"field": []})
+    finally:
+        ferric.run_dft = real
+    assert seen, "run_dft was never called"
+    assert all(kw.get("k_builder") == "cosx" for kw in seen), seen
+
+
+def test_an_unset_k_builder_is_absent_from_settings_so_digests_do_not_move():
+    """`settings()` is hashed into `input_digest`, the identity a run record is addressed by.
+
+    An always-present `k_builder` key would re-address every existing record for a default nobody chose --
+    tests/test_methods_registry.py caught exactly that. Unset must be ABSENT, not None; set must be present,
+    because a different exchange builder is a different calculation path and deserves a different identity.
+    """
+    assert "k_builder" not in FieldDftInteraction().settings()
+    assert FieldDftInteraction(k_builder="direct").settings()["k_builder"] == "direct"
