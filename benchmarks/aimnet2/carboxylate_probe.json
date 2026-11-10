@@ -1,0 +1,205 @@
+{
+ "plan": "docs/benchmarks/aimnet2_carboxylate_plan.md",
+ "bar_kcal_mol": 5.0,
+ "force_bar": 0.0001,
+ "settings": {
+  "provider": "aimnet2-wb97m-d3",
+  "model": "aimnet2 (ensemble member 0)",
+  "device": "cpu",
+  "precision": "float64 (model and external modules)",
+  "supported_charge_states": [
+   -1,
+   0,
+   1
+  ],
+  "license_id": "MIT",
+  "weights_license_source": "https://huggingface.co/isayevlab/aimnet2-wb97m-d3 (model card metadata: license: mit)",
+  "aimnet": "0.2.6",
+  "torch": "2.15.0+cu132"
+ },
+ "species": {
+  "acetic acid": {
+   "smiles": "CC(=O)O",
+   "charge": 0,
+   "n_atoms": 8,
+   "model": -143852.20332312046,
+   "dft": -143777.2600287317,
+   "dft_status": "ok (2 s wall)"
+  },
+  "acetic acid anion": {
+   "smiles": "CC(=O)[O-]",
+   "charge": -1,
+   "n_atoms": 7,
+   "model": -143495.21528029893,
+   "dft": -143424.06298701043,
+   "dft_status": "ok (2 s wall)"
+  },
+  "benzoic acid": {
+   "smiles": "OC(=O)c1ccccc1",
+   "charge": 0,
+   "n_atoms": 15,
+   "model": -264256.70135588327,
+   "dft": -264107.6245572367,
+   "dft_status": "ok (15 s wall)"
+  },
+  "benzoic acid anion": {
+   "smiles": "[O-]C(=O)c1ccccc1",
+   "charge": -1,
+   "n_atoms": 14,
+   "model": -263907.52425352146,
+   "dft": -263761.3350952195,
+   "dft_status": "ok (11 s wall)"
+  },
+  "formic acid": {
+   "smiles": "C(=O)O",
+   "charge": 0,
+   "n_atoms": 5,
+   "model": -119158.47124557856,
+   "dft": -119097.82368760426,
+   "dft_status": "ok (1 s wall)"
+  },
+  "formic acid anion": {
+   "smiles": "C(=O)[O-]",
+   "charge": -1,
+   "n_atoms": 4,
+   "model": -118804.56287566166,
+   "dft": -118748.59898667765,
+   "dft_status": "ok (1 s wall)"
+  },
+  "propanoic acid": {
+   "smiles": "CCC(=O)O",
+   "charge": 0,
+   "n_atoms": 11,
+   "model": -168538.1968990605,
+   "dft": -168449.3139730911,
+   "dft_status": "ok (4 s wall)"
+  },
+  "propanoic acid anion": {
+   "smiles": "CCC(=O)[O-]",
+   "charge": -1,
+   "n_atoms": 10,
+   "model": -168180.53853654835,
+   "dft": -168095.6775165324,
+   "dft_status": "ok (4 s wall)"
+  },
+  "indomethacin": {
+   "smiles": "COc1ccc2c(c1)c(CC(=O)O)c(C)n2C(=O)c1ccc(Cl)cc1",
+   "charge": 0,
+   "n_atoms": 41,
+   "model": -972865.1997352962,
+   "dft": -972436.731050245,
+   "dft_status": "ok (681 s wall)"
+  },
+  "indomethacin anion": {
+   "smiles": "COc1ccc2c(c1)c(CC(=O)[O-])c(C)n2C(=O)c1ccc(Cl)cc1",
+   "charge": -1,
+   "n_atoms": 40,
+   "model": -972519.8467540542,
+   "dft": null,
+   "dft_status": "not completed (rc=-9, 5803 s wall): ferric WARNING [RHF setup]: resident memory 15.52 GB exceeds 110% of the 11.70 GB budget (observability only \u2014 this stage already ran; if this recurs, raise [memory] budget_gb / FERRIC_MEM_BUDGET_GB o"
+  },
+  "danuglipron": {
+   "smiles": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)O)N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
+   "charge": 0,
+   "n_atoms": 71,
+   "model": -1176671.3456983385,
+   "dft": null,
+   "dft_status": "not completed (rc=-9, 1522 s wall): [jk_storage] auto: the RI-J tensor does not fit the memory budget; J by Split-RI-J (recomputed in contracted form each build, no stored J tensor)"
+  },
+  "danuglipron anion": {
+   "smiles": "C1CO[C@@H]1CN2C3=C(C=CC(=C3)C(=O)[O-])N=C2CN4CCC(CC4)C5=NC(=CC=C5)OCC6=C(C=C(C=C6)C#N)F",
+   "charge": -1,
+   "n_atoms": 70,
+   "model": -1176327.196147569,
+   "dft": null,
+   "dft_status": "not completed (rc=-9, 1404 s wall): [jk_storage] auto: the RI-J tensor does not fit the memory budget; J by Split-RI-J (recomputed in contracted form each build, no stored J tensor)"
+  }
+ },
+ "pairs": {
+  "acetic acid": {
+   "dft": 353.19704172125785,
+   "model": 356.9880428215256,
+   "error": 3.7910011002677493,
+   "within_bar": true
+  },
+  "benzoic acid": {
+   "dft": 346.28946201718645,
+   "model": 349.17710236180574,
+   "error": 2.8876403446192853,
+   "within_bar": true
+  },
+  "formic acid": {
+   "dft": 349.2247009266139,
+   "model": 353.90836991689866,
+   "error": 4.683668990284787,
+   "within_bar": true
+  },
+  "propanoic acid": {
+   "dft": 353.6364565587137,
+   "model": 357.6583625121566,
+   "error": 4.021905953442911,
+   "within_bar": true
+  },
+  "indomethacin": {
+   "error": null,
+   "status": "incomplete (a DFT leg did not finish)"
+  },
+  "danuglipron": {
+   "error": null,
+   "status": "incomplete (a DFT leg did not finish)"
+  }
+ },
+ "isodesmic": {
+  "benzoic acid": {
+   "dft": 6.907579704071395,
+   "model": 7.810940459719859,
+   "error": 0.903360755648464,
+   "within_bar": true
+  },
+  "formic acid": {
+   "dft": 3.972340794687625,
+   "model": 3.079672904626932,
+   "error": -0.892667890060693,
+   "within_bar": true
+  },
+  "propanoic acid": {
+   "dft": -0.43941483745584264,
+   "model": -0.6703196906601079,
+   "error": -0.23090485320426524,
+   "within_bar": true
+  },
+  "indomethacin": {
+   "error": null,
+   "status": "incomplete (a DFT leg did not finish)"
+  },
+  "danuglipron": {
+   "error": null,
+   "status": "incomplete (a DFT leg did not finish)"
+  }
+ },
+ "force_fd": {
+  "indomethacin anion": {
+   "0.0001": 0.0010440080697760492,
+   "0.001": 0.00011968827617264048,
+   "0.01": 0.0005569198467601168
+  },
+  "danuglipron anion": {
+   "0.0001": 0.001334896569758428,
+   "0.001": 0.0001464233916261673,
+   "0.01": 0.00063163450834082
+  }
+ },
+ "notes": [],
+ "verdict": {
+  "worst_abs_error_kcal_mol": 4.683668990284787,
+  "completed_within_bar": true,
+  "incomplete": [
+   "danuglipron",
+   "indomethacin"
+  ],
+  "partial_run": false,
+  "carboxylates_entered": false,
+  "rule": "a single miss means carboxylates are NOT entered (plan item 3); an incomplete required species, or a partial run, means the question is not established, which is also not an entry",
+  "note": "verdict block recomputed from this record's own errors under the corrected schema; no energy changed"
+ }
+}

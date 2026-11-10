@@ -115,3 +115,38 @@ def test_the_charge_input_changes_the_energy_unlike_ani2x():
     e_anion = p.energy_and_forces(POSE, charge=-1).energy
     e_neutral = p.energy_and_forces(POSE, charge=0).energy
     assert abs(e_anion - e_neutral) > 1.0  # kcal/mol; recorded difference for acetate coordinates is ~121
+
+
+CARBOX_RECORD = ROOT / "benchmarks" / "aimnet2" / "carboxylate_probe.json"
+CARBOX_TRUNC = ROOT / "benchmarks" / "aimnet2" / "carboxylate_truncated.json"
+CARBOX_DOC = ROOT / "docs" / "benchmarks" / "aimnet2_carboxylate.md"
+
+
+def test_the_carboxylate_doc_quotes_its_records_and_claims_no_entry():
+    """The carboxylate follow-up (#22) must quote its own numbers and must NOT read as an entry.
+
+    Every completed error was inside the 5.0 bar, but the two species the plan requires -- the drug-sized
+    carboxylate and the danuglipron anion -- died on memory. A doc that quoted only the passes would read as a
+    result the measurement does not support, so this asserts the refusal is stated and that the provider's
+    measured charge states were left alone.
+    """
+    from smeltery.providers import aimnet2
+
+    text = CARBOX_DOC.read_text()
+    main, trunc = json.loads(CARBOX_RECORD.read_text()), json.loads(CARBOX_TRUNC.read_text())
+    for rec in (main, trunc):
+        for name, pair in rec["pairs"].items():
+            if pair.get("error") is not None:
+                assert f"{pair['error']:+.2f}" in text, name
+        for name, iso in rec["isodesmic"].items():
+            if iso.get("error") is not None:
+                assert f"{iso['error']:+.2f}" in text, name
+    # The required species are recorded as not completed, in the record and in the doc.
+    assert main["pairs"]["indomethacin"]["error"] is None
+    assert main["pairs"]["danuglipron"]["error"] is None
+    assert "not completed" in text
+    # Neither run may claim an entry, and the provider's measured states are untouched.
+    assert main["verdict"]["carboxylates_entered"] is False
+    assert trunc["verdict"]["carboxylates_entered"] is False
+    assert "NOT entered" in text and "not established" in text
+    assert aimnet2.MEASURED_CHARGE_STATES == frozenset({0, 1})

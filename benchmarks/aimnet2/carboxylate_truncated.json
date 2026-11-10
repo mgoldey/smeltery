@@ -1,0 +1,88 @@
+{
+ "plan": "docs/benchmarks/aimnet2_carboxylate_plan.md",
+ "bar_kcal_mol": 5.0,
+ "force_bar": 0.0001,
+ "settings": {
+  "provider": "aimnet2-wb97m-d3",
+  "model": "aimnet2 (ensemble member 0)",
+  "device": "cpu",
+  "precision": "float64 (model and external modules)",
+  "supported_charge_states": [
+   -1,
+   0,
+   1
+  ],
+  "license_id": "MIT",
+  "weights_license_source": "https://huggingface.co/isayevlab/aimnet2-wb97m-d3 (model card metadata: license: mit)",
+  "aimnet": "0.2.6",
+  "torch": "2.15.0+cu132"
+ },
+ "species": {
+  "acetic acid": {
+   "smiles": "CC(=O)O",
+   "charge": 0,
+   "n_atoms": 8,
+   "model": -143852.20332312046,
+   "dft": -143777.2600287317,
+   "dft_status": "ok (2 s wall)"
+  },
+  "acetic acid anion": {
+   "smiles": "CC(=O)[O-]",
+   "charge": -1,
+   "n_atoms": 7,
+   "model": -143495.21528029893,
+   "dft": -143424.06298701043,
+   "dft_status": "ok (2 s wall)"
+  },
+  "truncated danuglipron fragment": {
+   "smiles": "Cn1c2ccc(cc2nc1C)C(=O)O",
+   "charge": 0,
+   "n_atoms": 24,
+   "model": -406331.2183117124,
+   "dft": -406098.8226966536,
+   "dft_status": "ok (39 s wall)"
+  },
+  "truncated danuglipron fragment anion": {
+   "smiles": "Cn1c2ccc(cc2nc1C)C(=O)[O-]",
+   "charge": -1,
+   "n_atoms": 23,
+   "model": -405978.1156517447,
+   "dft": -405748.7804710714,
+   "dft_status": "ok (40 s wall)"
+  }
+ },
+ "pairs": {
+  "acetic acid": {
+   "dft": 353.19704172125785,
+   "model": 356.9880428215256,
+   "error": 3.7910011002677493,
+   "within_bar": true
+  },
+  "truncated danuglipron fragment": {
+   "dft": 350.0422255821759,
+   "model": 353.10265996766975,
+   "error": 3.0604343854938634,
+   "within_bar": true
+  }
+ },
+ "isodesmic": {
+  "truncated danuglipron fragment": {
+   "dft": 3.1548161391401663,
+   "model": 3.885382853797637,
+   "error": 0.7305667146574706,
+   "within_bar": true
+  }
+ },
+ "force_fd": {},
+ "notes": [
+  "--only ['acetic acid', 'truncated danuglipron fragment']: a partial run, not the plan's full set"
+ ],
+ "verdict": {
+  "worst_abs_error_kcal_mol": 3.7910011002677493,
+  "completed_within_bar": true,
+  "incomplete": [],
+  "partial_run": true,
+  "carboxylates_entered": false,
+  "rule": "a single miss means carboxylates are NOT entered (plan item 3); an incomplete required species, or a partial run, means the question is not established, which is also not an entry"
+ }
+}
