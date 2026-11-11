@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BenchHome } from "./pages/BenchHome";
 import { Compare } from "./pages/Compare";
 import { Methods } from "./pages/Methods";
@@ -16,27 +17,30 @@ import { Structure } from "./pages/run/Structure";
 import { RunLayout } from "./pages/run/RunLayout";
 
 export function App() {
+  const { pathname } = useLocation();
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/bench" replace />} />
-      <Route path="/bench" element={<BenchHome />} />
-      <Route path="/studies/:module" element={<Study />} />
-      <Route path="/report/:idx" element={<Report />} />
-      <Route path="/campaigns/:id" element={<Notebook />} />
-      <Route path="/compare" element={<Compare />} />
-      <Route path="/methods" element={<Methods />} />
-      <Route path="/pipelines/:name" element={<Workspace />} />
-      <Route path="/run/:idx" element={<RunLayout />}>
-        <Route index element={<Navigate to="results" replace />} />
-        <Route path="results" element={<Results />} />
-        <Route path="poses" element={<Poses />} />
-        <Route path="structure" element={<Structure />} />
-        <Route path="pipeline" element={<RunPipeline />} />
-        <Route path="decisions" element={<Decisions />} />
-        <Route path="proposals" element={<Proposals />} />
-        <Route path="overview" element={<Overview />} />
-      </Route>
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <ErrorBoundary resetKey={pathname}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/bench" replace />} />
+        <Route path="/bench" element={<BenchHome />} />
+        <Route path="/studies/:module" element={<Study />} />
+        <Route path="/report/:idx" element={<Report />} />
+        <Route path="/campaigns/:id" element={<Notebook />} />
+        <Route path="/compare" element={<Compare />} />
+        <Route path="/methods" element={<Methods />} />
+        <Route path="/pipelines/:name" element={<Workspace />} />
+        <Route path="/run/:idx" element={<RunLayout />}>
+          <Route index element={<Navigate to="results" replace />} />
+          <Route path="results" element={<Results />} />
+          <Route path="poses" element={<Poses />} />
+          <Route path="structure" element={<Structure />} />
+          <Route path="pipeline" element={<RunPipeline />} />
+          <Route path="decisions" element={<Decisions />} />
+          <Route path="proposals" element={<Proposals />} />
+          <Route path="overview" element={<Overview />} />
+        </Route>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </ErrorBoundary>
   );
 }
