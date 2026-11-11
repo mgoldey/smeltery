@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import uuid
@@ -12,10 +13,20 @@ from pathlib import Path
 
 from smeltery.bench.adapters import task_supervisor as _sup
 from smeltery.bench.adapters._sqlite import add_column, migrate, open_db
-from smeltery.bench.adapters.task_supervisor import connect, kill_group, proc_identity, promote, same_process, utc
+from smeltery.bench.adapters.task_supervisor import (
+    connect,
+    kill_group,
+    proc_identity,
+    promote,
+    same_process,
+    spawn_supervisor,
+    task_event,
+    utc,
+)
 from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager
 
 _GB = 1024**3
+_log = logging.getLogger(__name__)
 #: `SubprocessTaskQueue` defines `list`, so inside its body the builtin is unreachable by name (as in smeltery.tasks).
 _TaskList = list[Task]
 
@@ -101,6 +112,7 @@ def _age_s(iso: str) -> float:
     try:
         t = datetime.fromisoformat(iso)
     except ValueError:
+        _log.debug("unparseable timestamp %r", iso, exc_info=True)
         return 0.0
     if t.tzinfo is None:
         t = t.replace(tzinfo=timezone.utc)
@@ -130,16 +142,17 @@ class SubprocessTaskQueue:
     #: enough that a cap fires before the node is in trouble.
     sample_interval_s = 1.0
 
-    def __init__(self, root: str | Path, *, max_concurrent_runs: int = 1):
+    def __init__(self, root: str | Path, *, max_concurrent_runs: int = 1, spawn=spawn_supervisor):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = self.root / "tasks.sqlite"
         self.log_dir = self.root / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._spawn = spawn  # a seam for tests: how a task's supervisor is started
         self._init_db()
         self.max_concurrent_runs = max_concurrent_runs
         self._reconcile()
-        promote(self.db)
+        promote(self.db, self._spawn)
 
     def _init_db(self) -> None:
         with open_db(self.db, wal=True) as con:
@@ -158,7 +171,7 @@ class SubprocessTaskQueue:
             raise ValueError(f"max_concurrent_runs must be a positive integer, got {n!r}")
         with open_db(self.db) as con:
             con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('max_concurrent_runs', ?)", (str(n),))
-        promote(self.db)  # a raised cap frees slots now
+        promote(self.db, self._spawn)  # a raised cap frees slots now
 
     def _row_to_task(self, row) -> Task:
         (
@@ -236,6 +249,10 @@ class SubprocessTaskQueue:
                     "WHERE id=? AND status='running' AND supervisor_pid IS ?",
                     (utc(), why, tid, spid),
                 ).rowcount
+            if changed:
+                task_event(
+                    tid, "supervisor_lost", level=logging.WARNING, supervisor_pid=spid, orphan_killed=bool(orphan)
+                )
             if changed and orphan and pid:
                 kill_group(pid)
 
@@ -292,7 +309,8 @@ class SubprocessTaskQueue:
                     int(bool(capped)),
                 ),
             )
-        promote(self.db)
+        task_event(tid, "submit", task_name=name or None, capped=bool(capped), retries=retries)
+        promote(self.db, self._spawn)
         return tid
 
     def _read(self, where: str = "", args: tuple = ()) -> _TaskList:
@@ -304,7 +322,7 @@ class SubprocessTaskQueue:
         """At most `limit` tasks (None: all), newest first. Queued and running tasks are chosen before finished
         ones, so a long history never pushes live work off the panel; the result is then ordered by creation."""
         self._reconcile()
-        promote(self.db)
+        promote(self.db, self._spawn)
         where, args = ("WHERE status=?", (status,)) if status else ("", ())
         if limit is None:
             return self._read(f"{where} ORDER BY created_at DESC", args)
@@ -319,7 +337,7 @@ class SubprocessTaskQueue:
 
     def get(self, task_id):
         self._reconcile(task_id)
-        promote(self.db)
+        promote(self.db, self._spawn)
         found = self._read("WHERE id=?", (task_id,))
         return found[0] if found else None
 
@@ -345,9 +363,10 @@ class SubprocessTaskQueue:
         if not changed:
             return False
         status, pid, pid_start = row
+        task_event(task_id, "cancel", was=status)
         if status == "running" and same_process(pid, pid_start):
             kill_group(pid)
-        promote(self.db)
+        promote(self.db, self._spawn)
         return True
 
     def ready(self):
@@ -355,6 +374,7 @@ class SubprocessTaskQueue:
             with contextlib.closing(sqlite3.connect(f"file:{self.db}?mode=rw", uri=True)) as con:
                 con.execute("SELECT 1 FROM tasks LIMIT 1")
         except sqlite3.Error as e:
+            _log.warning("task queue not ready: %s", e, exc_info=True)
             return False, str(e)
         return True, str(self.db)
 

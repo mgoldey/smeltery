@@ -14,6 +14,7 @@ number from the task's ceiling.
 pip install 'smeltery[bench]'          # the wheel ships the built UI
 smeltery bench ROOT [--study pkg.module] [--port 8765] [--max-runs 1] [--open]
                    [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
+                   [--log-level info] [--log-json]
 ```
 
 ROOT is searched recursively for run records (`run-*.json`). Bench keeps its own state (comments,
@@ -31,6 +32,23 @@ The UI is React and TypeScript in `ui/`. Every figure is built in Python (`smelt
 and drawn by Plotly; structures are drawn by Mol* from MolViewSpec scenes the API builds; 2D
 depictions and atom picking use RDKit.js. The pipeline exists only as TOML, carried through
 `smeltery.gui.pipeline.Pipeline`; every view of it is derived from that text.
+
+## Logging
+
+`--log-level {debug,info,warning,error}` (default `info`; env `SMELTERY_BENCH_LOG_LEVEL`) and
+`--log-json` (env `SMELTERY_BENCH_LOG_JSON=1`) go to stderr, for Bench, uvicorn and the task
+supervisors alike (a supervisor inherits both settings and stderr, so one task's trail reads the same
+whichever process wrote the line; so a pipe on Bench's stderr, as in `smeltery bench | tee log`, stays open until the tasks end). The one-line startup URL is unchanged and is not JSON.
+`--log-json` writes one object per line with `ts`, `level`, `logger`, `message`, the structured
+fields below, and `exc` (a traceback) when there is one.
+
+At `info`, every task lifecycle transition is a line on the `smeltery.bench.tasks` logger carrying
+`task_id` and `event`: `submit`, `promote` (a supervisor was started), `start`, `retry` (with the
+attempt and backoff), `oom`, `timeout`, `cancel`, `supervisor_lost`, and `exit` (with `status` and
+`returncode`; a failure is a warning). At `debug` there is one line per HTTP request, and each
+attempt. Exceptions that Bench turns into a response or a fallback are logged with their traceback.
+A request line's `?token=` value is redacted, and no command line, environment or token is ever
+logged.
 
 ## Security
 

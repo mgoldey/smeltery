@@ -7,6 +7,7 @@ TOML plus every issue `Pipeline.check()` finds, so the editor never holds a seco
 from __future__ import annotations
 
 import hashlib
+import logging
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from . import models as M
 from .common import ports, run
 from .methods import workspace_defaults
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["work"])
 
 
@@ -43,6 +46,7 @@ def list_tasks(request: Request, limit: int = Query(100, ge=1, le=1000)) -> Any:
     try:
         return [_task(t) for t in ports(request).task_queue.list(limit=limit)]
     except Exception as e:  # noqa: BLE001 - a dead backend degrades this panel, not the app
+        _log.warning("the task queue could not list tasks", exc_info=True)
         return JSONResponse(status_code=503, content={"reason": str(e)})
 
 

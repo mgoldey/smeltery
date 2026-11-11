@@ -14,13 +14,20 @@ pid is trusted or signalled unless its identity still matches: after a reboot or
 unrelated process.
 
 Standard library only, and run by path rather than with `-m`: importing the `smeltery` package pulls in RDKit and
-the rest of the funnel, a cost every task would pay for nothing.
+the rest of the funnel, a cost every task would pay for nothing. That is also why the logging setup shared with
+Bench (`setup_logging`, `JsonFormatter`) lives here: a supervisor cannot import a sibling module.
+
+Logging: every lifecycle transition is logged on the `smeltery.bench.tasks` logger with the task id (`task_event`).
+A supervisor outlives the Bench that started it and inherits its stderr and its `SMELTERY_BENCH_LOG_LEVEL` /
+`SMELTERY_BENCH_LOG_JSON`, so one task's trail reads the same whichever process wrote the line. Never log a
+command line, an environment or a token: they can hold secrets.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import signal
 import sqlite3
@@ -32,12 +39,75 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BUSY_TIMEOUT_S = 30
+LOG_LEVEL_ENV = "SMELTERY_BENCH_LOG_LEVEL"
+LOG_JSON_ENV = "SMELTERY_BENCH_LOG_JSON"
+_log = logging.getLogger("smeltery.bench.tasks")
 _PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 _GB = 1024**3
 
 
 def utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# ---------------------------------------------------------------------------------------------------- logging
+
+_HANDLER_NAME = "smeltery-bench"
+_STANDARD_ATTRS = frozenset(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
+
+
+class JsonFormatter(logging.Formatter):
+    """One JSON object per line: ts, level, logger, message, every `extra` field, and `exc_info` as `exc`."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        out: dict[str, object] = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(record.created)) + f".{int(record.msecs):03d}Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        out.update({k: v for k, v in record.__dict__.items() if k not in _STANDARD_ATTRS and not k.startswith("_")})
+        if record.exc_info:
+            out["exc"] = self.formatException(record.exc_info)
+        return json.dumps(out, default=str)
+
+
+def setup_logging(level: str = "info", as_json: bool = False) -> None:
+    """Install the one stderr handler on the root logger, replacing any this function installed before."""
+    root = logging.getLogger()
+    for h in [h for h in root.handlers if h.get_name() == _HANDLER_NAME]:
+        root.removeHandler(h)
+    handler = logging.StreamHandler()  # stderr
+    handler.set_name(_HANDLER_NAME)
+    handler.setFormatter(
+        JsonFormatter() if as_json else logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    )
+    root.addHandler(handler)
+    root.setLevel(level.upper())
+
+
+def log_env_requested() -> tuple[str, bool] | None:
+    """The level and JSON choice a parent Bench exported to its supervisors; None when it exported neither."""
+    level, as_json = os.environ.get(LOG_LEVEL_ENV), os.environ.get(LOG_JSON_ENV, "").lower() in ("1", "true", "yes")
+    if level is None and not as_json:
+        return None
+    level = (level or "info").upper()
+    return (level if level in logging.getLevelNamesMapping() else "INFO"), as_json
+
+
+def task_event(task_id: str | None, event: str, *, level: int = logging.INFO, exc_info: bool = False, **fields) -> None:
+    """Log one task lifecycle transition: `task <id> <event> k=v ...`, with `task_id`, `event` and the fields as
+    structured extras for `--log-json`."""
+    detail = "".join(f" {k}={v}" for k, v in fields.items() if v is not None)
+    _log.log(
+        level,
+        "task %s %s%s",
+        task_id,
+        event,
+        detail,
+        exc_info=exc_info,
+        extra={"task_id": task_id, "event": event, **fields},
+    )
 
 
 @contextlib.contextmanager
@@ -65,6 +135,7 @@ def _boot_id() -> str:
     try:
         return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     except OSError:
+        _log.debug("no boot id: /proc/sys/kernel/random/boot_id is unreadable", exc_info=True)
         return ""
 
 
@@ -134,7 +205,10 @@ def kill_group(pgid: int, grace: float = 2.0) -> None:
     `grace`. The caller must have checked the pid's identity first."""
     try:
         os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        _log.warning("not permitted to signal process group %s", pgid, exc_info=True)
         return
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
@@ -143,8 +217,12 @@ def kill_group(pgid: int, grace: float = 2.0) -> None:
         except (ProcessLookupError, PermissionError):
             return
         time.sleep(0.05)
-    with contextlib.suppress(ProcessLookupError, PermissionError):
+    try:
         os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        _log.warning("not permitted to SIGKILL process group %s", pgid, exc_info=True)
 
 
 # ---------------------------------------------------------------------------------------------------- scheduling
@@ -160,7 +238,10 @@ def spawn_supervisor(db: str | Path, task_id: str) -> subprocess.Popen:
         [sys.executable, "-I", str(Path(__file__).resolve()), str(db), task_id],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        # Inherited only when `smeltery bench` exported a logging choice, so the supervisor's lines reach the same place
+        # Bench's do. Otherwise (a library caller, a test) the supervisor must not hold open a pipe its parent's own
+        # caller is reading to EOF: that caller would wait for the task, not just for the submitter.
+        stderr=None if log_env_requested() else subprocess.DEVNULL,
         start_new_session=True,  # Ctrl+C on Bench, or Bench exiting, must not reach the task
         close_fds=True,
     )
@@ -211,6 +292,7 @@ def promote(db: str | Path, spawn: Callable[[str | Path, str], subprocess.Popen]
                     "UPDATE tasks SET status='failed', finished_at=?, note=? WHERE id=?",
                     (now, f"could not start the task's supervisor: {e}", tid),
                 )
+                task_event(tid, "promote_failed", level=logging.ERROR, exc_info=True, error=str(e))
                 continue
             con.execute(
                 "UPDATE tasks SET status='running', started_at=?, heartbeat_at=?, supervisor_pid=?, "
@@ -218,6 +300,7 @@ def promote(db: str | Path, spawn: Callable[[str | Path, str], subprocess.Popen]
                 (now, now, p.pid, proc_identity(p.pid), tid),
             )
             started.append(tid)
+            task_event(tid, "promote", supervisor_pid=p.pid, capped=bool(capped))
     return started
 
 
@@ -282,7 +365,21 @@ class Supervisor:
             sets.append(f"{k}=?")
             args.append(v)
         with connect(self.db) as con:
-            con.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id=? AND status='running'", (*args, self.tid))
+            changed = con.execute(
+                f"UPDATE tasks SET {', '.join(sets)} WHERE id=? AND status='running'", (*args, self.tid)
+            ).rowcount
+        if changed:
+            bad = status == "failed"
+            task_event(
+                self.tid,
+                "exit",
+                level=logging.WARNING if bad else logging.INFO,
+                status=status,
+                returncode=rc,
+                note=note,
+            )
+        else:  # a cancel (or a reconcile) wrote the end first, and it stands
+            task_event(self.tid, "exit_ignored", level=logging.DEBUG, status=status, returncode=rc)
 
     def _end(self, proc: subprocess.Popen) -> tuple[str, None]:
         kill_group(proc.pid)  # still our unreaped child, so its pid cannot have been reused
@@ -306,6 +403,7 @@ class Supervisor:
 
         signal.signal(signal.SIGTERM, _stop)
         signal.signal(signal.SIGINT, _stop)
+        task_event(self.tid, "start", supervisor_pid=os.getpid())
         job = _Job.from_row(*row[2:])
         if job.timeout_s:  # one wall-clock budget for the whole task, every attempt and backoff included
             self.deadline = time.monotonic() + job.timeout_s
@@ -313,13 +411,18 @@ class Supervisor:
             self._attempts(job)
         except BaseException as e:  # noqa: BLE001 - whatever happened, the task must not read "running" forever
             why = "supervisor stopped by a signal" if isinstance(e, _Stop) else f"supervisor error: {e!r}"
+            task_event(self.tid, "supervisor_error", level=logging.ERROR, exc_info=True, why=why)
             if self.proc is not None and self.proc.poll() is None:
                 kill_group(self.proc.pid)
-            with contextlib.suppress(Exception):
+            try:
                 self._finish("failed", None, why)
+            except Exception:  # noqa: BLE001 - nothing left to do but say so
+                task_event(self.tid, "finish_failed", level=logging.ERROR, exc_info=True)
         finally:
-            with contextlib.suppress(Exception):
+            try:
                 promote(self.db)
+            except Exception:  # noqa: BLE001 - the next promoter (any Bench, any supervisor) starts what is queued
+                task_event(self.tid, "promote_failed", level=logging.ERROR, exc_info=True)
         return 0
 
     def _attempts(self, job: _Job) -> None:
@@ -333,7 +436,17 @@ class Supervisor:
                     con.execute(
                         "UPDATE tasks SET pid=NULL, pid_start=NULL WHERE id=? AND status='running'", (self.tid,)
                     )
-                if not self._backoff(min(job.backoff_s * 2 ** (attempt - 1), 30.0), job):
+                delay = min(job.backoff_s * 2 ** (attempt - 1), 30.0)
+                task_event(
+                    self.tid,
+                    "retry",
+                    level=logging.WARNING,
+                    attempt=attempt,
+                    max_attempts=job.max_attempts,
+                    returncode=rc,
+                    backoff_s=delay,
+                )
+                if not self._backoff(delay, job):
                     return
                 attempt += 1
                 continue
@@ -353,6 +466,7 @@ class Supervisor:
         """Past the task's wall-clock limit: record why (the caller then kills what is running)."""
         if self.deadline is None or time.monotonic() < self.deadline:
             return False
+        task_event(self.tid, "timeout", level=logging.WARNING, timeout_s=job.timeout_s)
         self._finish("failed", None, f"timed out: still running after its {job.timeout_s:g} s wall-clock limit")
         return True
 
@@ -380,7 +494,9 @@ class Supervisor:
                 "peak_rss_bytes=MAX(COALESCE(peak_rss_bytes,0),?) WHERE id=? AND status='running'",
                 (proc.pid, proc_identity(proc.pid), attempt, peak, self.tid),
             ).rowcount
+        task_event(self.tid, "attempt", level=logging.DEBUG, attempt=attempt, pid=proc.pid)
         if not changed:  # cancelled while the process was starting
+            task_event(self.tid, "cancelled", note="while the process was starting")
             return self._end(proc)
         last_size = -1
         while True:
@@ -392,6 +508,7 @@ class Supervisor:
             except subprocess.TimeoutExpired:
                 pass
             if self._status() != "running":  # cancelled: Bench signals too, this covers a Bench that could not
+                task_event(self.tid, "cancelled", note="the supervisor stopped the task")
                 return self._end(proc)
             if self._out_of_time(job):
                 return self._end(proc)
@@ -403,6 +520,7 @@ class Supervisor:
                 # Terminal BEFORE the kill, so the non-zero exit is not retried: exceeding the cap is a verdict
                 # about this command, and running it again would exceed it again.
                 note = f"OOM at {rss / _GB:.2f} GB, over the {job.limit_bytes / _GB:.2f} GB limit"
+                task_event(self.tid, "oom", level=logging.WARNING, rss_bytes=int(rss), limit_bytes=job.limit_bytes)
                 self._finish("failed", None, note, oom=1, peak_rss_bytes=int(rss))
                 return self._end(proc)
 
@@ -413,9 +531,11 @@ class Supervisor:
         if beat:
             sets.append("heartbeat_at=?")
             args.append(utc())
-        with contextlib.suppress(sqlite3.Error):  # advisory: a busy database skips one sample, not the task
+        try:  # advisory: a busy database skips one sample, not the task
             with connect(self.db) as con:
                 con.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id=?", (*args, self.tid))
+        except sqlite3.Error:
+            task_event(self.tid, "sample_skipped", level=logging.DEBUG, exc_info=True)  # once a second: not a warning
 
 
 def _size(path: Path, default: int) -> int:
@@ -429,6 +549,8 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: task_supervisor.py DB TASK_ID", file=sys.stderr)
         return 2
+    if (requested := log_env_requested()) is not None:
+        setup_logging(*requested)
     return Supervisor(argv[0], argv[1]).run()
 
 

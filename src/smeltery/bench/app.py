@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -21,6 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .adapters.task_supervisor import LOG_JSON_ENV, LOG_LEVEL_ENV, setup_logging
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
 from .security import TOKEN_ENV, SecurityConfig, install, is_loopback
 
@@ -195,6 +198,18 @@ def build_app(
     )
 
 
+LOG_LEVELS = ("debug", "info", "warning", "error")
+_TOKEN_QUERY = re.compile(r"([?&]token=)[^&\s\"]*")
+
+
+def _redact_token(record: logging.LogRecord) -> bool:
+    """A logging filter: blank the value of a `token=` query parameter in an access-log line. Never drops one."""
+    if isinstance(record.args, tuple):
+        record.args = tuple(_TOKEN_QUERY.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+    record.msg = _TOKEN_QUERY.sub(r"\1***", record.msg) if isinstance(record.msg, str) else record.msg
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="smeltery bench", description="Serve Bench for the runs under ROOT.")
     ap.add_argument("root", nargs="?", default=".", help="directory holding run records (searched recursively)")
@@ -213,6 +228,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--max-runs", type=int, default=1, help="launched runs at once; the rest wait as queued (default 1)"
     )
+    ap.add_argument(
+        "--log-level",
+        choices=LOG_LEVELS,
+        default=None,
+        help=f"logging threshold (default info; ${LOG_LEVEL_ENV}). info logs every task lifecycle transition; "
+        "debug adds one line per HTTP request",
+    )
+    ap.add_argument(
+        "--log-json",
+        action="store_true",
+        default=None,
+        help=f"log one JSON object per line instead of text (${LOG_JSON_ENV}=1)",
+    )
     args = ap.parse_args(argv)
     token = args.token or os.environ.get(TOKEN_ENV) or None
     if not is_loopback(args.host) and token is None:
@@ -229,6 +257,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.max_runs < 1:
         ap.error("--max-runs must be at least 1")
+    level = args.log_level or os.environ.get(LOG_LEVEL_ENV, "info").lower()
+    if level not in LOG_LEVELS:
+        ap.error(f"${LOG_LEVEL_ENV} must be one of {', '.join(LOG_LEVELS)}, got {level!r}")
+    as_json = bool(args.log_json) or os.environ.get(LOG_JSON_ENV, "").lower() in ("1", "true", "yes")
+    setup_logging(level, as_json)
+    os.environ[LOG_LEVEL_ENV], os.environ[LOG_JSON_ENV] = level, "1" if as_json else "0"  # task supervisors inherit
     app = build_app(
         args.root,
         studies=tuple(args.study),
@@ -250,7 +284,11 @@ def main(argv: list[str] | None = None) -> int:
         import webbrowser
 
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    # log_config=None: uvicorn's loggers propagate to the root handler set up above, so the format is ours.
+    # The access log is debug-only and redacted: a request line carries the query string, and the first visit's is
+    # `?token=SECRET`.
+    logging.getLogger("uvicorn.access").addFilter(_redact_token)
+    uvicorn.run(app, host=args.host, port=args.port, log_level=level, log_config=None, access_log=level == "debug")
     return 0
 
 
