@@ -4,53 +4,53 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
-import signal
 import sqlite3
-import subprocess
-import threading
-import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from smeltery.bench.adapters._sqlite import is_duplicate_column, open_db
+from smeltery.bench.adapters.task_supervisor import (
+    connect,
+    kill_group,
+    proc_identity,
+    promote,
+    same_process,
+    utc,
+)
 from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager
 
-_PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
-
-
-def _utc() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def _kill_group(pgid: int, grace: float = 2.0) -> None:
-    """SIGTERM the task's process group (it is its own session leader), then SIGKILL what is left after `grace`."""
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + grace
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.05)
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(pgid, signal.SIGKILL)
-
-
-_LIVE_WAITERS: set[str] = set()  # task ids whose waiter thread is alive in this process
-
-
 _GB = 1024**3
+#: `SubprocessTaskQueue` defines `list`, so inside its body the builtin is unreachable by name (as in smeltery.tasks).
+_TaskList = list[Task]
+
+#: Columns added after the first schema, with their types. Every one is nullable, so an old row reads back as "the
+#: backend cannot say". `owner_pid` is no longer written (the supervisor replaced the in-process waiter) but stays
+#: in old databases.
+_ADDED_COLUMNS = (
+    ("attempt", "INTEGER"),
+    ("max_attempts", "INTEGER"),
+    ("owner_pid", "INTEGER"),
+    ("heartbeat_at", "TEXT"),
+    ("peak_rss_bytes", "INTEGER"),
+    ("oom", "INTEGER"),
+    ("memory_limit_bytes", "INTEGER"),
+    ("supervisor_pid", "INTEGER"),  # the process that owns the task (task_supervisor.py) ...
+    ("supervisor_start", "TEXT"),  # ... and its identity, so a reused pid is never trusted
+    ("pid_start", "TEXT"),  # the identity of `pid`, the current attempt's process (its process group leader)
+    ("spec", "TEXT"),  # JSON: what the supervisor needs beyond the columns (env overrides, intervals)
+)
+
+#: What `_row_to_task` reads, in order. Named, never `SELECT *`: the column order of a migrated table is not ours.
+_TASK_COLUMNS = (
+    "id,name,command,cwd,status,created_at,started_at,finished_at,returncode,log_path,note,"
+    "attempt,max_attempts,heartbeat_at,peak_rss_bytes,oom,memory_limit_bytes"
+)
 
 
 def _age_s(iso: str) -> float:
-    """Seconds since an ISO-8601 UTC stamp as `_utc()` writes it. Unparseable reads as 0: a bad stamp must not
+    """Seconds since an ISO-8601 UTC stamp as `utc()` writes it. Unparseable reads as 0: a bad stamp must not
     make a healthy task look stalled."""
-    from datetime import datetime, timezone
-
     try:
         t = datetime.fromisoformat(iso)
     except ValueError:
@@ -60,56 +60,24 @@ def _age_s(iso: str) -> float:
     return (datetime.now(timezone.utc) - t).total_seconds()
 
 
-def _rss_bytes(pid: int) -> int | None:
-    """Resident memory of `pid` AND its children, which is what a limit must count: smeltery's tasks shell out,
-    and a cap that ignored the children would never fire. None when it cannot be read (the process is gone, or
-    this is not a /proc system)."""
-    total, seen = 0, False
-    for p in (pid, *_descendants(pid)):
-        try:
-            with open(f"/proc/{p}/statm") as fh:
-                pages = int(fh.read().split()[1])
-        except (OSError, IndexError, ValueError):
-            continue
-        total += pages * _PAGE_SIZE
-        seen = True
-    return total if seen else None
-
-
-def _descendants(pid: int) -> list[int]:
-    """Every process under `pid`, walked through /proc. Empty when it cannot be determined."""
-    children: dict[int, list[int]] = {}
-    try:
-        pids = [int(e) for e in os.listdir("/proc") if e.isdigit()]
-    except OSError:
-        return []
-    for p in pids:
-        try:
-            with open(f"/proc/{p}/stat") as fh:
-                # The comm field can contain spaces and parens, so parse after the LAST ')'.
-                rest = fh.read().rpartition(")")[2].split()
-            children.setdefault(int(rest[1]), []).append(p)
-        except (OSError, IndexError, ValueError):
-            continue
-    out, stack = [], list(children.get(pid, []))
-    while stack:
-        p = stack.pop()
-        out.append(p)
-        stack.extend(children.get(p, []))
-    return out
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 class SubprocessTaskQueue:
+    """Tasks as local processes, state in ROOT/tasks.sqlite.
+
+    Each task runs under its own supervisor process (`task_supervisor.py`), started in a new session, which owns the
+    task, writes its heartbeat, peak RSS and exit code, and enforces its memory limit and retries. This class only
+    reads sqlite and sends signals, so a task survives the Bench process that submitted it, and a fresh queue on the
+    same ROOT reads what the supervisor wrote. Opening a queue reconciles every `running` row whose supervisor is
+    gone (the task is `failed` with a note saying so) and starts whatever is queued.
+    """
+
+    retry_backoff_s = 1.0  # base delay before a retry; doubles per attempt, capped at 30 s
+    #: A RUNNING task silent for longer than this reads as `stalled`. Minutes, not seconds: an SCF legitimately
+    #: prints nothing for a long time, and calling that dead is the mistake this flag exists to avoid making.
+    stall_after_s = 300.0
+    #: How often the supervisor reads the task's memory and log. Cheap (two /proc reads), so it can be frequent
+    #: enough that a cap fires before the node is in trouble.
+    sample_interval_s = 1.0
+
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -117,6 +85,8 @@ class SubprocessTaskQueue:
         self.log_dir = self.root / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._reconcile()
+        promote(self.db)
 
     def _init_db(self) -> None:
         with open_db(self.db, wal=True) as con:
@@ -124,28 +94,14 @@ class SubprocessTaskQueue:
                 """CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
                     created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
-                    log_path TEXT, note TEXT, pid INTEGER, attempt INTEGER, max_attempts INTEGER,
-                    owner_pid INTEGER, heartbeat_at TEXT, peak_rss_bytes INTEGER, oom INTEGER,
-                    memory_limit_bytes INTEGER)"""
+                    log_path TEXT, note TEXT, pid INTEGER)"""
             )
-            # Migrate databases created before retries (attempt..owner_pid) or worker health (the rest) existed.
-            # Every added column is nullable, so an old row reads back as "the backend cannot say".
-            for col in (
-                "attempt",
-                "max_attempts",
-                "owner_pid",
-                "heartbeat_at",
-                "peak_rss_bytes",
-                "oom",
-                "memory_limit_bytes",
-            ):
+            for col, kind in _ADDED_COLUMNS:
                 try:
-                    kind = "TEXT" if col == "heartbeat_at" else "INTEGER"
                     con.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
                 except sqlite3.OperationalError as e:
                     if not is_duplicate_column(e):
                         raise
-            con.commit()
 
     def _row_to_task(self, row) -> Task:
         (
@@ -160,10 +116,8 @@ class SubprocessTaskQueue:
             rc,
             log_path,
             note,
-            pid,
             attempt,
             max_attempts,
-            _owner_pid,
             heartbeat_at,
             peak_rss_bytes,
             oom,
@@ -196,112 +150,37 @@ class SubprocessTaskQueue:
             t.stalled = status == "running" and t.heartbeat_age_s >= self.stall_after_s
         return t
 
-    def _refresh(self, task_id: str) -> None:
+    def _reconcile(self, task_id: str | None = None) -> None:
+        """Fail every running task (or just `task_id`) whose supervisor is gone, saying why.
+
+        A supervisor writes the task's end before it exits, so a running row with no live supervisor will never be
+        finished by anyone. A supervisor pid whose identity no longer matches belongs to another process (a reboot,
+        or the pid was reused): it is never signalled. The task's own process is killed only when its identity
+        still matches, so the concurrency it held is really released.
+        """
+        sql = "SELECT id,supervisor_pid,supervisor_start,pid,pid_start FROM tasks WHERE status='running'"
         with open_db(self.db) as con:
-            row = con.execute("SELECT id,status,pid,started_at FROM tasks WHERE id=?", (task_id,)).fetchone()
-            if not row:
-                return
-            tid, status, pid, started_at = row
-            if status in ("succeeded", "failed", "cancelled"):
-                return
-            if pid is None:
-                # Between attempts there is no process; only the waiter thread of the submitting process can
-                # resume the task. If that process is gone (bench restarted), nothing ever will.
-                owner = con.execute("SELECT owner_pid FROM tasks WHERE id=?", (tid,)).fetchone()[0]
-                if owner is None or (_pid_alive(owner) and not (owner == os.getpid() and tid not in _LIVE_WAITERS)):
-                    return
-                con.execute(
-                    "UPDATE tasks SET status='failed', finished_at=?, note=? WHERE id=? AND status='running' "
-                    "AND pid IS NULL",
-                    (_utc(), "bench restarted during retry backoff", tid),
-                )
-                con.commit()
-                return
-        # check process
-        try:
-            os.kill(pid, 0)
-            alive = True
-        except ProcessLookupError:
-            alive = False
-        except PermissionError:
-            alive = True
-        if alive:
-            return
-        # The owning waiter thread (if any) writes status and returncode together.
-        # Give it a brief window so a successful task is never observed as failed.
-        for _ in range(50):
-            time.sleep(0.01)
-            with open_db(self.db) as con:
-                row = con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()
-            if row and row[0] in ("succeeded", "failed", "cancelled"):
-                return
-        # re-check liveness
-        try:
-            os.kill(pid, 0)
-            alive = True
-        except ProcessLookupError:
-            alive = False
-        except PermissionError:
-            alive = True
-        if alive:
-            return
-        # Reap the exit code if we still can (orphaned / vanished processes).
-        rc = None
-        try:
-            waited_pid, wstatus = os.waitpid(pid, os.WNOHANG)
-            if waited_pid == pid:
-                if os.WIFEXITED(wstatus):
-                    rc = os.WEXITSTATUS(wstatus)
-                elif os.WIFSIGNALED(wstatus):
-                    rc = -os.WTERMSIG(wstatus)
-        except (ChildProcessError, OSError):
-            rc = None
-        new_status = "succeeded" if rc == 0 else "failed"
-        with open_db(self.db) as con:
-            con.execute(
-                "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status='running' AND pid=?",
-                (new_status, rc, _utc(), tid, pid),  # pid guard: a retry may have replaced the dead process
-            )
-            con.commit()
-
-    retry_backoff_s = 1.0  # base delay before a retry; doubles per attempt, capped at 30 s
-    #: A RUNNING task silent for longer than this reads as `stalled`. Minutes, not seconds: an SCF legitimately
-    #: prints nothing for a long time, and calling that dead is the mistake this flag exists to avoid making.
-    stall_after_s = 300.0
-    #: How often the sampler reads the task's memory and log. Cheap (two /proc reads), so it can be frequent
-    #: enough that a cap fires before the node is in trouble.
-    sample_interval_s = 1.0
-
-    #: RSS read at spawn, keyed by pid: a task can exit before the first sampling pass, and /proc is gone the
-    #: moment it does, so the only reading guaranteed to exist is the one taken as the process starts.
-    _spawn_rss: dict[int, int] = {}
-
-    def _spawn(self, command, cwd, env_all, log_path: Path, header: str = ""):
-        proc = self._spawn_raw(command, cwd, env_all, log_path, header)
-        rss = _rss_bytes(proc.pid)
-        if rss is not None:
-            self._spawn_rss[proc.pid] = rss
-        return proc
-
-    def _spawn_raw(self, command, cwd, env_all, log_path: Path, header: str = ""):
-        with open(log_path, "ab") as lf:
-            if header:
-                lf.write(header.encode())
-                lf.flush()
-            return subprocess.Popen(
-                list(command),
-                cwd=str(cwd) if cwd else None,
-                stdout=lf,
-                stderr=subprocess.STDOUT,
-                env=env_all,
-                start_new_session=True,
-            )
-
-    def _is_running(self, tid: str) -> bool:
-        """False once the task is cancelled or otherwise resolved (e.g. by `_refresh`): stop retrying."""
-        with open_db(self.db) as con:
-            row = con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()
-        return row is not None and row[0] == "running"
+            rows = con.execute(*((sql + " AND id=?", (task_id,)) if task_id else (sql,))).fetchall()
+        for tid, spid, sstart, pid, pstart in rows:
+            if same_process(spid, sstart):
+                continue
+            if spid is None:
+                why = "supervisor lost: the task was started by a Bench without task supervisors"
+            elif proc_identity(spid) is None:
+                why = "supervisor lost: it exited without recording how the task ended"
+            else:
+                why = "supervisor lost: its pid now belongs to another process (reboot or pid reuse); not signalled"
+            orphan = same_process(pid, pstart)
+            if orphan:
+                why += "; the task's own process was still running and was killed"
+            with connect(self.db, immediate=True) as con:
+                changed = con.execute(
+                    "UPDATE tasks SET status='failed', finished_at=?, note=? "
+                    "WHERE id=? AND status='running' AND supervisor_pid IS ?",
+                    (utc(), why, tid, spid),
+                ).rowcount
+            if changed and orphan and pid:
+                kill_group(pid)
 
     def submit(
         self,
@@ -321,202 +200,51 @@ class SubprocessTaskQueue:
             isinstance(memory_limit_gb, bool) or not isinstance(memory_limit_gb, (int, float)) or memory_limit_gb <= 0
         ):
             raise ValueError(f"memory_limit_gb must be a positive number of GB or None, got {memory_limit_gb!r}")
-        limit_bytes = int(memory_limit_gb * _GB) if memory_limit_gb else None
-        max_attempts = retries + 1
         tid = uuid.uuid4().hex[:12]
         log_dir = Path(log_dir) if log_dir else self.log_dir
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{tid}.log"
-        env_all = dict(os.environ)
-        if env:
-            env_all.update(env)
-
-        def _header(n: int) -> str:
-            return f"--- attempt {n}/{max_attempts} ---\n" if max_attempts > 1 else ""
-
-        proc = self._spawn(command, cwd, env_all, log_path, _header(1))
-
-        def _wait(proc):
-            attempt = 1
-            while True:
-                try:
-                    rc = proc.wait()
-                except Exception:
-                    rc = None
-                if rc != 0 and attempt < max_attempts and self._is_running(tid):
-                    # Between attempts there is no process: pid NULL keeps _refresh from calling the task dead.
-                    try:
-                        with open_db(self.db) as con:
-                            con.execute("UPDATE tasks SET pid=NULL WHERE id=? AND status='running'", (tid,))
-                            con.commit()
-                    except Exception:
-                        pass
-                    deadline = time.monotonic() + min(self.retry_backoff_s * 2 ** (attempt - 1), 30.0)
-                    while time.monotonic() < deadline and self._is_running(tid):
-                        time.sleep(0.05)
-                    if not self._is_running(tid):
-                        return
-                    attempt += 1
-                    try:
-                        proc = self._spawn(command, cwd, env_all, log_path, _header(attempt))
-                        with open_db(self.db) as con:
-                            changed = con.execute(
-                                "UPDATE tasks SET pid=?, attempt=? WHERE id=? AND status='running'",
-                                (proc.pid, attempt, tid),
-                            ).rowcount
-                            con.commit()
-                        if not changed:  # cancelled while the process was starting
-                            _kill_group(proc.pid)
-                            return
-                        continue
-                    except Exception:
-                        rc = None
-                new_status = "succeeded" if rc == 0 else "failed"
-                try:
-                    with open_db(self.db) as con:
-                        con.execute(
-                            "UPDATE tasks SET status=?, returncode=?, finished_at=? WHERE id=? AND status NOT IN ('cancelled')",  # noqa: E501
-                            (new_status, rc, _utc(), tid),
-                        )
-                        con.commit()
-                except Exception:
-                    pass
-                return
-
+        log_path.touch()
+        spec = {
+            "env": dict(env or {}),  # overrides only: the supervisor inherits the rest of this process's environment
+            "retry_backoff_s": self.retry_backoff_s,
+            "sample_interval_s": self.sample_interval_s,
+        }
         with open_db(self.db) as con:
             con.execute(
-                "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid,"
-                "attempt,max_attempts,owner_pid,heartbeat_at,memory_limit_bytes,oom) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO tasks (id,name,command,cwd,status,created_at,log_path,note,max_attempts,"
+                "memory_limit_bytes,oom,spec) VALUES (?,?,?,?,'queued',?,?,?,?,?,0,?)",
                 (
                     tid,
                     name or "",
                     json.dumps(list(command)),
                     str(cwd) if cwd else "",
-                    "running",
-                    _utc(),
-                    _utc(),
+                    utc(),
                     str(log_path),
                     note,
-                    proc.pid,
-                    1,
-                    max_attempts,
-                    os.getpid(),
-                    _utc(),  # a task is alive the moment it starts; silence is measured from here
-                    limit_bytes,
-                    0,
+                    retries + 1,
+                    int(memory_limit_gb * _GB) if memory_limit_gb else None,
+                    json.dumps(spec),
                 ),
             )
-            con.commit()
-
-        def _run_waiter():
-            try:
-                _wait(proc)
-            finally:
-                _LIVE_WAITERS.discard(tid)
-
-        _LIVE_WAITERS.add(tid)
-        # One reading before any thread starts. A task can finish inside a sampling interval, and a peak that was
-        # never read is indistinguishable from a backend that cannot read one, so every task gets at least this.
-        startup_rss = self._spawn_rss.pop(proc.pid, None) or _rss_bytes(proc.pid)
-        if startup_rss is not None:
-            with contextlib.suppress(Exception):
-                with open_db(self.db) as con:
-                    con.execute(
-                        "UPDATE tasks SET peak_rss_bytes=MAX(COALESCE(peak_rss_bytes,0),?) WHERE id=?",
-                        (int(startup_rss), tid),
-                    )
-                    con.commit()
-        threading.Thread(target=_run_waiter, daemon=True).start()
-        threading.Thread(target=self._sample, args=(tid, log_path, limit_bytes), daemon=True).start()
+        promote(self.db)
         return tid
 
-    def _sample(self, tid: str, log_path: Path, limit_bytes: int | None) -> None:
-        """Watch one task: its log's growth is the heartbeat, its RSS is the memory check.
-
-        Runs until the task is no longer running, so a retry's new process is picked up by the same loop (the pid
-        is re-read every pass). Everything it writes is advisory except the kill, which is the point of the limit.
-        """
-        last_size = -1
-        first = True
-        while True:
-            # Sample at once, then on the interval: a short task can finish inside one interval, and a peak that
-            # was never read is reported as "nothing sampled it" -- indistinguishable from a backend that cannot.
-            if not first:
-                time.sleep(self.sample_interval_s)
-            first = False
-            try:
-                with open_db(self.db) as con:
-                    row = con.execute("SELECT status,pid,peak_rss_bytes FROM tasks WHERE id=?", (tid,)).fetchone()
-                if row is None or row[0] != "running":
-                    return  # terminal: the peak written on the last pass stands
-                _status, pid, peak = row
-                try:
-                    size = log_path.stat().st_size
-                except OSError:
-                    size = last_size
-                beat = size != last_size
-                last_size = size
-                rss = _rss_bytes(pid) if pid else None
-                if rss is not None and rss > (peak or 0):
-                    peak = rss
-                sets, args = [], []
-                if beat:
-                    sets.append("heartbeat_at=?")
-                    args.append(_utc())
-                if peak is not None:
-                    sets.append("peak_rss_bytes=MAX(COALESCE(peak_rss_bytes,0),?)")
-                    args.append(int(peak))
-                if sets:
-                    with open_db(self.db) as con:
-                        con.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id=?", (*args, tid))
-                        con.commit()
-                if limit_bytes is not None and rss is not None and rss > limit_bytes:
-                    self._kill_for_oom(tid, pid, rss, limit_bytes)
-                    return
-            except Exception:
-                # A sampler must never take the task down with it: a failed read is skipped, not fatal.
-                continue
-
-    def _kill_for_oom(self, tid: str, pid: int, rss: int, limit_bytes: int) -> None:
-        """Kill an over-limit task and record WHY, so "failed" is not the only thing the user is told.
-
-        Marked terminal before the kill, so the waiter thread cannot race it into a retry: exceeding the cap is a
-        verdict about this command, and re-running it would exceed the cap again.
-        """
-        note = f"OOM at {rss / _GB:.2f} GB, over the {limit_bytes / _GB:.2f} GB limit"
+    def _read(self, where: str = "", args: tuple = ()) -> _TaskList:
         with open_db(self.db) as con:
-            con.execute(
-                "UPDATE tasks SET status='failed', oom=1, finished_at=?, note=?, peak_rss_bytes=? "
-                "WHERE id=? AND status='running'",
-                (_utc(), note, int(rss), tid),
-            )
-            con.commit()
-        _kill_group(pid)
-
-    def list(self, status=None):
-        with open_db(self.db) as con:
-            if status:
-                rows = con.execute("SELECT * FROM tasks WHERE status=?", (status,)).fetchall()
-            else:
-                rows = con.execute("SELECT * FROM tasks").fetchall()
-        for r in rows:
-            self._refresh(r[0])
-        # re-read
-        with open_db(self.db) as con:
-            if status:
-                rows = con.execute("SELECT * FROM tasks WHERE status=?", (status,)).fetchall()
-            else:
-                rows = con.execute("SELECT * FROM tasks").fetchall()
+            rows = con.execute(f"SELECT {_TASK_COLUMNS} FROM tasks {where}", args).fetchall()
         return [self._row_to_task(r) for r in rows]
 
+    def list(self, status=None):
+        self._reconcile()
+        promote(self.db)
+        return self._read("WHERE status=?", (status,)) if status else self._read()
+
     def get(self, task_id):
-        self._refresh(task_id)
-        with open_db(self.db) as con:
-            row = con.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not row:
-            return None
-        return self._row_to_task(row)
+        self._reconcile(task_id)
+        promote(self.db)
+        found = self._read("WHERE id=?", (task_id,))
+        return found[0] if found else None
 
     def status(self, task_id):
         t = self.get(task_id)
@@ -525,24 +253,23 @@ class SubprocessTaskQueue:
         return t.status
 
     def cancel(self, task_id):
-        t = self.get(task_id)
-        if t is None:
+        """Mark the task cancelled, then signal its process group, if the recorded pid is still that process. The
+        mark comes first: the supervisor's end-of-task write is guarded by status='running', and a supervisor that
+        sees the mark stops the task itself (it is the one that can, if the signal here could not be sent)."""
+        if self.get(task_id) is None:
             raise KeyError(task_id)
-        if t.status in ("succeeded", "failed", "cancelled"):
-            return False
-        # mark cancelled first: the waiter thread's write is guarded by status NOT IN ('cancelled')
-        with open_db(self.db) as con:
+        with connect(self.db, immediate=True) as con:
+            row = con.execute("SELECT status,pid,pid_start FROM tasks WHERE id=?", (task_id,)).fetchone()
             changed = con.execute(
-                "UPDATE tasks SET status='cancelled', finished_at=? "
-                "WHERE id=? AND status NOT IN ('succeeded','failed','cancelled')",
-                (_utc(), task_id),
+                "UPDATE tasks SET status='cancelled', finished_at=? WHERE id=? AND status IN ('queued','running')",
+                (utc(), task_id),
             ).rowcount
-            pid = con.execute("SELECT pid FROM tasks WHERE id=?", (task_id,)).fetchone()
-            con.commit()
         if not changed:
             return False
-        if pid and pid[0]:
-            _kill_group(pid[0])
+        status, pid, pid_start = row
+        if status == "running" and same_process(pid, pid_start):
+            kill_group(pid)
+        promote(self.db)
         return True
 
     def ready(self):
