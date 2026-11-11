@@ -97,6 +97,15 @@ def test_the_sdist_ships_the_same_gitignored_artifacts_as_the_wheel():
     )
 
 
+def test_both_targets_exclude_a_pipelines_local_temporal_scratch():
+    """`artifacts` re-includes gitignored files, so `prebuilt/**` would ship an untracked run/temporal/ dir."""
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["hatch"]["build"]["targets"]
+    for target in ("wheel", "sdist"):
+        assert "**/run/temporal/**" in cfg[target].get("exclude", []), target
+        # `artifacts` wins over `exclude`, so the negated artifact pattern is what actually keeps it out.
+        assert "!src/smeltery/prebuilt/**/run/temporal/**" in cfg[target]["artifacts"], target
+
+
 def test_a_heavy_extra_is_only_resolved_unless_full_is_asked_for():
     assert ws.HEAVY_EXTRAS, "the table of heavy extras must not be empty (ml-potential pulls torch)"
     heavy = next(iter(ws.HEAVY_EXTRAS))
