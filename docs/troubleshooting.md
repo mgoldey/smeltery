@@ -87,6 +87,11 @@ config error: out already holds the run record run-....json; use another --out, 
 overwrite. Bench says `... already holds the run record ...; pick another out folder` for the
 same refusal. See [golden-path.md](golden-path.md#3-run).
 
+An interrupted run (no `run-*.json` yet) is not refused: rerunning the same command resumes it from
+`OUT/calcs.partial.jsonl` and prints `resuming: k of N SCFs reused`. If the config or its inputs changed
+since, that checkpoint is refused (`... calcs.partial.jsonl holds ... SCF line(s) of another run ...`);
+use a fresh `--out`, or `--force` to discard it and start over.
+
 ### Unknown or missing config keys
 
 ```text

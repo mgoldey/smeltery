@@ -121,6 +121,13 @@ down it exits 2 naming the docker command; it never falls back to an in-process 
     [field_interaction]
     remedies = [{level_shift = 0.5}, {max_iter = 300, soscf = true}]  # tried in order when an SCF does not converge
 
+Resuming a plain run (`smeltery.checkpoint`): with `--out OUT`, every SCF is appended to OUT/calcs.partial.jsonl as it
+finishes (fsync'd), and OUT/progress.json names that file and the planned SCF count. Rerunning the same command after
+a crash, kill or cancel reuses each finished SCF whose input digest and staged config are unchanged ("resuming: k of N
+SCFs reused") and computes only the rest; the record is the one an uninterrupted run writes. OUT is refused only once
+it holds a run record (then `--force` reruns it from scratch); a checkpoint of other inputs is refused (exit 2) unless
+`--force` discards it. Both files are removed when the record is written.
+
 Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed, 4 UNRANKED under `--fail-on-unranked`
 (in-process runs; not `--temporal`).
 """
@@ -1097,6 +1104,7 @@ def run_plan(
     partial: bool = False,
     skip_analyses: frozenset[str] = frozenset(),
     pose_index: dict[str, list[int]] | None = None,
+    checkpoint=None,
 ) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
@@ -1108,10 +1116,14 @@ def run_plan(
     re-measure). `pose_index`: after a pairwise pose drop, each candidate's kept ORIGINAL pose indices (its poses
     and per_pose hold only those); an analogue then pairs with the parent's values at its own kept indices, and
     the record carries `results.pose_index`.
+
+    `checkpoint` (`smeltery.checkpoint.ScfCheckpoint`): the measurement tier reuses the SCFs it holds and appends the
+    ones it runs (a plain run into OUT; analyses never see it).
     """
     _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
     if measure is None:
-        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, {"field": plan.field}))
+        ctx = {"field": plan.field} if checkpoint is None else {"field": plan.field, "checkpoint": checkpoint}
+        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
     else:
         _stage(plan.tier.name, lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
@@ -1650,6 +1662,25 @@ def _guard_out(out_dir: Path, staged_sha, temporal: bool = False) -> None:
         raise OutGuardRefused(why)
 
 
+def _open_checkpoint(plan: Plan, out_dir: Path, config_sha256: str, force: bool):
+    """The plain run's SCF checkpoint in OUT (`smeltery.checkpoint`): `--force` discards an old one first; one of
+    other inputs or another staged config is a ConfigError. Writes OUT/progress.json and says what it reuses."""
+    from .checkpoint import CheckpointRefused, ScfCheckpoint, discard, planned_scfs
+
+    if force:
+        discard(out_dir)
+    digest = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
+    try:
+        cp = ScfCheckpoint(out_dir, digest, config_sha256, primary_model(plan.field))
+    except CheckpointRefused as e:
+        raise ConfigError(str(e)) from e
+    total = planned_scfs(plan.candidates)
+    cp.write_progress(total)
+    if cp.n_reusable:
+        print(f"resuming: {cp.n_reusable} of {total} SCFs reused from {Path(out_dir) / 'calcs.partial.jsonl'}")
+    return cp
+
+
 def partial_digest(plan: Plan, parent: str, name: str) -> str:
     """The input digest `--only-candidate name` records for this config: the plan's inputs with only the parent and
     `name` as candidates (a partial plan is built from exactly those), and the same tiers."""
@@ -1724,7 +1755,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--fail-on-unranked", dest="fail_on_unranked", action="store_true", help="exit 4 when the cut is UNRANKED"
     )
-    run.add_argument("--force", action="store_true", help="run into an OUT that already holds a run record")
+    run.add_argument(
+        "--force",
+        action="store_true",
+        help="run into an OUT that already holds a run record; also discards an interrupted run's SCF checkpoint "
+        "(OUT/calcs.partial.jsonl), which a rerun without --force resumes from",
+    )
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
         "--temporal",
@@ -1941,10 +1977,17 @@ def main(argv: list[str] | None = None) -> int:
             if explicit_out:
                 write_plan_preview(plan, digest, args.out, args.config)
             return 0
-        rec, out = run_plan(plan)
+        checkpoint = None
+        if config_info is not None:  # a run into an explicit OUT checkpoints its SCFs there (smeltery.checkpoint)
+            checkpoint = _open_checkpoint(plan, args.out, config_info["sha256"], args.force)
+        rec, out = run_plan(plan, checkpoint=checkpoint)
         if config_info is not None:
             rec.results["config"] = config_info
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
+        if checkpoint is not None:  # the record is written: a finished OUT holds today's outputs only
+            from .checkpoint import discard
+
+            discard(args.out)
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan and not isinstance(e, OutGuardRefused):

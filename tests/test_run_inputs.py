@@ -137,7 +137,7 @@ def test_a_full_run_records_the_config_entry_in_results(tmp_path, monkeypatch):
 
     src, cfg = _write(tmp_path)
     seen = {}
-    monkeypatch.setattr(cli, "run_plan", lambda plan: (RunRecord("t", {}, {}, {}), {}))
+    monkeypatch.setattr(cli, "run_plan", lambda plan, **kw: (RunRecord("t", {}, {}, {}), {}))
     monkeypatch.setattr(cli, "write_outputs", lambda plan, rec, out: seen.setdefault("rec", rec) and out / "r.json")
     monkeypatch.setattr(cli, "format_table", lambda plan, out: "")
     assert main(["run", str(cfg), "--out", str(tmp_path / "out")]) == 0

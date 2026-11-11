@@ -28,6 +28,8 @@ Writes `out/myrun/run-<digest>.json`, pose SDFs, receptor, and prints the cut (s
 
 A run exits 0 even when the cut is UNRANKED; add `--fail-on-unranked` to exit 4 instead (in-process runs, not
 `--temporal`). `run` refuses an `--out` that already holds a `run-*.json` record; pass `--force` to rerun into it.
+An interrupted run (crash, kill, cancel) has no record yet: rerun the same command and it resumes from
+`OUT/calcs.partial.jsonl`, computing only the SCFs that had not finished (`--force` starts it over instead).
 With `--plan --out`, a failed plan still writes `plan.json` (`"status": "error"`, `stage`, `message`).
 
 ## 4. Inspect

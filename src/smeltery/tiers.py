@@ -25,6 +25,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Protocol
 
 import numpy as np
@@ -523,6 +524,13 @@ class PairedPoses:
         return out
 
 
+def _replayed(row: dict) -> SimpleNamespace:
+    """A checkpointed SCF line (`_calc_entry`) as the engine result it was logged from."""
+    return SimpleNamespace(
+        converged=bool(row["converged"]), iterations=int(row["iterations"]), energy=float(row["energy_hartree"])
+    )
+
+
 class _NotConverged:
     """An engine result the ladder refused: `converged` is False whatever the engine said; the rest is the engine's."""
 
@@ -728,13 +736,21 @@ class FieldInteraction:
         res = ferric.run_rhf(mol, bs, **kw) if charges is None else ferric.run_rhf(mol, bs, point_charges=charges, **kw)
         return res, time.perf_counter() - t0
 
-    def _climb(self, ferric, mol, bs, charges, cand: str, pose: int, leg: str):
-        """One leg up the ladder until it converges or the rungs run out; every SCF logged. Returns (result, rung)."""
+    def _climb(self, ferric, mol, bs, charges, cand: str, pose: int, leg: str, checkpoint=None):
+        """One leg up the ladder until it converges or the rungs run out; every SCF logged. Returns (result, rung).
+        `checkpoint` (`smeltery.checkpoint.ScfCheckpoint`): a rung it already holds is replayed, not recomputed, and
+        every rung computed is appended to it."""
         earlier: list[dict] = []
         for rung in range(self.n_rungs):
-            res, secs = self.scf(ferric, mol, bs, charges, rung)
-            row = {**_calc_entry(cand, pose, leg, res, res.energy, secs), "rung": rung}
-            row = refuse_false_convergence(row, earlier)
+            row = checkpoint.get(cand, pose, leg, rung) if checkpoint is not None else None
+            if row is None:
+                res, secs = self.scf(ferric, mol, bs, charges, rung)
+                row = {**_calc_entry(cand, pose, leg, res, res.energy, secs), "rung": rung}
+                row = refuse_false_convergence(row, earlier)
+                if checkpoint is not None:
+                    checkpoint.put(row)
+            else:
+                res = _replayed(row)
             self.calc_log.append(row)
             if row["converged"]:
                 return res, rung
@@ -747,6 +763,7 @@ class FieldInteraction:
         import ferric
 
         field: list[PointCharge] = ctx["field"]
+        checkpoint = ctx.get("checkpoint")  # a plain run's SCF checkpoint (smeltery.checkpoint), or None
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
@@ -756,8 +773,8 @@ class FieldInteraction:
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
                 mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
-                vac, vr = self._climb(ferric, mol, bs, None, cand.name, i, "vacuum")
-                fld, fr = self._climb(ferric, mol, bs, charges, cand.name, i, "field")
+                vac, vr = self._climb(ferric, mol, bs, None, cand.name, i, "vacuum", checkpoint)
+                fld, fr = self._climb(ferric, mol, bs, charges, cand.name, i, "field", checkpoint)
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
@@ -999,6 +1016,7 @@ class FieldDftInteraction:
                     )
 
         field: list[PointCharge] = ctx["field"]
+        checkpoint = ctx.get("checkpoint")  # a plain run's SCF checkpoint (smeltery.checkpoint), or None
         self.field_provenance = getattr(field, "provenance", None)
         charges = [c.as_ferric_bohr() for c in field]
         bs = ferric.BasisSet.bundled(self.basis)
@@ -1014,19 +1032,27 @@ class FieldDftInteraction:
                     kw["max_iter"] = self.max_iter
                 if self.k_builder is not None:
                     kw["k_builder"] = self.k_builder
-                t0 = time.perf_counter()
-                vac = ferric.run_dft(mol, bs, functional=self.functional, **kw)
-                t1 = time.perf_counter()
-                fld = ferric.run_dft(mol, bs, functional=self.functional, point_charges=charges, **kw)
-                t2 = time.perf_counter()
-                for leg, res, secs in (("vacuum", vac, t1 - t0), ("field", fld, t2 - t1)):
-                    # a non-converged energy is logged as-is: `_dft_energy` only refuses double-counted dispersion
-                    self.calc_log.append(_calc_entry(cand.name, i, leg, res, _dft_energy(res), secs))
-                if not (vac.converged and fld.converged):
+                legs: dict[str, dict] = {}
+                for leg, pc in (("vacuum", None), ("field", charges)):
+                    row = checkpoint.get(cand.name, i, leg) if checkpoint is not None else None
+                    if row is None:  # not checkpointed: run it
+                        extra = {} if pc is None else {"point_charges": pc}
+                        t0 = time.perf_counter()
+                        res = ferric.run_dft(mol, bs, functional=self.functional, **extra, **kw)
+                        secs = time.perf_counter() - t0
+                        # a non-converged energy is logged as-is: `_dft_energy` only refuses double-counted dispersion
+                        row = _calc_entry(cand.name, i, leg, res, _dft_energy(res), secs)
+                        if checkpoint is not None:
+                            checkpoint.put(row)
+                    self.calc_log.append(row)
+                    legs[leg] = row
+                vac, fld = legs["vacuum"], legs["field"]
+                if not (vac["converged"] and fld["converged"]):
                     raise RuntimeError(
-                        f"{cand.name} pose {i}: SCF did not converge (vacuum={vac.converged}, field={fld.converged})"
+                        f"{cand.name} pose {i}: SCF did not converge "
+                        f"(vacuum={vac['converged']}, field={fld['converged']})"
                     )
-                vals.append((_dft_energy(fld) - _dft_energy(vac)) * HARTREE_TO_KCAL)
+                vals.append((fld["energy_hartree"] - vac["energy_hartree"]) * HARTREE_TO_KCAL)
                 # Geometry-only, so it is the same for both legs and cancels in dE_int above. Computed
                 # once per pose and reported separately, never folded into dE_int.
                 d3s.append(ferric.d3bj_energy(mol, functional=self.functional) * HARTREE_TO_KCAL)

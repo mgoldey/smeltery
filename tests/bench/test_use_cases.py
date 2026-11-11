@@ -180,10 +180,12 @@ def test_a_launched_run_keeps_the_users_original_source_through_the_cli_restage(
     out = tmp_path / "out"
     first = (out / "config.toml").read_bytes()
     seen = {}
-    monkeypatch.setattr(cli, "run_plan", lambda plan: (RunRecord("c", {}, {}, {}), {}))
+    monkeypatch.setattr(cli, "run_plan", lambda plan, **kw: (RunRecord("c", {}, {}, {}), {}))
     monkeypatch.setattr(cli, "write_outputs", lambda plan, rec, o: seen.setdefault("rec", rec) and o / "r.json")
     monkeypatch.setattr(cli, "format_table", lambda plan, o: "")
     monkeypatch.setattr(cli, "build_plan", lambda cfg, out_dir: object())
+    # this test's plan is a bare object(): the SCF checkpoint needs a real plan, and restaging is what is under test
+    monkeypatch.setattr(cli, "_open_checkpoint", lambda plan, out_dir, config_sha256, force: None)
     assert cli.main(["run", str(out / "config.toml"), "--out", str(out)]) == 0
     entry = seen["rec"].results["config"]
     assert entry["inputs"]["pocket.file"]["source"] == "p.pqr"  # as the pipeline wrote it, beside the original
