@@ -68,10 +68,10 @@ class FakeTaskQueue:
         )
         return tid
 
-    def list(self, status=None):
-        if status is None:
-            return list(self.tasks)
-        return [t for t in self.tasks if t.status == status]
+    def list(self, status=None, limit=100):
+        found = list(self.tasks) if status is None else [t for t in self.tasks if t.status == status]
+        found.reverse()  # newest first, as the port says
+        return found if limit is None else found[:limit]
 
     def get(self, tid):
         for t in self.tasks:

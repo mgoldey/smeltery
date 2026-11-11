@@ -11,7 +11,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -38,9 +38,10 @@ def _task(t: Any) -> M.Task:
 
 
 @router.get("/tasks", response_model=list[M.Task], responses={503: {"model": M.Problem}})
-def list_tasks(request: Request) -> Any:
+def list_tasks(request: Request, limit: int = Query(100, ge=1, le=1000)) -> Any:
+    """The newest `limit` tasks; queued and running ones are always chosen before finished ones."""
     try:
-        return [_task(t) for t in ports(request).task_queue.list()]
+        return [_task(t) for t in ports(request).task_queue.list(limit=limit)]
     except Exception as e:  # noqa: BLE001 - a dead backend degrades this panel, not the app
         return JSONResponse(status_code=503, content={"reason": str(e)})
 

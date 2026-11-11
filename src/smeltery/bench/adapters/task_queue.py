@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -41,6 +42,40 @@ _TASK_COLUMNS = (
     "id,name,command,cwd,status,created_at,started_at,finished_at,returncode,log_path,note,"
     "attempt,max_attempts,heartbeat_at,peak_rss_bytes,oom,memory_limit_bytes"
 )
+
+
+#: Most tasks listed by default: enough to see what matters, few enough to poll every 1.5 s.
+DEFAULT_LIST_LIMIT = 100
+_ACTIVE = "('queued','running')"
+#: `tail_log` reads backwards in blocks of this size, and never more than `_TAIL_MAX_BYTES` in all, so a 50 MB log
+#: (or one giant `\r` progress line) costs the same as a short one.
+_TAIL_BLOCK = 64 * 1024
+_TAIL_MAX_BYTES = 4 * 1024 * 1024
+
+
+def read_tail(path: str | Path, lines: int) -> str:
+    """The last `lines` lines of a file, reading from the end instead of the whole file."""
+    if lines <= 0:
+        return ""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        end = pos = os.fstat(fd).st_size
+        chunks: list[bytes] = []
+        newlines = 0
+        # lines + 1 newlines mean the first wanted line is complete (a trailing newline ends the last line).
+        while pos > 0 and newlines <= lines and end - pos < _TAIL_MAX_BYTES:
+            n = min(_TAIL_BLOCK, pos)
+            pos -= n
+            chunk = os.pread(fd, n, pos)
+            chunks.append(chunk)
+            newlines += chunk.count(b"\n")
+    finally:
+        os.close(fd)
+    data = b"".join(reversed(chunks))
+    text = data.decode(errors="replace").splitlines()
+    if pos > 0 and newlines <= lines:  # hit the byte cap inside a line: the first line is partial
+        text = text[1:]
+    return "\n".join(text[-lines:])
 
 
 def _age_s(iso: str) -> float:
@@ -260,10 +295,22 @@ class SubprocessTaskQueue:
             rows = con.execute(f"SELECT {_TASK_COLUMNS} FROM tasks {where}", args).fetchall()
         return [self._row_to_task(r) for r in rows]
 
-    def list(self, status=None):
+    def list(self, status=None, limit: int | None = DEFAULT_LIST_LIMIT):
+        """At most `limit` tasks (None: all), newest first. Queued and running tasks are chosen before finished
+        ones, so a long history never pushes live work off the panel; the result is then ordered by creation."""
         self._reconcile()
         promote(self.db)
-        return self._read("WHERE status=?", (status,)) if status else self._read()
+        where, args = ("WHERE status=?", (status,)) if status else ("", ())
+        if limit is None:
+            return self._read(f"{where} ORDER BY created_at DESC", args)
+        if limit < 1:
+            raise ValueError(f"limit must be a positive integer or None, got {limit!r}")
+        inner = (
+            f"SELECT {_TASK_COLUMNS} FROM tasks {where} ORDER BY (status IN {_ACTIVE}) DESC, created_at DESC LIMIT ?"
+        )
+        with open_db(self.db) as con:
+            rows = con.execute(f"SELECT * FROM ({inner}) ORDER BY created_at DESC", (*args, limit)).fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     def get(self, task_id):
         self._reconcile(task_id)
@@ -310,11 +357,10 @@ class SubprocessTaskQueue:
         t = self.get(task_id)
         if t is None:
             raise KeyError(task_id)
-        p = Path(t.log_path)
-        if not p.exists():
+        try:
+            return read_tail(t.log_path, lines) if t.log_path else ""
+        except FileNotFoundError:
             return ""
-        data = p.read_text(errors="replace").splitlines()
-        return "\n".join(data[-lines:])
 
 
 class TemporalTaskQueue:
@@ -360,8 +406,9 @@ class TemporalTaskQueue:
         )
         return t.id if hasattr(t, "id") else str(t)
 
-    def list(self, status=None):
-        return self._m.list(status=status)
+    def list(self, status=None, limit: int | None = DEFAULT_LIST_LIMIT):
+        tasks = self._m.list(status=status)  # newest first
+        return tasks if limit is None else tasks[:limit]
 
     def get(self, task_id):
         return self._m.get(task_id)

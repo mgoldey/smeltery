@@ -332,7 +332,7 @@ change without that regeneration fails CI.
   `/ligands`, `/ligands/edit`, `/pocket_preview`, `/active_site`; `/api/prebuilt`
 - methods: `/api/methods` (list with workspace defaults), `PUT /api/methods/{key}` (set them);
   `/api/catalog`, `GET /api/methods/{key}`
-- work: `GET /api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; the earlier pipeline
+- work: `GET /api/tasks?limit=` (the newest 100 by default, at most 1000; queued and running tasks are chosen before finished ones, so history never hides live work), `/api/tasks/{id}/log` (read from the end of the file, so a huge log costs the same as a short one), `/api/tasks/{id}/cancel`; the earlier pipeline
   routes `/api/pipeline/{check,edit,site,from_run,launch}` and `/api/provisional`;
   `/api/structure`, `/api/structure/text`, `/api/structure/{sha}.pdb`
 - notebook: `/api/campaigns`, `/api/campaigns/{id}`, `/api/campaigns/{id}/entries`;
