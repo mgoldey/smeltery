@@ -207,6 +207,9 @@ class PipelineFromRun(BaseModel):
 class LaunchRequest(BaseModel):
     toml: str
     out: str | None = None
+    timeout_s: float | None = Field(
+        default=None, gt=0, description="fail the run after this many wall-clock seconds; omit for no limit"
+    )
 
 
 class Provisional(BaseModel):

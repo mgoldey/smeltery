@@ -209,7 +209,7 @@ def pipeline_launch(request: Request, body: M.LaunchRequest) -> Any:
         out = root / out
     try:
         tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-            p, out_dir=out
+            p, out_dir=out, timeout_s=body.timeout_s
         )
     except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
         raise HTTPException(status_code=409, detail=str(e)) from None

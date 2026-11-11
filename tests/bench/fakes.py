@@ -31,14 +31,29 @@ class FakeTaskQueue:
     def __init__(self, tasks=None):
         self.tasks = list(tasks or [])
         self.submitted = []
+        self.options = []  # per submit: memory_limit_gb, timeout_s, capped
         self.executed = []
         self.logs = {}
 
-    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries=0, memory_limit_gb=None):
+    def submit(
+        self,
+        name,
+        command,
+        *,
+        cwd=None,
+        env=None,
+        log_dir=None,
+        note="",
+        retries=0,
+        memory_limit_gb=None,
+        timeout_s=None,
+        capped=False,
+    ):
         from smeltery.tasks import Task
 
         tid = f"t{len(self.submitted)}"
         self.submitted.append((name, list(command), cwd, note))
+        self.options.append({"memory_limit_gb": memory_limit_gb, "timeout_s": timeout_s, "capped": capped})
         self.tasks.append(
             Task(
                 id=tid,

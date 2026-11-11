@@ -162,6 +162,9 @@ class EditedText(BaseModel):
 
 class PipelineLaunch(BaseModel):
     out: str | None = None
+    timeout_s: float | None = Field(
+        default=None, gt=0, description="fail the run after this many wall-clock seconds; omit for no limit"
+    )
 
 
 def _validate(text: str) -> Pipeline | None:
@@ -851,7 +854,7 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
         out = root / out
     try:
         tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-            p, out_dir=out, config_dir=f.folder, text=f.text
+            p, out_dir=out, config_dir=f.folder, text=f.text, preview_dir=f.folder / "preview", timeout_s=body.timeout_s
         )
     except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
         raise HTTPException(status_code=409, detail=str(e)) from None

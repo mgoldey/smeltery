@@ -2076,6 +2076,11 @@ export interface components {
         LaunchRequest: {
             /** Out */
             out?: string | null;
+            /**
+             * Timeout S
+             * @description fail the run after this many wall-clock seconds; omit for no limit
+             */
+            timeout_s?: number | null;
             /** Toml */
             toml: string;
         };
@@ -2636,6 +2641,11 @@ export interface components {
         PipelineLaunch: {
             /** Out */
             out?: string | null;
+            /**
+             * Timeout S
+             * @description fail the run after this many wall-clock seconds; omit for no limit
+             */
+            timeout_s?: number | null;
         };
         /** PipelinePut */
         PipelinePut: {

@@ -68,3 +68,23 @@ def test_a_task_carries_its_health_fields_through_the_api(client_for, tmp_path):
         assert key in body, f"{key} missing from the task the API returns"
     assert body["stalled"] is False and body["oom"] is False
     assert body["memory_limit_gb"] == 4.0
+
+
+# The four tests that used to live here POSTed to /api/tasks, which ran any argv for anyone who could reach
+# the port and is gone (see security.py). A launch is now the only way work enters the queue, so the two of
+# them that asserted real behaviour -- a memory cap and a timeout reaching the queue -- assert it on the queue
+# itself. The other two only checked Pydantic's `gt=0` on the deleted request model.
+def test_a_memory_limit_reaches_the_queue_and_the_api_reports_it(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    tid = q.submit("py", ["python", "-c", "pass"], memory_limit_gb=4.0)
+    assert q.options[-1]["memory_limit_gb"] == 4.0
+    body = next(t for t in c.get("/api/tasks").json() if t["id"] == tid)
+    assert body["memory_limit_gb"] == 4.0
+
+
+def test_a_timeout_reaches_the_queue(client_for):
+    q = FakeTaskQueue()
+    client_for(queue=q)
+    q.submit("sleep", ["sleep", "60"], timeout_s=30)
+    assert q.options[-1]["timeout_s"] == 30

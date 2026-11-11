@@ -21,12 +21,20 @@ class TaskQueue(Protocol):
         note: str = "",
         retries: int = 0,
         memory_limit_gb: float | None = None,
+        timeout_s: float | None = None,
+        capped: bool = False,
     ) -> str:
         """Submit work; return a task id. `retries` (0..5) re-runs a failed task; a cancelled one is never retried.
 
         `memory_limit_gb` caps the task's resident memory: a backend that can enforce it kills the task and reports
         `oom`, rather than letting one SCF take the node down. None means no cap. A backend that cannot sample
-        memory ignores it rather than pretending to enforce it.
+        memory refuses it rather than pretending to enforce it.
+
+        `timeout_s` is a wall-clock limit for the whole task (every attempt): past it the task is killed and reported
+        `failed` with a note saying so. None means no limit; a backend that cannot enforce it refuses it.
+
+        `capped=True` marks a launched run: it waits as `queued` until fewer than the backend's concurrency cap of
+        capped tasks are running. A cancelled queued task never starts. Previews and other short work leave it False.
         """
         ...
 

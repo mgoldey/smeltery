@@ -230,3 +230,56 @@ def test_relaunching_an_unchanged_config_does_not_rewrite_it(tmp_path, pipeline)
     before = (out / "config.toml").stat().st_mtime_ns
     uc.execute(pipeline, out=out)
     assert (out / "config.toml").stat().st_mtime_ns == before
+
+
+# ------------------------------------------------------------------------------------------- B03: launch limits
+
+
+def test_default_memory_limit_is_the_prediction_times_the_factor_capped_by_the_host():
+    from smeltery.bench.use_cases.launch_run import (
+        HOST_RAM_SHARE,
+        MIN_RUN_MEMORY_GB,
+        RUN_MEMORY_FACTOR,
+        default_memory_limit_gb,
+    )
+
+    assert default_memory_limit_gb(2.0, 64.0) == pytest.approx(2.0 * RUN_MEMORY_FACTOR)
+    assert default_memory_limit_gb(0.1, 64.0) == MIN_RUN_MEMORY_GB  # a floor: a run is not only its SCF
+    assert default_memory_limit_gb(20.0, 24.0) == pytest.approx(24.0 * HOST_RAM_SHARE)  # never past the host
+    assert default_memory_limit_gb(None, 24.0) == pytest.approx(24.0 * HOST_RAM_SHARE)  # no prediction: host cap
+    assert default_memory_limit_gb(2.0, None) == pytest.approx(2.0 * RUN_MEMORY_FACTOR)
+    assert default_memory_limit_gb(None, None) is None
+
+
+def test_a_launched_run_is_capped_with_a_memory_limit_and_no_timeout_by_default(tmp_path, pipeline, monkeypatch):
+    from smeltery.bench.use_cases import launch_run
+
+    monkeypatch.setattr(launch_run, "host_memory_gb", lambda: 10.0)
+    q = FakeTaskQueue()
+    LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock()).run(
+        pipeline, out_dir=tmp_path / "out"
+    )
+    assert q.options == [{"memory_limit_gb": pytest.approx(8.0), "timeout_s": None, "capped": True}]
+
+
+def test_a_launched_run_takes_its_memory_limit_from_a_matching_preview(tmp_path, pipeline, monkeypatch):
+    from smeltery import cli
+    from smeltery.bench.use_cases import launch_run
+
+    monkeypatch.setattr(launch_run, "host_memory_gb", lambda: 64.0)
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    text = pipeline.to_toml()
+    key = cli.poses_key(__import__("tomllib").loads(text), tmp_path)
+    plan = {"status": "ok", "poses_key": key, "memory": {"estimate": {"total_gb": 1.5}}}
+    (preview / "plan.json").write_text(json.dumps(plan))
+    q = FakeTaskQueue()
+    uc = LaunchRun(q, FakeRunStore(tmp_path), FakeArtifactStore(tmp_path / ".art"), FakeIdentity("mg"), FixedClock())
+    uc.run(pipeline, out_dir=tmp_path / "out", config_dir=tmp_path, preview_dir=preview, timeout_s=3600)
+    assert q.options[-1] == {"memory_limit_gb": pytest.approx(1.5 * 6.0), "timeout_s": 3600, "capped": True}
+
+    # a preview made for other poses says nothing about these: back to the host cap
+    plan["poses_key"] = "stale"
+    (preview / "plan.json").write_text(json.dumps(plan))
+    uc.run(pipeline, out_dir=tmp_path / "out2", config_dir=tmp_path, preview_dir=preview)
+    assert q.options[-1]["memory_limit_gb"] == pytest.approx(64.0 * 0.8)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tomllib
 from pathlib import Path
 
 from smeltery.gui.pipeline import Pipeline
@@ -20,6 +22,57 @@ def uses_temporal(task_queue) -> bool:
     from smeltery.bench.adapters.task_queue import TemporalTaskQueue
 
     return isinstance(task_queue, TemporalTaskQueue)
+
+
+#: A long run holds several times its per-calculation memory prediction: one was measured at ~11 GB resident against
+#: a ~2 GB prediction after ~40 molecules. The run's cap is the prediction times this.
+RUN_MEMORY_FACTOR = 6.0
+#: Never cap a run below this: not all of its memory is the SCF (the interpreter, RDKit, docking).
+MIN_RUN_MEMORY_GB = 4.0
+#: Never cap it above this share of the host's RAM: past that the machine swaps, and a swapping run was measured
+#: 29x slower than its peers, which is worse than being stopped.
+HOST_RAM_SHARE = 0.8
+
+
+def host_memory_gb() -> float | None:
+    """`MemTotal` from /proc/meminfo in GB; None where it cannot be read."""
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / 1024 / 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def default_memory_limit_gb(per_calculation_gb: float | None, host_gb: float | None) -> float | None:
+    """The memory cap a launched run gets: `per_calculation_gb` x RUN_MEMORY_FACTOR, at least MIN_RUN_MEMORY_GB,
+    and never more than HOST_RAM_SHARE of the host. Without a prediction, the host cap alone; None when neither is
+    known (no cap)."""
+    cap = host_gb * HOST_RAM_SHARE if host_gb else None
+    if per_calculation_gb is None:
+        return cap
+    want = max(MIN_RUN_MEMORY_GB, per_calculation_gb * RUN_MEMORY_FACTOR)
+    return min(want, cap) if cap is not None else want
+
+
+def predicted_memory_gb(text: str, base: Path, preview_dir: Path | None) -> float | None:
+    """The per-calculation memory `smeltery run --plan` predicted for this config (`plan.json` `memory.estimate.
+    total_gb` in `preview_dir`), or None: no preview, the model cannot say, or the preview was made for other poses
+    (its `poses_key` differs from this config's)."""
+    if preview_dir is None:
+        return None
+    try:
+        plan = json.loads((Path(preview_dir) / "plan.json").read_text())
+        from smeltery.cli import poses_key
+
+        if plan.get("status") != "ok" or plan.get("poses_key") != poses_key(tomllib.loads(text), base):
+            return None
+        total = ((plan.get("memory") or {}).get("estimate") or {}).get("total_gb")
+    except (OSError, ValueError, AttributeError, tomllib.TOMLDecodeError):
+        return None
+    return float(total) if isinstance(total, (int, float)) and total > 0 else None
 
 
 class LiveRunRefused(ValueError):
@@ -45,10 +98,16 @@ class LaunchRun:
         command: list[str] | None = None,
         config_dir: Path | None = None,
         text: str | None = None,
+        preview_dir: Path | None = None,
+        timeout_s: float | None = None,
     ):  # noqa: E501
         """Stage inputs into `out_dir`, write `out_dir/config.toml` and submit `smeltery run` on it. `text` is the
         config as the user wrote it (comments and all); given, it is what the run directory holds, with only the input
-        paths rewritten to their staged copies. Without it the pipeline's compiled TOML is written."""
+        paths rewritten to their staged copies. Without it the pipeline's compiled TOML is written.
+
+        The run waits in `queued` for one of the queue's run slots (`capped`), and gets a memory cap from the
+        pipeline's preview (`preview_dir/plan.json`, see `default_memory_limit_gb`) and the optional wall-clock
+        `timeout_s`. Under Temporal neither is passed: the workflow's workers bound their own work."""
         if out_dir is None:
             out_dir = out if out is not None else Path("out")
         out_dir = Path(out_dir)
@@ -70,11 +129,17 @@ class LaunchRun:
             command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
             if uses_temporal(self.task_queue):  # the run itself is then a durable workflow, not one long process
                 command.append("--temporal")
+        limits = {}
+        if not uses_temporal(self.task_queue):
+            per_calc = predicted_memory_gb(source, base, preview_dir)
+            limits = {"memory_limit_gb": default_memory_limit_gb(per_calc, host_memory_gb()), "timeout_s": timeout_s}
         task_id = self.task_queue.submit(
             f"run {pipeline.campaign}",
             list(command),
             cwd=str(out_dir.parent),
             note=f"user={self.identity.current()} time={self.clock.now().isoformat()}",
+            capped=True,
+            **limits,
         )
         return task_id
 

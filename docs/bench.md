@@ -2,15 +2,17 @@
 
 Bench is the application over the smeltery funnel: one local web app in which a computational
 chemist opens a structure, edits and launches a pipeline, and reads its runs, and a bench chemist
-reads a run's report and answers it. It shows runs, tasks, and verdicts;
-it does not schedule work, set priorities, or bound memory. `memory_budget_gb` sizes predicted
-arrays and is not a process ceiling.
+reads a run's report and answers it. It shows runs, tasks, and verdicts, and it schedules the runs
+it launches: one at a time by default, each with a memory ceiling and an optional wall-clock limit
+(see [Queueing and limits](#queueing-and-limits)). It still sets no priorities: the queue is
+first-in, first-out. `memory_budget_gb` sizes the arrays one calculation predicts and is a different
+number from the task's ceiling.
 
 ## Starting it
 
 ```
 pip install 'smeltery[bench]'          # the wheel ships the built UI
-smeltery bench ROOT [--study pkg.module] [--port 8765] [--open]
+smeltery bench ROOT [--study pkg.module] [--port 8765] [--max-runs 1] [--open]
                    [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
 ```
 
@@ -357,7 +359,8 @@ Core modules never import `smeltery.bench`. Ports declare Protocols only. Adapte
 only place with sqlite3, Path.home, or Temporal references, with one named exception:
 `src/smeltery/tasks.py` also imports temporalio for the Temporal task backend. A task runs once
 unless it was submitted with `retries` (0-5); a dead worker's task is reported failed, never retried
-on the orchestrator's own initiative.
+on the orchestrator's own initiative. The queue's own scheduling (which queued task starts next)
+lives in its sqlite database, not in the server process, so it survives a restart.
 
 ### Tasks outlive Bench
 
@@ -374,6 +377,32 @@ killed if it is verifiably still running); a pid that now names another process 
 reuse) fails the task and is never signalled. The database is in WAL mode with a 30 s busy
 timeout, since several supervisors write to it at once.
 
+### Queueing and limits
+
+A launched run waits its turn. `smeltery bench --max-runs N` (default 1) sets how many launched runs
+may execute at once; the rest sit in `queued` and start, oldest first, as slots free. Previews and
+tasks submitted through `POST /api/tasks` are exempt: they are short and are not what fills memory.
+Cancelling a queued run means it never starts. The queue is first-in, first-out, with no priorities.
+
+One run at a time is the default because of what a long run actually holds: on this machine a DFT run
+was measured at ~11 GB resident against a ~2 GB per-calculation prediction, and once it outgrew free
+memory it paged the RI tensor every SCF iteration and took 67 minutes on a molecule whose peers took
+140 s. Two clicks on Run must not start two of those.
+
+Each launched run therefore gets a memory ceiling, derived rather than guessed:
+
+- the per-calculation prediction from the pipeline's own preview (`preview/plan.json`,
+  `memory.estimate.total_gb`, the figure `smeltery run --plan` prints), times a safety factor of 6
+  for the run-level growth above;
+- at least 4 GB, since a run is not only its SCF (the interpreter, RDKit, docking);
+- never more than 80% of `MemTotal`, so a run is stopped rather than left to swap;
+- with no preview, or a preview made for other poses, the host share alone; with neither, no cap.
+
+Over the ceiling the task is killed and reported `OOM` with how far over it went. A wall-clock limit
+is optional (`timeout_s` on the launch and task-submit requests): past it the task is killed and
+reported `failed`, with a note saying it timed out. Neither a memory nor a time limit is ever
+retried: both are verdicts about the command.
+
 ### Worker health
 
 The work panel reports what a running task is actually doing, because "running" alone cannot tell a
@@ -388,4 +417,5 @@ long SCF from a hung one:
   `sample_interval_s`. A cap that ignored children would never fire, since smeltery's tasks shell out.
 - **OOM** marks a task killed for exceeding the `memory_limit_gb` it was submitted with, and its note
   says how far over it went. Exceeding the cap is a verdict about that command, so it is never
-  retried. The Temporal queue refuses a limit rather than accepting one it cannot enforce.
+  retried. The Temporal queue refuses a limit, and a timeout, rather than accepting one it cannot
+  enforce.

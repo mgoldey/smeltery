@@ -57,7 +57,7 @@ export function Launch({ name, errors, dirty }: { name: string; errors: Schemas[
       ) : null}
       {launch.data ? (
         <p role="status" data-testid="launched">
-          Pipeline running as task <span className="mono">{launch.data.id}</span>:{" "}
+          Pipeline {launch.data.status === "queued" ? "queued (waiting for a run slot)" : "running"} as task <span className="mono">{launch.data.id}</span>:{" "}
           <span className="mono">{launch.data.command.join(" ")}</span>. <Link to="/bench">Follow it in Work</Link>.
         </p>
       ) : null}
