@@ -4,6 +4,9 @@ import { api, unwrap, type Schemas } from "../api/client";
 
 type Task = Schemas["Task"];
 const LIVE = new Set(["queued", "running"]);
+const QUEUED_HELP =
+  "Launched runs share a fixed number of slots (one by default) so two heavy runs never compete for memory. This one " +
+  "starts by itself when a slot frees, even if Bench restarts meanwhile.";
 const STALLED_HELP =
   "No output for longer than the queue's threshold. A long SCF can legitimately print nothing, so this is a " +
   "place to look, not a verdict: the task is still running.";
@@ -50,7 +53,9 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
     <section aria-labelledby="work-h">
       <h2 id="work-h">Work</h2>
       <p className="lede">
-        A task runs at most once. If its worker dies it is reported failed, not retried: re-running a command is your call.
+        Launched runs take turns: one runs at a time by default, and the rest wait as queued until it ends. Previews and
+        other tasks start at once. Cancelling a queued run means it never starts. A task whose supervisor dies is reported
+        failed, not retried: re-running a command is your call.
       </p>
       {tasks.isError ? (
         <div className="banner" role="alert">
@@ -84,6 +89,12 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
                     {t.status}
                   </span>
                   {(t.max_attempts ?? 1) > 1 ? ` attempt ${t.attempt ?? 1}/${t.max_attempts}` : ""}
+                  {t.status === "queued" ? (
+                    <span className="queued-hint" data-testid="queued-hint" title={QUEUED_HELP}>
+                      {" "}
+                      waiting for a run slot
+                    </span>
+                  ) : null}
                   {t.stalled ? (
                     <span className="status" data-state="stalled" data-testid="stalled" title={STALLED_HELP}>
                       stalled
@@ -140,9 +151,15 @@ export function TaskInspector({ id, onClose }: { id: string; onClose: () => void
             </span>
             {(task.max_attempts ?? 1) > 1 ? ` attempt ${task.attempt ?? 1}/${task.max_attempts}` : ""}
           </p>
+          {task.status === "queued" ? (
+            <p className="lede" data-testid="queued-help">
+              Waiting for a run slot. {QUEUED_HELP} Cancelling it now means it never starts.
+            </p>
+          ) : null}
           <p className="lede" data-testid="task-health">
             {task.peak_rss_gb === null || task.peak_rss_gb === undefined
-              ? "Peak memory not sampled."
+              ? "Peak memory not sampled" +
+                (task.memory_limit_gb ? `; limit ${task.memory_limit_gb.toFixed(2)} GB.` : ".")
               : `Peak memory ${task.peak_rss_gb.toFixed(2)} GB` +
                 (task.memory_limit_gb ? ` of a ${task.memory_limit_gb.toFixed(2)} GB limit.` : ", no limit set.")}
             {task.oom ? ` ${task.note}` : ""}

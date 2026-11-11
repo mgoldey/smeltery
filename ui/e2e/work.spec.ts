@@ -1,4 +1,4 @@
-import { expect, IDX, test } from "./bench";
+import { expect, IDX, newPipeline, test } from "./bench";
 
 test("a running task appears without reloading, its elapsed time advances, and it can be cancelled", async ({ page }) => {
   await page.goto("/bench");
@@ -76,4 +76,33 @@ test("HPC-002: a task over its memory limit is marked OOM and says how much it u
 
   await row.getByRole("button", { name: "Show task e2e-hog" }).click();
   await expect(page.getByTestId("task-health")).toContainText("OOM at");
+});
+
+test("B03: a second launched run waits as queued, and cancelling it means it never starts", async ({ page }) => {
+  // A launchable pipeline: the starting one has no pocket charge, which blocks Run (see launch.spec.ts).
+  const { name } = await newPipeline(page, (t) =>
+    `${t}\n[[pocket.site]]\nq = 1.0\natom = 3\nfrom_atom = 4\ndistance = 3.0\n`,
+  );
+  await page.goto("/bench");
+  // Two launches into different OUT folders. The queue runs one launched run at a time, so the second waits.
+  const launch = async (out: string) => {
+    const r = await page.request.post(`/api/pipelines/${name}/launch`, { data: { out } });
+    expect(r.status(), await r.text()).toBe(201);
+    return ((await r.json()) as { id: string }).id;
+  };
+  const first = await launch("out/e2e-q1");
+  const second = await launch("out/e2e-q2");
+  const row1 = page.locator(`[data-task="${first}"]`);
+  const row2 = page.locator(`[data-task="${second}"]`);
+  await expect(row1.locator(".status").first()).toHaveText("running", { timeout: 15_000 });
+  await expect(row2.locator(".status").first()).toHaveText("queued", { timeout: 15_000 });
+  await expect(row2.getByTestId("queued-hint")).toBeVisible();
+
+  // Cancel works on a queued task, from the inspector, and the task never starts.
+  await row2.getByRole("button", { name: /Show task/ }).first().click();
+  await expect(page.getByTestId("queued-help")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel task" }).click();
+  await expect(row2.locator(".status").first()).toHaveText("cancelled", { timeout: 15_000 });
+  await page.request.post(`/api/tasks/${first}/cancel`); // do not leave a real SCF running
+  await expect(row2.locator(".status").first()).toHaveText("cancelled");
 });

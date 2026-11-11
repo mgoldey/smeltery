@@ -156,7 +156,9 @@ def create_app(
     return app
 
 
-def build_app(root: str | Path, *, studies: tuple[str, ...] = (), web_dir: Path = WEB_DIR) -> FastAPI:
+def build_app(
+    root: str | Path, *, studies: tuple[str, ...] = (), web_dir: Path = WEB_DIR, max_runs: int = 1
+) -> FastAPI:
     """The composition root: local adapters, everything under ROOT/.smeltery/bench/."""
     from .adapters.identity import LocalIdentity
     from .adapters.run_store import FilesystemRunStore
@@ -167,7 +169,7 @@ def build_app(root: str | Path, *, studies: tuple[str, ...] = (), web_dir: Path 
     local = root / ".smeltery" / "bench"
     return create_app(
         run_store=FilesystemRunStore(root),
-        task_queue=SubprocessTaskQueue(local / "tasks"),
+        task_queue=SubprocessTaskQueue(local / "tasks", max_concurrent_runs=max_runs),
         identity=LocalIdentity(),
         clock=SystemClock(),
         settings=Settings(root=root, studies=tuple(studies), web_dir=web_dir),
@@ -181,13 +183,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--study", action="append", default=[], help="a study's Python module path (repeatable)")
     ap.add_argument("--open", action="store_true", help="open a browser")
+    ap.add_argument(
+        "--max-runs", type=int, default=1, help="launched runs at once; the rest wait as queued (default 1)"
+    )
     args = ap.parse_args(argv)
     if not (WEB_DIR / "index.html").is_file():
         print(BUILD_HINT, file=sys.stderr)
         return 2
     import uvicorn
 
-    app = build_app(args.root, studies=tuple(args.study))
+    if args.max_runs < 1:
+        ap.error("--max-runs must be at least 1")
+    app = build_app(args.root, studies=tuple(args.study), max_runs=args.max_runs)
     # uvicorn runs at log_level="warning", so without this line a healthy server prints nothing and looks hung.
     url = f"http://{args.host}:{args.port}/"
     print(f"smeltery bench: serving {Path(args.root).resolve()} at {url} (Ctrl+C stops)", file=sys.stderr, flush=True)

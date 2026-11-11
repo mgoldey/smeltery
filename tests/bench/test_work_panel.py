@@ -88,3 +88,16 @@ def test_a_non_positive_memory_limit_is_refused_by_the_schema(client_for):
     c, _ = client_for()
     r = c.post("/api/tasks", json={"command": ["python", "-c", "pass"], "memory_limit_gb": 0})
     assert r.status_code == 422, r.text
+
+
+def test_a_timeout_is_passed_to_the_queue(client_for):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    r = c.post("/api/tasks", json={"command": ["sleep", "60"], "timeout_s": 30})
+    assert r.status_code == 201, r.text
+    assert q.options[-1]["timeout_s"] == 30
+
+
+def test_a_non_positive_timeout_is_refused_by_the_schema(client_for):
+    c, _ = client_for()
+    assert c.post("/api/tasks", json={"command": ["true"], "timeout_s": 0}).status_code == 422

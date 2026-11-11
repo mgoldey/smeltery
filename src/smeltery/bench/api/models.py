@@ -129,6 +129,9 @@ class TaskSubmit(BaseModel):
     memory_limit_gb: float | None = Field(
         default=None, gt=0, description="kill the task over this resident size, in GB; omit for no cap"
     )
+    timeout_s: float | None = Field(
+        default=None, gt=0, description="fail the task after this many wall-clock seconds; omit for no limit"
+    )
 
 
 class TaskLog(BaseModel):
@@ -217,6 +220,9 @@ class PipelineFromRun(BaseModel):
 class LaunchRequest(BaseModel):
     toml: str
     out: str | None = None
+    timeout_s: float | None = Field(
+        default=None, gt=0, description="fail the run after this many wall-clock seconds; omit for no limit"
+    )
 
 
 class Provisional(BaseModel):

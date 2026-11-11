@@ -6,8 +6,8 @@
 
 and from then on only reads sqlite and sends signals. The supervisor is the task's parent: it alone can reap the exit
 code, so it writes the heartbeat, the peak RSS and the final status and returncode to sqlite itself, and it enforces
-the memory limit and the retries. When it finishes it promotes the next queued task, which is what keeps
-the queue moving while no Bench process is up.
+the memory limit, the timeout and the retries. When it finishes it promotes the next queued task that may start
+now, which is what keeps the queue moving while no Bench process is up.
 
 Every pid stored here is stored with its identity (boot id + the start time from /proc/<pid>/stat, field 22), and no
 pid is trusted or signalled unless its identity still matches: after a reboot or PID reuse a stored pid can name an
@@ -168,19 +168,41 @@ def spawn_supervisor(db: str | Path, task_id: str) -> subprocess.Popen:
     return p
 
 
+def max_concurrent_runs(con: sqlite3.Connection) -> int:
+    """The queue's run-slot count, as the queue last stored it in the `settings` table (default 1)."""
+    row = con.execute("SELECT value FROM settings WHERE key='max_concurrent_runs'").fetchone()
+    try:
+        return max(1, int(row[0])) if row else 1
+    except (TypeError, ValueError):
+        return 1
+
+
 def promote(db: str | Path, spawn: Callable[[str | Path, str], subprocess.Popen] = spawn_supervisor) -> list[str]:
-    """Start every queued task, oldest first, each under its own supervisor; return their ids.
+    """Start every queued task that may start now, oldest first, each under its own supervisor; return their ids.
+
+    Uncapped tasks (previews, ad-hoc commands) always start. Capped ones (launched runs) start only while fewer than
+    `max_concurrent_runs` capped tasks are running: a long DFT run holds several times its per-calculation memory,
+    so two at once can push the machine into swap.
 
     Runs under BEGIN IMMEDIATE, so two promoters (a Bench submitting, a finishing supervisor, a Bench starting up)
-    cannot both start the same row. The supervisor's pid and identity are written in the same transaction as
-    `running`, so a running row always names its supervisor.
+    cannot both see the same free slot: the second waits for the lock, then sees the first one's task running. The
+    supervisor's pid and identity are written in the same transaction as `running`, so a running row always names
+    its supervisor.
     """
     with connect(db) as con:  # the common case, nothing queued, must not take the write lock
         if con.execute("SELECT 1 FROM tasks WHERE status='queued' LIMIT 1").fetchone() is None:
             return []
     started: list[str] = []
     with connect(db, immediate=True) as con:
-        for (tid,) in con.execute("SELECT id FROM tasks WHERE status='queued' ORDER BY rowid").fetchall():
+        slots = (
+            max_concurrent_runs(con)
+            - con.execute("SELECT COUNT(*) FROM tasks WHERE status='running' AND capped=1").fetchone()[0]
+        )
+        for tid, capped in con.execute("SELECT id, capped FROM tasks WHERE status='queued' ORDER BY rowid").fetchall():
+            if capped:
+                if slots <= 0:
+                    continue
+                slots -= 1
             now = utc()
             try:
                 p = spawn(db, tid)
@@ -218,6 +240,7 @@ class _Job:
     env: dict[str, str]
     backoff_s: float
     interval_s: float
+    timeout_s: float | None
 
     @classmethod
     def from_row(cls, command, cwd, log_path, max_attempts, limit_bytes, spec) -> _Job:
@@ -231,6 +254,7 @@ class _Job:
             env={**os.environ, **(spec.get("env") or {})},
             backoff_s=float(spec.get("retry_backoff_s", 1.0)),
             interval_s=float(spec.get("sample_interval_s", 1.0)),
+            timeout_s=float(spec["timeout_s"]) if spec.get("timeout_s") else None,
         )
 
 
@@ -241,6 +265,7 @@ class Supervisor:
     def __init__(self, db: str | Path, task_id: str) -> None:
         self.db, self.tid = str(db), task_id
         self.proc: subprocess.Popen | None = None
+        self.deadline: float | None = None  # monotonic; set once the task's limit is known
 
     def _status(self) -> str | None:
         with connect(self.db) as con:
@@ -281,8 +306,11 @@ class Supervisor:
 
         signal.signal(signal.SIGTERM, _stop)
         signal.signal(signal.SIGINT, _stop)
+        job = _Job.from_row(*row[2:])
+        if job.timeout_s:  # one wall-clock budget for the whole task, every attempt and backoff included
+            self.deadline = time.monotonic() + job.timeout_s
         try:
-            self._attempts(_Job.from_row(*row[2:]))
+            self._attempts(job)
         except BaseException as e:  # noqa: BLE001 - whatever happened, the task must not read "running" forever
             why = "supervisor stopped by a signal" if isinstance(e, _Stop) else f"supervisor error: {e!r}"
             if self.proc is not None and self.proc.poll() is None:
@@ -299,31 +327,38 @@ class Supervisor:
         while True:
             outcome, rc = self._one(job, attempt)
             if outcome != "exited":
-                return  # cancelled or over the memory limit: already recorded, never retried
+                return  # cancelled, over the memory limit or out of time: already recorded, never retried
             if rc != 0 and attempt < job.max_attempts and self._status() == "running":
                 with connect(self.db) as con:  # no process between attempts: pid NULL says so
                     con.execute(
                         "UPDATE tasks SET pid=NULL, pid_start=NULL WHERE id=? AND status='running'", (self.tid,)
                     )
-                if not self._backoff(min(job.backoff_s * 2 ** (attempt - 1), 30.0)):
+                if not self._backoff(min(job.backoff_s * 2 ** (attempt - 1), 30.0), job):
                     return
                 attempt += 1
                 continue
             self._finish("succeeded" if rc == 0 else "failed", rc)
             return
 
-    def _backoff(self, seconds: float) -> bool:
-        """Wait out the retry delay; False if the task stopped running (was cancelled) meanwhile."""
+    def _backoff(self, seconds: float, job: _Job) -> bool:
+        """Wait out the retry delay; False if the task was cancelled or ran out of time meanwhile."""
         end = time.monotonic() + seconds
         while (left := end - time.monotonic()) > 0:
-            if self._status() != "running":
+            if self._status() != "running" or self._out_of_time(job):
                 return False
             time.sleep(min(0.05, left))
         return self._status() == "running"
 
+    def _out_of_time(self, job: _Job) -> bool:
+        """Past the task's wall-clock limit: record why (the caller then kills what is running)."""
+        if self.deadline is None or time.monotonic() < self.deadline:
+            return False
+        self._finish("failed", None, f"timed out: still running after its {job.timeout_s:g} s wall-clock limit")
+        return True
+
     def _one(self, job: _Job, attempt: int) -> tuple[str, int | None]:
-        """Run one attempt to its end: ("exited", rc), or ("stopped", None) when it was ended here (cancelled, or
-        over the memory limit), with the reason already written."""
+        """Run one attempt to its end: ("exited", rc), or ("stopped", None) when it was ended here (cancelled, over
+        the memory limit, or out of time), with the reason already written."""
         with open(job.log_path, "ab") as lf:
             if job.max_attempts > 1:
                 lf.write(f"--- attempt {attempt}/{job.max_attempts} ---\n".encode())
@@ -349,11 +384,16 @@ class Supervisor:
             return self._end(proc)
         last_size = -1
         while True:
+            wait = job.interval_s
+            if self.deadline is not None:  # wake for the deadline, not a whole interval after it
+                wait = max(0.0, min(wait, self.deadline - time.monotonic()))
             try:
-                return "exited", proc.wait(timeout=job.interval_s)
+                return "exited", proc.wait(timeout=wait)
             except subprocess.TimeoutExpired:
                 pass
             if self._status() != "running":  # cancelled: Bench signals too, this covers a Bench that could not
+                return self._end(proc)
+            if self._out_of_time(job):
                 return self._end(proc)
             rss, size = rss_bytes(proc.pid), _size(job.log_path, last_size)
             peak = max(peak, rss or 0)
