@@ -253,6 +253,16 @@ A run started with `--out OUT` (as Bench's Run does) leaves a self-contained dir
   (SCF lines per field model, with `shared_vacuum` for the vacuum legs; outcome lines are not
   counted). A run whose SCF fails still leaves the calculations that finished. See
   [temporal-runs.md](temporal-runs.md).
+- `calcs.partial.jsonl` and `progress.json`, only while a plain (not `--temporal`) run is unfinished or
+  after it was interrupted: every SCF is appended to `calcs.partial.jsonl` as it finishes (fsync'd; the
+  `calcs.jsonl` line plus `digest` and `config_sha256`, 12 characters each), and `progress.json` gives
+  `partial` (that file's name), `total_scfs` (the planned count: a vacuum and a field leg per pose, at
+  rung 0; a remedy ladder can add lines), `reused`, `digest` and `config_sha256`. SCFs done so far is the
+  partial file's line count. Rerunning the same command into OUT reuses every finished SCF of the same
+  input digest and staged config (it prints `resuming: k of N SCFs reused`) and computes only the rest;
+  the record and `calcs.jsonl` are the ones an uninterrupted run writes. A checkpoint of other inputs is
+  refused (exit 2) unless `--force` discards it. Both files are removed when the record is written.
+  SCFs of an analysis that re-measures (`[charge_sensitivity]`) are not checkpointed.
 - `gates.json`, only when a gate rejected a pose and the run stopped (exit 3): every pose's result.
 - the pose SDFs, and for `--plan --out`, `plan.json` with the input digest, estimated seconds and memory.
 

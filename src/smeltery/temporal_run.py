@@ -184,15 +184,15 @@ class RunSummary:
 _LOG_LOCK = threading.Lock()
 
 
-def calcs_path(out: str | Path) -> Path:
-    return Path(out) / CALCS
+def calcs_path(out: str | Path, name: str = CALCS) -> Path:
+    return Path(out) / name
 
 
-def append_row(out: str | Path, row: dict) -> None:
-    """Append one line to OUT/calcs.jsonl, fsync'd. A torn last line (no newline) is closed first, so the new row is
-    never glued onto it."""
+def append_row(out: str | Path, row: dict, name: str = CALCS) -> None:
+    """Append one line to OUT/<name> (calcs.jsonl), fsync'd. A torn last line (no newline) is closed first, so the new
+    row is never glued onto it. A plain run's checkpoint (`smeltery.checkpoint`) appends to its own file this way."""
     line = json.dumps(row) + "\n"
-    p = calcs_path(out)
+    p = calcs_path(out, name)
     with _LOG_LOCK:
         fd = os.open(p, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
         try:
@@ -205,11 +205,12 @@ def append_row(out: str | Path, row: dict) -> None:
             os.close(fd)
 
 
-def read_rows(out: str | Path, digest: str) -> tuple[list[dict], int]:
+def read_rows(out: str | Path, digest: str, name: str = CALCS) -> tuple[list[dict], int]:
     """(the Temporal SCF lines of this input digest, how many unreadable lines were skipped). A torn line (a write
     cut short) is skipped and counted, never a crash. A line of another digest, or without one (a non-Temporal run's),
-    is refused: resuming into a log of different inputs would mix two measurements."""
-    p = calcs_path(out)
+    is refused: resuming into a log of different inputs would mix two measurements. `name`: the log under OUT (a plain
+    run's checkpoint is read back the same way)."""
+    p = calcs_path(out, name)
     if not p.is_file():
         return [], 0
     rows, torn = [], 0
