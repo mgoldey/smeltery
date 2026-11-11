@@ -20,3 +20,8 @@ __marimo__/
 
 # Bench UI build output (npm run build in ui/)
 src/smeltery/bench/web/
+
+# Build output, and a pipeline's temporal/ scratch (a local wheel build would otherwise pick it up through the
+# prebuilt/** artifacts glob in pyproject.toml).
+dist/
+src/smeltery/prebuilt/**/run/temporal/

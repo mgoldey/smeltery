@@ -33,3 +33,11 @@ test("an unknown address is a page that says so", async ({ page }) => {
 test("the fixture indices used at collection time match what the server built", () => {
   for (const r of fixture().runs) expect(IDX[r.name as keyof typeof IDX]).toBe(r.idx);
 });
+
+test("the app shell renders under the error boundary, and its fallback stays out of the way", async ({ page }) => {
+  // Forcing a throw in the real app would need a test-only hook; the fallback itself is covered by ErrorBoundary.test.tsx.
+  const r = run("a_resolved");
+  await page.goto(`/run/${r.idx}`);
+  await expect(page.getByTestId("context-campaign")).toBeVisible();
+  await expect(page.getByTestId("error-boundary")).toHaveCount(0);
+});
