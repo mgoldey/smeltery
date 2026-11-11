@@ -1,0 +1,36 @@
+# Weekly dependency updates, one grouped PR per ecosystem so a week's bumps are reviewed (and bisected) together
+# instead of arriving as dozens of single-package PRs.
+version: 2
+updates:
+  # Python: pyproject.toml extras and uv.lock at the repo root.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    ignore:
+      # ruff is pinned EXACTLY in two places that must move together: the ruff== pin in pyproject.toml's dev
+      # extra and RUFF_VERSION in .github/workflows/test.yml (tests/test_ruff_pin.py fails if they differ), and a
+      # new ruff also moves the format baseline. Dependabot can only bump one of them, so it would turn CI red;
+      # bump ruff by hand, both pins in one commit.
+      - dependency-name: ruff
+
+  # The Bench UI: ui/package.json and ui/package-lock.json.
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      ui:
+        patterns: ["*"]
+
+  # The SHA-pinned actions in .github/workflows/. Dependabot updates the SHA and rewrites the "# vX.Y.Z" comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

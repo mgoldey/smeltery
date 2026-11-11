@@ -65,6 +65,37 @@ jobs:
       - name: Example (benzoic acid)
         run: uv run --no-sync python examples/mwe_benzoic.py
 
+  # The Bench gate on its own, so a Bench regression is reported in minutes instead of at the end of the ~30-minute
+  # `test` job (which still runs these tests too). It runs on 3.11 and 3.12: the classifiers claim both, but every
+  # other job here is 3.11 only and posebusters-py312 covers one test file. Coverage of smeltery.bench is measured
+  # and floored at 87% (measured 88.9% with exactly this install, rounded down); raise the floor when
+  # coverage rises, never lower it to make a PR pass. The path form of --cov is deliberate: --cov=smeltery.bench
+  # imports the package before numpy and dies with "cannot load module more than once per process".
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false   # a 3.12-only failure must not hide the 3.11 result
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install (dev + bench extras, ferric from PyPI)
+        run: uv sync --extra dev --extra bench --no-sources
+      - name: Install pdb2pqr30 (the active-site preview charges a PDB with it)
+        run: uv pip install pdb2pqr
+      - name: Bench gate with coverage
+        run: >
+          uv run --no-sync pytest tests/bench tests/test_study_plan_cells.py -q -p no:randomly
+          --cov=src/smeltery/bench --cov-report=term-missing --cov-fail-under=87
+
   ty:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -145,6 +176,23 @@ jobs:
           BENCH_PYTHON: ${{ github.workspace }}/.venv/bin/python
         working-directory: ui
         run: npx playwright test
+
+  # ESLint for the Bench UI. Its own job and not a step of `ui`, so a first red run is visible and fixable without
+  # blocking the typecheck, unit and browser results. Not a required check until it has been green once on main.
+  ui-lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+      - name: Lint (eslint)
+        run: npm run lint --prefix ui
 
   # Real Vina + Meeko docking. The `test` job above has no `docking` extra, so
   # every test that needs vina/meeko skips there; this job installs the extra
