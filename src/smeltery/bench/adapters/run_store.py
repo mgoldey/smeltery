@@ -6,8 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from smeltery.bench.adapters._sqlite import open_db
+from smeltery.bench.adapters._sqlite import migrate, open_db
 from smeltery.gui.results import Run, load_run
+
+#: Schema steps; append only (see `_sqlite.migrate`).
+_STEPS = ("CREATE TABLE IF NOT EXISTS runs (path TEXT PRIMARY KEY, campaign TEXT, digest TEXT, indexed_at TEXT)",)
+SCHEMA_VERSION = len(_STEPS)
 
 
 class FilesystemRunStore:
@@ -21,10 +25,7 @@ class FilesystemRunStore:
 
     def _init_db(self) -> None:
         with open_db(self._db, wal=True) as con:
-            con.execute(
-                "CREATE TABLE IF NOT EXISTS runs (path TEXT PRIMARY KEY, campaign TEXT, digest TEXT, indexed_at TEXT)"
-            )
-            con.commit()
+            migrate(con, _STEPS)
 
     def _discover(self, root: Path | None = None) -> list[Path]:
         r = Path(root).resolve() if root else self.root

@@ -340,6 +340,16 @@ change without that regeneration fails CI.
 
 Every other path serves the app.
 
+## Database versions
+
+Every sqlite file Bench writes (`tasks.sqlite`, the comment, project and run-index stores) carries a
+schema version in `PRAGMA user_version`. Opening one applies only the migration steps above its
+version, in a single transaction, so a failed migration leaves the file as it was; a file written
+before versioning (version 0) is adopted the same way. A file whose version is newer than the
+running Bench knows is refused at startup with a message naming the file: it was written by a newer
+Bench, so upgrade Bench rather than editing the file, or move it aside to start fresh. Bench never
+writes to a database it refuses, so the newer Bench can still open it.
+
 ## Ports and local adapters
 
 1. RunStore - `FilesystemRunStore` (SQLite index cache over run-*.json; records win over index)

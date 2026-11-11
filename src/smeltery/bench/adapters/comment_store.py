@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from smeltery.bench.adapters._sqlite import is_duplicate_column, open_db
+from smeltery.bench.adapters._sqlite import add_column, migrate, open_db
 from smeltery.bench.ports.comment_store import Comment
+
+
+def _add_comment_columns(con) -> None:
+    for col in ("run", "anchor"):
+        add_column(con, "comments", col, "TEXT")
+
+
+#: Schema steps; append only (see `_sqlite.migrate`). Version 2 adds the columns an older database lacks.
+_STEPS = (
+    """CREATE TABLE IF NOT EXISTS comments (
+        id TEXT PRIMARY KEY, anchor_type TEXT, anchor_id TEXT, author TEXT,
+        body TEXT, created_at TEXT, parent_id TEXT)""",
+    _add_comment_columns,
+)
+SCHEMA_VERSION = len(_STEPS)
 
 
 class SqliteCommentStore:
@@ -22,18 +36,7 @@ class SqliteCommentStore:
 
     def _init(self):
         with open_db(self.db_path, wal=True) as con:
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS comments (
-                    id TEXT PRIMARY KEY, run TEXT, anchor_type TEXT, anchor_id TEXT, author TEXT,
-                    body TEXT, created_at TEXT, parent_id TEXT, anchor TEXT)"""
-            )
-            # Migrate databases created before these columns existed.
-            for col in ("run", "anchor"):
-                try:
-                    con.execute(f"ALTER TABLE comments ADD COLUMN {col} TEXT")
-                except sqlite3.OperationalError as e:
-                    if not is_duplicate_column(e):
-                        raise
+            migrate(con, _STEPS)
 
     def add(self, anchor_type=None, anchor_id=None, author="", body="", *, parent_id=None, run=None, anchor=None, **kw):
         if anchor is not None and anchor_type is None and run is None:

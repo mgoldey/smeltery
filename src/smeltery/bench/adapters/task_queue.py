@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from smeltery.bench.adapters import task_supervisor as _sup
-from smeltery.bench.adapters._sqlite import is_duplicate_column, open_db
+from smeltery.bench.adapters._sqlite import add_column, migrate, open_db
 from smeltery.bench.adapters.task_supervisor import connect, kill_group, proc_identity, promote, same_process, utc
 from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager
 
@@ -36,6 +36,23 @@ _ADDED_COLUMNS = (
     ("spec", "TEXT"),  # JSON: what the supervisor needs beyond the columns (env overrides, intervals, timeout)
     ("capped", "INTEGER"),  # 1: a launched run, which waits in `queued` for one of max_concurrent_runs slots
 )
+
+
+def _add_task_columns(con: sqlite3.Connection) -> None:
+    for col, kind in _ADDED_COLUMNS:
+        add_column(con, "tasks", col, kind)
+
+
+#: Schema steps; append only (see `_sqlite.migrate`). Version 2 adds `_ADDED_COLUMNS`, which an older database lacks.
+_STEPS = (
+    """CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
+        created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
+        log_path TEXT, note TEXT, pid INTEGER)""",
+    "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)",
+    _add_task_columns,
+)
+SCHEMA_VERSION = len(_STEPS)
 
 #: What `_row_to_task` reads, in order. Named, never `SELECT *`: the column order of a migrated table is not ours.
 _TASK_COLUMNS = (
@@ -126,19 +143,7 @@ class SubprocessTaskQueue:
 
     def _init_db(self) -> None:
         with open_db(self.db, wal=True) as con:
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS tasks (
-                    id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
-                    created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
-                    log_path TEXT, note TEXT, pid INTEGER)"""
-            )
-            con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-            for col, kind in _ADDED_COLUMNS:
-                try:
-                    con.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
-                except sqlite3.OperationalError as e:
-                    if not is_duplicate_column(e):
-                        raise
+            migrate(con, _STEPS)
 
     @property
     def max_concurrent_runs(self) -> int:
