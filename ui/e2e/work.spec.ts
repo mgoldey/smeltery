@@ -2,8 +2,8 @@ import { expect, IDX, test } from "./bench";
 
 test("a running task appears without reloading, its elapsed time advances, and it can be cancelled", async ({ page }) => {
   await page.goto("/bench");
-  // Submitted through the API after the page has loaded: it must appear by polling, not by navigation.
-  const res = await page.request.post("/api/tasks", {
+  // Submitted through the fixture's queue route after the page has loaded: it must appear by polling, not by navigation.
+  const res = await page.request.post("/e2e/tasks", {
     data: { name: "e2e-sleeper", command: ["bash", "-c", "printf '<b>bold</b>\\n'; sleep 30"] },
   });
   expect(res.status()).toBe(201);
@@ -43,7 +43,7 @@ test("HPC-004: the panel shows how long a task has been silent, and marks it sta
   await page.goto("/bench");
   // Prints once, then goes quiet. The fixture server's queue uses a short stall threshold (see serve_fixture.py),
   // so "stalled" is reachable in a test without waiting out the production default of minutes.
-  const res = await page.request.post("/api/tasks", {
+  const res = await page.request.post("/e2e/tasks", {
     data: { name: "e2e-quiet", command: ["bash", "-c", "echo one; sleep 60"] },
   });
   expect(res.status()).toBe(201);
@@ -64,7 +64,7 @@ test("HPC-004: the panel shows how long a task has been silent, and marks it sta
 test("HPC-002: a task over its memory limit is marked OOM and says how much it used", async ({ page }) => {
   await page.goto("/bench");
   const grow = "python3 -c \"a=[]\nimport time\nwhile True:\n a.append(bytearray(4_000_000)); time.sleep(0.02)\"";
-  const res = await page.request.post("/api/tasks", {
+  const res = await page.request.post("/e2e/tasks", {
     data: { name: "e2e-hog", command: ["bash", "-c", grow], memory_limit_gb: 0.064 },
   });
   expect(res.status()).toBe(201);

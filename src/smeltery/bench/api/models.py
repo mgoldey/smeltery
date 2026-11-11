@@ -121,16 +121,6 @@ class Task(BaseModel):
     memory_limit_gb: float | None = Field(default=None, description="the cap it was submitted with, GB")
 
 
-class TaskSubmit(BaseModel):
-    name: str = ""
-    command: list[str] | str
-    cwd: str | None = None
-    retries: int = Field(default=0, ge=0, le=5, description="extra attempts after a failure; 0 runs once")
-    memory_limit_gb: float | None = Field(
-        default=None, gt=0, description="kill the task over this resident size, in GB; omit for no cap"
-    )
-
-
 class TaskLog(BaseModel):
     log: str
 

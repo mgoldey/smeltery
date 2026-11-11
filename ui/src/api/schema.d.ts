@@ -1384,8 +1384,7 @@ export interface paths {
         /** List Tasks */
         get: operations["list_tasks_api_tasks_get"];
         put?: never;
-        /** Submit Task */
-        post: operations["submit_task_api_tasks_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3272,29 +3271,6 @@ export interface components {
         TaskLog: {
             /** Log */
             log: string;
-        };
-        /** TaskSubmit */
-        TaskSubmit: {
-            /** Command */
-            command: string[] | string;
-            /** Cwd */
-            cwd?: string | null;
-            /**
-             * Memory Limit Gb
-             * @description kill the task over this resident size, in GB; omit for no cap
-             */
-            memory_limit_gb?: number | null;
-            /**
-             * Name
-             * @default
-             */
-            name: string;
-            /**
-             * Retries
-             * @description extra attempts after a failure; 0 runs once
-             * @default 0
-             */
-            retries: number;
         };
         /** UnmeasuredLimit */
         UnmeasuredLimit: {
@@ -6044,48 +6020,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Task"][];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Problem"];
-                };
-            };
-        };
-    };
-    submit_task_api_tasks_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskSubmit"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Service Unavailable */
