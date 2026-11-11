@@ -14,17 +14,21 @@ import re
 import shutil
 import sys
 import tempfile
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .adapters.task_supervisor import LOG_JSON_ENV, LOG_LEVEL_ENV, setup_logging
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
+from .ports.task_queue import StoppableTasks
 from .security import TOKEN_ENV, SecurityConfig, install, is_loopback
 
 #: Where `npm run build` (in ui/) writes the app. Build output: never edited or committed.
@@ -47,7 +51,41 @@ class Settings:
             self.cache_dir = self.root / ".smeltery" / "study-cache"
 
 
+_log = logging.getLogger(__name__)
 MIN_FREE_BYTES = 100 * 2**20
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    yield
+    await run_in_threadpool(_shutdown, app)
+
+
+def _shutdown(app: FastAPI) -> None:
+    """Tell the operator what Bench leaves running, and stop it when asked to. Never raises: a shutdown that fails
+    would only hide why Bench was stopping."""
+    q = app.state.task_queue
+    if not isinstance(q, StoppableTasks):
+        _log.info("shutting down; this task backend runs work elsewhere, so there is nothing for Bench to report")
+        return
+    try:
+        live = q.live_tasks()
+        if not live:
+            _log.info("shutting down; no tasks are running")
+            return
+        listing = ", ".join(f"{t['id']} (pid {t['pid']})" if t["pid"] else f"{t['id']} ({t['status']})" for t in live)
+        if app.state.stop_tasks_on_exit:
+            _log.warning("shutting down; stopping %d live task(s): %s", len(live), listing)
+            q.stop_live("stopped: Bench was shut down with --stop-tasks-on-exit")
+        else:
+            _log.warning(
+                "shutting down; %d task(s) keep running and will be reported by the next Bench on this root: %s. "
+                "Pass --stop-tasks-on-exit to stop them instead.",
+                len(live),
+                listing,
+            )
+    except Exception:  # noqa: BLE001
+        _log.exception("could not inspect or stop the live tasks while shutting down")
 
 
 def _ready_checks(root: Path, task_queue: Any) -> dict[str, dict[str, Any]]:
@@ -78,8 +116,12 @@ def create_app(
     method_defaults: Any = None,
     settings: Settings | None = None,
     security: SecurityConfig | None = None,
+    stop_tasks_on_exit: bool = False,
 ) -> FastAPI:
-    """`security`, when given, puts the Host/Origin/token guard in front of every route; `build_app` always gives it."""
+    """`security`, when given, puts the Host/Origin/token guard in front of every route; `build_app` always gives it.
+
+    On shutdown (SIGINT or SIGTERM under uvicorn) the app logs the tasks that are still live; with
+    `stop_tasks_on_exit` it also stops them. Tasks run in their own sessions, so by default they outlive Bench."""
     settings = settings or Settings()
     local = settings.root / ".smeltery" / "bench"
     if comment_store is None:
@@ -109,13 +151,14 @@ def create_app(
 
         method_defaults = FilesystemMethodDefaults(local / "methods.toml")
 
-    app = FastAPI(title="smeltery bench", version="1")
+    app = FastAPI(title="smeltery bench", version="1", lifespan=_lifespan)
     st = app.state
     st.run_store, st.task_queue, st.identity, st.clock = run_store, task_queue, identity, clock
     st.project_store, st.comment_store, st.artifact_store = project_store, comment_store, artifact_store
     st.structure_source, st.settings = structure_source, settings
     st.pipeline_store = pipeline_store
     st.method_defaults = method_defaults
+    st.stop_tasks_on_exit = stop_tasks_on_exit
     st.structures = {}  # sha256 -> PDB text of structures opened this session (a cache, rebuilt by reopening)
     if security is not None:
         install(app, security)
@@ -175,6 +218,7 @@ def build_app(
     allowed_hosts: tuple[str, ...] = (),
     token: str | None = None,
     max_runs: int = 1,
+    stop_tasks_on_exit: bool = False,
 ) -> FastAPI:
     """The composition root: local adapters, everything under ROOT/.smeltery/bench/, behind the request guard.
 
@@ -195,9 +239,12 @@ def build_app(
         clock=SystemClock(),
         settings=Settings(root=root, studies=tuple(studies), web_dir=web_dir),
         security=SecurityConfig(bind_host=host, allowed_hosts=tuple(allowed_hosts), token=token or None),
+        stop_tasks_on_exit=stop_tasks_on_exit,
     )
 
 
+STOP_TASKS_ENV = "SMELTERY_BENCH_STOP_TASKS_ON_EXIT"
+_TRUE = ("1", "true", "yes")
 LOG_LEVELS = ("debug", "info", "warning", "error")
 _TOKEN_QUERY = re.compile(r"([?&]token=)[^&\s\"]*")
 
@@ -241,6 +288,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=f"log one JSON object per line instead of text (${LOG_JSON_ENV}=1)",
     )
+    ap.add_argument(
+        "--stop-tasks-on-exit",
+        action="store_true",
+        default=None,
+        help=f"on shutdown, cancel queued tasks and terminate running ones (default: leave them running; "
+        f"${STOP_TASKS_ENV}=1). What Docker should use.",
+    )
     args = ap.parse_args(argv)
     token = args.token or os.environ.get(TOKEN_ENV) or None
     if not is_loopback(args.host) and token is None:
@@ -260,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     level = args.log_level or os.environ.get(LOG_LEVEL_ENV, "info").lower()
     if level not in LOG_LEVELS:
         ap.error(f"${LOG_LEVEL_ENV} must be one of {', '.join(LOG_LEVELS)}, got {level!r}")
-    as_json = bool(args.log_json) or os.environ.get(LOG_JSON_ENV, "").lower() in ("1", "true", "yes")
+    as_json = bool(args.log_json) or os.environ.get(LOG_JSON_ENV, "").lower() in _TRUE
     setup_logging(level, as_json)
     os.environ[LOG_LEVEL_ENV], os.environ[LOG_JSON_ENV] = level, "1" if as_json else "0"  # task supervisors inherit
     app = build_app(
@@ -270,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         allowed_hosts=tuple(args.allow_host),
         token=token,
         max_runs=args.max_runs,
+        stop_tasks_on_exit=bool(args.stop_tasks_on_exit) or os.environ.get(STOP_TASKS_ENV, "").lower() in _TRUE,
     )
     # uvicorn runs at log_level="warning", so without this line a healthy server prints nothing and looks hung.
     shown = args.host if args.host not in ("0.0.0.0", "::") else "localhost"

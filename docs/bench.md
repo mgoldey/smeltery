@@ -14,7 +14,7 @@ number from the task's ceiling.
 pip install 'smeltery[bench]'          # the wheel ships the built UI
 smeltery bench ROOT [--study pkg.module] [--port 8765] [--max-runs 1] [--open]
                    [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
-                   [--log-level info] [--log-json]
+                   [--log-level info] [--log-json] [--stop-tasks-on-exit]
 ```
 
 ROOT is searched recursively for run records (`run-*.json`). Bench keeps its own state (comments,
@@ -49,6 +49,28 @@ attempt and backoff), `oom`, `timeout`, `cancel`, `supervisor_lost`, and `exit` 
 attempt. Exceptions that Bench turns into a response or a fallback are logged with their traceback.
 A request line's `?token=` value is redacted, and no command line, environment or token is ever
 logged.
+
+## Shutdown
+
+Ctrl+C or SIGTERM makes uvicorn stop gracefully, and Bench's shutdown hook then runs. Tasks run in
+their own sessions under their own supervisors, so by default they **outlive Bench**: the hook logs
+one warning naming every queued or running task (id and pid) so the operator knows what is still
+going, and the next Bench on the same ROOT picks them up again (a queued run starts, a running one is
+reported as it was).
+
+`--stop-tasks-on-exit` (env `SMELTERY_BENCH_STOP_TASKS_ON_EXIT=1`) stops them instead. Queued
+tasks are cancelled first, in one transaction, so a finishing supervisor cannot promote one into the
+slot a dying task frees; then each running task's process group gets SIGTERM, and SIGKILL after a
+2 s grace. A group is signalled only while the recorded pid still has the recorded identity (boot id
+and start time), so a pid reused since is never touched. Stopped tasks read `cancelled` with a note
+saying why. A second Ctrl+C makes uvicorn exit without waiting, and a SIGKILL runs no hook at all;
+neither stops anything, and the tasks are then found by the next Bench as above.
+
+Use `--stop-tasks-on-exit` in Docker: the container's tasks live in its process tree, and a
+container that stops (or restarts) with orphaned supervisors inside it would lose them to the
+runtime's SIGKILL with no record of why. With the flag a stop leaves clean `cancelled` rows instead.
+Leave it off on a workstation where a multi-hour run should survive closing the terminal. The task
+queue on Temporal runs work elsewhere and is not touched either way.
 
 ## Security
 

@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+import signal
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -29,6 +30,8 @@ _GB = 1024**3
 _log = logging.getLogger(__name__)
 #: `SubprocessTaskQueue` defines `list`, so inside its body the builtin is unreachable by name (as in smeltery.tasks).
 _TaskList = list[Task]
+_StrList = list[str]
+_DictList = list[dict]
 
 #: Columns added after the first schema, with their types. Every one is nullable, so an old row reads back as "the
 #: backend cannot say". `owner_pid` is no longer written (the supervisor replaced the in-process waiter) but stays
@@ -368,6 +371,38 @@ class SubprocessTaskQueue:
             kill_group(pid)
         promote(self.db, self._spawn)
         return True
+
+    def live_tasks(self) -> _DictList:
+        self._reconcile()  # a running row whose supervisor is gone is not live
+        with open_db(self.db) as con:
+            rows = con.execute(
+                "SELECT id,name,status,pid,supervisor_pid FROM tasks WHERE status IN ('queued','running') "
+                "ORDER BY created_at"
+            ).fetchall()
+        return [{"id": i, "name": n, "status": st, "pid": pid, "supervisor_pid": spid} for i, n, st, pid, spid in rows]
+
+    def stop_live(self, reason: str) -> _StrList:
+        """Cancel every queued task and terminate every running one. The marks are written first and in one
+        transaction, so nothing is promoted while the running ones die (a finishing supervisor promotes the next
+        queued task). A process group is signalled only while the recorded pid still has the recorded identity: a
+        reused pid is never touched."""
+        with connect(self.db, immediate=True) as con:
+            rows = con.execute(
+                "SELECT id,status,pid,pid_start FROM tasks WHERE status IN ('queued','running')"
+            ).fetchall()
+            con.execute(
+                "UPDATE tasks SET status='cancelled', finished_at=?, note=? WHERE status IN ('queued','running')",
+                (utc(), reason),
+            )
+        groups = [pid for _, status, pid, start in rows if status == "running" and pid and same_process(pid, start)]
+        for pgid in groups:  # ask them all first, so the grace periods overlap instead of adding up
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(pgid, signal.SIGTERM)
+        for pgid in groups:
+            kill_group(pgid)
+        for tid, status, *_ in rows:
+            task_event(tid, "stop", was=status, reason=reason)
+        return [tid for tid, *_ in rows]
 
     def ready(self):
         try:
