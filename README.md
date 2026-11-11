@@ -1,10 +1,39 @@
 # smeltery
 
-A tiered screening funnel for biochemical systems that ranks only what it can resolve.
+[![test](https://github.com/mgoldey/smeltery/actions/workflows/test.yml/badge.svg)](https://github.com/mgoldey/smeltery/actions/workflows/test.yml)
+[![PyPI](https://img.shields.io/pypi/v/smeltery)](https://pypi.org/project/smeltery/)
+[![Python](https://img.shields.io/pypi/pyversions/smeltery)](https://pypi.org/project/smeltery/)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-smeltery takes a lead compound and its analogues and runs them through tiers of
-increasingly expensive physics. At each tier it keeps only the candidates that are measurably
-better. It runs on the [ferric](https://github.com/mgoldey/ferric) quantum-chemistry engine.
+A tiered screening funnel for biochemical systems that ranks only what it can resolve, and
+**Bench**, the local web app you read and run it from.
+
+You give smeltery a lead compound and its analogues. It runs them through tiers of increasingly
+expensive physics, keeps only the candidates that are measurably better, and says "unranked"
+when two of them are within each other's uncertainty. It is for computational chemists who want
+a ranking they can defend, and for the bench chemists who read the result. It runs on the
+[ferric](https://github.com/mgoldey/ferric) quantum-chemistry engine.
+
+![Bench's Results page for a run whose cut cannot separate its candidates: a paired ddE forest plot with tie groups, and the verdict "Does not resolve"](docs/img/bench-results.png)
+
+*Bench's Results page on a small fixture run. The verdict is "Does not resolve": 4-Cl and 4-Br
+share a tie group, so the cut refuses to order them.*
+
+## 60-second demo
+
+No quantum chemistry runs. This seeds a Bench directory with finished example runs and opens one.
+From a source checkout, build the UI once first (needs Node); `pip install 'smeltery[bench]'`
+ships it prebuilt.
+
+```bash
+(cd ui && npm ci && npm run build)
+uv run --extra bench smeltery bench --demo --open
+```
+
+`--demo` copies all five prebuilt pipelines, each with its inputs and a finished run, into your
+per-user Bench directory and opens on the `benzoic-rhf` run. It is idempotent: a second `--demo`
+never overwrites your edits. Add a `ROOT` argument to use another directory. Details in
+[docs/bench.md](docs/bench.md).
 
 ## Quickstart
 
@@ -121,6 +150,64 @@ Running the tests and the other checks is covered in [AGENTS.md](AGENTS.md).
   cut reports a tie, or "unranked", instead of an order.
 - **Records provenance.** Every run writes a JSON record with the exact ferric commit, the
   settings and an input digest.
+
+## How it works
+
+A run is a pipeline of tiers. Each tier is a measurement with a stated cost and a stated claim
+about what it may rank; the cheap ones go first.
+
+1. **Poses.** `PairedPoses` builds an ensemble of parent poses (or takes docked ones). Each
+   analogue pose *i* is built on parent pose *i*, with the shared core copied exactly, so pose
+   noise cancels.
+2. **Measure.** `FieldInteraction` computes each pose's interaction energy with the pocket's
+   point-charge field. The difference from the parent is the paired ΔΔE.
+3. **Cut.** The cut ranks candidates by mean paired ΔΔE, with its standard error and an explicit
+   systematic floor. Candidates it cannot separate form a tie group with no internal order, and
+   the verdict says so.
+
+Optional gates (parity, PoseBusters, MMFF strain) either pass every candidate or stop the run;
+only the paired-ΔΔE cut removes candidates. See [docs/tiers/index.md](docs/tiers/index.md) for
+each tier, [docs/tiers/paired_poses.md](docs/tiers/paired_poses.md) for the pairing, and
+[docs/worked-example.md](docs/worked-example.md) for one pipeline from its config to its numbers.
+
+## Architecture
+
+Bench is a FastAPI backend in `src/smeltery/bench/` with a React and TypeScript frontend in
+`ui/`. The backend is ports and adapters: routes call use cases, use cases and routes depend on
+port protocols, and `app.py` is the one place that picks concrete adapters. The frontend talks
+to the backend only through a client generated from the backend's OpenAPI schema
+(`npm run gen:api`), so a changed route is a type error in the UI rather than a runtime surprise.
+
+```mermaid
+flowchart LR
+  subgraph UI["ui/ (React + TypeScript)"]
+    pages["pages/"] --> client["openapi-fetch client<br/>api/schema.d.ts, generated"]
+  end
+  subgraph Backend["src/smeltery/bench/ (FastAPI)"]
+    api["api/<br/>runs, pipelines, work, ..."] --> usecases["use_cases/<br/>launch_run, record_decision, ..."]
+    api --> ports["ports/<br/>Protocols"]
+    usecases --> ports
+    adapters["adapters/"] -. implements .-> ports
+    app["app.py<br/>composition root"] -. injects .-> adapters
+  end
+  client -- "HTTP / JSON" --> api
+  adapters --> fs[("run and pipeline files<br/>under ROOT")]
+  adapters --> sql[("sqlite<br/>comments, projects, tasks")]
+  adapters --> proc["task subprocesses<br/>smeltery run"]
+```
+
+- **`api/`** holds the routers (`runs`, `pipelines`, `work`, `lineage`, `methods`, `prebuilt`,
+  `ligands`, `active_site`, `notebook`). They read the injected ports from `app.state`.
+- **`use_cases/`** holds one module per operation, such as `launch_run`, `record_decision`,
+  `compare_arms`, `publish_report` and `seed_demo`.
+- **`ports/`** holds the protocols: `RunStore`, `PipelineStore`, `TaskQueue`, `CommentStore`,
+  `ProjectStore`, `ArtifactStore`, `StructureSource`, `MethodDefaults`, `Identity` and `Clock`.
+- **`adapters/`** implements them. Runs, pipelines and artefacts are files under ROOT; comments,
+  projects and the task table are sqlite (`comments.sqlite`, `projects.sqlite`, `tasks.sqlite`).
+  `SubprocessTaskQueue` runs each launch as its own `smeltery run` process group and records its
+  state in sqlite; `TemporalTaskQueue` is the alternative backed by Temporal.
+
+Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 
 ## Documentation
 
