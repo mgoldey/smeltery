@@ -39,7 +39,7 @@ from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
 from . import models as M
 from . import prebuilt as prebuilt_api
-from .common import ports, record, row
+from .common import confined_out, ports, record, row
 from .work import pipeline_from_run, pipeline_issues
 
 router = APIRouter(prefix="/api", tags=["pipelines"])
@@ -846,9 +846,10 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
         )
     st = ports(request)
     root = Path(st.settings.root)
-    out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
-    if not out.is_absolute():
-        out = root / out
+    default = root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
+    out = confined_out(root, body.out, default)
+    if isinstance(out, JSONResponse):
+        return out
     try:
         tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
             p, out_dir=out, config_dir=f.folder, text=f.text

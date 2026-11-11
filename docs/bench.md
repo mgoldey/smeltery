@@ -40,6 +40,9 @@ is `smeltery.bench.security`, put in front of every route by `build_app`:
   rebinding, where a hostile page re-resolves its own name to 127.0.0.1.
 - **Origin check.** A POST, PUT, PATCH or DELETE carrying an `Origin` whose host is not allowed (or
   `Origin: null`) gets 403. Same-origin requests and requests with no Origin (curl, scripts) pass.
+- **Launch output stays in ROOT.** The `out` of a launch is resolved (`~`, `..` and symlinks
+  followed) and must lie strictly inside ROOT, a relative `out` being read from ROOT; anything else
+  is a 400 `{"reason": ...}` and nothing is staged.
 - **Token off loopback.** `--host` anything but loopback (e.g. `0.0.0.0`) requires `--token` or
   `SMELTERY_BENCH_TOKEN`; without one `smeltery bench` exits 2. With a token, every request except
   `/healthz` and `/livez` needs `Authorization: Bearer <token>` or the cookie set by visiting the
@@ -320,8 +323,7 @@ change without that regeneration fails CI.
   `/ligands`, `/ligands/edit`, `/pocket_preview`, `/active_site`; `/api/prebuilt`
 - methods: `/api/methods` (list with workspace defaults), `PUT /api/methods/{key}` (set them);
   `/api/catalog`, `GET /api/methods/{key}`
-- work: `GET /api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; the earlier pipeline
-  routes `/api/pipeline/{check,edit,site,from_run,launch}` and `/api/provisional`;
+- work: `GET /api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; `/api/provisional`;
   `/api/structure`, `/api/structure/text`, `/api/structure/{sha}.pdb`
 - notebook: `/api/campaigns`, `/api/campaigns/{id}`, `/api/campaigns/{id}/entries`;
   `/api/studies`, `/api/studies/{module}/dag`, `/api/studies/{module}/cells`

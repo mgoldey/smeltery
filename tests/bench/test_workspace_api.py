@@ -240,7 +240,7 @@ def test_run_launches_the_saved_config_from_its_folder(client_for, tmp_path):
     c, ports = client_for(queue=queue)
     doc = _saved(c, "p1", HAND)
     assert doc["ok"], doc["issues"]
-    out = tmp_path / "runs" / "one"
+    out = tmp_path / "bench-root" / "runs" / "one"
     r = c.post("/api/pipelines/p1/launch", json={"out": str(out)})
     assert r.status_code == 201, r.text
     (name, command, cwd, _note) = queue.submitted[0]
@@ -258,12 +258,56 @@ def test_run_resolves_relative_inputs_against_the_pipeline_folder(client_for, tm
     (folder / "decisions.toml").write_text("")
     text = HAND + '\n[decisions]\nfile = "decisions.toml"\n'
     doc = c.put("/api/pipelines/p1", json={"toml": text, "base_sha256": doc["sha256"]}).json()
-    out = tmp_path / "runs" / "two"
+    out = tmp_path / "bench-root" / "runs" / "two"
     r = c.post("/api/pipelines/p1/launch", json={"out": str(out)})
     assert r.status_code == 201, r.text
     staged = tomllib.loads((out / "config.toml").read_text())["decisions"]["file"]
     assert staged.startswith("inputs/")
     assert (out / staged).is_file()
+
+
+def _launch_out(c, out):
+    if "p1" not in c.get("/api/pipelines").json():
+        _saved(c, "p1", HAND)
+    return c.post("/api/pipelines/p1/launch", json={"out": out})
+
+
+def test_launch_refuses_an_out_outside_the_workspace_and_stages_nothing(client_for, tmp_path):
+    queue = FakeTaskQueue()
+    c, ports = client_for(queue=queue)
+    elsewhere = tmp_path / "elsewhere"
+    for out in (str(elsewhere), "../x", "~/smeltery-b05-nope", "/", "."):
+        r = _launch_out(c, out)
+        assert r.status_code == 400, (out, r.text)
+        assert "inside the workspace" in r.json()["reason"]
+    assert queue.submitted == [] and not elsewhere.exists() and not (tmp_path / "x").exists()
+
+
+def test_launch_refuses_a_symlink_that_leaves_the_workspace(client_for, tmp_path):
+    queue = FakeTaskQueue()
+    c, ports = client_for(queue=queue)
+    root = Path(ports["settings"].root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    r = _launch_out(c, "link/run")
+    assert r.status_code == 400 and queue.submitted == []
+    assert list(outside.iterdir()) == []
+
+
+def test_launch_takes_a_relative_out_inside_the_workspace(client_for):
+    queue = FakeTaskQueue()
+    c, ports = client_for(queue=queue)
+    r = _launch_out(c, "runs/rel")
+    assert r.status_code == 201, r.text
+    assert (Path(ports["settings"].root) / "runs" / "rel" / "config.toml").is_file()
+
+
+def test_the_singular_pipeline_routes_are_gone(client_for):
+    c, _ = client_for()
+    for name in ("check", "from_run", "edit", "site", "launch"):
+        assert c.post(f"/api/pipeline/{name}", json={}).status_code in (404, 405), name
 
 
 def test_run_of_an_unknown_pipeline_is_404(client_for):
@@ -358,7 +402,7 @@ def test_the_run_directory_holds_the_kept_text_with_only_input_paths_rewritten(c
     (Path(doc["folder"]) / "decisions.toml").write_text("")
     text = HAND + '\n# who decided what\n[decisions]\nfile = "decisions.toml"\n'
     c.put("/api/pipelines/p1", json={"toml": text, "base_sha256": doc["sha256"]})
-    out = tmp_path / "runs" / "kept"
+    out = tmp_path / "bench-root" / "runs" / "kept"
     assert c.post("/api/pipelines/p1/launch", json={"out": str(out)}).status_code == 201
     written = (out / "config.toml").read_text()
     changed = _changed(text, written)
@@ -382,7 +426,7 @@ def test_run_into_a_live_temporal_out_is_409_and_writes_nothing(client_for, tmp_
     queue = FakeTaskQueue()
     c, _ = client_for(queue=queue)
     assert _saved(c, "p1", HAND)["ok"]
-    out = tmp_path / "runs" / "live"
+    out = tmp_path / "bench-root" / "runs" / "live"
     r = c.post("/api/pipelines/p1/launch", json={"out": str(out)})
     assert r.status_code == 409 and "still running" in r.json()["detail"]
     assert queue.submitted == [] and not out.exists()

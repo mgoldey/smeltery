@@ -111,7 +111,7 @@ def test_a_hand_broken_methods_file_is_a_409_naming_it_not_a_500(client_for):
 
 
 def _edit(c, toml, op, key, **kw):
-    r = c.post("/api/pipeline/edit", json={"toml": toml, "op": op, "key": key, **kw})
+    r = c.post("/api/pipelines/edit", json={"toml": toml, "op": op, "key": key, **kw})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -123,16 +123,15 @@ def test_a_workspace_default_is_copied_into_a_method_added_through_the_edit_rout
     c, _ = client_for()
     assert c.put("/api/methods/field_dft_interaction", json={"defaults": {"basis": "def2-svp"}}).status_code == 200
     toml = dumps(Pipeline.minimal("cdk2", "a", {"a": "CCO", "b": "CCN"}).to_config())
-    toml = _edit(c, toml, "remove", "field_interaction")["toml"]
-    added = _edit(c, toml, "add", "field_dft_interaction")
+    added = _edit(c, toml, "choose", "field_dft_interaction")
     assert tomllib.loads(added["toml"])["field_dft_interaction"] == {"basis": "def2-svp"}
     # an explicit value in the request beats the default
-    explicit = _edit(c, toml, "add", "field_dft_interaction", params={"basis": "sto-3g"})
+    explicit = _edit(c, toml, "choose", "field_dft_interaction", params={"basis": "sto-3g"})
     assert tomllib.loads(explicit["toml"])["field_dft_interaction"] == {"basis": "sto-3g"}
     # copied, not referenced: clearing the default leaves the already-added stage as it was
     assert c.put("/api/methods/field_dft_interaction", json={"defaults": {}}).status_code == 200
     assert tomllib.loads(added["toml"])["field_dft_interaction"] == {"basis": "def2-svp"}
-    bare = _edit(c, toml, "add", "field_dft_interaction")
+    bare = _edit(c, toml, "choose", "field_dft_interaction")
     assert tomllib.loads(bare["toml"])["field_dft_interaction"] == {}
 
 
