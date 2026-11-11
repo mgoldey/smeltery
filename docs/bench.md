@@ -326,6 +326,21 @@ only place with sqlite3, Path.home, or Temporal references, with one named excep
 unless it was submitted with `retries` (0-5); a dead worker's task is reported failed, never retried
 on the orchestrator's own initiative.
 
+### Tasks outlive Bench
+
+`SubprocessTaskQueue` starts each task under its own supervisor process
+(`smeltery/bench/adapters/task_supervisor.py`, in a new session). The supervisor is the task's
+parent: it writes the heartbeat, the peak memory and the exit code to `tasks.sqlite` itself, and
+enforces the memory limit and the retries. Bench only reads that database and sends signals, so
+stopping or restarting Bench does not stop a task, and a restarted Bench reads how it ended.
+
+Every pid is stored with its start time (`/proc/<pid>/stat` field 22, plus the boot id) and is
+trusted or signalled only while that still matches. When Bench opens the queue, a `running` task
+whose supervisor is gone is marked `failed` with the note "supervisor lost" (its own process is
+killed if it is verifiably still running); a pid that now names another process (a reboot, or pid
+reuse) fails the task and is never signalled. The database is in WAL mode with a 30 s busy
+timeout, since several supervisors write to it at once.
+
 ### Worker health
 
 The work panel reports what a running task is actually doing, because "running" alone cannot tell a

@@ -300,25 +300,28 @@ def _pid(q, tid):
         return con.execute("SELECT pid FROM tasks WHERE id=?", (tid,)).fetchone()[0]
 
 
-def test_a_task_in_backoff_whose_owner_process_died_is_failed_by_a_new_queue(bench_tmp):
+def _row(q, tid, cols):
     import sqlite3
-    import subprocess
+
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        return con.execute(f"SELECT {cols} FROM tasks WHERE id=?", (tid,)).fetchone()
+
+
+def test_a_task_in_backoff_whose_supervisor_died_is_failed_by_a_new_queue(bench_tmp):
+    import os
+    import signal
 
     q = SubprocessTaskQueue(bench_tmp)
     q.retry_backoff_s = 30.0
     tid = q.submit("fail", ["bash", "-c", "exit 1"], retries=2)
-    wait_until(lambda: _pid(q, tid) is None, timeout=10)
-    dead = subprocess.Popen(["true"])
-    dead.wait()  # a reaped child's pid: certainly not alive
-    with contextlib.closing(sqlite3.connect(q.db)) as con:
-        con.execute("UPDATE tasks SET owner_pid=? WHERE id=?", (dead.pid, tid))
-        con.commit()
-    t = SubprocessTaskQueue(bench_tmp).get(tid)
-    assert t.status == "failed" and "bench restarted" in t.note
-    assert q.get(tid).status == "failed"
+    wait_until(lambda: _row(q, tid, "attempt")[0] == 1 and _pid(q, tid) is None, timeout=10)
+    os.kill(_row(q, tid, "supervisor_pid")[0], signal.SIGKILL)
+    wait_until(lambda: SubprocessTaskQueue(bench_tmp).get(tid).status == "failed", timeout=10)
+    t = q.get(tid)
+    assert t.status == "failed" and "supervisor lost" in t.note, t.note
 
 
-def test_a_task_in_backoff_with_a_live_owner_is_left_running(bench_tmp):
+def test_a_task_in_backoff_with_a_live_supervisor_is_left_running(bench_tmp):
     q = SubprocessTaskQueue(bench_tmp)
     q.retry_backoff_s = 30.0
     tid = q.submit("fail", ["bash", "-c", "exit 1"], retries=2)
@@ -449,3 +452,146 @@ def test_an_oom_kill_is_never_retried(bench_tmp):
     t1 = q.get(tid)
     assert t1.status == "failed" and t1.oom is True
     assert t1.attempt == t0.attempt, f"an OOM was retried: attempt went {t0.attempt} -> {t1.attempt}"
+
+
+# ---------------------------------------------------------------------------------------------------- B02: restarts
+
+_SUBMIT_AND_EXIT = """
+import sys
+from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
+print(SubprocessTaskQueue(sys.argv[1]).submit("sleepy", ["sleep", "2"]))
+"""
+
+
+def test_a_task_outlives_the_process_that_submitted_it(bench_tmp):
+    """Submit from a process that exits at once: the supervisor, not the submitter, records the exit code."""
+    import os
+    import subprocess
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, "-c", _SUBMIT_AND_EXIT, str(bench_tmp)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        check=True,
+    )
+    tid = done.stdout.strip().splitlines()[-1]
+    q = SubprocessTaskQueue(bench_tmp)
+    assert q.get(tid).status == "running"
+    wait_until(lambda: q.status(tid) != "running", timeout=30)
+    t = q.get(tid)
+    assert (t.status, t.returncode) == ("succeeded", 0), (t.status, t.returncode, t.note)
+
+
+def _fake_running_row(q, tid, *, supervisor_pid, supervisor_start, pid, pid_start):
+    """A running row as an earlier Bench would have left it, naming whatever pids the test chooses."""
+    import sqlite3
+
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        con.execute(
+            "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid,max_attempts,"
+            "oom,supervisor_pid,supervisor_start,pid_start) VALUES (?,?,?,?,'running',?,?,?,'',?,1,0,?,?,?)",
+            (
+                tid,
+                "x",
+                '["true"]',
+                "",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+                str(q.log_dir / "x.log"),
+                pid,
+                supervisor_pid,
+                supervisor_start,
+                pid_start,
+            ),
+        )
+        con.commit()
+
+
+def _alive(p) -> bool:
+    return p.poll() is None
+
+
+def test_a_reused_supervisor_pid_reads_failed_and_nothing_is_signalled(bench_tmp):
+    """After a reboot or pid reuse, the stored pids name unrelated processes: the task fails, and they live on."""
+    import subprocess
+
+    q = SubprocessTaskQueue(bench_tmp)
+    stranger = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        _fake_running_row(
+            q,
+            "reused",
+            supervisor_pid=stranger.pid,
+            supervisor_start="other-boot:1",
+            pid=stranger.pid,
+            pid_start="other-boot:1",
+        )
+        t = SubprocessTaskQueue(bench_tmp).get("reused")
+        assert t.status == "failed" and "pid reuse" in t.note, t.note
+        assert q.cancel("reused") is False
+        time.sleep(0.3)
+        assert _alive(stranger), "a process whose identity did not match was signalled"
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_cancel_never_signals_a_pid_whose_start_time_does_not_match(bench_tmp):
+    import os
+    import subprocess
+
+    from smeltery.bench.adapters.task_supervisor import proc_identity
+
+    q = SubprocessTaskQueue(bench_tmp)
+    stranger = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        # the supervisor is a live, matching process (this one); the task pid names a stranger
+        _fake_running_row(
+            q,
+            "mismatch",
+            supervisor_pid=os.getpid(),
+            supervisor_start=proc_identity(os.getpid()),
+            pid=stranger.pid,
+            pid_start="other-boot:1",
+        )
+        assert q.get("mismatch").status == "running"
+        assert q.cancel("mismatch") is True
+        assert q.get("mismatch").status == "cancelled"
+        time.sleep(0.3)
+        assert _alive(stranger), "cancel signalled a process whose start time did not match"
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_a_dead_supervisor_fails_its_task_and_kills_the_orphan(bench_tmp):
+    import os
+    import signal
+
+    q = SubprocessTaskQueue(bench_tmp)
+    tid = q.submit("long", ["sleep", "60"])
+    wait_until(lambda: _pid(q, tid) is not None, timeout=10)
+    child = _pid(q, tid)
+    os.kill(_row(q, tid, "supervisor_pid")[0], signal.SIGKILL)
+    wait_until(lambda: SubprocessTaskQueue(bench_tmp).get(tid).status == "failed", timeout=10)
+    t = q.get(tid)
+    assert "supervisor lost" in t.note and "killed" in t.note, t.note
+
+    def gone():
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            return True
+        return "Z" in Path(f"/proc/{child}/stat").read_text().rsplit(")", 1)[1].split()[0]
+
+    wait_until(gone, timeout=5)
+
+
+def test_the_database_is_in_wal_mode(bench_tmp):
+    import sqlite3
+
+    q = SubprocessTaskQueue(bench_tmp)
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
