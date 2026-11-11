@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import socket
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -45,6 +46,35 @@ class Settings:
 
 
 MIN_FREE_BYTES = 100 * 2**20
+
+ROOT_ENV = "SMELTERY_BENCH_ROOT"
+HOST_ENV = "SMELTERY_BENCH_HOST"
+PORT_ENV = "SMELTERY_BENCH_PORT"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8765
+
+
+def default_root() -> Path:
+    """Where Bench keeps its work when no ROOT is given: `$SMELTERY_BENCH_ROOT`, else the per-user XDG data directory
+    (`$XDG_DATA_HOME/smeltery/bench`, or `~/.local/share/smeltery/bench`). Never the current directory, whose run
+    glob would walk a `.venv` or `node_modules`."""
+    env = os.environ.get(ROOT_ENV)
+    if env:
+        return Path(env).expanduser()
+    data = os.environ.get("XDG_DATA_HOME")
+    base = (
+        Path(data).expanduser() if data and Path(data).expanduser().is_absolute() else Path.home() / ".local" / "share"
+    )
+    return base / "smeltery" / "bench"
+
+
+def port_in_use(host: str, port: int) -> OSError | None:
+    """The error binding (host, port) raises, or None when it is free. A probe: the socket is closed at once."""
+    try:
+        socket.create_server((host, port), family=socket.AF_INET6 if ":" in host else socket.AF_INET).close()
+    except OSError as e:
+        return e
+    return None
 
 
 def _ready_checks(root: Path, task_queue: Any) -> dict[str, dict[str, Any]]:
@@ -195,8 +225,16 @@ def build_app(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="smeltery bench", description="Serve Bench for the runs under ROOT.")
-    ap.add_argument("root", nargs="?", default=".", help="directory holding run records (searched recursively)")
-    ap.add_argument("--host", default="127.0.0.1", help="address to bind; anything but loopback needs a token")
+    ap.add_argument(
+        "root",
+        nargs="?",
+        default=None,
+        help=f"workspace directory (default: ${ROOT_ENV}, else ~/.local/share/smeltery/bench); created if missing",
+    )
+    ap.add_argument(
+        "--demo", action="store_true", help="seed ROOT with every prebuilt pipeline and open a finished run"
+    )
+    ap.add_argument("--host", default=None, help=f"address to bind (default: ${HOST_ENV}, else {DEFAULT_HOST})")
     ap.add_argument(
         "--allow-host",
         action="append",
@@ -205,10 +243,19 @@ def main(argv: list[str] | None = None) -> int:
         help="another Host name browsers may use to reach Bench, e.g. this machine's DNS name (repeatable)",
     )
     ap.add_argument("--token", default=None, help=f"require this token on every request (default: ${TOKEN_ENV})")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=None, help=f"port (default: ${PORT_ENV}, else {DEFAULT_PORT})")
     ap.add_argument("--study", action="append", default=[], help="a study's Python module path (repeatable)")
     ap.add_argument("--open", action="store_true", help="open a browser")
     args = ap.parse_args(argv)
+    args.host = args.host or os.environ.get(HOST_ENV) or DEFAULT_HOST
+    if args.port is None:
+        env_port = os.environ.get(PORT_ENV)
+        try:
+            args.port = int(env_port) if env_port else DEFAULT_PORT
+        except ValueError:
+            print(f"smeltery bench: {PORT_ENV}={env_port!r} is not a port number", file=sys.stderr)
+            return 2
+    root = Path(args.root).expanduser() if args.root else default_root()
     token = args.token or os.environ.get(TOKEN_ENV) or None
     if not is_loopback(args.host) and token is None:
         print(
@@ -220,16 +267,38 @@ def main(argv: list[str] | None = None) -> int:
     if not (WEB_DIR / "index.html").is_file():
         print(BUILD_HINT, file=sys.stderr)
         return 2
+    busy = port_in_use(args.host, args.port)
+    if busy is not None:
+        print(
+            f"smeltery bench: port {args.port} on {args.host} is not available ({busy.strerror or busy}). "
+            f"Another Bench may already be running there; pass --port N or set {PORT_ENV}.",
+            file=sys.stderr,
+        )
+        return 1
     import uvicorn
 
-    app = build_app(
-        args.root, studies=tuple(args.study), host=args.host, allowed_hosts=tuple(args.allow_host), token=token
-    )
+    root.mkdir(parents=True, exist_ok=True)
+    landing = ""
+    if args.demo:
+        from .use_cases.seed_demo import landing_path, seed_demo
+
+        added = seed_demo(root)
+        landing = landing_path(root)
+        what = "added " + ", ".join(added) if added else "already seeded"
+        print(
+            f"smeltery bench: demo workspace {root.resolve()} ({what})",
+            file=sys.stderr,
+            flush=True,
+        )
+    app = build_app(root, studies=tuple(args.study), host=args.host, allowed_hosts=tuple(args.allow_host), token=token)
     # uvicorn runs at log_level="warning", so without this line a healthy server prints nothing and looks hung.
     shown = args.host if args.host not in ("0.0.0.0", "::") else "localhost"
     shown = f"[{shown}]" if ":" in shown else shown  # an IPv6 literal in a URL
     url = f"http://{shown}:{args.port}/"
-    print(f"smeltery bench: serving {Path(args.root).resolve()} at {url} (Ctrl+C stops)", file=sys.stderr, flush=True)
+    print(f"smeltery bench: serving {root.resolve()} at {url} (Ctrl+C stops)", file=sys.stderr, flush=True)
+    if landing and token is None:  # with a token the sign-in redirect lands on `/`, where the runs are listed
+        url = url.rstrip("/") + landing
+        print(f"smeltery bench: the demo's finished run is at {url}", file=sys.stderr, flush=True)
     if token is not None:
         url = f"{url}?token={quote(token, safe='')}"  # visiting it once sets the cookie the UI then carries
         print(f"smeltery bench: open {url} to sign this browser in", file=sys.stderr, flush=True)

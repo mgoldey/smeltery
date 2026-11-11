@@ -10,14 +10,36 @@ arrays and is not a process ceiling.
 
 ```
 pip install 'smeltery[bench]'          # the wheel ships the built UI
-smeltery bench ROOT [--study pkg.module] [--port 8765] [--open]
-                   [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
+smeltery bench [ROOT] [--demo] [--study pkg.module] [--port 8765] [--open]
+                       [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
+smeltery bench --demo --open           # the one-command tour: finished runs, no SCF
 ```
 
 ROOT is searched recursively for run records (`run-*.json`). Bench keeps its own state (comments,
 decisions, campaigns, attached artefacts, task logs, method defaults) under `ROOT/.smeltery/bench/`;
 pipelines are folders under `ROOT/pipelines/`. `--study`
 names a study by Python module path and may be repeated.
+
+### Defaults and environment
+
+Each setting takes the first of: the command-line flag, the environment variable, the default.
+
+| Setting | Flag | Environment | Default |
+|---|---|---|---|
+| ROOT | positional `ROOT` | `SMELTERY_BENCH_ROOT` | `$XDG_DATA_HOME/smeltery/bench`, else `~/.local/share/smeltery/bench` |
+| Host | `--host` | `SMELTERY_BENCH_HOST` | `127.0.0.1` |
+| Port | `--port` | `SMELTERY_BENCH_PORT` | `8765` |
+| Token | `--token` | `SMELTERY_BENCH_TOKEN` | none (required off loopback) |
+
+ROOT is created on first use; with no ROOT Bench never searches the current directory (which would
+walk `.venv` and `node_modules`). A port that is already taken prints `port N on HOST is not
+available` and exits 1; pass `--port` or set `SMELTERY_BENCH_PORT`. A `SMELTERY_BENCH_PORT` that is
+not a number exits 2.
+
+`--demo` copies every prebuilt pipeline (below) into ROOT, with its inputs and finished example
+run, then opens on a finished run (`benzoic-rhf`, RESOLVED). It runs no SCF, and it is idempotent:
+a pipeline already in ROOT is left as it is, so a second `--demo` adds nothing and never
+overwrites your edits.
 
 From a source checkout the UI must be built first; without it `smeltery bench` exits 2 and says so:
 

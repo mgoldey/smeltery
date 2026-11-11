@@ -88,6 +88,8 @@ run, copies of every input, the run record (`run-*.json`) and a per-SCF log.
 
   It works on an empty directory, so this is where to start when you have no runs yet:
   `mkdir work && uv run --extra bench smeltery bench work --open`.
+  To see finished work without running anything: `uv run --extra bench smeltery bench --demo --open`
+  seeds your per-user Bench directory with all five pipelines and opens a finished run.
 
 **4. Start your own pipeline.**
 
