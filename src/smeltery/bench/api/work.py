@@ -7,7 +7,6 @@ TOML plus every issue `Pipeline.check()` finds, so the editor never holds a seco
 from __future__ import annotations
 
 import hashlib
-import shlex
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -44,31 +43,6 @@ def list_tasks(request: Request) -> Any:
         return [_task(t) for t in ports(request).task_queue.list()]
     except Exception as e:  # noqa: BLE001 - a dead backend degrades this panel, not the app
         return JSONResponse(status_code=503, content={"reason": str(e)})
-
-
-@router.post("/tasks", response_model=M.Task, status_code=201, responses={503: {"model": M.Problem}})
-def submit_task(request: Request, body: M.TaskSubmit) -> Any:
-    try:
-        command = shlex.split(body.command) if isinstance(body.command, str) else list(body.command)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"invalid command: {e}") from e
-    if not command:
-        raise HTTPException(status_code=400, detail="command required")
-    q = ports(request).task_queue
-    try:
-        tid = q.submit(
-            body.name or command[0],
-            command,
-            cwd=body.cwd,
-            retries=body.retries,
-            memory_limit_gb=body.memory_limit_gb,
-        )
-        t = q.get(tid)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse(status_code=503, content={"reason": str(e)})
-    if t is None:
-        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
-    return _task(t)
 
 
 @router.get("/tasks/{task_id}/log", response_model=M.TaskLog)

@@ -17,6 +17,10 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
+
+from fastapi import Request
+from pydantic import BaseModel
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -88,6 +92,26 @@ class BrokenQueue:
         raise KeyError(tid)
 
 
+class E2ETask(BaseModel):
+    """What `POST /e2e/tasks` takes. Declared at module level: FastAPI resolves a handler's annotations against
+    module globals, and this file uses `from __future__ import annotations`, so a local class is invisible to it."""
+
+    name: str
+    command: list[str]
+    memory_limit_gb: float | None = None
+
+
+def add_e2e_task_route(app: Any) -> None:
+    """`POST /e2e/tasks`: put a chosen command on the queue, for the work-panel tests (a sleeper, a quiet task, a
+    memory hog). Fixture-only: Bench itself has no route that runs an arbitrary command, by design."""
+
+    @app.post("/e2e/tasks", status_code=201, include_in_schema=False)
+    def submit(request: Request, body: E2ETask) -> dict:
+        q = request.app.state.task_queue
+        tid = q.submit(body.name, body.command, memory_limit_gb=body.memory_limit_gb)
+        return {"id": tid}
+
+
 def main() -> int:
     import uvicorn
 
@@ -111,7 +135,10 @@ def main() -> int:
         queue.sample_interval_s = 0.1
     from fastapi.testclient import TestClient
 
-    made = TestClient(app).post("/api/pipelines", json={"name": "e2e", "from_run": 0})  # e2e/bench.ts PIPELINE
+    add_e2e_task_route(app)
+    made = TestClient(app, base_url=f"http://127.0.0.1:{port}").post(  # e2e/bench.ts PIPELINE
+        "/api/pipelines", json={"name": "e2e", "from_run": 0}
+    )
     assert made.status_code == 201, made.text
     if os.environ.get("BENCH_E2E_BROKEN_QUEUE"):
         app.state.task_queue = BrokenQueue()

@@ -11,6 +11,7 @@ arrays and is not a process ceiling.
 ```
 pip install 'smeltery[bench]'          # the wheel ships the built UI
 smeltery bench ROOT [--study pkg.module] [--port 8765] [--open]
+                   [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
 ```
 
 ROOT is searched recursively for run records (`run-*.json`). Bench keeps its own state (comments,
@@ -28,6 +29,28 @@ The UI is React and TypeScript in `ui/`. Every figure is built in Python (`smelt
 and drawn by Plotly; structures are drawn by Mol* from MolViewSpec scenes the API builds; 2D
 depictions and atom picking use RDKit.js. The pipeline exists only as TOML, carried through
 `smeltery.gui.pipeline.Pipeline`; every view of it is derived from that text.
+
+## Security
+
+Bench starts work on the machine it runs on, so it trusts only what it can tell is local. The guard
+is `smeltery.bench.security`, put in front of every route by `build_app`:
+
+- **Host allow-list.** A request whose `Host` header is not `localhost`, a loopback address, the
+  `--host` it binds, or a name passed with `--allow-host` (repeatable) gets 400. This defeats DNS
+  rebinding, where a hostile page re-resolves its own name to 127.0.0.1.
+- **Origin check.** A POST, PUT, PATCH or DELETE carrying an `Origin` whose host is not allowed (or
+  `Origin: null`) gets 403. Same-origin requests and requests with no Origin (curl, scripts) pass.
+- **Token off loopback.** `--host` anything but loopback (e.g. `0.0.0.0`) requires `--token` or
+  `SMELTERY_BENCH_TOKEN`; without one `smeltery bench` exits 2. With a token, every request except
+  `/healthz` and `/livez` needs `Authorization: Bearer <token>` or the cookie set by visiting the
+  `/?token=<token>` URL printed at startup (HttpOnly, SameSite=Strict; the redirect drops the token
+  from the address bar). Tokens are compared in constant time. On loopback a token is optional.
+- **No arbitrary commands.** There is no route that runs a command the client chooses: tasks come
+  only from launching or previewing a pipeline, which run `smeltery run` on a checked config.
+
+Binding `0.0.0.0` and browsing by the machine's name needs that name allowed:
+`smeltery bench ROOT --host 0.0.0.0 --allow-host bench.lab --token "$(openssl rand -hex 16)"`.
+The token travels in clear over HTTP; put Bench behind TLS when it leaves a trusted network.
 
 ## The workspace
 
@@ -297,7 +320,7 @@ change without that regeneration fails CI.
   `/ligands`, `/ligands/edit`, `/pocket_preview`, `/active_site`; `/api/prebuilt`
 - methods: `/api/methods` (list with workspace defaults), `PUT /api/methods/{key}` (set them);
   `/api/catalog`, `GET /api/methods/{key}`
-- work: `/api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; the earlier pipeline
+- work: `GET /api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; the earlier pipeline
   routes `/api/pipeline/{check,edit,site,from_run,launch}` and `/api/provisional`;
   `/api/structure`, `/api/structure/text`, `/api/structure/{sha}.pdb`
 - notebook: `/api/campaigns`, `/api/campaigns/{id}`, `/api/campaigns/{id}/entries`;
