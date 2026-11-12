@@ -1341,7 +1341,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whoami */
+        /**
+         * Whoami
+         * @description Who is using Bench, and what the server allows: the UI reads `read_only` to hide what would be refused.
+         */
         get: operations["whoami_api_whoami_get"];
         put?: never;
         post?: never;
@@ -3179,6 +3182,18 @@ export interface components {
             reasons: string[];
             /** Statuses */
             statuses: string[];
+        };
+        /** WhoAmI */
+        WhoAmI: {
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only: boolean;
+            /** Root */
+            root: string;
+            /** User */
+            user: string;
         };
     };
     responses: never;
@@ -6492,9 +6507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["WhoAmI"];
                 };
             };
             /** @description Error */

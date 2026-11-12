@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useCapabilities } from "../api/capabilities";
 import { api, unwrap } from "../api/client";
 
 /** Comments anchored to the run, a candidate (`candidate:<name>`) or a pose (`pose:<name>:<i>`). Text is text. */
 export function CommentThread({ runId, anchor, title }: { runId: string; anchor: string; title: string }) {
   const qc = useQueryClient();
+  const { readOnly } = useCapabilities();
   const all = useQuery({
     queryKey: ["comments", runId],
     queryFn: () => unwrap(api.GET("/api/runs/{run_id}/comments", { params: { path: { run_id: runId } } })),
@@ -31,6 +33,7 @@ export function CommentThread({ runId, anchor, title }: { runId: string; anchor:
           ))}
         </ul>
       ) : null}
+      {readOnly ? null : (
       <form
         className="comment-form"
         onSubmit={(e) => {
@@ -45,6 +48,7 @@ export function CommentThread({ runId, anchor, title }: { runId: string; anchor:
         </button>
         {add.isError ? <span className="field-error">{add.error.message}</span> : null}
       </form>
+      )}
     </div>
   );
 }

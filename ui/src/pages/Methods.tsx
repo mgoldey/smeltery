@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useCapabilities } from "../api/capabilities";
 import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
 import { EmptyState } from "../components/EmptyState";
@@ -53,6 +54,7 @@ function MethodCard({ m }: { m: Method }) {
   const [draft, setDraft] = useState<Record<string, string>>(saved);
   const [problem, setProblem] = useState<string | null>(null);
   const dirty = editable.some((p) => (draft[p.name] ?? "") !== saved[p.name]);
+  const { readOnly } = useCapabilities();
   const save = useMutation({
     mutationFn: () => {
       const defaults: Record<string, unknown> = {};
@@ -138,6 +140,7 @@ function MethodCard({ m }: { m: Method }) {
                     <span style={muted}>set per pipeline</span>
                   ) : p.kind === "choice" || p.kind === "bool" ? (
                     <select
+                      disabled={readOnly}
                       aria-label={`${m.key} ${p.name} workspace default`}
                       value={draft[p.name] ?? ""}
                       onChange={(e) => setDraft({ ...draft, [p.name]: e.target.value })}
@@ -151,6 +154,7 @@ function MethodCard({ m }: { m: Method }) {
                     </select>
                   ) : (
                     <input
+                      disabled={readOnly}
                       aria-label={`${m.key} ${p.name} workspace default`}
                       value={draft[p.name] ?? ""}
                       onChange={(e) => setDraft({ ...draft, [p.name]: e.target.value })}
@@ -160,7 +164,7 @@ function MethodCard({ m }: { m: Method }) {
                 </td>
                 <td data-cell="help">
                   {p.help}
-                  {differs(p) ? (
+                  {differs(p) && !readOnly ? (
                     <>
                       {" "}
                       <button disabled={dirty || save.isPending || reset.isPending} onClick={() => reset.mutate(p.name)}>
@@ -174,7 +178,7 @@ function MethodCard({ m }: { m: Method }) {
           </tbody>
         </table>
       )}
-      {editable.length ? (
+      {editable.length && !readOnly ? (
         <p>
           <button className="primary" disabled={!dirty || save.isPending || reset.isPending} onClick={() => save.mutate()}>
             Save defaults for {m.label}

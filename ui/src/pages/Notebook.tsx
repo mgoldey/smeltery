@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useCapabilities } from "../api/capabilities";
 import { api, unwrap } from "../api/client";
 import { ApiError, reasonOf } from "../api/http";
 import { EmptyState } from "../components/EmptyState";
@@ -45,6 +46,7 @@ export function Notebook() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [supersedes, setSupersedes] = useState<string | null>(null);
+  const { readOnly } = useCapabilities();
   const add = useMutation({
     mutationFn: () =>
       unwrap(
@@ -117,7 +119,7 @@ export function Notebook() {
                     ))}
                   </ul>
                 ) : null}
-                {!e.superseded_by ? (
+                {!e.superseded_by && !readOnly ? (
                   <button type="button" onClick={() => setSupersedes(e.id)} aria-label={`Write a correction to ${e.title}`}>
                     Write a correction
                   </button>
@@ -125,9 +127,10 @@ export function Notebook() {
               </li>
             ))}
           </ol>
-          {entries.data && entries.data.length === 0 ? <EmptyState action={{ label: "Write the first entry", onClick: () => titleRef.current?.focus() }}>
+          {entries.data && entries.data.length === 0 ? <EmptyState action={readOnly ? undefined : { label: "Write the first entry", onClick: () => titleRef.current?.focus() }}>
               No entries yet: record what you decided and why.
             </EmptyState> : null}
+          {readOnly ? null : (
           <section aria-label="New entry">
             <h2>{supersedes ? `Correct “${titleOf.get(supersedes)}”` : "New entry"}</h2>
             <form
@@ -201,6 +204,7 @@ export function Notebook() {
               {add.isError ? <p className="field-error">{add.error.message}</p> : null}
             </form>
           </section>
+          )}
         </main>
       </div>
     </Shell>

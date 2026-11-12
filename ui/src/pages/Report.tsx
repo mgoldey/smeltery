@@ -5,6 +5,8 @@ import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { PoseExplorer } from "../components/PoseExplorer";
+import { useCapabilities } from "../api/capabilities";
+import { Writable } from "../components/ReadOnly";
 import { ProposeForm } from "../components/ProposeForm";
 import { Shell } from "../components/Shell";
 import { Structure2D } from "../components/Structure2D";
@@ -38,6 +40,7 @@ export function Report() {
       unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name: "forest" }, query: { theme } } })),
     enabled: ok,
   });
+  const { readOnly } = useCapabilities();
   const snapshot = useMutation({
     mutationFn: () => unwrap(api.POST("/api/runs/{run_id}/snapshot", { params: { path: { run_id: runId } } })),
   });
@@ -99,7 +102,9 @@ export function Report() {
               />
             </section>
           ) : null}
-          <ProposeForm runId={runId} />
+          <Writable>
+            <ProposeForm runId={runId} />
+          </Writable>
           <section aria-label="Discussion">
             <h2>Discussion</h2>
             <CommentThread runId={runId} anchor="run" title="this run" />
@@ -155,7 +160,7 @@ export function Report() {
               </details>
             </section>
           ) : null}
-          {ok ? (
+          {ok && !readOnly ? (
             <section aria-label="Archive">
               <h2>Archive</h2>
               <p className="lede">

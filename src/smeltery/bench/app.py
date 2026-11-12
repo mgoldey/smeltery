@@ -26,6 +26,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from .adapters.task_supervisor import LOG_JSON_ENV, LOG_LEVEL_ENV, setup_logging
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
@@ -134,6 +135,12 @@ def _ready_checks(root: Path, task_queue: Any) -> dict[str, dict[str, Any]]:
     return checks
 
 
+class WhoAmI(BaseModel):
+    user: str
+    root: str
+    read_only: bool = False
+
+
 def create_app(
     *,
     run_store: Any,
@@ -211,9 +218,14 @@ def create_app(
         ok = all(c["ok"] for c in checks.values())
         return JSONResponse({"status": "ok" if ok else "unavailable", "checks": checks}, status_code=200 if ok else 503)
 
-    @app.get("/api/whoami")
-    def whoami(request: Request) -> dict[str, str]:
-        return {"user": request.app.state.identity.current(), "root": str(request.app.state.settings.root)}
+    @app.get("/api/whoami", response_model=WhoAmI)
+    def whoami(request: Request) -> WhoAmI:
+        """Who is using Bench, and what the server allows: the UI reads `read_only` to hide what would be refused."""
+        return WhoAmI(
+            user=request.app.state.identity.current(),
+            root=str(request.app.state.settings.root),
+            read_only=security is not None and security.read_only,
+        )
 
     app.include_router(runs.router)
     app.include_router(lineage.router)
@@ -253,12 +265,13 @@ def build_app(
     token: str | None = None,
     max_runs: int = 1,
     stop_tasks_on_exit: bool = False,
+    read_only: bool = False,
 ) -> FastAPI:
     """The composition root: local adapters, everything under ROOT/.smeltery/bench/, behind the request guard.
 
     `host` is the address the server binds; it and `allowed_hosts` join the loopback names a request's Host may
     carry. `token`, when set, is required on every request (see `security.py`). `max_runs` is how many launched
-    runs execute at once; the rest wait as queued."""
+    runs execute at once; the rest wait as queued. `read_only` refuses every POST/PUT/PATCH/DELETE with 403."""
     from .adapters.identity import LocalIdentity
     from .adapters.run_store import FilesystemRunStore
     from .adapters.task_queue import SubprocessTaskQueue
@@ -272,12 +285,15 @@ def build_app(
         identity=LocalIdentity(),
         clock=SystemClock(),
         settings=Settings(root=root, studies=tuple(studies), web_dir=web_dir),
-        security=SecurityConfig(bind_host=host, allowed_hosts=tuple(allowed_hosts), token=token or None),
+        security=SecurityConfig(
+            bind_host=host, allowed_hosts=tuple(allowed_hosts), token=token or None, read_only=read_only
+        ),
         stop_tasks_on_exit=stop_tasks_on_exit,
     )
 
 
 STOP_TASKS_ENV = "SMELTERY_BENCH_STOP_TASKS_ON_EXIT"
+READ_ONLY_ENV = "SMELTERY_BENCH_READ_ONLY"
 _TRUE = ("1", "true", "yes")
 LOG_LEVELS = ("debug", "info", "warning", "error")
 _TOKEN_QUERY = re.compile(r"([?&]token=)[^&\s\"]*")
@@ -336,6 +352,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=f"on shutdown, cancel queued tasks and terminate running ones (default: leave them running; "
         f"${STOP_TASKS_ENV}=1). What Docker should use.",
+    )
+    ap.add_argument(
+        "--read-only",
+        action="store_true",
+        default=None,
+        help=f"refuse every write (POST/PUT/PATCH/DELETE) with 403 and hide the controls that would write, so Bench "
+        f"can be shown publicly (${READ_ONLY_ENV}=1)",
     )
     args = ap.parse_args(argv)
     args.host = args.host or os.environ.get(HOST_ENV) or DEFAULT_HOST
@@ -397,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         token=token,
         max_runs=args.max_runs,
         stop_tasks_on_exit=bool(args.stop_tasks_on_exit) or os.environ.get(STOP_TASKS_ENV, "").lower() in _TRUE,
+        read_only=bool(args.read_only) or os.environ.get(READ_ONLY_ENV, "").lower() in _TRUE,
     )
     # uvicorn runs at log_level="warning", so without this line a healthy server prints nothing and looks hung.
     shown = args.host if args.host not in ("0.0.0.0", "::") else "localhost"
