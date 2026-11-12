@@ -524,6 +524,14 @@ class ImportResult(BaseModel):
     notes: list[str] = []
 
 
+class ImportRefused(M.Problem):
+    """A refused bundle: the `Problem` reason, plus the per-file verdicts the import dialog lists."""
+
+    pipeline: None = None
+    files: list[ImportedFile]
+    notes: list[str] = []
+
+
 def _unique_name(store: Any, base: str) -> str:
     taken = set(store.list())
     if base not in taken:
@@ -543,7 +551,7 @@ def _unique_name(store: Any, base: str) -> str:
         400: {"model": M.Problem},
         409: {"model": M.Problem},
         413: {"model": M.Problem},
-        422: {"model": ImportResult},
+        422: {"model": ImportRefused},
     },
 )
 async def import_pipeline(request: Request, name: str | None = None) -> Any:
@@ -615,7 +623,11 @@ def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> 
         bad = {p for p, _ in errors}
         files = [ImportedFile(path=p, ok=False, message=m) for p, m in errors]
         files += [ImportedFile(path=r, ok=True) for r in u.files if r not in bad]
-        return JSONResponse(status_code=422, content=ImportResult(pipeline=None, files=files).model_dump(mode="json"))
+        n = len(errors)
+        refused = ImportRefused(
+            reason=f"{n} problem{'s' if n != 1 else ''} in the bundle; nothing was imported", files=files
+        )
+        return JSONResponse(status_code=422, content=refused.model_dump(mode="json", exclude={"errors"}))
     notes += [f"not found when the bundle was exported: {m}" for m in u.missing]
     target = name
     if target is None:

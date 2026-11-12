@@ -99,9 +99,9 @@ def test_steps_put_an_issue_on_its_step_and_the_rest_above(client_for):
 def test_steps_on_unparseable_toml_is_400_with_the_line(client_for):
     c, _ = client_for()
     r = c.post("/api/pipelines/steps", json={"toml": 'campaign = "x"\nbad = = 1\n'})
-    assert r.status_code == 400 and "line 2" in r.json()["detail"]
+    assert r.status_code == 400 and "line 2" in r.json()["reason"]
     r = c.post("/api/pipelines/steps", json={"toml": HAND, "baseline_toml": "x = \n"})
-    assert r.status_code == 400 and "line 1" in r.json()["detail"]
+    assert r.status_code == 400 and "line 1" in r.json()["reason"]
 
 
 def test_steps_carry_the_workspace_default_beside_each_value(client_for):
@@ -164,7 +164,7 @@ def test_removing_a_method_removes_its_lines(client_for):
 def test_removing_the_only_measurement_is_refused_with_its_alternative(client_for):
     c, _ = client_for()
     r = _edit(c, HAND, "remove", "field_interaction")
-    assert r.status_code == 400 and "field_dft_interaction" in r.json()["detail"]
+    assert r.status_code == 400 and "field_dft_interaction" in r.json()["reason"]
 
 
 def test_choosing_ks_dft_replaces_rhf_in_the_measure_step(client_for):
@@ -198,7 +198,7 @@ def test_placing_a_site_appends_one_block_and_keeps_the_others(client_for):
 def test_an_edit_on_unparseable_text_is_400_with_the_line(client_for):
     c, _ = client_for()
     r = _edit(c, HAND + "\nbad = = 1\n", "set", "paired_poses", params={"n_poses": 8})
-    assert r.status_code == 400 and f"line {len(HAND.splitlines()) + 2}" in r.json()["detail"]
+    assert r.status_code == 400 and f"line {len(HAND.splitlines()) + 2}" in r.json()["reason"]
 
 
 def test_an_unknown_knob_or_method_is_400(client_for):
@@ -428,5 +428,5 @@ def test_run_into_a_live_temporal_out_is_409_and_writes_nothing(client_for, tmp_
     assert _saved(c, "p1", HAND)["ok"]
     out = tmp_path / "bench-root" / "runs" / "live"
     r = c.post("/api/pipelines/p1/launch", json={"out": str(out)})
-    assert r.status_code == 409 and "still running" in r.json()["detail"]
+    assert r.status_code == 409 and "still running" in r.json()["reason"]
     assert queue.submitted == [] and not out.exists()

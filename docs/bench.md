@@ -65,6 +65,9 @@ is `smeltery.bench.security`, put in front of every route by `build_app`:
 - **Launch output stays in ROOT.** The `out` of a launch is resolved (`~`, `..` and symlinks
   followed) and must lie strictly inside ROOT, a relative `out` being read from ROOT; anything else
   is a 400 `{"reason": ...}` and nothing is staged.
+- **One error shape.** Every 4xx/5xx body is `{"reason": "<sentence>"}` (the `Problem` model, the
+  default response of every route in the OpenAPI schema); a 422 also carries the structured
+  `errors` list. Handlers live in `src/smeltery/bench/errors.py`.
 - **Token off loopback.** `--host` anything but loopback (e.g. `0.0.0.0`) requires `--token` or
   `SMELTERY_BENCH_TOKEN`; without one `smeltery bench` exits 2. With a token, every request except
   `/healthz` and `/livez` needs `Authorization: Bearer <token>` or the cookie set by visiting the

@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
+from .errors import install_errors
 from .security import TOKEN_ENV, SecurityConfig, install, is_loopback
 
 #: Where `npm run build` (in ui/) writes the app. Build output: never edited or committed.
@@ -144,6 +145,7 @@ def create_app(
     st.pipeline_store = pipeline_store
     st.method_defaults = method_defaults
     st.structures = {}  # sha256 -> PDB text of structures opened this session (a cache, rebuilt by reopening)
+    install_errors(app)
     if security is not None:
         install(app, security)
 

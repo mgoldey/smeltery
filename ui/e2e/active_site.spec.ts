@@ -64,7 +64,7 @@ test("a preview that cannot run says what is missing instead of a number", async
     route.fulfill({
       status: 409,
       contentType: "application/json",
-      body: JSON.stringify({ detail: "`pdb2pqr30` is not on PATH" }),
+      body: JSON.stringify({ reason: "`pdb2pqr30` is not on PATH" }),
     }),
   );
   const view = page.locator('[data-view="active_site"]');

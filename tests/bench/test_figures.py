@@ -55,13 +55,13 @@ def test_the_forest_has_one_point_per_analogue_and_a_floor_band(client_for, run_
 def test_an_unknown_figure_is_404(client_for, run_dir):
     c, _ = client_for(run_dir)
     r = c.get("/api/runs/0/figures/pie")
-    assert r.status_code == 404 and "forest" in r.json()["detail"]
+    assert r.status_code == 404 and "forest" in r.json()["reason"]
 
 
 def test_an_incomplete_run_has_no_figures_409(client_for, incomplete_run_dir):
     c, _ = client_for(incomplete_run_dir)
     r = c.get("/api/runs/0/figures/forest")
-    assert r.status_code == 409 and "cut" in r.json()["detail"]
+    assert r.status_code == 409 and "cut" in r.json()["reason"]
 
 
 def _strings(x):

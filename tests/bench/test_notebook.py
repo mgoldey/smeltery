@@ -109,7 +109,7 @@ def test_a_corrupt_stored_file_is_a_clear_422_not_a_500(client_for):
     ref = _upload(c, "t.csv", b"a,b\n1,2\n").json()
     c.app.state.artifact_store.path_for(ref["digest"]).write_bytes(b"tampered")
     got = c.get(f"/api/notebook/artifacts/{ref['digest']}", params={"name": "t.csv"})
-    assert got.status_code == 422 and "sha256" in got.json()["detail"]
+    assert got.status_code == 422 and "sha256" in got.json()["reason"]
     assert c.get(f"/api/notebook/artifacts/{'0' * 64}").status_code == 404
     assert c.get("/api/notebook/artifacts/not-a-digest").status_code == 422
 

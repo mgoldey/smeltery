@@ -83,4 +83,4 @@ def test_a_dropped_file_is_described_by_its_text(client_for):
 def test_text_that_is_not_a_pdb_is_400(client_for):
     c, _ = client_for()
     r = c.post("/api/structure/text", json={"name": "notes.txt", "text": "hello"})
-    assert r.status_code == 400 and "PDB" in r.json()["detail"]
+    assert r.status_code == 400 and "PDB" in r.json()["reason"]

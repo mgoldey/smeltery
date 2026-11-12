@@ -92,7 +92,7 @@ def test_calcs_is_409_when_the_run_kept_no_log(client_for, run_dir):
     _edit(run_dir, lambda rec: rec["results"].update(calcs=None))
     c, _ = client_for(run_dir)
     r = c.get("/api/runs/0/calcs", params={"candidate": "4-F", "pose": 0})
-    assert r.status_code == 409 and "no SCF log" in r.json()["detail"]
+    assert r.status_code == 409 and "no SCF log" in r.json()["reason"]
 
 
 def test_calcs_will_not_read_outside_the_run_directory(client_for, run_dir):

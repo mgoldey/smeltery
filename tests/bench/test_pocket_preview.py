@@ -40,7 +40,7 @@ def test_a_missing_pdb2pqr_is_409_and_named(client_for, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
     r = c.post("/api/pipelines/pocket_preview", json={"toml": _toml(f'[pocket]\nfile = "{PDB}"\n')})
     assert r.status_code == 409
-    assert "pdb2pqr30" in r.json()["detail"]
+    assert "pdb2pqr30" in r.json()["reason"]
 
 
 def test_a_structure_without_pdb2pqr_is_409_and_named(client_for, monkeypatch):
@@ -48,7 +48,7 @@ def test_a_structure_without_pdb2pqr_is_409_and_named(client_for, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
     s = f'[structure]\nspec = "{PDB}"\ncenter = [0.0, 0.0, 0.0]\npocket_cutoff = 8.0\n'
     r = c.post("/api/pipelines/pocket_preview", json={"toml": _toml(s)})
-    assert r.status_code == 409 and "pdb2pqr30" in r.json()["detail"]
+    assert r.status_code == 409 and "pdb2pqr30" in r.json()["reason"]
 
 
 def test_a_pqr_needs_no_pdb2pqr(client_for, monkeypatch, tmp_path):
@@ -144,7 +144,7 @@ def test_choosing_a_pocket_file_then_hand_placed_round_trips(client_for):
 def test_an_incomplete_choice_is_400_naming_what_is_missing(client_for):
     c, _ = client_for()
     r = c.post("/api/pipelines/active_site", json={"toml": _blank(c), "choice": "structure", "spec": "x.pdb"})
-    assert r.status_code == 400 and "pocket_cutoff" in r.json()["detail"]
+    assert r.status_code == 400 and "pocket_cutoff" in r.json()["reason"]
 
 
 @pytest.mark.skipif(not (Path(__file__).resolve().parents[1] / "data" / "gly3.pqr").exists(), reason="no fixture")
@@ -182,4 +182,4 @@ def test_a_pdb2pqr_that_is_found_but_cannot_run_is_409_not_500(client_for, monke
     c, _ = client_for()
     r = c.post("/api/pipelines/pocket_preview", json={"toml": _toml(extra)})
     assert r.status_code == 409, r.text
-    assert "broken shim" in r.json()["detail"]
+    assert "broken shim" in r.json()["reason"]
