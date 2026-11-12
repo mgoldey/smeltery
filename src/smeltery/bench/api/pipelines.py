@@ -39,7 +39,7 @@ from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
 from . import models as M
 from . import prebuilt as prebuilt_api
-from .common import ports, record, row
+from .common import confined_out, ports, record, row
 from .work import pipeline_from_run, pipeline_issues
 
 router = APIRouter(prefix="/api", tags=["pipelines"])
@@ -48,7 +48,7 @@ router = APIRouter(prefix="/api", tags=["pipelines"])
 class ImpactRequest(BaseModel):
     toml: str
     baseline_toml: str
-    source_run: int | None = None
+    source_run: str | None = None
     name: str | None = None  # the saved pipeline: its folder resolves relative paths and holds `preview/`
 
 
@@ -162,6 +162,9 @@ class EditedText(BaseModel):
 
 class PipelineLaunch(BaseModel):
     out: str | None = None
+    timeout_s: float | None = Field(
+        default=None, gt=0, description="fail the run after this many wall-clock seconds; omit for no limit"
+    )
 
 
 def _validate(text: str) -> Pipeline | None:
@@ -357,14 +360,14 @@ def pipeline_bundle(request: Request, name: str) -> FileResponse:
     )
 
 
-def _from_run(request: Request, idx: int) -> tuple[str, dict[str, Path], list[str]]:
-    """(config text, {relative path: file to copy}, notes) for a new pipeline built from run `idx`."""
-    r = row(request, idx)
+def _from_run(request: Request, run_id: str) -> tuple[str, dict[str, Path], list[str]]:
+    """(config text, {relative path: file to copy}, notes) for a new pipeline built from run `run_id`."""
+    r = row(request, run_id)
     out_dir = Path(r["path"]).parent
-    cfg = record(request, idx).get("results", {}).get("config")
+    cfg = record(request, run_id).get("results", {}).get("config")
     cfg_file = out_dir / cfg["file"] if isinstance(cfg, dict) and cfg.get("file") else None
     if cfg_file is None or not cfg_file.is_file():
-        state = pipeline_from_run(request, M.PipelineFromRun(run=idx))
+        state = pipeline_from_run(request, M.PipelineFromRun(run=run_id))
         return state.toml, {}, state.notes
     files: dict[str, Path] = {}
     for dotted, info in (cfg.get("inputs") or {}).items():
@@ -453,9 +456,7 @@ def _busy_with(request: Request, folder: Path, name: str) -> list[str]:
     copy of the config and inputs into OUT, and a run record stores no pipeline name, so no run is orphaned by a
     rename."""
     out = []
-    for t in ports(request).task_queue.list():
-        if t.status not in ("queued", "running"):
-            continue
+    for t in _live_tasks(request):
         cwd = Path(t.cwd) if t.cwd else None
         if t.name == f"preview {name}" or (cwd is not None and (cwd == folder or folder in cwd.parents)):
             out.append(t.id)
@@ -524,6 +525,14 @@ class ImportResult(BaseModel):
     notes: list[str] = []
 
 
+class ImportRefused(M.Problem):
+    """A refused bundle: the `Problem` reason, plus the per-file verdicts the import dialog lists."""
+
+    pipeline: None = None
+    files: list[ImportedFile]
+    notes: list[str] = []
+
+
 def _unique_name(store: Any, base: str) -> str:
     taken = set(store.list())
     if base not in taken:
@@ -543,7 +552,7 @@ def _unique_name(store: Any, base: str) -> str:
         400: {"model": M.Problem},
         409: {"model": M.Problem},
         413: {"model": M.Problem},
-        422: {"model": ImportResult},
+        422: {"model": ImportRefused},
     },
 )
 async def import_pipeline(request: Request, name: str | None = None) -> Any:
@@ -615,7 +624,11 @@ def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> 
         bad = {p for p, _ in errors}
         files = [ImportedFile(path=p, ok=False, message=m) for p, m in errors]
         files += [ImportedFile(path=r, ok=True) for r in u.files if r not in bad]
-        return JSONResponse(status_code=422, content=ImportResult(pipeline=None, files=files).model_dump(mode="json"))
+        n = len(errors)
+        refused = ImportRefused(
+            reason=f"{n} problem{'s' if n != 1 else ''} in the bundle; nothing was imported", files=files
+        )
+        return JSONResponse(status_code=422, content=refused.model_dump(mode="json", exclude={"errors"}))
     notes += [f"not found when the bundle was exported: {m}" for m in u.missing]
     target = name
     if target is None:
@@ -637,12 +650,20 @@ def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> 
     )
 
 
+def _live_tasks(request: Request) -> list[Any]:
+    """Every queued or running task, newest first, however long the finished history is."""
+    q = ports(request).task_queue
+    return sorted(
+        [*q.list(status="queued", limit=None), *q.list(status="running", limit=None)],
+        key=lambda t: t.created_at or "",
+        reverse=True,
+    )
+
+
 def _preview_task(request: Request, name: str) -> str | None:
     """The id of this pipeline's preview that is queued or running, newest first."""
-    live = [
-        t for t in ports(request).task_queue.list() if t.name == f"preview {name}" and t.status in ("queued", "running")
-    ]
-    return live[-1].id if live else None
+    live = [t for t in _live_tasks(request) if t.name == f"preview {name}"]
+    return live[0].id if live else None
 
 
 @router.post("/pipelines/impact", response_model=Impact)
@@ -846,12 +867,13 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
         )
     st = ports(request)
     root = Path(st.settings.root)
-    out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
-    if not out.is_absolute():
-        out = root / out
+    default = root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
+    out = confined_out(root, body.out, default)
+    if isinstance(out, JSONResponse):
+        return out
     try:
         tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-            p, out_dir=out, config_dir=f.folder, text=f.text
+            p, out_dir=out, config_dir=f.folder, text=f.text, preview_dir=f.folder / "preview", timeout_s=body.timeout_s
         )
     except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
         raise HTTPException(status_code=409, detail=str(e)) from None

@@ -5,6 +5,8 @@ import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { PoseExplorer } from "../components/PoseExplorer";
+import { useCanWrite } from "../api/capabilities";
+import { Writable } from "../components/ReadOnly";
 import { ProposeForm } from "../components/ProposeForm";
 import { Shell } from "../components/Shell";
 import { Structure2D } from "../components/Structure2D";
@@ -15,31 +17,54 @@ import { VerdictBanner } from "../components/VerdictBanner";
  * and propose a candidate; nothing here edits the method or starts work.
  */
 export function Report() {
-  const idx = Number(useParams().idx);
+  const runId = useParams().runId ?? "";
   const verdict = useQuery({
-    queryKey: ["verdict", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
+    queryKey: ["verdict", runId],
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/runs/{run_id}/verdict", {
+          params: { path: { run_id: runId } },
+        }),
+      ),
   });
   const ok = verdict.data !== undefined && verdict.data.state !== "INCOMPLETE";
   const detail = useQuery({
-    queryKey: ["run", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}", { params: { path: { idx } } })),
+    queryKey: ["run", runId],
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } }),
+      ),
     enabled: ok,
   });
   const table = useQuery({
-    queryKey: ["ddE", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/ddE", { params: { path: { idx } } })),
+    queryKey: ["ddE", runId],
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/runs/{run_id}/ddE", {
+          params: { path: { run_id: runId } },
+        }),
+      ),
     enabled: ok,
   });
   const theme = useScheme();
   const forest = useQuery({
-    queryKey: ["figure", idx, "forest", theme],
+    queryKey: ["figure", runId, "forest", theme],
     queryFn: () =>
-      unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name: "forest" }, query: { theme } } })),
+      unwrap(
+        api.GET("/api/runs/{run_id}/figures/{name}", {
+          params: { path: { run_id: runId, name: "forest" }, query: { theme } },
+        }),
+      ),
     enabled: ok,
   });
+  const canWrite = useCanWrite();
   const snapshot = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/runs/{idx}/snapshot", { params: { path: { idx } } })),
+    mutationFn: () =>
+      unwrap(
+        api.POST("/api/runs/{run_id}/snapshot", {
+          params: { path: { run_id: runId } },
+        }),
+      ),
   });
   const limits = useQuery({
     queryKey: ["limits"],
@@ -47,13 +72,14 @@ export function Report() {
   });
   const d = detail.data;
   const sizes = new Map<number, number>();
-  for (const r of table.data?.rows ?? []) sizes.set(r.group, (sizes.get(r.group) ?? 0) + 1);
+  for (const r of table.data?.rows ?? [])
+    sizes.set(r.group, (sizes.get(r.group) ?? 0) + 1);
 
   return (
     <Shell>
       <div className="body">
         <main className="work report">
-          <VerdictBanner idx={idx} />
+          <VerdictBanner runId={runId} />
           {d ? (
             <p className="lede" data-testid="floor-statement">
               {d.floor_statement}
@@ -62,7 +88,10 @@ export function Report() {
           {ok && forest.data ? (
             <section aria-label="Result plot">
               <h2>Paired ΔΔE against the parent</h2>
-              <p className="lede">Lower is better. Candidates sharing a band could not be told apart; their order inside it means nothing.</p>
+              <p className="lede">
+                Lower is better. Candidates sharing a band could not be told
+                apart; their order inside it means nothing.
+              </p>
               <PlotlyFigure figure={forest.data} name="forest" />
             </section>
           ) : null}
@@ -71,17 +100,32 @@ export function Report() {
               <h2>Candidates</h2>
               <ul className="report-candidates">
                 {table.data.rows.map((r) => (
-                  <li key={r.candidate} className="report-candidate" data-candidate={r.candidate}>
+                  <li
+                    key={r.candidate}
+                    className="report-candidate"
+                    data-candidate={r.candidate}
+                  >
                     <Structure2D smiles={r.smiles} />
                     <div>
                       <strong>{r.candidate}</strong>{" "}
                       <span className="num" data-testid={`mean-${r.candidate}`}>
                         {r.mean.toFixed(2)}
                       </span>{" "}
-                      ± <span className="num">{r.sem.toFixed(2)}</span> {table.data.unit},{" "}
-                      {(sizes.get(r.group) ?? 1) > 1 ? `tie group ${r.group + 1} (no order)` : `group ${r.group + 1}`}
-                      {r.survivor === true ? ", kept" : r.survivor === false ? ", not kept" : ", unranked"}
-                      <CommentThread idx={idx} anchor={`candidate:${r.candidate}`} title={r.candidate} />
+                      ± <span className="num">{r.sem.toFixed(2)}</span>{" "}
+                      {table.data.unit},{" "}
+                      {(sizes.get(r.group) ?? 1) > 1
+                        ? `tie group ${r.group + 1} (no order)`
+                        : `group ${r.group + 1}`}
+                      {r.survivor === true
+                        ? ", kept"
+                        : r.survivor === false
+                          ? ", not kept"
+                          : ", unranked"}
+                      <CommentThread
+                        runId={runId}
+                        anchor={`candidate:${r.candidate}`}
+                        title={r.candidate}
+                      />
                     </div>
                   </li>
                 ))}
@@ -92,25 +136,38 @@ export function Report() {
             <section aria-label="Poses">
               <h2>Poses</h2>
               <PoseExplorer
-                idx={idx}
+                runId={runId}
                 detail={d}
                 label="report pose viewer"
-                footer={(c, p) => <CommentThread idx={idx} anchor={`pose:${c}:${p}`} title={`pose ${p} of ${c}`} />}
+                footer={(c, p) => (
+                  <CommentThread
+                    runId={runId}
+                    anchor={`pose:${c}:${p}`}
+                    title={`pose ${p} of ${c}`}
+                  />
+                )}
               />
             </section>
           ) : null}
-          <ProposeForm idx={idx} />
+          <Writable>
+            <ProposeForm runId={runId} />
+          </Writable>
           <section aria-label="Discussion">
             <h2>Discussion</h2>
-            <CommentThread idx={idx} anchor="run" title="this run" />
+            <CommentThread runId={runId} anchor="run" title="this run" />
           </section>
           {limits.data ? (
             <section aria-label="What this result cannot tell you">
               <details>
                 <summary>
-                  <h2 style={{ display: "inline" }}>What this result cannot tell you</h2>
+                  <h2 style={{ display: "inline" }}>
+                    What this result cannot tell you
+                  </h2>
                 </summary>
-                <p className="lede">Measured limits of the funnel (docs/limits.md). Each rests on one system or one model pair.</p>
+                <p className="lede">
+                  Measured limits of the funnel (docs/limits.md). Each rests on
+                  one system or one model pair.
+                </p>
                 <table className="grid">
                   <thead>
                     <tr>
@@ -155,20 +212,28 @@ export function Report() {
               </details>
             </section>
           ) : null}
-          {ok ? (
+          {ok && canWrite ? (
             <section aria-label="Archive">
               <h2>Archive</h2>
               <p className="lede">
-                A self-contained HTML copy for the notebook: every number, plot and table is inside the file. Its 2D and
-                3D views load pinned, integrity-checked libraries and say so when they cannot.
+                A self-contained HTML copy for the notebook: every number, plot
+                and table is inside the file. Its 2D and 3D views load pinned,
+                integrity-checked libraries and say so when they cannot.
               </p>
-              <button type="button" onClick={() => snapshot.mutate()} disabled={snapshot.isPending}>
+              <button
+                type="button"
+                onClick={() => snapshot.mutate()}
+                disabled={snapshot.isPending}
+              >
                 Archive snapshot
               </button>
-              {snapshot.isError ? <p className="field-error">{snapshot.error.message}</p> : null}
+              {snapshot.isError ? (
+                <p className="field-error">{snapshot.error.message}</p>
+              ) : null}
               {snapshot.data ? (
                 <p role="status" data-testid="snapshot">
-                  Written to <span className="mono">{snapshot.data.path}</span>, sha256{" "}
+                  Written to <span className="mono">{snapshot.data.path}</span>,
+                  sha256{" "}
                   <span className="mono" data-testid="snapshot-sha">
                     {snapshot.data.sha256}
                   </span>

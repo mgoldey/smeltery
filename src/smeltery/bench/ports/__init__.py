@@ -6,7 +6,7 @@ from .pipeline_store import PipelineFile, PipelineStore, StaleWrite
 from .project_store import ProjectStore
 from .run_store import RunStore
 from .structure_source import StructureSource
-from .task_queue import TaskQueue
+from .task_queue import StoppableTasks, TaskQueue
 
 __all__ = [
     "ArtifactStore",
@@ -19,6 +19,7 @@ __all__ = [
     "ProjectStore",
     "RunStore",
     "StaleWrite",
+    "StoppableTasks",
     "StructureSource",
     "SystemClock",
     "TaskQueue",

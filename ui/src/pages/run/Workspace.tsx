@@ -11,7 +11,7 @@ import { Launch } from "../../components/workspace/Launch";
 import { useOpenRunPipeline } from "../../components/workspace/openFromRun";
 import { PipelineDrawing } from "../../components/workspace/PipelineDrawing";
 import { StepPanel, type EditExtra, type EditOp } from "../../components/workspace/StepPanel";
-import { useRunIdx } from "./RunLayout";
+import { useRunId } from "./RunLayout";
 
 type StepsOut = Schemas["StepsOut"];
 
@@ -33,12 +33,12 @@ function groupIssues(pipelineIssues: Issue[], steps: StepOut[]) {
 
 /** The run's "Pipeline" tab: open (or make, the first time) the pipeline that made this run, in the workspace. */
 export function RunPipeline() {
-  const idx = useRunIdx();
-  const open = useOpenRunPipeline(idx);
+  const runId = useRunId();
+  const open = useOpenRunPipeline(runId);
   const { mutate } = open;
   useEffect(() => {
     mutate({ replace: true });
-  }, [idx, mutate]);
+  }, [runId, mutate]);
   return (
     <div className="body">
       <main className="work">
@@ -65,7 +65,7 @@ export function Workspace() {
   const { name = "" } = useParams();
   const [search, setSearch] = useSearchParams();
   const runParam = search.get("run");
-  const sourceRun = runParam !== null && /^\d+$/.test(runParam) ? Number(runParam) : null;
+  const sourceRun = runParam !== null && runParam !== "" ? runParam : null;
   const qc = useQueryClient();
 
   const doc = useQuery({

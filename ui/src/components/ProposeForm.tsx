@@ -4,7 +4,7 @@ import { api, unwrap } from "../api/client";
 import { Structure2D } from "./Structure2D";
 
 /** A bench chemist proposes a candidate for the computational chemist to review. Proposing starts no work. */
-export function ProposeForm({ idx }: { idx: number }) {
+export function ProposeForm({ runId }: { runId: string }) {
   const qc = useQueryClient();
   const vocab = useQuery({ queryKey: ["proposal-vocab"], queryFn: () => unwrap(api.GET("/api/proposals/vocabulary")) });
   const [smiles, setSmiles] = useState("");
@@ -16,7 +16,7 @@ export function ProposeForm({ idx }: { idx: number }) {
     return () => window.clearTimeout(t);
   }, [smiles]);
   const propose = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/runs/{idx}/proposals", { params: { path: { idx } }, body: { smiles: smiles.trim(), reason, note, candidate: "" } })),
+    mutationFn: () => unwrap(api.POST("/api/runs/{run_id}/proposals", { params: { path: { run_id: runId } }, body: { smiles: smiles.trim(), reason, note, candidate: "" } })),
     onSuccess: () => {
       setSmiles("");
       setNote("");

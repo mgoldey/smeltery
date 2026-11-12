@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -49,5 +49,65 @@ def _enable_wal(con: sqlite3.Connection, path: str | Path) -> None:
             _log.warning("could not enable WAL on %s (%s); keeping the rollback journal", path, e)
 
 
-def is_duplicate_column(exc: sqlite3.OperationalError) -> bool:
-    return "duplicate column name" in str(exc).lower()
+class SchemaTooNew(RuntimeError):
+    """The database was written by a newer Bench than this one. Refused, never opened for writing."""
+
+
+#: A schema step: one SQL statement, or a function of the connection. Steps run inside `migrate`'s transaction, so a
+#: step must not commit; `executescript` does, which is why a SQL string is executed as a single statement.
+Step = str | Callable[[sqlite3.Connection], None]
+
+
+def add_column(con: sqlite3.Connection, table: str, column: str, kind: str) -> None:
+    """`ALTER TABLE ... ADD COLUMN`, unless the column is already there. A database written before schemas were
+    versioned (user_version 0) may hold any subset of the columns, so the steps that adopt it must be idempotent."""
+    if column not in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+
+
+def migrate(con: sqlite3.Connection, steps: Sequence[Step]) -> int:
+    """Bring the database to version ``len(steps)``, applying only the steps above its ``PRAGMA user_version``.
+
+    ``steps[0]`` makes version 1, ``steps[1]`` version 2, and so on: append, never edit or reorder, or a database
+    that already ran the old step diverges from a fresh one. The steps and the version bump are one transaction, so
+    a failing step leaves the database as it was. A fresh database runs every step; a current one is not written.
+    A database whose version is NEWER than this build knows is refused with `SchemaTooNew`, before anything is
+    written, because this build cannot know what the newer one changed.
+    """
+    target = len(steps)
+    current = _user_version(con)
+    if current == target:
+        return target
+    if current > target:
+        raise SchemaTooNew(_too_new(con, current, target))
+    try:
+        con.execute("BEGIN IMMEDIATE")  # another process may be migrating too: take the lock, then look again
+        current = _user_version(con)
+        if current > target:
+            raise SchemaTooNew(_too_new(con, current, target))
+        for step in steps[current:]:
+            step(con) if callable(step) else con.execute(step)
+        con.execute(f"PRAGMA user_version = {target}")  # an int we computed: pragmas cannot take parameters
+    except sqlite3.OperationalError as e:
+        if "readonly" not in str(e).lower():
+            raise
+        # A read-only file (a copy kept for reading, a read-only mount) cannot be migrated, and a file written
+        # before versioning may already have the current schema: serve it as it is rather than refuse it.
+        con.rollback()
+        _log.warning("database is read-only at schema version %d (this Bench is %d); not migrating it", current, target)
+        return current
+    return target
+
+
+def _user_version(con: sqlite3.Connection) -> int:
+    return con.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _too_new(con: sqlite3.Connection, found: int, known: int) -> str:
+    row = con.execute("PRAGMA database_list").fetchone()
+    where = row[2] if row and row[2] else "the database"
+    return (
+        f"{where} is schema version {found}, but this Bench understands up to {known}: it was written by a newer "
+        "Bench. Upgrade Bench to open it. Do not edit it by hand; to start fresh instead, move the file aside "
+        "(Bench makes a new one, and the old one stays intact for the newer Bench)."
+    )

@@ -88,7 +88,7 @@ def test_no_common_core_is_a_reason_not_a_failure(client_for):
 def test_text_that_is_not_toml_is_a_400_naming_the_line_and_an_empty_pipeline_has_no_rows(client_for):
     c, _ = client_for()
     r = c.post("/api/pipelines/ligands", json={"toml": "a = 1\nb = [\n"})
-    assert r.status_code == 400 and "line" in r.json()["detail"]
+    assert r.status_code == 400 and "line" in r.json()["reason"]
     assert c.post("/api/pipelines/ligands", json={"toml": "x = 1\n"}).json()["candidates"] == []
 
 
@@ -122,7 +122,7 @@ def test_removing_the_parent_is_refused_with_the_reason(client_for):
     c, _ = client_for()
     r = edit(c, "remove", "benzoic")
     assert r.status_code == 400
-    assert "parent" in r.json()["detail"] and "benzoic" in r.json()["detail"]
+    assert "parent" in r.json()["reason"] and "benzoic" in r.json()["reason"]
     text = cfg_of(edit(c, "set_parent", "4-F"))
     assert text["parent"] == "4-F"
     from smeltery.gui._toml import dumps
@@ -141,8 +141,8 @@ def test_an_unknown_name_and_a_blank_name_are_refused(client_for):
 def test_a_duplicate_name_is_refused_naming_it(client_for):
     c, _ = client_for()
     for r in (edit(c, "add", "4-F", smiles="CC"), edit(c, "rename", "4-F", new_name="benzoic")):
-        assert r.status_code == 400 and "already a candidate named" in r.json()["detail"]
-    assert "'4-F'" in edit(c, "add", "4-F", smiles="CC").json()["detail"]
+        assert r.status_code == 400 and "already a candidate named" in r.json()["reason"]
+    assert "'4-F'" in edit(c, "add", "4-F", smiles="CC").json()["reason"]
 
 
 def test_an_edit_is_applied_to_the_live_text_so_a_candidate_added_there_survives(client_for):

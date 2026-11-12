@@ -35,10 +35,10 @@ describe("ConfigDiff.visible", () => {
 
 describe("pipelineName", () => {
   it("is a valid store name made from the campaign and digest", () => {
-    const n = pipelineName({ idx: 3, campaign: "GUI Fixture!", digest: "ABCDEF0123456789" });
+    const n = pipelineName({ id: "abcdef012345-9f3c1a", campaign: "GUI Fixture!", digest: "ABCDEF0123456789" });
     expect(n).toBe("gui-fixture-abcdef01");
     expect(n).toMatch(/^[a-z0-9][a-z0-9_-]{0,63}$/);
-    expect(pipelineName({ idx: 3, campaign: null, digest: null })).toBe("run-run3");
+    expect(pipelineName({ id: "abcdef012345-9f3c1a", campaign: null, digest: null })).toBe("run-runabcdef012345-9f3c1a");
   });
 });
 

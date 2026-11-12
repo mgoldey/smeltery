@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, unwrap } from "../api/client";
+import { Writable } from "../components/ReadOnly";
 import { ImportBundle } from "../components/ImportBundle";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
@@ -30,7 +31,7 @@ export function BenchHome() {
   const [pipeName, setPipeName] = useState("");
   const [fromRun, setFromRun] = useState("");
   const newPipeline = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: Number(fromRun) } })),
+    mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: fromRun } })),
     onSuccess: (d) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
       navigate(`/pipelines/${d.name}?run=${fromRun}`);
@@ -42,15 +43,15 @@ export function BenchHome() {
     mutationFn: async (p: string) => {
       const name = (prebuiltName[p] ?? p).trim();
       const made = await unwrap(api.POST("/api/pipelines", { body: { name, from_prebuilt: p } }));
-      // The example run was copied into the new pipeline's folder, so the run store lists it: find its index now.
+      // The example run was copied into the new pipeline's folder, so the run store lists it: find its id now.
       const list = await unwrap(api.GET("/api/runs"));
       const mine = list.find((r) => r.path.includes(`/pipelines/${made.name}/run/`));
-      return { name: made.name, idx: mine?.idx ?? null };
+      return { name: made.name, runId: mine?.id ?? null };
     },
-    onSuccess: ({ name, idx }) => {
+    onSuccess: ({ name, runId }) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
       void qc.invalidateQueries({ queryKey: ["runs"] });
-      navigate(`/pipelines/${name}?${idx === null ? "" : `run=${idx}&`}step=measure`);
+      navigate(`/pipelines/${name}?${runId === null ? "" : `run=${runId}&`}step=measure`);
     },
   });
   const [blank, setBlank] = useState({ name: "", campaign: "", parent: "", parentSmiles: "", analogues: "" });
@@ -97,6 +98,7 @@ export function BenchHome() {
             run it. Finished runs are listed under Your work, and two of them <Link to="/compare">compare</Link>.
           </p>
 
+          <Writable>
           <section className="start" aria-labelledby="start-h" role="region">
             <h2 id="start-h">Start here</h2>
             <div className="start-ways">
@@ -217,8 +219,8 @@ export function BenchHome() {
                     <select id="pipeline-from" value={fromRun} onChange={(e) => setFromRun(e.target.value)}>
                       <option value="">choose a run</option>
                       {(runs.data ?? []).map((r) => (
-                        <option key={r.idx} value={String(r.idx)}>
-                          {r.idx}: {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
+                        <option key={r.id} value={r.id}>
+                          {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
                         </option>
                       ))}
                     </select>
@@ -232,6 +234,7 @@ export function BenchHome() {
               </div>
             </div>
           </section>
+          </Writable>
 
           <h2 className="section-break">Your work</h2>
           <section aria-labelledby="pipelines-h">
@@ -253,7 +256,9 @@ export function BenchHome() {
             ) : (
               <p className="empty-state">No pipelines yet. Start one above.</p>
             )}
-            <ImportBundle />
+            <Writable>
+              <ImportBundle />
+            </Writable>
           </section>
           <section aria-labelledby="runs-h">
             <h3 id="runs-h">Runs</h3>
@@ -279,9 +284,9 @@ export function BenchHome() {
                 </thead>
                 <tbody>
                   {(runs.data ?? []).map((r) => (
-                    <tr key={r.idx}>
+                    <tr key={r.id}>
                       <td>
-                        <Link to={`/run/${r.idx}`}>{r.campaign ?? r.path}</Link>
+                        <Link to={`/run/${r.id}`}>{r.campaign ?? r.path}</Link>
                         {r.error ? <div className="field-error">{r.error}</div> : null}
                       </td>
                       <td>{r.parent}</td>
@@ -318,6 +323,7 @@ export function BenchHome() {
             ) : (
               <p className="empty-state">No notebooks yet. Start one for a campaign below.</p>
             )}
+            <Writable>
             <form
               className="controls"
               onSubmit={(e) => {
@@ -333,6 +339,7 @@ export function BenchHome() {
                 Start notebook
               </button>
             </form>
+            </Writable>
           </section>
           <section aria-labelledby="studies-h">
             <h3 id="studies-h">Studies</h3>

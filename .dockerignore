@@ -1,0 +1,27 @@
+# Keep the build context small and never send the host's node_modules (ui/node_modules may be a symlink) or venv.
+.git
+.github
+.venv
+**/node_modules
+ui/node_modules
+ui/test-results
+ui/playwright-report
+# the image rebuilds the UI itself
+src/smeltery/bench/web
+benchmarks/
+out/
+dist/
+experiments/
+docs/
+tests/
+ralph/
+wiki/
+campaigns/
+**/__pycache__
+*.pyc
+*.sqlite
+.smeltery
+.ralph
+.opencode
+.pytest_cache
+.ruff_cache

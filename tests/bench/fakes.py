@@ -31,14 +31,29 @@ class FakeTaskQueue:
     def __init__(self, tasks=None):
         self.tasks = list(tasks or [])
         self.submitted = []
+        self.options = []  # per submit: memory_limit_gb, timeout_s, capped
         self.executed = []
         self.logs = {}
 
-    def submit(self, name, command, *, cwd=None, env=None, log_dir=None, note="", retries=0, memory_limit_gb=None):
+    def submit(
+        self,
+        name,
+        command,
+        *,
+        cwd=None,
+        env=None,
+        log_dir=None,
+        note="",
+        retries=0,
+        memory_limit_gb=None,
+        timeout_s=None,
+        capped=False,
+    ):
         from smeltery.tasks import Task
 
         tid = f"t{len(self.submitted)}"
         self.submitted.append((name, list(command), cwd, note))
+        self.options.append({"memory_limit_gb": memory_limit_gb, "timeout_s": timeout_s, "capped": capped})
         self.tasks.append(
             Task(
                 id=tid,
@@ -53,10 +68,10 @@ class FakeTaskQueue:
         )
         return tid
 
-    def list(self, status=None):
-        if status is None:
-            return list(self.tasks)
-        return [t for t in self.tasks if t.status == status]
+    def list(self, status=None, limit=100):
+        found = list(self.tasks) if status is None else [t for t in self.tasks if t.status == status]
+        found.reverse()  # newest first, as the port says
+        return found if limit is None else found[:limit]
 
     def get(self, tid):
         for t in self.tasks:
@@ -95,6 +110,9 @@ class FakeRunStore:
 
     def find_runs(self, root=None):
         return self._store.find_runs(root)
+
+    def read_record(self, path):
+        return self._store.read_record(path)
 
 
 class FakeArtifactStore(FilesystemArtifactStore):

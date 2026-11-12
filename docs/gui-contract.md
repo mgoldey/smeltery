@@ -40,7 +40,7 @@ on a `--temporal` vacuum leg, which every field model shares), `rung` (0 without
 also has `digest` (the first 12 hex of `input_digest`), `started_utc` and `build`. A `--temporal` outcome line (a leg
 that gave no value) has `candidate`, `pose`, `leg`, `field_model`, `outcome` (`"not_converged"`, `"timeout"`,
 `"clash_refused"`, `"error"`), `rungs_tried`, `error` and `digest`, and no `converged`. Bench's
-`GET /api/runs/{idx}/calcs?candidate=&pose=` takes `pose` as the record position and maps it through `pose_index`.
+`GET /api/runs/{run_id}/calcs?candidate=&pose=` takes `pose` as the record position and maps it through `pose_index`.
 
 ### 1.1 Imported records
 

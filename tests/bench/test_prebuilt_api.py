@@ -93,7 +93,7 @@ def test_the_example_run_is_listed_as_a_run_under_the_new_pipeline(tmp_path):
 def test_an_unknown_prebuilt_or_a_taken_name_is_refused(tmp_path):
     c, _ = _real_client(tmp_path)
     r = c.post("/api/pipelines", json={"name": "x", "from_prebuilt": "nope"})
-    assert r.status_code == 400 and "unknown prebuilt" in r.json()["detail"]
+    assert r.status_code == 400 and "unknown prebuilt" in r.json()["reason"]
     assert c.post("/api/pipelines", json={"name": "x", "from_prebuilt": "docking"}).status_code == 201
     assert c.post("/api/pipelines", json={"name": "x", "from_prebuilt": "docking"}).status_code == 409
 

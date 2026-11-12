@@ -300,25 +300,28 @@ def _pid(q, tid):
         return con.execute("SELECT pid FROM tasks WHERE id=?", (tid,)).fetchone()[0]
 
 
-def test_a_task_in_backoff_whose_owner_process_died_is_failed_by_a_new_queue(bench_tmp):
+def _row(q, tid, cols):
     import sqlite3
-    import subprocess
+
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        return con.execute(f"SELECT {cols} FROM tasks WHERE id=?", (tid,)).fetchone()
+
+
+def test_a_task_in_backoff_whose_supervisor_died_is_failed_by_a_new_queue(bench_tmp):
+    import os
+    import signal
 
     q = SubprocessTaskQueue(bench_tmp)
     q.retry_backoff_s = 30.0
     tid = q.submit("fail", ["bash", "-c", "exit 1"], retries=2)
-    wait_until(lambda: _pid(q, tid) is None, timeout=10)
-    dead = subprocess.Popen(["true"])
-    dead.wait()  # a reaped child's pid: certainly not alive
-    with contextlib.closing(sqlite3.connect(q.db)) as con:
-        con.execute("UPDATE tasks SET owner_pid=? WHERE id=?", (dead.pid, tid))
-        con.commit()
-    t = SubprocessTaskQueue(bench_tmp).get(tid)
-    assert t.status == "failed" and "bench restarted" in t.note
-    assert q.get(tid).status == "failed"
+    wait_until(lambda: _row(q, tid, "attempt")[0] == 1 and _pid(q, tid) is None, timeout=10)
+    os.kill(_row(q, tid, "supervisor_pid")[0], signal.SIGKILL)
+    wait_until(lambda: SubprocessTaskQueue(bench_tmp).get(tid).status == "failed", timeout=10)
+    t = q.get(tid)
+    assert t.status == "failed" and "supervisor lost" in t.note, t.note
 
 
-def test_a_task_in_backoff_with_a_live_owner_is_left_running(bench_tmp):
+def test_a_task_in_backoff_with_a_live_supervisor_is_left_running(bench_tmp):
     q = SubprocessTaskQueue(bench_tmp)
     q.retry_backoff_s = 30.0
     tid = q.submit("fail", ["bash", "-c", "exit 1"], retries=2)
@@ -337,7 +340,10 @@ def test_a_running_task_reports_a_heartbeat_that_advances_as_it_writes(bench_tmp
     condition from a dead one, and `stalled` is what says which -- see the stall test below.
     """
     q = SubprocessTaskQueue(bench_tmp)
-    chatty = "import time,sys\nfor _ in range(40):\n print('tick');sys.stdout.flush();time.sleep(0.1)"
+    # `_utc()` stamps whole seconds (see the stall test below), so this has to stay alive long enough for the
+    # clock's second to turn over twice while still writing. 40 ticks x 0.1 s = 4 s was too tight: under load,
+    # startup alone can eat the window, the task then exits, and the heartbeat can never advance again.
+    chatty = "import time,sys\nfor _ in range(300):\n print('tick');sys.stdout.flush();time.sleep(0.1)"
     tid = q.submit("chatty", ["python", "-c", chatty])
     wait_until(lambda: q.get(tid).heartbeat_at is not None)
     first = q.get(tid).heartbeat_at
@@ -449,3 +455,305 @@ def test_an_oom_kill_is_never_retried(bench_tmp):
     t1 = q.get(tid)
     assert t1.status == "failed" and t1.oom is True
     assert t1.attempt == t0.attempt, f"an OOM was retried: attempt went {t0.attempt} -> {t1.attempt}"
+
+
+# ---------------------------------------------------------------------------------------------------- B02: restarts
+
+_SUBMIT_AND_EXIT = """
+import sys
+from smeltery.bench.adapters.task_queue import SubprocessTaskQueue
+print(SubprocessTaskQueue(sys.argv[1]).submit("sleepy", ["sleep", "2"]))
+"""
+
+
+def test_a_task_outlives_the_process_that_submitted_it(bench_tmp):
+    """Submit from a process that exits at once: the supervisor, not the submitter, records the exit code."""
+    import os
+    import subprocess
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, "-c", _SUBMIT_AND_EXIT, str(bench_tmp)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        check=True,
+    )
+    tid = done.stdout.strip().splitlines()[-1]
+    q = SubprocessTaskQueue(bench_tmp)
+    assert q.get(tid).status == "running"
+    wait_until(lambda: q.status(tid) != "running", timeout=30)
+    t = q.get(tid)
+    assert (t.status, t.returncode) == ("succeeded", 0), (t.status, t.returncode, t.note)
+
+
+def _fake_running_row(q, tid, *, supervisor_pid, supervisor_start, pid, pid_start):
+    """A running row as an earlier Bench would have left it, naming whatever pids the test chooses."""
+    import sqlite3
+
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        con.execute(
+            "INSERT INTO tasks (id,name,command,cwd,status,created_at,started_at,log_path,note,pid,max_attempts,"
+            "oom,supervisor_pid,supervisor_start,pid_start) VALUES (?,?,?,?,'running',?,?,?,'',?,1,0,?,?,?)",
+            (
+                tid,
+                "x",
+                '["true"]',
+                "",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+                str(q.log_dir / "x.log"),
+                pid,
+                supervisor_pid,
+                supervisor_start,
+                pid_start,
+            ),
+        )
+        con.commit()
+
+
+def _alive(p) -> bool:
+    return p.poll() is None
+
+
+def test_a_reused_supervisor_pid_reads_failed_and_nothing_is_signalled(bench_tmp):
+    """After a reboot or pid reuse, the stored pids name unrelated processes: the task fails, and they live on."""
+    import subprocess
+
+    q = SubprocessTaskQueue(bench_tmp)
+    stranger = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        _fake_running_row(
+            q,
+            "reused",
+            supervisor_pid=stranger.pid,
+            supervisor_start="other-boot:1",
+            pid=stranger.pid,
+            pid_start="other-boot:1",
+        )
+        t = SubprocessTaskQueue(bench_tmp).get("reused")
+        assert t.status == "failed" and "pid reuse" in t.note, t.note
+        assert q.cancel("reused") is False
+        time.sleep(0.3)
+        assert _alive(stranger), "a process whose identity did not match was signalled"
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_cancel_never_signals_a_pid_whose_start_time_does_not_match(bench_tmp):
+    import os
+    import subprocess
+
+    from smeltery.bench.adapters.task_supervisor import proc_identity
+
+    q = SubprocessTaskQueue(bench_tmp)
+    stranger = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        # the supervisor is a live, matching process (this one); the task pid names a stranger
+        _fake_running_row(
+            q,
+            "mismatch",
+            supervisor_pid=os.getpid(),
+            supervisor_start=proc_identity(os.getpid()),
+            pid=stranger.pid,
+            pid_start="other-boot:1",
+        )
+        assert q.get("mismatch").status == "running"
+        assert q.cancel("mismatch") is True
+        assert q.get("mismatch").status == "cancelled"
+        time.sleep(0.3)
+        assert _alive(stranger), "cancel signalled a process whose start time did not match"
+    finally:
+        stranger.kill()
+        stranger.wait()
+
+
+def test_a_dead_supervisor_fails_its_task_and_kills_the_orphan(bench_tmp):
+    import os
+    import signal
+
+    q = SubprocessTaskQueue(bench_tmp)
+    tid = q.submit("long", ["sleep", "60"])
+    wait_until(lambda: _pid(q, tid) is not None, timeout=10)
+    child = _pid(q, tid)
+    os.kill(_row(q, tid, "supervisor_pid")[0], signal.SIGKILL)
+    wait_until(lambda: SubprocessTaskQueue(bench_tmp).get(tid).status == "failed", timeout=10)
+    t = q.get(tid)
+    assert "supervisor lost" in t.note and "killed" in t.note, t.note
+
+    def gone():
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            return True
+        return "Z" in Path(f"/proc/{child}/stat").read_text().rsplit(")", 1)[1].split()[0]
+
+    wait_until(gone, timeout=5)
+
+
+def test_the_database_is_in_wal_mode(bench_tmp):
+    import sqlite3
+
+    q = SubprocessTaskQueue(bench_tmp)
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+# ---------------------------------------------------------------------------------------------------- B03: queueing
+
+
+def test_a_second_run_stays_queued_until_the_first_ends(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    gate = bench_tmp / "release"
+    first = q.submit("run 1", ["bash", "-c", f"until [ -e {gate} ]; do sleep 0.05; done"], capped=True)
+    second = q.submit("run 2", ["bash", "-c", "echo second"], capped=True)
+    wait_until(lambda: q.status(first) == "running", timeout=10)
+    time.sleep(0.5)
+    t2 = q.get(second)
+    assert (t2.status, t2.started_at) == ("queued", None)
+    gate.touch()
+    wait_until(lambda: q.status(second) == "succeeded", timeout=30)
+    assert q.get(first).status == "succeeded"
+    assert q.get(second).started_at >= q.get(first).finished_at
+
+
+def test_uncapped_tasks_are_not_held_by_a_running_run(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    run = q.submit("run", ["sleep", "30"], capped=True)
+    preview = q.submit("preview", ["bash", "-c", "echo plan"])
+    wait_until(lambda: q.status(preview) == "succeeded", timeout=30)
+    assert q.status(run) == "running"
+    q.cancel(run)
+
+
+def test_max_concurrent_runs_is_configurable(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp, max_concurrent_runs=2)
+    a, b, c = (q.submit(f"run {i}", ["sleep", "30"], capped=True) for i in range(3))
+    wait_until(lambda: q.status(b) == "running", timeout=10)
+    assert [q.status(t) for t in (a, b, c)] == ["running", "running", "queued"]
+    for t in (c, b, a):
+        q.cancel(t)
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "2"])
+def test_an_invalid_concurrency_cap_is_refused(bench_tmp, bad):
+    with pytest.raises(ValueError, match="max_concurrent_runs"):
+        SubprocessTaskQueue(bench_tmp, max_concurrent_runs=bad)
+
+
+def test_cancelling_a_queued_task_means_it_never_starts(bench_tmp):
+    q = SubprocessTaskQueue(bench_tmp)
+    marker = bench_tmp / "started"
+    gate = bench_tmp / "release"
+    first = q.submit("run 1", ["bash", "-c", f"until [ -e {gate} ]; do sleep 0.05; done"], capped=True)
+    second = q.submit("run 2", ["bash", "-c", f"touch {marker}"], capped=True)
+    wait_until(lambda: q.status(first) == "running", timeout=10)
+    assert q.cancel(second) is True
+    assert q.status(second) == "cancelled"
+    gate.touch()
+    wait_until(lambda: q.status(first) == "succeeded", timeout=30)
+    time.sleep(1.0)  # long enough for a wrongly promoted task to have run
+    assert q.status(second) == "cancelled" and q.get(second).started_at is None
+    assert not marker.exists()
+
+
+def test_a_queued_run_starts_after_the_process_that_queued_it_is_gone(bench_tmp):
+    """The scheduling is durable: the first run's supervisor promotes the second, with no Bench process up."""
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import sys\n"
+        "from smeltery.bench.adapters.task_queue import SubprocessTaskQueue\n"
+        "q = SubprocessTaskQueue(sys.argv[1])\n"
+        "print(q.submit('run 1', ['sleep', '1'], capped=True))\n"
+        "print(q.submit('run 2', ['bash', '-c', 'echo two'], capped=True))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", script, str(bench_tmp)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        check=True,
+    )
+    first, second = done.stdout.split()[-2:]
+    db = bench_tmp / "tasks.sqlite"
+
+    def status(tid):
+        import sqlite3
+
+        with contextlib.closing(sqlite3.connect(db)) as con:
+            return con.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()[0]
+
+    # read the database directly: opening a queue would promote, which is the other path tested below
+    wait_until(lambda: status(second) == "succeeded", timeout=30)
+    assert status(first) == "succeeded"
+
+
+def test_opening_the_queue_starts_what_is_queued(bench_tmp):
+    import sqlite3
+
+    q = SubprocessTaskQueue(bench_tmp)
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        con.execute(
+            "INSERT INTO tasks (id,name,command,cwd,status,created_at,log_path,note,max_attempts,oom,capped,spec) "
+            "VALUES ('left','run','[\"true\"]','','queued','2026-01-01T00:00:00Z',?,'',1,0,1,'{}')",
+            (str(q.log_dir / "left.log"),),
+        )
+        con.commit()
+    q2 = SubprocessTaskQueue(bench_tmp)
+    wait_until(lambda: q2.status("left") == "succeeded", timeout=30)
+
+
+def test_concurrent_promoters_never_exceed_the_cap(bench_tmp):
+    import sqlite3
+
+    from smeltery.bench.adapters.task_supervisor import promote
+
+    q = SubprocessTaskQueue(bench_tmp)
+    with contextlib.closing(sqlite3.connect(q.db)) as con:
+        for i in range(4):
+            con.execute(
+                "INSERT INTO tasks (id,name,command,cwd,status,created_at,log_path,note,max_attempts,oom,capped,spec) "
+                "VALUES (?,'run','[\"sleep\", \"30\"]','','queued','2026-01-01T00:00:00Z',?,'',1,0,1,'{}')",
+                (f"r{i}", str(q.log_dir / f"r{i}.log")),
+            )
+        con.commit()
+    with concurrent.futures.ThreadPoolExecutor(6) as ex:
+        started = [tid for fut in [ex.submit(promote, q.db) for _ in range(6)] for tid in fut.result()]
+    assert len(started) == 1
+    statuses = [q.status(f"r{i}") for i in range(4)]
+    assert statuses.count("running") == 1 and statuses.count("queued") == 3
+    for i in range(4):
+        q.cancel(f"r{i}")
+
+
+def test_a_timeout_kills_the_task_and_says_why(bench_tmp):
+    import os
+
+    q = SubprocessTaskQueue(bench_tmp)
+    q.sample_interval_s = 0.1
+    pidfile = bench_tmp / "child.pid"
+    tid = q.submit("slow", ["sh", "-c", f"sleep 60 & echo $! > {pidfile}; wait"], timeout_s=1.5, retries=2)
+    wait_until(lambda: q.status(tid) != "running" and q.status(tid) != "queued", timeout=30)
+    t = q.get(tid)
+    assert t.status == "failed" and "timed out" in t.note, (t.status, t.note)
+    assert t.attempt == 1, "a timeout is never retried"
+    gc = int(pidfile.read_text())
+
+    def gone():
+        try:
+            os.kill(gc, 0)
+        except ProcessLookupError:
+            return True
+        return "Z" in Path(f"/proc/{gc}/stat").read_text().rsplit(")", 1)[1].split()[0]
+
+    wait_until(gone, timeout=5)
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, "5", True])
+def test_an_invalid_timeout_is_refused(bench_tmp, bad):
+    with pytest.raises(ValueError, match="timeout_s"):
+        SubprocessTaskQueue(bench_tmp).submit("x", ["true"], timeout_s=bad)

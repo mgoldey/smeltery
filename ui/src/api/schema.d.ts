@@ -103,7 +103,8 @@ export interface paths {
         };
         /**
          * Compare
-         * @description Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn.
+         * @description Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn. Each arm is a
+         *     run id (an old positional integer still resolves, as everywhere else).
          */
         get: operations["compare_api_compare_get"];
         put?: never;
@@ -222,101 +223,6 @@ export interface paths {
         get: operations["get_notebook_file_api_notebook_artifacts__digest__get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pipeline Check */
-        post: operations["pipeline_check_api_pipeline_check_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/edit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pipeline Edit */
-        post: operations["pipeline_edit_api_pipeline_edit_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/from_run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pipeline From Run
-         * @description A starting pipeline for the next round, rebuilt from what the run record holds: its candidates and parent,
-         *     the cut's keep and z, a floor that came from the config, and the gates that ran. The record stores the field's
-         *     charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
-         *     notes say so, and click-to-place puts them back.
-         */
-        post: operations["pipeline_from_run_api_pipeline_from_run_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pipeline Launch
-         * @description Stage inputs into OUT by hash, write OUT/config.toml, and submit `smeltery run` on it. Refused while
-         *     `Pipeline.check()` reports any error.
-         */
-        post: operations["pipeline_launch_api_pipeline_launch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/site": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pipeline Site */
-        post: operations["pipeline_site_api_pipeline_site_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -829,7 +735,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}": {
+    "/api/runs/{run_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -837,7 +743,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Detail */
-        get: operations["run_detail_api_runs__idx__get"];
+        get: operations["run_detail_api_runs__run_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -846,7 +752,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/calcs": {
+    "/api/runs/{run_id}/calcs": {
         parameters: {
             query?: never;
             header?: never;
@@ -861,7 +767,7 @@ export interface paths {
          *     candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
          *     409 when the run kept no SCF log.
          */
-        get: operations["run_calcs_api_runs__idx__calcs_get"];
+        get: operations["run_calcs_api_runs__run_id__calcs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -870,7 +776,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/charge_sensitivity": {
+    "/api/runs/{run_id}/charge_sensitivity": {
         parameters: {
             query?: never;
             header?: never;
@@ -878,7 +784,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Charge Sensitivity */
-        get: operations["run_charge_sensitivity_api_runs__idx__charge_sensitivity_get"];
+        get: operations["run_charge_sensitivity_api_runs__run_id__charge_sensitivity_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -887,7 +793,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/comments": {
+    "/api/runs/{run_id}/comments": {
         parameters: {
             query?: never;
             header?: never;
@@ -895,17 +801,17 @@ export interface paths {
             cookie?: never;
         };
         /** List Comments */
-        get: operations["list_comments_api_runs__idx__comments_get"];
+        get: operations["list_comments_api_runs__run_id__comments_get"];
         put?: never;
         /** Add Comment */
-        post: operations["add_comment_api_runs__idx__comments_post"];
+        post: operations["add_comment_api_runs__run_id__comments_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/ddE": {
+    "/api/runs/{run_id}/ddE": {
         parameters: {
             query?: never;
             header?: never;
@@ -913,7 +819,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Dde */
-        get: operations["run_dde_api_runs__idx__ddE_get"];
+        get: operations["run_dde_api_runs__run_id__ddE_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -922,7 +828,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions": {
+    "/api/runs/{run_id}/decisions": {
         parameters: {
             query?: never;
             header?: never;
@@ -930,20 +836,20 @@ export interface paths {
             cookie?: never;
         };
         /** List Decisions */
-        get: operations["list_decisions_api_runs__idx__decisions_get"];
+        get: operations["list_decisions_api_runs__run_id__decisions_get"];
         put?: never;
         /**
          * Record Decision
          * @description Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`.
          */
-        post: operations["record_decision_api_runs__idx__decisions_post"];
+        post: operations["record_decision_api_runs__run_id__decisions_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions.csv": {
+    "/api/runs/{run_id}/decisions.csv": {
         parameters: {
             query?: never;
             header?: never;
@@ -951,7 +857,7 @@ export interface paths {
             cookie?: never;
         };
         /** Decisions Csv */
-        get: operations["decisions_csv_api_runs__idx__decisions_csv_get"];
+        get: operations["decisions_csv_api_runs__run_id__decisions_csv_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -960,7 +866,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions.sdf": {
+    "/api/runs/{run_id}/decisions.sdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -968,7 +874,7 @@ export interface paths {
             cookie?: never;
         };
         /** Decisions Sdf */
-        get: operations["decisions_sdf_api_runs__idx__decisions_sdf_get"];
+        get: operations["decisions_sdf_api_runs__run_id__decisions_sdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -977,7 +883,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions/bulk": {
+    "/api/runs/{run_id}/decisions/bulk": {
         parameters: {
             query?: never;
             header?: never;
@@ -991,14 +897,14 @@ export interface paths {
          * @description One decision applied to many candidates, all or nothing: any unknown candidate or invalid decision is a 400
          *     naming every problem, and nothing is written. The file is written once.
          */
-        post: operations["record_decisions_bulk_api_runs__idx__decisions_bulk_post"];
+        post: operations["record_decisions_bulk_api_runs__run_id__decisions_bulk_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/dropped_poses": {
+    "/api/runs/{run_id}/dropped_poses": {
         parameters: {
             query?: never;
             header?: never;
@@ -1006,7 +912,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Dropped Poses */
-        get: operations["run_dropped_poses_api_runs__idx__dropped_poses_get"];
+        get: operations["run_dropped_poses_api_runs__run_id__dropped_poses_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1015,7 +921,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/export.sdf": {
+    "/api/runs/{run_id}/export.sdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -1027,7 +933,7 @@ export interface paths {
          * @description Every pose of the run as one 3D SDF, with ddE, tie group, survivor, gate results and decisions as properties
          *     (`smeltery.sdf_export`). Unlike decisions.sdf (2D, one record per decided candidate) this is the poses.
          */
-        get: operations["export_sdf_api_runs__idx__export_sdf_get"];
+        get: operations["export_sdf_api_runs__run_id__export_sdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1036,7 +942,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/figures/{name}": {
+    "/api/runs/{run_id}/figures/{name}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1048,7 +954,7 @@ export interface paths {
          * @description The figure `smeltery.gui.views` builds, as Plotly JSON, coloured for `theme`. The browser draws it; it never
          *     re-derives or recolours it.
          */
-        get: operations["run_figure_api_runs__idx__figures__name__get"];
+        get: operations["run_figure_api_runs__run_id__figures__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1057,7 +963,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/gates": {
+    "/api/runs/{run_id}/gates": {
         parameters: {
             query?: never;
             header?: never;
@@ -1065,7 +971,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Gates */
-        get: operations["run_gates_api_runs__idx__gates_get"];
+        get: operations["run_gates_api_runs__run_id__gates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1074,7 +980,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/lineage": {
+    "/api/runs/{run_id}/lineage": {
         parameters: {
             query?: never;
             header?: never;
@@ -1082,7 +988,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Lineage */
-        get: operations["run_lineage_api_runs__idx__lineage_get"];
+        get: operations["run_lineage_api_runs__run_id__lineage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1091,7 +997,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/per_pose": {
+    "/api/runs/{run_id}/per_pose": {
         parameters: {
             query?: never;
             header?: never;
@@ -1099,7 +1005,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Per Pose */
-        get: operations["run_per_pose_api_runs__idx__per_pose_get"];
+        get: operations["run_per_pose_api_runs__run_id__per_pose_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1108,7 +1014,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/pose_atoms": {
+    "/api/runs/{run_id}/pose_atoms": {
         parameters: {
             query?: never;
             header?: never;
@@ -1120,7 +1026,7 @@ export interface paths {
          * @description Atom symbols in the order of the candidate's pose SDF -- the order `[[pocket.site]]` indexes. Read from the
          *     SDF bytes, never derived from the SMILES, so a mismatch with any depiction is detectable.
          */
-        get: operations["run_pose_atoms_api_runs__idx__pose_atoms_get"];
+        get: operations["run_pose_atoms_api_runs__run_id__pose_atoms_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1129,7 +1035,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/pose_maps": {
+    "/api/runs/{run_id}/pose_maps": {
         parameters: {
             query?: never;
             header?: never;
@@ -1140,7 +1046,7 @@ export interface paths {
          * Run Pose Maps
          * @description Empty for a record written before pose maps were kept; the Poses view then cannot tell core from the rest.
          */
-        get: operations["run_pose_maps_api_runs__idx__pose_maps_get"];
+        get: operations["run_pose_maps_api_runs__run_id__pose_maps_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1149,7 +1055,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/proposals": {
+    "/api/runs/{run_id}/proposals": {
         parameters: {
             query?: never;
             header?: never;
@@ -1162,14 +1068,14 @@ export interface paths {
          * Propose
          * @description Store a proposal for review. This route never touches the task queue: a comment must not start compute.
          */
-        post: operations["propose_api_runs__idx__proposals_post"];
+        post: operations["propose_api_runs__run_id__proposals_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/pymol.zip": {
+    "/api/runs/{run_id}/pymol.zip": {
         parameters: {
             query?: never;
             header?: never;
@@ -1181,7 +1087,7 @@ export interface paths {
          * @description The run's poses as a PyMOL bundle: receptor.pdb, one SDF per candidate (the run's own pose files, unchanged,
          *     sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut.
          */
-        get: operations["run_pymol_api_runs__idx__pymol_zip_get"];
+        get: operations["run_pymol_api_runs__run_id__pymol_zip_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1190,7 +1096,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/resolved": {
+    "/api/runs/{run_id}/resolved": {
         parameters: {
             query?: never;
             header?: never;
@@ -1198,7 +1104,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Resolved */
-        get: operations["run_resolved_api_runs__idx__resolved_get"];
+        get: operations["run_resolved_api_runs__run_id__resolved_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1207,7 +1113,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/scene": {
+    "/api/runs/{run_id}/scene": {
         parameters: {
             query?: never;
             header?: never;
@@ -1215,7 +1121,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Scene */
-        get: operations["run_scene_api_runs__idx__scene_get"];
+        get: operations["run_scene_api_runs__run_id__scene_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1224,7 +1130,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/snapshot": {
+    "/api/runs/{run_id}/snapshot": {
         parameters: {
             query?: never;
             header?: never;
@@ -1238,14 +1144,14 @@ export interface paths {
          * @description Write the frozen report beside the run, unmodified. Its numbers, plots and tables are inline; its only
          *     external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load.
          */
-        post: operations["snapshot_api_runs__idx__snapshot_post"];
+        post: operations["snapshot_api_runs__run_id__snapshot_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/verdict": {
+    "/api/runs/{run_id}/verdict": {
         parameters: {
             query?: never;
             header?: never;
@@ -1253,7 +1159,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Verdict */
-        get: operations["run_verdict_api_runs__idx__verdict_get"];
+        get: operations["run_verdict_api_runs__run_id__verdict_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1381,11 +1287,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Tasks */
+        /**
+         * List Tasks
+         * @description The newest `limit` tasks; queued and running ones are always chosen before finished ones.
+         */
         get: operations["list_tasks_api_tasks_get"];
         put?: never;
-        /** Submit Task */
-        post: operations["submit_task_api_tasks_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1433,7 +1341,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whoami */
+        /**
+         * Whoami
+         * @description Who is using Bench, and what the server allows: the UI reads `read_only` to hide what would be refused.
+         */
         get: operations["whoami_api_whoami_get"];
         put?: never;
         post?: never;
@@ -1849,9 +1760,10 @@ export interface components {
             files: components["schemas"]["FileRef"][];
             /**
              * Runs
+             * @description run ids to attach
              * @default []
              */
-            runs: number[];
+            runs: string[];
             /** Supersedes */
             supersedes?: string | null;
             /** Title */
@@ -1939,11 +1851,6 @@ export interface components {
             /** Rows */
             rows: components["schemas"]["GateRow"][];
         };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
-        };
         /** Impact */
         Impact: {
             /** Changes */
@@ -1994,7 +1901,7 @@ export interface components {
             /** Name */
             name?: string | null;
             /** Source Run */
-            source_run?: number | null;
+            source_run?: string | null;
             /** Toml */
             toml: string;
         };
@@ -2004,6 +1911,33 @@ export interface components {
             basis: string;
             /** Value */
             value: number | null;
+        };
+        /**
+         * ImportRefused
+         * @description A refused bundle: the `Problem` reason, plus the per-file verdicts the import dialog lists.
+         */
+        ImportRefused: {
+            /**
+             * Errors
+             * @description per-field detail of a 422
+             */
+            errors?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Files */
+            files: components["schemas"]["ImportedFile"][];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            /** Pipeline */
+            pipeline?: null;
+            /**
+             * Reason
+             * @description a human-readable sentence
+             */
+            reason: string;
         };
         /** ImportResult */
         ImportResult: {
@@ -2072,13 +2006,6 @@ export interface components {
             message: string;
             /** Stage */
             stage: string | null;
-        };
-        /** LaunchRequest */
-        LaunchRequest: {
-            /** Out */
-            out?: string | null;
-            /** Toml */
-            toml: string;
         };
         /** LigandCheck */
         LigandCheck: {
@@ -2570,18 +2497,13 @@ export interface components {
             /** Value */
             value: number;
         };
-        /** PipelineCheck */
-        PipelineCheck: {
-            /** Toml */
-            toml: string;
-        };
         /** PipelineCreate */
         PipelineCreate: {
             blank?: components["schemas"]["BlankPipeline"] | null;
             /** From Prebuilt */
             from_prebuilt?: string | null;
             /** From Run */
-            from_run?: number | null;
+            from_run?: string | null;
             /** Name */
             name: string;
         };
@@ -2608,85 +2530,20 @@ export interface components {
             /** Toml */
             toml: string;
         };
-        /** PipelineEdit */
-        PipelineEdit: {
-            /** At */
-            at?: number | null;
-            /** Key */
-            key: string;
-            /**
-             * Op
-             * @enum {string}
-             */
-            op: "add" | "remove" | "move" | "set";
-            /** Params */
-            params?: {
-                [key: string]: unknown;
-            } | null;
-            /** To */
-            to?: number | null;
-            /** Toml */
-            toml: string;
-        };
-        /** PipelineFromRun */
-        PipelineFromRun: {
-            /** Run */
-            run: number;
-        };
         /** PipelineLaunch */
         PipelineLaunch: {
             /** Out */
             out?: string | null;
+            /**
+             * Timeout S
+             * @description fail the run after this many wall-clock seconds; omit for no limit
+             */
+            timeout_s?: number | null;
         };
         /** PipelinePut */
         PipelinePut: {
             /** Base Sha256 */
             base_sha256?: string | null;
-            /** Toml */
-            toml: string;
-        };
-        /** PipelineState */
-        PipelineState: {
-            /** Addable */
-            addable: string[];
-            /** Campaign */
-            campaign: string;
-            /** Candidates */
-            candidates: {
-                [key: string]: string;
-            };
-            /** Issues */
-            issues: components["schemas"]["Issue"][];
-            /**
-             * Notes
-             * @default []
-             */
-            notes: string[];
-            /** Ok */
-            ok: boolean;
-            /**
-             * Params
-             * @description knobs the user set, per placed stage
-             */
-            params: {
-                [key: string]: {
-                    [key: string]: unknown;
-                };
-            };
-            /** Parent */
-            parent: string;
-            /**
-             * Placed
-             * @description the stages the user placed, in their order
-             */
-            placed: string[];
-            /**
-             * Stages
-             * @description Pipeline.view(): stages as smeltery run executes them
-             */
-            stages: {
-                [key: string]: unknown;
-            }[];
             /** Toml */
             toml: string;
         };
@@ -2777,9 +2634,22 @@ export interface components {
             /** Task */
             task: string;
         };
-        /** Problem */
+        /**
+         * Problem
+         * @description The one error body: every 4xx/5xx the API returns. `errors` is FastAPI's structured list, on a 422 only.
+         */
         Problem: {
-            /** Reason */
+            /**
+             * Errors
+             * @description per-field detail of a 422
+             */
+            errors?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Reason
+             * @description a human-readable sentence
+             */
             reason: string;
         };
         /** ProposalIn */
@@ -2883,8 +2753,8 @@ export interface components {
             groups: string[][];
             /** Has Pose Output */
             has_pose_output: boolean;
-            /** Idx */
-            idx: number;
+            /** Id */
+            id: string;
             /** Keep */
             keep: number;
             /** N Poses */
@@ -2915,8 +2785,11 @@ export interface components {
             digest?: string | null;
             /** Error */
             error?: string | null;
-            /** Idx */
-            idx: number;
+            /**
+             * Id
+             * @description the run's stable id; what every /api/runs/{run_id} route takes
+             */
+            id: string;
             /** N Candidates */
             n_candidates?: number | null;
             /** Parent */
@@ -2954,25 +2827,6 @@ export interface components {
             kind: string;
             /** Name */
             name: string;
-        };
-        /** SiteRequest */
-        SiteRequest: {
-            /** Atom */
-            atom: number;
-            /**
-             * Distance
-             * @default 3
-             */
-            distance: number;
-            /** From Atom */
-            from_atom: number;
-            /**
-             * Q
-             * @default 1
-             */
-            q: number;
-            /** Toml */
-            toml: string;
         };
         /** SiteSpec */
         SiteSpec: {
@@ -3253,6 +3107,8 @@ export interface components {
              * @description largest resident set observed, GB
              */
             peak_rss_gb?: number | null;
+            /** @description SCFs done of planned, for a run in flight that checkpoints; null otherwise (never 0 of N) */
+            progress?: components["schemas"]["TaskProgress"] | null;
             /** Returncode */
             returncode?: number | null;
             /** Run Id */
@@ -3273,28 +3129,23 @@ export interface components {
             /** Log */
             log: string;
         };
-        /** TaskSubmit */
-        TaskSubmit: {
-            /** Command */
-            command: string[] | string;
-            /** Cwd */
-            cwd?: string | null;
+        /** TaskProgress */
+        TaskProgress: {
             /**
-             * Memory Limit Gb
-             * @description kill the task over this resident size, in GB; omit for no cap
+             * Done
+             * @description SCFs finished so far, reused ones included (the line count of the checkpoint)
              */
-            memory_limit_gb?: number | null;
+            done: number;
             /**
-             * Name
-             * @default
+             * Reused
+             * @description of `done`, the SCFs a resumed run took from an earlier attempt
              */
-            name: string;
+            reused: number;
             /**
-             * Retries
-             * @description extra attempts after a failure; 0 runs once
-             * @default 0
+             * Total
+             * @description SCFs the run plans; raised to `done` if a remedy ladder adds more
              */
-            retries: number;
+            total: number;
         };
         /** UnmeasuredLimit */
         UnmeasuredLimit: {
@@ -3308,19 +3159,6 @@ export interface components {
             status: string;
             /** Tracked In */
             tracked_in: string;
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
         };
         /** Verdict */
         Verdict: {
@@ -3344,6 +3182,18 @@ export interface components {
             reasons: string[];
             /** Statuses */
             statuses: string[];
+        };
+        /** WhoAmI */
+        WhoAmI: {
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only: boolean;
+            /** Root */
+            root: string;
+            /** User */
+            user: string;
         };
     };
     responses: never;
@@ -3370,6 +3220,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignOut"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3402,7 +3261,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3433,7 +3301,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3464,7 +3341,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3499,7 +3385,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3531,7 +3426,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3554,13 +3458,22 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogOut"];
                 };
             };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     compare_api_compare_get: {
         parameters: {
             query: {
-                a: number;
-                b: number;
+                a: string;
+                b: string;
                 theme?: "light" | "dark";
             };
             header?: never;
@@ -3584,7 +3497,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3607,6 +3529,15 @@ export interface operations {
                     "application/json": components["schemas"]["Vocabulary"];
                 };
             };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     limits_api_limits_get: {
@@ -3627,6 +3558,15 @@ export interface operations {
                     "application/json": components["schemas"]["Limits"] | null;
                 };
             };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     list_methods_api_methods_get: {
@@ -3645,6 +3585,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MethodInfo"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3677,7 +3626,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3712,7 +3670,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3761,7 +3728,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3806,178 +3782,13 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-        };
-    };
-    pipeline_check_api_pipeline_check_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PipelineCheck"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_edit_api_pipeline_edit_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PipelineEdit"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_from_run_api_pipeline_from_run_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PipelineFromRun"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_launch_api_pipeline_launch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LaunchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Conflict */
-            409: {
+            /** @description Error */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_site_api_pipeline_site_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SiteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3998,6 +3809,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": string[];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4039,7 +3859,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4081,7 +3910,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4123,7 +3961,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4156,7 +4003,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4214,7 +4070,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportResult"];
+                    "application/json": components["schemas"]["ImportRefused"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4256,7 +4121,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4298,7 +4172,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4349,7 +4232,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4400,7 +4292,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4442,7 +4343,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4473,7 +4383,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4517,7 +4436,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4557,7 +4485,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4610,7 +4547,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4641,7 +4587,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4700,7 +4655,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4744,7 +4708,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4784,7 +4757,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4824,7 +4806,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4855,7 +4846,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4908,7 +4908,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4929,6 +4938,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Prebuilt"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4959,7 +4977,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -4980,6 +5007,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProposalVocabulary"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5010,7 +5046,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5033,14 +5078,23 @@ export interface operations {
                     "application/json": components["schemas"]["RunSummary"][];
                 };
             };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
-    run_detail_api_runs__idx__get: {
+    run_detail_api_runs__run_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5061,12 +5115,21 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_calcs_api_runs__idx__calcs_get: {
+    run_calcs_api_runs__run_id__calcs_get: {
         parameters: {
             query: {
                 candidate: string;
@@ -5075,7 +5138,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5096,17 +5159,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_charge_sensitivity_api_runs__idx__charge_sensitivity_get: {
+    run_charge_sensitivity_api_runs__run_id__charge_sensitivity_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5127,17 +5199,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    list_comments_api_runs__idx__comments_get: {
+    list_comments_api_runs__run_id__comments_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5158,17 +5239,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    add_comment_api_runs__idx__comments_post: {
+    add_comment_api_runs__run_id__comments_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5193,17 +5283,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_dde_api_runs__idx__ddE_get: {
+    run_dde_api_runs__run_id__ddE_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5224,17 +5323,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    list_decisions_api_runs__idx__decisions_get: {
+    list_decisions_api_runs__run_id__decisions_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5255,17 +5363,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    record_decision_api_runs__idx__decisions_post: {
+    record_decision_api_runs__run_id__decisions_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5290,17 +5407,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    decisions_csv_api_runs__idx__decisions_csv_get: {
+    decisions_csv_api_runs__run_id__decisions_csv_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5321,17 +5447,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    decisions_sdf_api_runs__idx__decisions_sdf_get: {
+    decisions_sdf_api_runs__run_id__decisions_sdf_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5352,17 +5487,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    record_decisions_bulk_api_runs__idx__decisions_bulk_post: {
+    record_decisions_bulk_api_runs__run_id__decisions_bulk_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5387,17 +5531,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_dropped_poses_api_runs__idx__dropped_poses_get: {
+    run_dropped_poses_api_runs__run_id__dropped_poses_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5418,17 +5571,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    export_sdf_api_runs__idx__export_sdf_get: {
+    export_sdf_api_runs__run_id__export_sdf_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5449,19 +5611,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_figure_api_runs__idx__figures__name__get: {
+    run_figure_api_runs__run_id__figures__name__get: {
         parameters: {
             query?: {
                 theme?: "light" | "dark";
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
                 name: string;
             };
             cookie?: never;
@@ -5485,17 +5656,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_gates_api_runs__idx__gates_get: {
+    run_gates_api_runs__run_id__gates_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5516,19 +5696,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_lineage_api_runs__idx__lineage_get: {
+    run_lineage_api_runs__run_id__lineage_get: {
         parameters: {
             query: {
                 candidate: string;
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5549,19 +5738,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_per_pose_api_runs__idx__per_pose_get: {
+    run_per_pose_api_runs__run_id__per_pose_get: {
         parameters: {
             query?: {
                 quantity?: string;
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5582,19 +5780,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_pose_atoms_api_runs__idx__pose_atoms_get: {
+    run_pose_atoms_api_runs__run_id__pose_atoms_get: {
         parameters: {
             query: {
                 candidate: string;
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5615,17 +5822,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_pose_maps_api_runs__idx__pose_maps_get: {
+    run_pose_maps_api_runs__run_id__pose_maps_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5646,17 +5862,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    propose_api_runs__idx__proposals_post: {
+    propose_api_runs__run_id__proposals_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5681,17 +5906,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_pymol_api_runs__idx__pymol_zip_get: {
+    run_pymol_api_runs__run_id__pymol_zip_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5712,17 +5946,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_resolved_api_runs__idx__resolved_get: {
+    run_resolved_api_runs__run_id__resolved_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5743,12 +5986,21 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_scene_api_runs__idx__scene_get: {
+    run_scene_api_runs__run_id__scene_get: {
         parameters: {
             query: {
                 candidate: string;
@@ -5757,7 +6009,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5780,17 +6032,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    snapshot_api_runs__idx__snapshot_post: {
+    snapshot_api_runs__run_id__snapshot_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5811,17 +6072,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
-    run_verdict_api_runs__idx__verdict_get: {
+    run_verdict_api_runs__run_id__verdict_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5842,7 +6112,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5875,7 +6154,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5908,7 +6196,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5939,7 +6236,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5960,6 +6266,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": string[];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -5990,7 +6305,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -6023,14 +6347,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
     };
     list_tasks_api_tasks_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6046,6 +6381,15 @@ export interface operations {
                     "application/json": components["schemas"]["Task"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
@@ -6055,41 +6399,8 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-        };
-    };
-    submit_task_api_tasks_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskSubmit"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
+            /** @description Error */
+            default: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6125,7 +6436,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -6158,7 +6478,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -6178,9 +6507,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["WhoAmI"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -6203,6 +6539,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };

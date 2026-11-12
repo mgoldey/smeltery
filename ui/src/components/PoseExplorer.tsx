@@ -6,12 +6,12 @@ import { ScfLog } from "./ScfLog";
 
 /** A candidate's pose in the site, with selectors, the pairing stated, and an optional per-pose footer. */
 export function PoseExplorer({
-  idx,
+  runId,
   detail,
   label = "pose viewer",
   footer,
 }: {
-  idx: number;
+  runId: string;
   detail: Schemas["RunDetail"];
   label?: string;
   footer?: (candidate: string, pose: number) => ReactNode;
@@ -22,8 +22,8 @@ export function PoseExplorer({
   const chosen = candidate ?? detail.analogues[0] ?? null;
   const nPoses = chosen ? (detail.n_poses[chosen] ?? 0) : 0;
   const scene = useQuery({
-    queryKey: ["scene", idx, chosen, pose],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/scene", { params: { path: { idx }, query: { candidate: chosen ?? "", pose } } })),
+    queryKey: ["scene", runId, chosen, pose],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/scene", { params: { path: { run_id: runId }, query: { candidate: chosen ?? "", pose } } })),
     enabled: Boolean(detail.has_pose_output && chosen),
   });
   if (!detail.has_pose_output) {
@@ -85,7 +85,7 @@ export function PoseExplorer({
           SCF log
         </button>
       </p>
-      {showLog ? <ScfLog idx={idx} candidate={chosen} position={pose} summary /> : null}
+      {showLog ? <ScfLog runId={runId} candidate={chosen} position={pose} summary /> : null}
       {footer ? footer(chosen, pose) : null}
     </>
   );

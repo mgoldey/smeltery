@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from bench.conftest import run_id_of
 from smeltery import cli
 from smeltery.run_inputs import stage_inputs
 
@@ -91,11 +92,11 @@ def test_a_docking_edit_downstream_reuses_the_source_runs_poses(client_for, tmp_
     root = tmp_path / "runs"
     _source_run(root, base)
     c, _ = client_for(run_dir=root)
-    downstream = _post(c, base.replace("z = 2.0", "z = 3.0"), base, source_run=0)
+    downstream = _post(c, base.replace("z = 2.0", "z = 3.0"), base, source_run=run_id_of(c))
     assert downstream["poses_from"] == "source run"
     assert downstream["seconds"]["value"] > 0 and downstream["memory"]["verdict"] != "cannot say"
     assert downstream["changes"] == ["cut"]
-    upstream = _post(c, base.replace("seeds = [7]", "seeds = [8]"), base, source_run=0)
+    upstream = _post(c, base.replace("seeds = [7]", "seeds = [8]"), base, source_run=run_id_of(c))
     assert upstream["poses_from"] == "none" and upstream["seconds"]["value"] is None
 
 
@@ -106,7 +107,7 @@ def test_impact_never_runs_docking(client_for, tmp_path, monkeypatch):
     root = tmp_path / "runs"
     _source_run(root, base)
     c, _ = client_for(run_dir=root)
-    for kw in ({}, {"source_run": 0}):
+    for kw in ({}, {"source_run": run_id_of(c)}):
         got = _post(c, base, base, **kw)
         assert got["poses_from"] in ("none", "source run")
     _post(c, BENZOIC)

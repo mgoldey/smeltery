@@ -694,7 +694,7 @@ def test_fail_on_unranked_exits_4_and_a_rerun_into_a_record_is_refused(tmp_path,
     cut = SimpleNamespace(unranked_at_boundary=True)
     monkeypatch.setattr(cli, "load_config", lambda p: {})
     monkeypatch.setattr(cli, "build_plan", lambda cfg, out_dir: object())
-    monkeypatch.setattr(cli, "run_plan", lambda plan: (RunRecord("c", {}, {}, {}), {"cut": cut}))
+    monkeypatch.setattr(cli, "run_plan", lambda plan, **kw: (RunRecord("c", {}, {}, {}), {"cut": cut}))
     monkeypatch.setattr(cli, "write_outputs", lambda plan, rec, o: o / "run-abc.json")
     monkeypatch.setattr(cli, "format_table", lambda plan, o: "")
     monkeypatch.setattr(cli, "_stage_config", lambda c, o, temporal=False: (c, None))

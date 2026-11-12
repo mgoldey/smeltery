@@ -114,7 +114,7 @@ def add_entry(request: Request, campaign_id: str, body: M.EntryIn) -> M.EntryOut
     st = ports(request)
     if body.supersedes is not None and body.supersedes not in {e.id for e in _entries(request, campaign_id)}:
         raise HTTPException(status_code=400, detail=f"cannot supersede unknown entry {body.supersedes}")
-    artefacts = [st.artifact_store.put(Path(row(request, i)["path"])) for i in body.runs]
+    artefacts = [st.artifact_store.put(Path(row(request, rid)["path"])) for rid in body.runs]
     files = []
     for f in body.files:
         try:

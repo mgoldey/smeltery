@@ -7,18 +7,17 @@ TOML plus every issue `Pipeline.check()` finds, so the editor never holds a seco
 from __future__ import annotations
 
 import hashlib
-import shlex
-import tomllib
+import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from smeltery.bench.provisional import place_site, provisional_pose
-from smeltery.bench.use_cases.launch_run import LaunchRun, LiveRunRefused
+from smeltery.bench.progress import RunProgress, out_dir_of
+from smeltery.bench.provisional import provisional_pose
 from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import catalog, catalog_json, method
 from smeltery.gui.pipeline import Pipeline
@@ -26,7 +25,8 @@ from smeltery.structure_check import check_pdb
 
 from . import models as M
 from .common import ports, run
-from .methods import workspace_defaults
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["work"])
 
@@ -34,41 +34,25 @@ router = APIRouter(prefix="/api", tags=["work"])
 # ---------------------------------------------------------------------------------------------------- tasks
 
 
+_progress = RunProgress()
+
+
 def _task(t: Any) -> M.Task:
-    return M.Task(**(t.to_dict() if hasattr(t, "to_dict") else t))
+    d = dict(t.to_dict() if hasattr(t, "to_dict") else t)
+    # only a live run has progress; a finished one has deleted its checkpoint, and a stale file must not show
+    if d.get("status") == "running":
+        d["progress"] = _progress.of(out_dir_of(list(d.get("command") or []), d.get("cwd") or ""))
+    return M.Task(**d)
 
 
 @router.get("/tasks", response_model=list[M.Task], responses={503: {"model": M.Problem}})
-def list_tasks(request: Request) -> Any:
+def list_tasks(request: Request, limit: int = Query(100, ge=1, le=1000)) -> Any:
+    """The newest `limit` tasks; queued and running ones are always chosen before finished ones."""
     try:
-        return [_task(t) for t in ports(request).task_queue.list()]
+        return [_task(t) for t in ports(request).task_queue.list(limit=limit)]
     except Exception as e:  # noqa: BLE001 - a dead backend degrades this panel, not the app
+        _log.warning("the task queue could not list tasks", exc_info=True)
         return JSONResponse(status_code=503, content={"reason": str(e)})
-
-
-@router.post("/tasks", response_model=M.Task, status_code=201, responses={503: {"model": M.Problem}})
-def submit_task(request: Request, body: M.TaskSubmit) -> Any:
-    try:
-        command = shlex.split(body.command) if isinstance(body.command, str) else list(body.command)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"invalid command: {e}") from e
-    if not command:
-        raise HTTPException(status_code=400, detail="command required")
-    q = ports(request).task_queue
-    try:
-        tid = q.submit(
-            body.name or command[0],
-            command,
-            cwd=body.cwd,
-            retries=body.retries,
-            memory_limit_gb=body.memory_limit_gb,
-        )
-        t = q.get(tid)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse(status_code=503, content={"reason": str(e)})
-    if t is None:
-        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
-    return _task(t)
 
 
 @router.get("/tasks/{task_id}/log", response_model=M.TaskLog)
@@ -109,13 +93,6 @@ def get_catalog() -> dict[str, Any]:
 # ---------------------------------------------------------------------------------------------------- pipeline
 
 
-def _parse(text: str) -> Pipeline:
-    try:
-        return Pipeline.from_toml(text)
-    except (tomllib.TOMLDecodeError, KeyError, ValueError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"cannot read this TOML: {e}") from e
-
-
 def pipeline_issues(p: Pipeline) -> list[M.Issue]:
     return [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
 
@@ -136,12 +113,6 @@ def _state(p: Pipeline) -> M.PipelineState:
     )
 
 
-@router.post("/pipeline/check", response_model=M.PipelineState)
-def pipeline_check(body: M.PipelineCheck) -> M.PipelineState:
-    return _state(_parse(body.toml))
-
-
-@router.post("/pipeline/from_run", response_model=M.PipelineState)
 def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineState:
     """A starting pipeline for the next round, rebuilt from what the run record holds: its candidates and parent,
     the cut's keep and z, a floor that came from the config, and the gates that ran. The record stores the field's
@@ -174,36 +145,6 @@ def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineSt
     return state
 
 
-@router.post("/pipeline/edit", response_model=M.PipelineState)
-def pipeline_edit(request: Request, body: M.PipelineEdit) -> M.PipelineState:
-    p = _parse(body.toml)
-    defaults = workspace_defaults(request) if body.op == "add" else None
-    try:
-        if body.op == "add":
-            p.add(body.key, body.params or None, at=body.at, defaults=defaults)
-        elif body.op == "remove":
-            p.remove(body.key)
-        elif body.op == "move":
-            if body.to is None:
-                raise ValueError("move needs `to`")
-            p.move(body.key, body.to)
-        else:
-            p.set(body.key, **(body.params or {}))
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e).strip("'\"")) from e
-    return _state(p)
-
-
-@router.post("/pipeline/site", response_model=M.PipelineState)
-def pipeline_site(body: M.SiteRequest) -> M.PipelineState:
-    p = _parse(body.toml)
-    try:
-        place_site(p, body.atom, body.from_atom, q=body.q, distance=body.distance)
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e).strip("'\"")) from e
-    return _state(p)
-
-
 @router.get("/provisional", response_model=M.Provisional)
 def provisional(smiles: str) -> M.Provisional:
     """The provisional parent conformer: atoms in `Chem.AddHs` order, the order `[[pocket.site]]` indexes."""
@@ -218,31 +159,6 @@ def provisional(smiles: str) -> M.Provisional:
     mol.AddConformer(conf, assignId=True)
     AllChem.AssignStereochemistryFrom3D(mol)  # ty: ignore[unresolved-attribute]
     return M.Provisional(smiles=smiles, symbols=list(symbols), molblock=Chem.MolToMolBlock(mol))
-
-
-@router.post("/pipeline/launch", response_model=M.Task, status_code=201, responses={409: {"model": M.Problem}})
-def pipeline_launch(request: Request, body: M.LaunchRequest) -> Any:
-    """Stage inputs into OUT by hash, write OUT/config.toml, and submit `smeltery run` on it. Refused while
-    `Pipeline.check()` reports any error."""
-    p = _parse(body.toml)
-    errors = [i.message for i in p.check() if i.level == "error"]
-    if errors:
-        return JSONResponse(status_code=409, content={"reason": "; ".join(errors)})
-    st = ports(request)
-    root = Path(st.settings.root)
-    out = Path(body.out) if body.out else root / "out" / f"{p.campaign}-{st.clock.now().strftime('%Y%m%d-%H%M%S')}"
-    if not out.is_absolute():
-        out = root / out
-    try:
-        tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).run(
-            p, out_dir=out
-        )
-    except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
-        raise HTTPException(status_code=409, detail=str(e)) from None
-    t = st.task_queue.get(tid)
-    if t is None:
-        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
-    return _task(t)
 
 
 @router.get("/methods/{key}")

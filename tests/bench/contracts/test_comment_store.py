@@ -64,7 +64,7 @@ def test_a_long_read_transaction_does_not_block_the_writer(tmp_path):
         t.join()
 
 
-def test_migration_reraises_errors_other_than_duplicate_column(tmp_path, monkeypatch):
+def test_a_failing_migration_step_is_reraised_not_swallowed(tmp_path, monkeypatch):
     import sqlite3
 
     import pytest
@@ -73,7 +73,13 @@ def test_migration_reraises_errors_other_than_duplicate_column(tmp_path, monkeyp
     from smeltery.bench.adapters._sqlite import open_db as real_open_db
 
     db = tmp_path / "c.sqlite"
-    comment_store.SqliteCommentStore(db)  # existing DB: duplicate-column path is swallowed
+    con = sqlite3.connect(db)  # a database from before schemas were versioned: it still needs the ALTERs
+    with con:
+        con.execute(
+            "CREATE TABLE comments (id TEXT PRIMARY KEY, anchor_type TEXT, anchor_id TEXT, author TEXT, "
+            "body TEXT, created_at TEXT, parent_id TEXT)"
+        )
+    con.close()
 
     class Boom:
         def __init__(self, con):

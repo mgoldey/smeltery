@@ -1,30 +1,31 @@
+import { useCapabilities } from "../api/capabilities";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { NavLink, useMatch, useSearchParams } from "react-router-dom";
-import { api, unwrap } from "../api/client";
+import { api, runByRef, unwrap } from "../api/client";
 
 /**
- * Where the page is: a run (its index), or a pipeline and the run it was opened from (`?run=N`). A pipeline page is
- * about a run as much as a run page is, so the rail and the context bar name both instead of saying "no run".
+ * Where the page is: a run (its stable id), or a pipeline and the run it was opened from (`?run=<id>`). A pipeline
+ * page is about a run as much as a run page is, so the rail and the context bar name both instead of saying "no run".
  */
 function useLocation() {
-  const runMatch = useMatch("/run/:idx/*");
-  const reportMatch = useMatch("/report/:idx");
+  const runMatch = useMatch("/run/:runId/*");
+  const reportMatch = useMatch("/report/:runId");
   const pipeMatch = useMatch("/pipelines/:name");
   const [search] = useSearchParams();
   const fromRun = pipeMatch ? search.get("run") : null;
-  const idx = runMatch?.params.idx ?? reportMatch?.params.idx ?? (fromRun && /^\d+$/.test(fromRun) ? fromRun : undefined);
-  return { idx, runMatch, pipeline: pipeMatch?.params.name };
+  const runId = runMatch?.params.runId ?? reportMatch?.params.runId ?? fromRun ?? undefined;
+  return { runId, runMatch, pipeline: pipeMatch?.params.name };
 }
 
 function useCurrentRun() {
-  const { idx } = useLocation();
+  const { runId } = useLocation();
   const q = useQuery({
     queryKey: ["runs"],
     queryFn: () => unwrap(api.GET("/api/runs")),
-    enabled: idx !== undefined,
+    enabled: runId !== undefined,
   });
-  return idx === undefined ? undefined : q.data?.find((r) => String(r.idx) === idx);
+  return runByRef(q.data, runId);
 }
 
 export function ContextBar({ tabs }: { tabs?: ReactNode }) {
@@ -59,7 +60,8 @@ export function ContextBar({ tabs }: { tabs?: ReactNode }) {
 
 export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNode }) {
   const who = useQuery({ queryKey: ["whoami"], queryFn: () => unwrap(api.GET("/api/whoami")) });
-  const { idx, runMatch, pipeline } = useLocation();
+  const { readOnly } = useCapabilities();
+  const { runId, runMatch, pipeline } = useLocation();
   const [search] = useSearchParams();
   return (
     <div className="shell">
@@ -76,12 +78,12 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
               Pipeline · {pipeline}
             </NavLink>
           ) : null}
-          {idx !== undefined ? (
+          {runId !== undefined ? (
             <>
-              <NavLink to={`/run/${idx}`} className={() => (runMatch ? "active" : "")}>
+              <NavLink to={`/run/${runId}`} className={() => (runMatch ? "active" : "")}>
                 Run
               </NavLink>
-              <NavLink to={`/report/${idx}`}>Report</NavLink>
+              <NavLink to={`/report/${runId}`}>Report</NavLink>
             </>
           ) : (
             <>
@@ -90,6 +92,11 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
             </>
           )}
         </nav>
+        {readOnly ? (
+          <div className="who" data-testid="read-only-badge" title="Every write is refused by the server">
+            Read-only
+          </div>
+        ) : null}
         <div className="who">{who.data ? `Signed in locally as ${who.data.user}` : " "}</div>
       </aside>
       <div className="main">

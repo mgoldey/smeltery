@@ -7,7 +7,7 @@ license = { text = "MIT OR Apache-2.0" }
 authors = [{ name = "Matthew Goldey" }]
 keywords = ["computational-chemistry", "drug-discovery", "quantum-chemistry", "virtual-screening"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "License :: OSI Approved :: Apache Software License",
@@ -50,7 +50,7 @@ Issues = "https://github.com/mgoldey/smeltery/issues"
 # ruff is pinned EXACTLY, and must equal the pin in .github/workflows/test.yml
 # (tests/test_ruff_pin.py enforces it): a drifting linter moves the baseline.
 # httpx2: starlette's TestClient, which the Bench API tests use (httpx is deprecated there).
-dev = ["pytest>=8", "ruff==0.16.10", "httpx2>=2.13"]
+dev = ["pytest>=8", "pytest-cov>=7", "ruff==0.16.10", "httpx2>=2.13"]
 # Optional readers for smeltery.structure. A missing one raises MissingBackend
 # naming the extra. gemmi is currently also pulled in by ferric itself; rdkit is
 # also a core dependency while smeltery.tiers imports it at module level.
@@ -121,14 +121,19 @@ source = "vcs"
 packages = ["src/smeltery"]
 # The built Bench UI is gitignored (it is build output), and hatch leaves ignored files out by default; `artifacts`
 # puts it back. CI and release run `npm run build` in ui/ before building the wheel.
-artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**"]
+artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**", "!src/smeltery/prebuilt/**/run/temporal/**"]
+# `artifacts` re-includes even gitignored files, and wins over `exclude` (measured: exclude alone still shipped a dummy
+# run/temporal/x.json), so a pipeline's local temporal/ scratch is dropped by the "!" artifact pattern; `exclude` is kept
+# so the intent also reads from the target.
+exclude = ["**/run/temporal/**"]
 
 # The SAME artifacts, because `python -m build` (what release.yml runs) builds the sdist first and then the wheel
 # FROM that sdist: anything the sdist drops is missing from the wheel too. Declaring these only on the wheel target
 # is what published nothing for v0.1.0 -- the sdist carried 0 of the 59 bench/web files, so the wheel built from it
 # failed the bench extra's own `index.html` check. tests/test_wheel_smoke.py keeps the two lists equal.
 [tool.hatch.build.targets.sdist]
-artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**"]
+artifacts = ["src/smeltery/bench/web/**", "src/smeltery/prebuilt/**", "!src/smeltery/prebuilt/**/run/temporal/**"]
+exclude = ["**/run/temporal/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

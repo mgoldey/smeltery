@@ -1,0 +1,26 @@
+# smeltery Bench in a container, serving the demo. `docker compose up --build`, then read the sign-in URL from
+# `docker compose logs bench`. Set SMELTERY_BENCH_TOKEN (shell or .env) to keep one token across restarts; unset,
+# the entrypoint generates a new one each start. See docs/bench.md ("Docker").
+services:
+  bench:
+    build: .
+    image: smeltery-bench
+    ports:
+      # Published on loopback only; drop "127.0.0.1:" to serve other machines (and then add --allow-host NAME to
+      # command, and put TLS in front: the token travels in clear over HTTP).
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - bench-data:/data
+    environment:
+      SMELTERY_BENCH_TOKEN: ${SMELTERY_BENCH_TOKEN:-}
+      SMELTERY_BENCH_LOG_JSON: "1"
+      SMELTERY_BENCH_LOG_LEVEL: info
+    # Stop (or restart) leaves clean `cancelled` task rows instead of supervisors the runtime SIGKILLs.
+    command: ["--demo", "--stop-tasks-on-exit"]
+    # A public demo: refuse every write (403) and hide the controls that would write. See docs/bench.md ("Read-only").
+    # command: ["--demo", "--stop-tasks-on-exit", "--read-only"]   # or: SMELTERY_BENCH_READ_ONLY: "1" above
+    stop_grace_period: 15s
+    restart: unless-stopped
+
+volumes:
+  bench-data:

@@ -2,7 +2,7 @@
 
 import hashlib
 
-from bench.conftest import record_path
+from bench.conftest import record_path, run_id_of
 
 
 def _campaign(c):
@@ -12,7 +12,7 @@ def _campaign(c):
 def test_an_entry_records_attached_runs_by_sha256(client_for, run_dir):
     c, _ = client_for(run_dir)
     cid = _campaign(c)
-    r = c.post(f"/api/campaigns/{cid}/entries", json={"title": "first pass", "body": "ran it", "runs": [0]})
+    r = c.post(f"/api/campaigns/{cid}/entries", json={"title": "first pass", "body": "ran it", "runs": [run_id_of(c)]})
     assert r.status_code == 201
     assert r.json()["artefacts"] == [hashlib.sha256(record_path(run_dir).read_bytes()).hexdigest()]
 
@@ -58,7 +58,7 @@ def test_a_campaign_reports_its_entry_and_run_counts(client_for, run_dir):
     cid = _campaign(c)
     empty = c.get(f"/api/campaigns/{cid}").json()
     assert (empty["n_entries"], empty["n_runs"], empty["updated_at"]) == (0, 0, empty["created_at"])
-    e = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "runs": [0]}).json()
+    e = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "runs": [run_id_of(c)]}).json()
     got = next(x for x in c.get("/api/campaigns").json() if x["id"] == cid)
     assert (got["n_entries"], got["n_runs"], got["updated_at"]) == (1, 1, e["created_at"])
 
@@ -85,7 +85,7 @@ def test_a_file_attaches_round_trips_and_is_not_counted_as_a_run(client_for, run
     ref = ref.json()
     assert ref["digest"] == hashlib.sha256(PNG).hexdigest()
     assert (ref["media_type"], ref["kind"]) == ("image/png", "file")
-    e = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "runs": [0], "files": [ref]}).json()
+    e = c.post(f"/api/campaigns/{cid}/entries", json={"title": "t", "runs": [run_id_of(c)], "files": [ref]}).json()
     assert e["files"] == [ref] and len(e["artefacts"]) == 1 and ref["digest"] not in e["artefacts"]
     assert c.get(f"/api/campaigns/{cid}/entries/{e['id']}").json()["files"] == [ref]
     assert c.get(f"/api/campaigns/{cid}").json()["n_runs"] == 1
@@ -109,7 +109,7 @@ def test_a_corrupt_stored_file_is_a_clear_422_not_a_500(client_for):
     ref = _upload(c, "t.csv", b"a,b\n1,2\n").json()
     c.app.state.artifact_store.path_for(ref["digest"]).write_bytes(b"tampered")
     got = c.get(f"/api/notebook/artifacts/{ref['digest']}", params={"name": "t.csv"})
-    assert got.status_code == 422 and "sha256" in got.json()["detail"]
+    assert got.status_code == 422 and "sha256" in got.json()["reason"]
     assert c.get(f"/api/notebook/artifacts/{'0' * 64}").status_code == 404
     assert c.get("/api/notebook/artifacts/not-a-digest").status_code == 422
 

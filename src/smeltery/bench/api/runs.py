@@ -64,17 +64,15 @@ def _plain(fig: Any) -> dict[str, Any]:
 @router.get("/runs", response_model=list[M.RunSummary])
 def list_runs(request: Request) -> list[M.RunSummary]:
     out = []
-    for i, r in enumerate(rows(request)):
-        try:
-            raw = json.loads(Path(r["path"]).read_text())
-            verdict = _verdict(raw) if isinstance(raw, dict) else None
-            digest = raw.get("input_digest") if isinstance(raw, dict) else None
-        except (OSError, ValueError):
-            verdict, digest = None, None
+    store = ports(request).run_store
+    for r in rows(request):
+        raw = store.read_record(r["path"])
+        verdict = _verdict(raw) if raw is not None else None
+        digest = raw.get("input_digest") if raw is not None else None
         cands = r.get("candidates")
         out.append(
             M.RunSummary(
-                idx=i,
+                id=r["id"],
                 path=r["path"],
                 campaign=r.get("campaign"),
                 parent=r.get("parent"),
@@ -87,14 +85,15 @@ def list_runs(request: Request) -> list[M.RunSummary]:
     return out
 
 
-@router.get("/runs/{idx}", response_model=M.RunDetail)
-def run_detail(request: Request, idx: int) -> M.RunDetail:
-    raw = record(request, idx)
-    r = run(request, idx)
+@router.get("/runs/{run_id}", response_model=M.RunDetail)
+def run_detail(request: Request, run_id: str) -> M.RunDetail:
+    raw = record(request, run_id)
+    r = run(request, run_id)
+    found = row(request, run_id)
     poses = r.record["results"].get("poses", {}) if r.has_pose_output else {}
     return M.RunDetail(
-        idx=idx,
-        path=row(request, idx)["path"],
+        id=found["id"],
+        path=found["path"],
         out_dir=str(r.out_dir),
         campaign=r.campaign,
         digest=r.record["input_digest"],
@@ -116,15 +115,15 @@ def run_detail(request: Request, idx: int) -> M.RunDetail:
     )
 
 
-@router.get("/runs/{idx}/verdict", response_model=M.Verdict)
-def run_verdict(request: Request, idx: int) -> M.Verdict:
-    return _verdict(record(request, idx))
+@router.get("/runs/{run_id}/verdict", response_model=M.Verdict)
+def run_verdict(request: Request, run_id: str) -> M.Verdict:
+    return _verdict(record(request, run_id))
 
 
-@router.get("/runs/{idx}/ddE", response_model=M.DdeTable)
-def run_dde(request: Request, idx: int) -> M.DdeTable:
-    raw = record(request, idx)
-    r = run(request, idx)
+@router.get("/runs/{run_id}/ddE", response_model=M.DdeTable)
+def run_dde(request: Request, run_id: str) -> M.DdeTable:
+    raw = record(request, run_id)
+    r = run(request, run_id)
     return M.DdeTable(
         rows=[M.DdeRow(**x) for x in R.ddE_table(r)],
         floor=r.floor,
@@ -136,16 +135,16 @@ def run_dde(request: Request, idx: int) -> M.DdeTable:
     )
 
 
-@router.get("/runs/{idx}/resolved", response_model=M.Resolved)
-def run_resolved(request: Request, idx: int) -> M.Resolved:
-    names, matrix = R.resolved_matrix(run(request, idx))
+@router.get("/runs/{run_id}/resolved", response_model=M.Resolved)
+def run_resolved(request: Request, run_id: str) -> M.Resolved:
+    names, matrix = R.resolved_matrix(run(request, run_id))
     return M.Resolved(names=names, matrix=matrix)
 
 
-@router.get("/runs/{idx}/per_pose", response_model=list[M.PerPoseRow])
-def run_per_pose(request: Request, idx: int, quantity: str = QUANTITY) -> list[M.PerPoseRow]:
+@router.get("/runs/{run_id}/per_pose", response_model=list[M.PerPoseRow])
+def run_per_pose(request: Request, run_id: str, quantity: str = QUANTITY) -> list[M.PerPoseRow]:
     try:
-        return [M.PerPoseRow(**x) for x in R.per_pose_table(run(request, idx), quantity)]
+        return [M.PerPoseRow(**x) for x in R.per_pose_table(run(request, run_id), quantity)]
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
@@ -155,17 +154,17 @@ FIGURES = ("forest", "matrix", "per_pose", "per_pose_values")
 Theme = Literal["light", "dark"]
 
 
-@router.get("/runs/{idx}/figures/{name}")
-def run_figure(request: Request, idx: int, name: str, theme: Theme = "light") -> dict[str, Any]:
+@router.get("/runs/{run_id}/figures/{name}")
+def run_figure(request: Request, run_id: str, name: str, theme: Theme = "light") -> dict[str, Any]:
     """The figure `smeltery.gui.views` builds, as Plotly JSON, coloured for `theme`. The browser draws it; it never
     re-derives or recolours it."""
-    return themed(_figure(request, idx, name), theme)
+    return themed(_figure(request, run_id, name), theme)
 
 
-def _figure(request: Request, idx: int, name: str) -> dict[str, Any]:
+def _figure(request: Request, run_id: str, name: str) -> dict[str, Any]:
     if name not in FIGURES:
         raise HTTPException(status_code=404, detail=f"no figure {name!r}; figures are {', '.join(FIGURES)}")
-    r = run(request, idx)
+    r = run(request, run_id)
     table = R.ddE_table(r)
     if name == "forest":
         return _plain(forest_figure(table, r, unit=_unit(r)))
@@ -181,9 +180,9 @@ def _figure(request: Request, idx: int, name: str) -> dict[str, Any]:
     return _plain(per_pose_figure(pp, r, quantity=QUANTITY, unit=_unit(r), rows=table))
 
 
-@router.get("/runs/{idx}/scene")
-def run_scene(request: Request, idx: int, candidate: str, pose: int = 0, core: bool = False) -> dict[str, Any]:
-    r = run(request, idx)
+@router.get("/runs/{run_id}/scene")
+def run_scene(request: Request, run_id: str, candidate: str, pose: int = 0, core: bool = False) -> dict[str, Any]:
+    r = run(request, run_id)
     if not r.has_pose_output:
         raise HTTPException(status_code=409, detail="this run record predates pose output; it has no poses to show")
     n = int(r.record["results"]["poses"].get(candidate, {}).get("n_poses", 0))
@@ -252,10 +251,10 @@ class PoseMaps(BaseModel):
     maps: dict[str, list[list[int]]]
 
 
-@router.get("/runs/{idx}/pose_maps", response_model=PoseMaps)
-def run_pose_maps(request: Request, idx: int) -> PoseMaps:
+@router.get("/runs/{run_id}/pose_maps", response_model=PoseMaps)
+def run_pose_maps(request: Request, run_id: str) -> PoseMaps:
     """Empty for a record written before pose maps were kept; the Poses view then cannot tell core from the rest."""
-    return PoseMaps(maps=record(request, idx).get("results", {}).get("pose_maps") or {})
+    return PoseMaps(maps=record(request, run_id).get("results", {}).get("pose_maps") or {})
 
 
 class SensitivityRow(BaseModel):
@@ -296,9 +295,9 @@ class ChargeSensitivity(BaseModel):
     models: dict[str, ModelSensitivity] | None
 
 
-@router.get("/runs/{idx}/charge_sensitivity", response_model=ChargeSensitivity)
-def run_charge_sensitivity(request: Request, idx: int) -> ChargeSensitivity:
-    got = (record(request, idx).get("results") or {}).get("charge_sensitivity")
+@router.get("/runs/{run_id}/charge_sensitivity", response_model=ChargeSensitivity)
+def run_charge_sensitivity(request: Request, run_id: str) -> ChargeSensitivity:
+    got = (record(request, run_id).get("results") or {}).get("charge_sensitivity")
     if not isinstance(got, dict):
         return ChargeSensitivity(models=None)
     return ChargeSensitivity(models={k: ModelSensitivity.model_validate(v) for k, v in got.items()})
@@ -327,9 +326,9 @@ class Gates(BaseModel):
     raw: dict[str, Any]
 
 
-@router.get("/runs/{idx}/gates", response_model=Gates)
-def run_gates(request: Request, idx: int) -> Gates:
-    raw = record(request, idx)
+@router.get("/runs/{run_id}/gates", response_model=Gates)
+def run_gates(request: Request, run_id: str) -> Gates:
+    raw = record(request, run_id)
     results = raw.get("results", {})
     gates: dict[str, Any] = results.get("gates") or {}
     limit = (raw.get("inputs", {}).get("gates") or {}).get("max_strain_kcal")
@@ -380,19 +379,19 @@ def _original_pose(raw: dict, candidate: str, pose: int) -> int:
     return int(index[pose])
 
 
-@router.get("/runs/{idx}/calcs", response_model=CalcLines)
-def run_calcs(request: Request, idx: int, candidate: str, pose: int, field_model: str | None = None) -> CalcLines:
+@router.get("/runs/{run_id}/calcs", response_model=CalcLines)
+def run_calcs(request: Request, run_id: str, candidate: str, pose: int, field_model: str | None = None) -> CalcLines:
     """Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
     written, of one field model: `field_model`, else the run's primary one (`results.calcs.primary`). A line naming
     no model (a run from before models were recorded) is the primary's. `pose` is the record's place in the
     candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
     409 when the run kept no SCF log."""
-    raw = record(request, idx)
+    raw = record(request, run_id)
     calcs = (raw.get("results") or {}).get("calcs")
     if not calcs:
         raise HTTPException(status_code=409, detail="this run kept no SCF log")
     pose = _original_pose(raw, candidate, pose)
-    out_dir = Path(row(request, idx)["path"]).parent.resolve()
+    out_dir = Path(row(request, run_id)["path"]).parent.resolve()
     path = (out_dir / str(calcs["file"])).resolve()
     if out_dir not in path.parents:
         raise HTTPException(status_code=409, detail=f"the SCF log {calcs['file']!r} is outside the run directory")
@@ -441,20 +440,20 @@ class PoseDrops(BaseModel):
     dropped: list[DroppedPose]
 
 
-@router.get("/runs/{idx}/dropped_poses", response_model=PoseDrops)
-def run_dropped_poses(request: Request, idx: int) -> PoseDrops:
-    res = record(request, idx).get("results") or {}
+@router.get("/runs/{run_id}/dropped_poses", response_model=PoseDrops)
+def run_dropped_poses(request: Request, run_id: str) -> PoseDrops:
+    res = record(request, run_id).get("results") or {}
     return PoseDrops(
         pose_index={k: [int(i) for i in v] for k, v in (res.get("pose_index") or {}).items()},
         dropped=[DroppedPose.model_validate(d) for d in res.get("dropped_poses") or []],
     )
 
 
-@router.get("/runs/{idx}/pose_atoms", response_model=M.PoseAtoms)
-def run_pose_atoms(request: Request, idx: int, candidate: str) -> M.PoseAtoms:
+@router.get("/runs/{run_id}/pose_atoms", response_model=M.PoseAtoms)
+def run_pose_atoms(request: Request, run_id: str, candidate: str) -> M.PoseAtoms:
     """Atom symbols in the order of the candidate's pose SDF -- the order `[[pocket.site]]` indexes. Read from the
     SDF bytes, never derived from the SMILES, so a mismatch with any depiction is detectable."""
-    r = run(request, idx)
+    r = run(request, run_id)
     if not r.has_pose_output:
         raise HTTPException(status_code=409, detail="this run record predates pose output")
     try:
@@ -472,11 +471,11 @@ def run_pose_atoms(request: Request, idx: int, candidate: str) -> M.PoseAtoms:
     )
 
 
-@router.get("/runs/{idx}/pymol.zip")
-def run_pymol(request: Request, idx: int) -> Response:
+@router.get("/runs/{run_id}/pymol.zip")
+def run_pymol(request: Request, run_id: str) -> Response:
     """The run's poses as a PyMOL bundle: receptor.pdb, one SDF per candidate (the run's own pose files, unchanged,
     sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut."""
-    r = run(request, idx)
+    r = run(request, run_id)
     if not r.has_pose_output:
         raise HTTPException(status_code=409, detail="this run record predates pose output; it has no poses to export")
     try:
@@ -522,18 +521,18 @@ def decisions_vocabulary() -> M.Vocabulary:
     return M.Vocabulary(statuses=list(STATUSES), reasons=list(REASONS), note_required=sorted(NOTE_REQUIRED))
 
 
-@router.get("/runs/{idx}/decisions", response_model=list[M.DecisionOut])
-def list_decisions(request: Request, idx: int) -> list[M.DecisionOut]:
-    p = _decisions_path(run(request, idx))
+@router.get("/runs/{run_id}/decisions", response_model=list[M.DecisionOut])
+def list_decisions(request: Request, run_id: str) -> list[M.DecisionOut]:
+    p = _decisions_path(run(request, run_id))
     if not p.is_file():
         return []
     return [M.DecisionOut(**d.__dict__) for d in DecisionSet.load(p).decisions]
 
 
-@router.post("/runs/{idx}/decisions", response_model=M.DecisionOut)
-def record_decision(request: Request, idx: int, body: M.DecisionIn) -> M.DecisionOut:
+@router.post("/runs/{run_id}/decisions", response_model=M.DecisionOut)
+def record_decision(request: Request, run_id: str, body: M.DecisionIn) -> M.DecisionOut:
     """Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`."""
-    r = run(request, idx)
+    r = run(request, run_id)
     p = _decisions_path(r)
     ds = _load_decisions(r)
     if body.candidate not in r.candidates:
@@ -557,11 +556,11 @@ def _load_decisions(r: R.Run) -> DecisionSet:
     return ds
 
 
-@router.post("/runs/{idx}/decisions/bulk", response_model=list[M.DecisionOut])
-def record_decisions_bulk(request: Request, idx: int, body: M.BulkDecisionIn) -> list[M.DecisionOut]:
+@router.post("/runs/{run_id}/decisions/bulk", response_model=list[M.DecisionOut])
+def record_decisions_bulk(request: Request, run_id: str, body: M.BulkDecisionIn) -> list[M.DecisionOut]:
     """One decision applied to many candidates, all or nothing: any unknown candidate or invalid decision is a 400
     naming every problem, and nothing is written. The file is written once."""
-    r = run(request, idx)
+    r = run(request, run_id)
     unknown = [c for c in body.candidates if c not in r.candidates]
     if unknown:
         raise HTTPException(status_code=400, detail=f"no candidate {', '.join(map(repr, unknown))} in this run")
@@ -574,8 +573,8 @@ def record_decisions_bulk(request: Request, idx: int, body: M.BulkDecisionIn) ->
     return [M.DecisionOut(**d.__dict__) for d in done]
 
 
-def _decisions_download(request: Request, idx: int, ext: str, serialise, media_type: str) -> Response:
-    r = run(request, idx)
+def _decisions_download(request: Request, run_id: str, ext: str, serialise, media_type: str) -> Response:
+    r = run(request, run_id)
     text = serialise(_load_decisions(r))
     name = f"decisions-{r.record['input_digest'][:12]}.{ext}"
     return Response(
@@ -583,21 +582,21 @@ def _decisions_download(request: Request, idx: int, ext: str, serialise, media_t
     )
 
 
-@router.get("/runs/{idx}/decisions.csv")
-def decisions_csv(request: Request, idx: int) -> Response:
-    return _decisions_download(request, idx, "csv", to_csv, "text/csv; charset=utf-8")
+@router.get("/runs/{run_id}/decisions.csv")
+def decisions_csv(request: Request, run_id: str) -> Response:
+    return _decisions_download(request, run_id, "csv", to_csv, "text/csv; charset=utf-8")
 
 
-@router.get("/runs/{idx}/decisions.sdf")
-def decisions_sdf(request: Request, idx: int) -> Response:
-    return _decisions_download(request, idx, "sdf", to_sdf, "chemical/x-mdl-sdfile")
+@router.get("/runs/{run_id}/decisions.sdf")
+def decisions_sdf(request: Request, run_id: str) -> Response:
+    return _decisions_download(request, run_id, "sdf", to_sdf, "chemical/x-mdl-sdfile")
 
 
-@router.get("/runs/{idx}/export.sdf")
-def export_sdf(request: Request, idx: int) -> Response:
+@router.get("/runs/{run_id}/export.sdf")
+def export_sdf(request: Request, run_id: str) -> Response:
     """Every pose of the run as one 3D SDF, with ddE, tie group, survivor, gate results and decisions as properties
     (`smeltery.sdf_export`). Unlike decisions.sdf (2D, one record per decided candidate) this is the poses."""
-    r = run(request, idx)
+    r = run(request, run_id)
     try:
         text = enriched_sdf(r, _load_decisions(r))
     except (ValueError, KeyError) as e:
@@ -615,9 +614,9 @@ def export_sdf(request: Request, idx: int) -> Response:
 _ANCHOR = re.compile(r"^(run|candidate:[^:]+|pose:[^:]+:\d+)$")
 
 
-@router.get("/runs/{idx}/comments", response_model=list[M.CommentOut])
-def list_comments(request: Request, idx: int) -> list[M.CommentOut]:
-    digest = record(request, idx).get("input_digest", "")
+@router.get("/runs/{run_id}/comments", response_model=list[M.CommentOut])
+def list_comments(request: Request, run_id: str) -> list[M.CommentOut]:
+    digest = record(request, run_id).get("input_digest", "")
     return [
         M.CommentOut(
             id=c.id, anchor=c.anchor_text or "run", author=c.author, body=c.body, created_at=utc_iso(c.created_at)
@@ -626,13 +625,13 @@ def list_comments(request: Request, idx: int) -> list[M.CommentOut]:
     ]
 
 
-@router.post("/runs/{idx}/comments", response_model=M.CommentOut, status_code=201)
-def add_comment(request: Request, idx: int, body: M.CommentIn) -> M.CommentOut:
+@router.post("/runs/{run_id}/comments", response_model=M.CommentOut, status_code=201)
+def add_comment(request: Request, run_id: str, body: M.CommentIn) -> M.CommentOut:
     if not _ANCHOR.match(body.anchor):
         raise HTTPException(status_code=400, detail="anchor is 'run', 'candidate:<name>' or 'pose:<name>:<i>'")
     if not body.body.strip():
         raise HTTPException(status_code=400, detail="a comment needs some text")
-    digest = record(request, idx).get("input_digest", "")
+    digest = record(request, run_id).get("input_digest", "")
     st = ports(request)
     c = st.comment_store.add(run=digest, anchor=body.anchor, author=st.identity.current(), body=body.body)
     return M.CommentOut(
@@ -668,11 +667,11 @@ def list_proposals(request: Request, run: str | None = None) -> list[M.ProposalO
     return [_proposal_out(p) for p in ports(request).project_store.list_proposals(run)]
 
 
-@router.post("/runs/{idx}/proposals", response_model=M.ProposalOut, status_code=201)
-def propose(request: Request, idx: int, body: M.ProposalIn) -> M.ProposalOut:
+@router.post("/runs/{run_id}/proposals", response_model=M.ProposalOut, status_code=201)
+def propose(request: Request, run_id: str, body: M.ProposalIn) -> M.ProposalOut:
     """Store a proposal for review. This route never touches the task queue: a comment must not start compute."""
     st = ports(request)
-    digest = record(request, idx).get("input_digest", "")
+    digest = record(request, run_id).get("input_digest", "")
     now = utc_iso(st.clock.now())
     p = Proposal(
         id=make_entry_id(digest, body.smiles, now),
@@ -694,11 +693,11 @@ def propose(request: Request, idx: int, body: M.ProposalIn) -> M.ProposalOut:
 # ---------------------------------------------------------------------------------------------------- snapshot
 
 
-@router.post("/runs/{idx}/snapshot", response_model=M.Snapshot)
-def snapshot(request: Request, idx: int) -> M.Snapshot:
+@router.post("/runs/{run_id}/snapshot", response_model=M.Snapshot)
+def snapshot(request: Request, run_id: str) -> M.Snapshot:
     """Write the frozen report beside the run, unmodified. Its numbers, plots and tables are inline; its only
     external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load."""
-    r = run(request, idx)
+    r = run(request, run_id)
     path = Path(r.out_dir) / f"report-{r.record['input_digest'][:12]}.html"
     digest = r.record["input_digest"]
     comments = [
@@ -731,9 +730,10 @@ def _arm_labels(ra: R.Run, rb: R.Run) -> tuple[str, str]:
 
 
 @router.get("/compare", response_model=M.Comparison)
-def compare(request: Request, a: int, b: int, theme: Theme = "light") -> M.Comparison:
-    """Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn."""
-    if a == b:
+def compare(request: Request, a: str, b: str, theme: Theme = "light") -> M.Comparison:
+    """Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn. Each arm is a
+    run id (an old positional integer still resolves, as everywhere else)."""
+    if row(request, a)["path"] == row(request, b)["path"]:
         raise HTTPException(
             status_code=400, detail="a run is in both arms; an arm compared with itself is not a comparison"
         )

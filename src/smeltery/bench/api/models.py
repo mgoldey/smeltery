@@ -15,7 +15,7 @@ class Verdict(BaseModel):
 
 
 class RunSummary(BaseModel):
-    idx: int
+    id: str = Field(description="the run's stable id; what every /api/runs/{run_id} route takes")
     path: str
     campaign: str | None = None
     parent: str | None = None
@@ -26,7 +26,7 @@ class RunSummary(BaseModel):
 
 
 class RunDetail(BaseModel):
-    idx: int
+    id: str
     path: str
     out_dir: str
     campaign: str
@@ -96,6 +96,12 @@ class PoseAtoms(BaseModel):
     source: str = Field(description="where the symbols were read from: the candidate's pose SDF")
 
 
+class TaskProgress(BaseModel):
+    done: int = Field(description="SCFs finished so far, reused ones included (the line count of the checkpoint)")
+    total: int = Field(description="SCFs the run plans; raised to `done` if a remedy ladder adds more")
+    reused: int = Field(description="of `done`, the SCFs a resumed run took from an earlier attempt")
+
+
 class Task(BaseModel):
     id: str
     name: str
@@ -119,15 +125,9 @@ class Task(BaseModel):
     peak_rss_gb: float | None = Field(default=None, description="largest resident set observed, GB")
     oom: bool = Field(default=False, description="killed for exceeding memory_limit_gb")
     memory_limit_gb: float | None = Field(default=None, description="the cap it was submitted with, GB")
-
-
-class TaskSubmit(BaseModel):
-    name: str = ""
-    command: list[str] | str
-    cwd: str | None = None
-    retries: int = Field(default=0, ge=0, le=5, description="extra attempts after a failure; 0 runs once")
-    memory_limit_gb: float | None = Field(
-        default=None, gt=0, description="kill the task over this resident size, in GB; omit for no cap"
+    progress: TaskProgress | None = Field(
+        default=None,
+        description="SCFs done of planned, for a run in flight that checkpoints; null otherwise (never 0 of N)",
     )
 
 
@@ -136,7 +136,10 @@ class TaskLog(BaseModel):
 
 
 class Problem(BaseModel):
-    reason: str
+    """The one error body: every 4xx/5xx the API returns. `errors` is FastAPI's structured list, on a 422 only."""
+
+    reason: str = Field(description="a human-readable sentence")
+    errors: list[dict[str, Any]] | None = Field(default=None, description="per-field detail of a 422")
 
 
 class Issue(BaseModel):
@@ -184,39 +187,13 @@ class BlankPipeline(BaseModel):
 
 class PipelineCreate(BaseModel):
     name: str
-    from_run: int | None = None
+    from_run: str | None = None
     from_prebuilt: str | None = None
     blank: BlankPipeline | None = None
 
 
-class PipelineCheck(BaseModel):
-    toml: str
-
-
-class PipelineEdit(BaseModel):
-    toml: str
-    op: Literal["add", "remove", "move", "set"]
-    key: str
-    params: dict[str, Any] | None = None
-    at: int | None = None
-    to: int | None = None
-
-
-class SiteRequest(BaseModel):
-    toml: str
-    atom: int
-    from_atom: int
-    q: float = 1.0
-    distance: float = 3.0
-
-
 class PipelineFromRun(BaseModel):
-    run: int
-
-
-class LaunchRequest(BaseModel):
-    toml: str
-    out: str | None = None
+    run: str
 
 
 class Provisional(BaseModel):
@@ -352,7 +329,7 @@ class FileRef(BaseModel):
 class EntryIn(BaseModel):
     title: str
     body: str = ""
-    runs: list[int] = []
+    runs: list[str] = Field(default=[], description="run ids to attach")
     files: list[FileRef] = Field(default=[], description="files already uploaded to /notebook/artifacts")
     supersedes: str | None = None
 
