@@ -22,6 +22,11 @@ function tracked(): string[] {
     .filter(Boolean)
     .filter((f) => !f.startsWith("node_modules/"))
     .filter((f) => f !== "src/api/schema.d.ts") // generated; checked as a dependency of the files that import it
+    // eslint's own flat config. Typechecking it would mean resolving @eslint/js, globals,
+    // typescript-eslint and eslint-plugin-react-hooks, which are devDependencies of the lint job
+    // only -- `tsc` reports TS2307 on all four wherever they are not installed. ESLint parses and
+    // validates this file itself every time `npm run lint` runs, which is the check that matters.
+    .filter((f) => f !== "eslint.config.js")
     .sort();
 }
 
