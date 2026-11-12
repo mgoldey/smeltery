@@ -14,6 +14,7 @@ number from the task's ceiling.
 pip install 'smeltery[bench]'          # the wheel ships the built UI
 smeltery bench [ROOT] [--demo] [--study pkg.module] [--port 8765] [--max-runs 1] [--open]
                        [--host 127.0.0.1] [--allow-host NAME] [--token SECRET]
+                       [--log-level info] [--log-json] [--stop-tasks-on-exit]
 smeltery bench --demo --open           # the one-command tour: finished runs, no SCF
 ```
 
@@ -53,6 +54,45 @@ The UI is React and TypeScript in `ui/`. Every figure is built in Python (`smelt
 and drawn by Plotly; structures are drawn by Mol* from MolViewSpec scenes the API builds; 2D
 depictions and atom picking use RDKit.js. The pipeline exists only as TOML, carried through
 `smeltery.gui.pipeline.Pipeline`; every view of it is derived from that text.
+
+## Logging
+
+`--log-level {debug,info,warning,error}` (default `info`; env `SMELTERY_BENCH_LOG_LEVEL`) and
+`--log-json` (env `SMELTERY_BENCH_LOG_JSON=1`) go to stderr, for Bench, uvicorn and the task
+supervisors alike (a supervisor inherits both settings and stderr, so one task's trail reads the same
+whichever process wrote the line; so a pipe on Bench's stderr, as in `smeltery bench | tee log`, stays open until the tasks end). The one-line startup URL is unchanged and is not JSON.
+`--log-json` writes one object per line with `ts`, `level`, `logger`, `message`, the structured
+fields below, and `exc` (a traceback) when there is one.
+
+At `info`, every task lifecycle transition is a line on the `smeltery.bench.tasks` logger carrying
+`task_id` and `event`: `submit`, `promote` (a supervisor was started), `start`, `retry` (with the
+attempt and backoff), `oom`, `timeout`, `cancel`, `supervisor_lost`, and `exit` (with `status` and
+`returncode`; a failure is a warning). At `debug` there is one line per HTTP request, and each
+attempt. Exceptions that Bench turns into a response or a fallback are logged with their traceback.
+A request line's `?token=` value is redacted, and no command line, environment or token is ever
+logged.
+
+## Shutdown
+
+Ctrl+C or SIGTERM makes uvicorn stop gracefully, and Bench's shutdown hook then runs. Tasks run in
+their own sessions under their own supervisors, so by default they **outlive Bench**: the hook logs
+one warning naming every queued or running task (id and pid) so the operator knows what is still
+going, and the next Bench on the same ROOT picks them up again (a queued run starts, a running one is
+reported as it was).
+
+`--stop-tasks-on-exit` (env `SMELTERY_BENCH_STOP_TASKS_ON_EXIT=1`) stops them instead. Queued
+tasks are cancelled first, in one transaction, so a finishing supervisor cannot promote one into the
+slot a dying task frees; then each running task's process group gets SIGTERM, and SIGKILL after a
+2 s grace. A group is signalled only while the recorded pid still has the recorded identity (boot id
+and start time), so a pid reused since is never touched. Stopped tasks read `cancelled` with a note
+saying why. A second Ctrl+C makes uvicorn exit without waiting, and a SIGKILL runs no hook at all;
+neither stops anything, and the tasks are then found by the next Bench as above.
+
+Use `--stop-tasks-on-exit` in Docker: the container's tasks live in its process tree, and a
+container that stops (or restarts) with orphaned supervisors inside it would lose them to the
+runtime's SIGKILL with no record of why. With the flag a stop leaves clean `cancelled` rows instead.
+Leave it off on a workstation where a multi-hour run should survive closing the terminal. The task
+queue on Temporal runs work elsewhere and is not touched either way.
 
 ## Security
 
@@ -360,12 +400,25 @@ change without that regeneration fails CI.
   `/ligands`, `/ligands/edit`, `/pocket_preview`, `/active_site`; `/api/prebuilt`
 - methods: `/api/methods` (list with workspace defaults), `PUT /api/methods/{key}` (set them);
   `/api/catalog`, `GET /api/methods/{key}`
-- work: `GET /api/tasks`, `/api/tasks/{id}/log`, `/api/tasks/{id}/cancel`; `/api/provisional`;
+- work: `GET /api/tasks?limit=` (the newest 100 by default, at most 1000; queued and running tasks are
+  chosen before finished ones, so history never hides live work), `/api/tasks/{id}/log` (read from the
+  end of the file, so a huge log costs the same as a short one), `/api/tasks/{id}/cancel`;
+  `/api/provisional`;
   `/api/structure`, `/api/structure/text`, `/api/structure/{sha}.pdb`
 - notebook: `/api/campaigns`, `/api/campaigns/{id}`, `/api/campaigns/{id}/entries`;
   `/api/studies`, `/api/studies/{module}/dag`, `/api/studies/{module}/cells`
 
 Every other path serves the app.
+
+## Database versions
+
+Every sqlite file Bench writes (`tasks.sqlite`, the comment, project and run-index stores) carries a
+schema version in `PRAGMA user_version`. Opening one applies only the migration steps above its
+version, in a single transaction, so a failed migration leaves the file as it was; a file written
+before versioning (version 0) is adopted the same way. A file whose version is newer than the
+running Bench knows is refused at startup with a message naming the file: it was written by a newer
+Bench, so upgrade Bench rather than editing the file, or move it aside to start fresh. Bench never
+writes to a database it refuses, so the newer Bench can still open it.
 
 ## Ports and local adapters
 

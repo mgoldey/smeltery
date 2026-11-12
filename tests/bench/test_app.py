@@ -10,7 +10,7 @@ from smeltery.bench.app import BUILD_HINT, Settings, build_app, create_app, main
 
 
 class BrokenTaskQueue:
-    def list(self, status=None):
+    def list(self, status=None, limit=100):
         raise RuntimeError("temporal down")
 
     def cancel(self, tid):

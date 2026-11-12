@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from smeltery.bench.adapters._sqlite import open_db
+from smeltery.bench.adapters._sqlite import migrate, open_db
 from smeltery.gui.results import Run, load_run
+
+_log = logging.getLogger(__name__)
+
+#: Schema steps; append only (see `_sqlite.migrate`).
+_STEPS = ("CREATE TABLE IF NOT EXISTS runs (path TEXT PRIMARY KEY, campaign TEXT, digest TEXT, indexed_at TEXT)",)
+SCHEMA_VERSION = len(_STEPS)
 
 
 class FilesystemRunStore:
@@ -21,10 +28,7 @@ class FilesystemRunStore:
 
     def _init_db(self) -> None:
         with open_db(self._db, wal=True) as con:
-            con.execute(
-                "CREATE TABLE IF NOT EXISTS runs (path TEXT PRIMARY KEY, campaign TEXT, digest TEXT, indexed_at TEXT)"
-            )
-            con.commit()
+            migrate(con, _STEPS)
 
     def _discover(self, root: Path | None = None) -> list[Path]:
         r = Path(root).resolve() if root else self.root
@@ -38,6 +42,7 @@ class FilesystemRunStore:
             try:
                 run = load_run(p)
             except Exception as e:  # noqa: BLE001
+                _log.debug("load_run failed for %s; falling back to a raw parse", p, exc_info=True)
                 # Fall back to raw parse so an incomplete/dead run still surfaces (verdict INCOMPLETE).
                 try:
                     raw = json.loads(p.read_text())

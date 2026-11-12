@@ -38,7 +38,10 @@ class TaskQueue(Protocol):
         """
         ...
 
-    def list(self, status: str | None = None) -> List[Task]: ...
+    def list(self, status: str | None = None, limit: int | None = 100) -> List[Task]:
+        """At most `limit` tasks (None: all), newest first. Queued and running tasks are chosen before finished
+        ones, so history never hides live work."""
+        ...
 
     def get(self, task_id: str) -> Task | None: ...
 
@@ -50,4 +53,21 @@ class TaskQueue(Protocol):
 
     def ready(self) -> tuple[bool, str]:
         """Whether the queue can take work, with a short detail. Read-only: a probe must not create anything."""
+        ...
+
+
+@runtime_checkable
+class StoppableTasks(Protocol):
+    """Optional, beside `TaskQueue`: a queue whose tasks outlive the Bench process (local subprocesses) can say what
+    is still going and stop it. A backend that runs work elsewhere (Temporal) does not offer it, and Bench's
+    shutdown then has nothing to report or stop."""
+
+    def live_tasks(self) -> List[dict]:
+        """Every queued or running task as {id, name, status, pid, supervisor_pid}; pids are None when unknown."""
+        ...
+
+    def stop_live(self, reason: str) -> List[str]:
+        """Cancel every queued task and terminate every running one (its process group, only while the recorded pid
+        still has the recorded identity). Returns the ids. Queued tasks are cancelled too, or a finishing
+        supervisor would start them as the running ones die."""
         ...

@@ -6,8 +6,22 @@ import json
 import uuid
 from pathlib import Path
 
-from smeltery.bench.adapters._sqlite import open_db
+from smeltery.bench.adapters._sqlite import add_column, migrate, open_db
 from smeltery.project import Campaign, NotebookEntry, Proposal
+
+#: Schema steps; append only (see `_sqlite.migrate`). Version 2 adds `entries.files` (old rows: NULL, read as no files).
+_STEPS = (
+    """CREATE TABLE IF NOT EXISTS campaigns (
+        id TEXT PRIMARY KEY, name TEXT, created_at TEXT, description TEXT, run_paths TEXT)""",
+    """CREATE TABLE IF NOT EXISTS entries (
+        id TEXT PRIMARY KEY, campaign_id TEXT, title TEXT, body TEXT, author TEXT,
+        created_at TEXT, artefacts TEXT, supersedes TEXT)""",
+    """CREATE TABLE IF NOT EXISTS proposals (
+        id TEXT PRIMARY KEY, run TEXT, smiles TEXT, reason TEXT, note TEXT, candidate TEXT,
+        author TEXT, created_at TEXT, status TEXT)""",
+    lambda con: add_column(con, "entries", "files", "TEXT"),
+)
+SCHEMA_VERSION = len(_STEPS)
 
 
 class SqliteProjectStore:
@@ -21,23 +35,7 @@ class SqliteProjectStore:
 
     def _init(self):
         with open_db(self.db_path, wal=True) as con:
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS campaigns (
-                    id TEXT PRIMARY KEY, name TEXT, created_at TEXT, description TEXT, run_paths TEXT)"""
-            )
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS entries (
-                    id TEXT PRIMARY KEY, campaign_id TEXT, title TEXT, body TEXT, author TEXT,
-                    created_at TEXT, artefacts TEXT, supersedes TEXT)"""
-            )
-            if "files" not in {r[1] for r in con.execute("PRAGMA table_info(entries)")}:
-                con.execute("ALTER TABLE entries ADD COLUMN files TEXT")  # old rows: NULL, read as no files
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS proposals (
-                    id TEXT PRIMARY KEY, run TEXT, smiles TEXT, reason TEXT, note TEXT, candidate TEXT,
-                    author TEXT, created_at TEXT, status TEXT)"""
-            )
-            con.commit()
+            migrate(con, _STEPS)
 
     def add_proposal(self, proposal: Proposal) -> Proposal:
         """Store a proposal for the computational chemist's review. Validated first; never launches anything."""

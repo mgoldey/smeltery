@@ -4,19 +4,34 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import os
+import signal
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from smeltery.bench.adapters import task_supervisor as _sup
-from smeltery.bench.adapters._sqlite import is_duplicate_column, open_db
-from smeltery.bench.adapters.task_supervisor import connect, kill_group, proc_identity, promote, same_process, utc
+from smeltery.bench.adapters._sqlite import add_column, migrate, open_db
+from smeltery.bench.adapters.task_supervisor import (
+    connect,
+    kill_group,
+    proc_identity,
+    promote,
+    same_process,
+    spawn_supervisor,
+    task_event,
+    utc,
+)
 from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager
 
 _GB = 1024**3
+_log = logging.getLogger(__name__)
 #: `SubprocessTaskQueue` defines `list`, so inside its body the builtin is unreachable by name (as in smeltery.tasks).
 _TaskList = list[Task]
+_StrList = list[str]
+_DictList = list[dict]
 
 #: Columns added after the first schema, with their types. Every one is nullable, so an old row reads back as "the
 #: backend cannot say". `owner_pid` is no longer written (the supervisor replaced the in-process waiter) but stays
@@ -36,11 +51,62 @@ _ADDED_COLUMNS = (
     ("capped", "INTEGER"),  # 1: a launched run, which waits in `queued` for one of max_concurrent_runs slots
 )
 
+
+def _add_task_columns(con: sqlite3.Connection) -> None:
+    for col, kind in _ADDED_COLUMNS:
+        add_column(con, "tasks", col, kind)
+
+
+#: Schema steps; append only (see `_sqlite.migrate`). Version 2 adds `_ADDED_COLUMNS`, which an older database lacks.
+_STEPS = (
+    """CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
+        created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
+        log_path TEXT, note TEXT, pid INTEGER)""",
+    "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)",
+    _add_task_columns,
+)
+SCHEMA_VERSION = len(_STEPS)
+
 #: What `_row_to_task` reads, in order. Named, never `SELECT *`: the column order of a migrated table is not ours.
 _TASK_COLUMNS = (
     "id,name,command,cwd,status,created_at,started_at,finished_at,returncode,log_path,note,"
     "attempt,max_attempts,heartbeat_at,peak_rss_bytes,oom,memory_limit_bytes"
 )
+
+
+#: Most tasks listed by default: enough to see what matters, few enough to poll every 1.5 s.
+DEFAULT_LIST_LIMIT = 100
+_ACTIVE = "('queued','running')"
+#: `tail_log` reads backwards in blocks of this size, and never more than `_TAIL_MAX_BYTES` in all, so a 50 MB log
+#: (or one giant `\r` progress line) costs the same as a short one.
+_TAIL_BLOCK = 64 * 1024
+_TAIL_MAX_BYTES = 4 * 1024 * 1024
+
+
+def read_tail(path: str | Path, lines: int) -> str:
+    """The last `lines` lines of a file, reading from the end instead of the whole file."""
+    if lines <= 0:
+        return ""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        end = pos = os.fstat(fd).st_size
+        chunks: list[bytes] = []
+        newlines = 0
+        # lines + 1 newlines mean the first wanted line is complete (a trailing newline ends the last line).
+        while pos > 0 and newlines <= lines and end - pos < _TAIL_MAX_BYTES:
+            n = min(_TAIL_BLOCK, pos)
+            pos -= n
+            chunk = os.pread(fd, n, pos)
+            chunks.append(chunk)
+            newlines += chunk.count(b"\n")
+    finally:
+        os.close(fd)
+    data = b"".join(reversed(chunks))
+    text = data.decode(errors="replace").splitlines()
+    if pos > 0 and newlines <= lines:  # hit the byte cap inside a line: the first line is partial
+        text = text[1:]
+    return "\n".join(text[-lines:])
 
 
 def _age_s(iso: str) -> float:
@@ -49,6 +115,7 @@ def _age_s(iso: str) -> float:
     try:
         t = datetime.fromisoformat(iso)
     except ValueError:
+        _log.debug("unparseable timestamp %r", iso, exc_info=True)
         return 0.0
     if t.tzinfo is None:
         t = t.replace(tzinfo=timezone.utc)
@@ -78,32 +145,21 @@ class SubprocessTaskQueue:
     #: enough that a cap fires before the node is in trouble.
     sample_interval_s = 1.0
 
-    def __init__(self, root: str | Path, *, max_concurrent_runs: int = 1):
+    def __init__(self, root: str | Path, *, max_concurrent_runs: int = 1, spawn=spawn_supervisor):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = self.root / "tasks.sqlite"
         self.log_dir = self.root / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._spawn = spawn  # a seam for tests: how a task's supervisor is started
         self._init_db()
         self.max_concurrent_runs = max_concurrent_runs
         self._reconcile()
-        promote(self.db)
+        promote(self.db, self._spawn)
 
     def _init_db(self) -> None:
         with open_db(self.db, wal=True) as con:
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS tasks (
-                    id TEXT PRIMARY KEY, name TEXT, command TEXT, cwd TEXT, status TEXT,
-                    created_at TEXT, started_at TEXT, finished_at TEXT, returncode INTEGER,
-                    log_path TEXT, note TEXT, pid INTEGER)"""
-            )
-            con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-            for col, kind in _ADDED_COLUMNS:
-                try:
-                    con.execute(f"ALTER TABLE tasks ADD COLUMN {col} {kind}")
-                except sqlite3.OperationalError as e:
-                    if not is_duplicate_column(e):
-                        raise
+            migrate(con, _STEPS)
 
     @property
     def max_concurrent_runs(self) -> int:
@@ -118,7 +174,7 @@ class SubprocessTaskQueue:
             raise ValueError(f"max_concurrent_runs must be a positive integer, got {n!r}")
         with open_db(self.db) as con:
             con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('max_concurrent_runs', ?)", (str(n),))
-        promote(self.db)  # a raised cap frees slots now
+        promote(self.db, self._spawn)  # a raised cap frees slots now
 
     def _row_to_task(self, row) -> Task:
         (
@@ -196,6 +252,10 @@ class SubprocessTaskQueue:
                     "WHERE id=? AND status='running' AND supervisor_pid IS ?",
                     (utc(), why, tid, spid),
                 ).rowcount
+            if changed:
+                task_event(
+                    tid, "supervisor_lost", level=logging.WARNING, supervisor_pid=spid, orphan_killed=bool(orphan)
+                )
             if changed and orphan and pid:
                 kill_group(pid)
 
@@ -252,7 +312,8 @@ class SubprocessTaskQueue:
                     int(bool(capped)),
                 ),
             )
-        promote(self.db)
+        task_event(tid, "submit", task_name=name or None, capped=bool(capped), retries=retries)
+        promote(self.db, self._spawn)
         return tid
 
     def _read(self, where: str = "", args: tuple = ()) -> _TaskList:
@@ -260,14 +321,26 @@ class SubprocessTaskQueue:
             rows = con.execute(f"SELECT {_TASK_COLUMNS} FROM tasks {where}", args).fetchall()
         return [self._row_to_task(r) for r in rows]
 
-    def list(self, status=None):
+    def list(self, status=None, limit: int | None = DEFAULT_LIST_LIMIT):
+        """At most `limit` tasks (None: all), newest first. Queued and running tasks are chosen before finished
+        ones, so a long history never pushes live work off the panel; the result is then ordered by creation."""
         self._reconcile()
-        promote(self.db)
-        return self._read("WHERE status=?", (status,)) if status else self._read()
+        promote(self.db, self._spawn)
+        where, args = ("WHERE status=?", (status,)) if status else ("", ())
+        if limit is None:
+            return self._read(f"{where} ORDER BY created_at DESC", args)
+        if limit < 1:
+            raise ValueError(f"limit must be a positive integer or None, got {limit!r}")
+        inner = (
+            f"SELECT {_TASK_COLUMNS} FROM tasks {where} ORDER BY (status IN {_ACTIVE}) DESC, created_at DESC LIMIT ?"
+        )
+        with open_db(self.db) as con:
+            rows = con.execute(f"SELECT * FROM ({inner}) ORDER BY created_at DESC", (*args, limit)).fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     def get(self, task_id):
         self._reconcile(task_id)
-        promote(self.db)
+        promote(self.db, self._spawn)
         found = self._read("WHERE id=?", (task_id,))
         return found[0] if found else None
 
@@ -293,16 +366,50 @@ class SubprocessTaskQueue:
         if not changed:
             return False
         status, pid, pid_start = row
+        task_event(task_id, "cancel", was=status)
         if status == "running" and same_process(pid, pid_start):
             kill_group(pid)
-        promote(self.db)
+        promote(self.db, self._spawn)
         return True
+
+    def live_tasks(self) -> _DictList:
+        self._reconcile()  # a running row whose supervisor is gone is not live
+        with open_db(self.db) as con:
+            rows = con.execute(
+                "SELECT id,name,status,pid,supervisor_pid FROM tasks WHERE status IN ('queued','running') "
+                "ORDER BY created_at"
+            ).fetchall()
+        return [{"id": i, "name": n, "status": st, "pid": pid, "supervisor_pid": spid} for i, n, st, pid, spid in rows]
+
+    def stop_live(self, reason: str) -> _StrList:
+        """Cancel every queued task and terminate every running one. The marks are written first and in one
+        transaction, so nothing is promoted while the running ones die (a finishing supervisor promotes the next
+        queued task). A process group is signalled only while the recorded pid still has the recorded identity: a
+        reused pid is never touched."""
+        with connect(self.db, immediate=True) as con:
+            rows = con.execute(
+                "SELECT id,status,pid,pid_start FROM tasks WHERE status IN ('queued','running')"
+            ).fetchall()
+            con.execute(
+                "UPDATE tasks SET status='cancelled', finished_at=?, note=? WHERE status IN ('queued','running')",
+                (utc(), reason),
+            )
+        groups = [pid for _, status, pid, start in rows if status == "running" and pid and same_process(pid, start)]
+        for pgid in groups:  # ask them all first, so the grace periods overlap instead of adding up
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(pgid, signal.SIGTERM)
+        for pgid in groups:
+            kill_group(pgid)
+        for tid, status, *_ in rows:
+            task_event(tid, "stop", was=status, reason=reason)
+        return [tid for tid, *_ in rows]
 
     def ready(self):
         try:
             with contextlib.closing(sqlite3.connect(f"file:{self.db}?mode=rw", uri=True)) as con:
                 con.execute("SELECT 1 FROM tasks LIMIT 1")
         except sqlite3.Error as e:
+            _log.warning("task queue not ready: %s", e, exc_info=True)
             return False, str(e)
         return True, str(self.db)
 
@@ -310,11 +417,10 @@ class SubprocessTaskQueue:
         t = self.get(task_id)
         if t is None:
             raise KeyError(task_id)
-        p = Path(t.log_path)
-        if not p.exists():
+        try:
+            return read_tail(t.log_path, lines) if t.log_path else ""
+        except FileNotFoundError:
             return ""
-        data = p.read_text(errors="replace").splitlines()
-        return "\n".join(data[-lines:])
 
 
 class TemporalTaskQueue:
@@ -360,8 +466,9 @@ class TemporalTaskQueue:
         )
         return t.id if hasattr(t, "id") else str(t)
 
-    def list(self, status=None):
-        return self._m.list(status=status)
+    def list(self, status=None, limit: int | None = DEFAULT_LIST_LIMIT):
+        tasks = self._m.list(status=status)  # newest first
+        return tasks if limit is None else tasks[:limit]
 
     def get(self, task_id):
         return self._m.get(task_id)

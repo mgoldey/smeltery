@@ -9,6 +9,7 @@ never run here (spec, settled item 4): `poses_from == "none"` and every pose-dep
 from __future__ import annotations
 
 import json
+import logging
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,8 @@ from smeltery import cli
 from smeltery.gui.pipeline import Pipeline
 from smeltery.gui.steps import steps
 from smeltery.model import Candidate, Pose
+
+_log = logging.getLogger(__name__)
 
 CANNOT_SAY = "cannot say until poses exist"
 
@@ -149,6 +152,7 @@ def impact(
         result.memory = cli.memory_estimate(SimpleNamespace(tier=tier, candidates=cands))
         result.poses_from = poses_from
     except Exception as e:  # noqa: BLE001 - a live-typing endpoint answers "cannot say" with the reason, never a 500
+        _log.debug("cost estimate failed", exc_info=True)
         issues.append({"level": "error", "stage": None, "message": f"cannot estimate: {type(e).__name__}: {e}"})
         result.seconds = {"value": None, "basis": CANNOT_SAY}
         result.memory = cli.memory_cannot_say(tier, CANNOT_SAY)

@@ -456,9 +456,7 @@ def _busy_with(request: Request, folder: Path, name: str) -> list[str]:
     copy of the config and inputs into OUT, and a run record stores no pipeline name, so no run is orphaned by a
     rename."""
     out = []
-    for t in ports(request).task_queue.list():
-        if t.status not in ("queued", "running"):
-            continue
+    for t in _live_tasks(request):
         cwd = Path(t.cwd) if t.cwd else None
         if t.name == f"preview {name}" or (cwd is not None and (cwd == folder or folder in cwd.parents)):
             out.append(t.id)
@@ -652,12 +650,20 @@ def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> 
     )
 
 
+def _live_tasks(request: Request) -> list[Any]:
+    """Every queued or running task, newest first, however long the finished history is."""
+    q = ports(request).task_queue
+    return sorted(
+        [*q.list(status="queued", limit=None), *q.list(status="running", limit=None)],
+        key=lambda t: t.created_at or "",
+        reverse=True,
+    )
+
+
 def _preview_task(request: Request, name: str) -> str | None:
     """The id of this pipeline's preview that is queued or running, newest first."""
-    live = [
-        t for t in ports(request).task_queue.list() if t.name == f"preview {name}" and t.status in ("queued", "running")
-    ]
-    return live[-1].id if live else None
+    live = [t for t in _live_tasks(request) if t.name == f"preview {name}"]
+    return live[0].id if live else None
 
 
 @router.post("/pipelines/impact", response_model=Impact)

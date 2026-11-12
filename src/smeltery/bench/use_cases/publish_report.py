@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 class PublishReport:
     def __init__(self, run_store, artifact_store):
@@ -16,6 +20,7 @@ class PublishReport:
             if hasattr(report_mod, "render"):
                 frozen = report_mod.render(run)
         except Exception:
+            _log.warning("could not render the frozen report for %s; publishing without it", run, exc_info=True)
             frozen = None
         if frozen is not None:
             digest = self.artifact_store.put(frozen.encode() if isinstance(frozen, str) else frozen)

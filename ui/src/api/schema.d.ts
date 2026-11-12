@@ -1286,7 +1286,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Tasks */
+        /**
+         * List Tasks
+         * @description The newest `limit` tasks; queued and running ones are always chosen before finished ones.
+         */
         get: operations["list_tasks_api_tasks_get"];
         put?: never;
         post?: never;
@@ -6320,7 +6323,9 @@ export interface operations {
     };
     list_tasks_api_tasks_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6334,6 +6339,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Task"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
