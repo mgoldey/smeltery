@@ -340,7 +340,10 @@ def test_a_running_task_reports_a_heartbeat_that_advances_as_it_writes(bench_tmp
     condition from a dead one, and `stalled` is what says which -- see the stall test below.
     """
     q = SubprocessTaskQueue(bench_tmp)
-    chatty = "import time,sys\nfor _ in range(40):\n print('tick');sys.stdout.flush();time.sleep(0.1)"
+    # `_utc()` stamps whole seconds (see the stall test below), so this has to stay alive long enough for the
+    # clock's second to turn over twice while still writing. 40 ticks x 0.1 s = 4 s was too tight: under load,
+    # startup alone can eat the window, the task then exits, and the heartbeat can never advance again.
+    chatty = "import time,sys\nfor _ in range(300):\n print('tick');sys.stdout.flush();time.sleep(0.1)"
     tid = q.submit("chatty", ["python", "-c", chatty])
     wait_until(lambda: q.get(tid).heartbeat_at is not None)
     first = q.get(tid).heartbeat_at
