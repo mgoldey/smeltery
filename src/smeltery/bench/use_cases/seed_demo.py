@@ -34,11 +34,14 @@ def seed_demo(root: str | Path) -> list[str]:
 
 
 def landing_path(root: str | Path) -> str:
-    """The Bench URL path of the demo's finished run (the first run listed under `LANDING`, else the first run)."""
+    """The Bench URL path of the demo's finished run (the first run listed under `LANDING`, else the first run).
+
+    Addressed by the run's stable id, never its position: this URL is printed once and then lives in a terminal
+    scrollback, where a later run that sorts earlier would otherwise have moved it to a different run."""
     from smeltery.bench.adapters.run_store import FilesystemRunStore
 
     runs = FilesystemRunStore(root).list_runs()
-    for i, r in enumerate(runs):
+    for r in runs:
         if f"/pipelines/{LANDING}/" in str(r["path"]).replace("\\", "/"):
-            return f"/run/{i}/results"
-    return "/run/0/results" if runs else "/"
+            return f"/run/{r['id']}/results"
+    return f"/run/{runs[0]['id']}/results" if runs else "/"

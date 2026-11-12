@@ -358,8 +358,8 @@ filled in.
   of their record.
 - `/compare`: two runs chosen as arms, side by side, with the difference of their ddE values.
 
-**Run** (`/run/{idx}/...`) is the computational chemist's instrument panel for one run. A context
-bar shows the campaign, input digest and verdict.
+**Run** (`/run/{run_id}/...`) is the computational chemist's instrument panel for one run. A
+context bar shows the campaign, input digest and verdict.
 
 - `overview`: the verdict and what the run did.
 - `results`: the forest plot of ddE with the floor band, the resolved table, and per-pose values.
@@ -371,10 +371,21 @@ bar shows the campaign, input digest and verdict.
   the core refuses, for example, a within-tie choice that has no note.
 - `proposals`: candidates proposed for review. A proposal starts no work.
 
-**Report** (`/report/{idx}`) is what a bench chemist reads: the verdict, figures and poses, with
+**Report** (`/report/{run_id}`) is what a bench chemist reads: the verdict, figures and poses, with
 comment threads anchored to the run, a candidate or a pose, and proposals. It offers no control
 that starts work. "Snapshot" writes a self-contained `report-<digest>.html` beside the run for
 archiving.
+
+## Addressing a run
+
+A run's `run_id` is `<input_digest[:12]>-<hash of its path under ROOT>`: derived from the run
+itself, so adding or removing other runs never changes it and a bookmark, a shared link or an
+in-flight decision keeps naming the same record. `GET /api/runs` returns it as `id`.
+
+An older link whose path segment is a bare integer (`/run/3`, `/api/runs/3/ddE`) still resolves,
+as the position in `GET /api/runs`; the answer carries `Deprecation: true` and a `Link` header
+with the stable URL. Nothing writes that form any more -- no response and no page link carries a
+position, and `/api/compare?a=&b=` takes ids too.
 
 ## Verdict states
 
@@ -390,7 +401,7 @@ The schema is served at `/openapi.json`; `python -m smeltery.bench.openapi` prin
 change without that regeneration fails CI.
 
 - `/healthz`, `/api/whoami`
-- runs: `/api/runs`, `/api/runs/{idx}` and its `verdict`, `ddE`, `resolved`, `per_pose`,
+- runs: `/api/runs`, `/api/runs/{run_id}` and its `verdict`, `ddE`, `resolved`, `per_pose`,
   `figures/{name}`, `scene`, `pose_maps`, `pose_atoms`, `gates`, `calcs`, `lineage`, `decisions`,
   `comments`, `proposals`, `snapshot`; `/api/compare`; `/api/decisions/vocabulary`,
   `/api/proposals`, `/api/proposals/vocabulary`

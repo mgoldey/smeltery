@@ -70,9 +70,9 @@ def _steps(res: dict, tiers: list[dict]) -> tuple[list[M.LineageStep], list[str]
     return steps, missing
 
 
-@router.get("/runs/{idx}/lineage", response_model=M.Lineage)
-def run_lineage(request: Request, idx: int, candidate: str) -> M.Lineage:
-    r = run(request, idx)
+@router.get("/runs/{run_id}/lineage", response_model=M.Lineage)
+def run_lineage(request: Request, run_id: str, candidate: str) -> M.Lineage:
+    r = run(request, run_id)
     rec: dict[str, Any] = r.record
     res = rec["results"]
     if candidate not in r.candidates:

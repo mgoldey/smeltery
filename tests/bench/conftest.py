@@ -43,6 +43,11 @@ def incomplete_run_dir(tmp_path):
     return out
 
 
+def run_id_of(client, i: int = 0) -> str:
+    """The stable id of the i-th run the client lists (B04: what every route and body that addresses a run takes)."""
+    return client.get("/api/runs").json()[i]["id"]
+
+
 @pytest.fixture
 def client_for(tmp_path):
     """client_for(run_dir=None, queue=None, studies=(), identity="mg") -> (TestClient, ports dict)."""

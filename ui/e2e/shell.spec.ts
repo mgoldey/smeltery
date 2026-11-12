@@ -12,15 +12,15 @@ test("the bench lists every fixture run with its digest", async ({ page }) => {
 
 test("the context bar shows the run's campaign and input digest", async ({ page }) => {
   const r = run("a_resolved"); // data source: the record serve_fixture.py wrote, via .fixture.json
-  await page.goto(`/run/${r.idx}`);
-  await expect(page).toHaveURL(new RegExp(`/run/${r.idx}/results$`));
+  await page.goto(`/run/${r.id}`);
+  await expect(page).toHaveURL(new RegExp(`/run/${r.id}/results$`));
   await expect(page.getByTestId("context-campaign")).toHaveText(r.campaign);
   await expect(page.getByTestId("context-digest")).toHaveText(r.digest.slice(0, 12));
 });
 
 test("an incomplete run says what it is missing instead of rendering blank", async ({ page }) => {
   const r = run("c_incomplete");
-  await page.goto(`/run/${r.idx}/overview`);
+  await page.goto(`/run/${r.id}/overview`);
   await expect(page.getByRole("alert")).toContainText("incomplete");
   await expect(page.getByRole("alert")).toContainText("cut");
 });
@@ -40,4 +40,21 @@ test("the app shell renders under the error boundary, and its fallback stays out
   await page.goto(`/run/${r.idx}`);
   await expect(page.getByTestId("context-campaign")).toBeVisible();
   await expect(page.getByTestId("error-boundary")).toHaveCount(0);
+});
+
+test("a run id addresses the same record whatever its position, and the old integer link still opens it", async ({
+  page,
+}) => {
+  const r = run("d_floor"); // not position 0, so an id/position mix-up would show
+  const byId = (await (await page.request.get(`/api/runs/${r.id}`)).json()) as { path: string; id: string };
+  expect(byId.path).toBe(r.path);
+  const byPosition = await page.request.get(`/api/runs/${r.idx}`);
+  expect(((await byPosition.json()) as { path: string }).path).toBe(r.path);
+  expect(byPosition.headers()["deprecation"]).toBe("true"); // it works, and it says it is the old form
+  expect(byPosition.headers()["link"]).toBe(`</api/runs/${r.id}>; rel="canonical"`);
+  // The page the app itself links to is the id one: every run link on Bench is /run/<an id>, never /run/<n>.
+  await page.goto("/bench");
+  const hrefs = await page.locator('a[href^="/run/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+  expect(hrefs).toContain(`/run/${r.id}`);
+  expect(hrefs.filter((h) => /^\/run\/\d+$/.test(h ?? ""))).toEqual([]);
 });

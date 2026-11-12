@@ -1,21 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "../../api/client";
 import { DroppedPoses } from "../../components/DroppedPoses";
-import { useRunIdx } from "./RunLayout";
+import { useRunId } from "./RunLayout";
 
 export function Overview() {
-  const idx = useRunIdx();
+  const runId = useRunId();
   const detail = useQuery({
-    queryKey: ["run", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}", { params: { path: { idx } } })),
+    queryKey: ["run", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })),
   });
   const verdict = useQuery({
-    queryKey: ["verdict", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
+    queryKey: ["verdict", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/verdict", { params: { path: { run_id: runId } } })),
   });
   const drops = useQuery({
-    queryKey: ["dropped_poses", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/dropped_poses", { params: { path: { idx } } })),
+    queryKey: ["dropped_poses", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/dropped_poses", { params: { path: { run_id: runId } } })),
   });
   const d = detail.data;
   return (

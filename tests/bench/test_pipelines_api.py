@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from bench.conftest import record_path
+from bench.conftest import record_path, run_id_of
 
 BLANK = {"campaign": "cdk2", "parent": "a", "candidates": {"a": "CCO", "b": "CCN"}}
 
@@ -69,7 +69,7 @@ def test_unknown_taken_and_invalid_names(client_for):
 def test_create_needs_exactly_one_source(client_for):
     c, _ = client_for()
     assert c.post("/api/pipelines", json={"name": "p1"}).status_code == 400
-    r = c.post("/api/pipelines", json={"name": "p1", "blank": BLANK, "from_run": 0})
+    r = c.post("/api/pipelines", json={"name": "p1", "blank": BLANK, "from_run": "deadbeefcafe-000000"})
     assert r.status_code == 400
 
 
@@ -82,7 +82,7 @@ def test_from_prebuilt_is_unknown_until_there_are_any(client_for):
 
 def test_from_a_run_without_a_recorded_config_reconstructs_it_with_the_note(client_for, run_dir):
     c, _ = client_for(run_dir)
-    r = c.post("/api/pipelines", json={"name": "next", "from_run": 0})
+    r = c.post("/api/pipelines", json={"name": "next", "from_run": run_id_of(c)})
     assert r.status_code == 201, r.text
     body = r.json()
     assert 'campaign = "' in body["toml"] and any("place the sites again" in n for n in body["notes"])
@@ -109,7 +109,7 @@ def test_from_a_run_with_a_recorded_config_keeps_its_sites(client_for, run_dir):
     )
     _record_config(run_dir, toml, {"inputs/abc.pdb": "ATOM\n"})
     c, _ = client_for(run_dir)
-    r = c.post("/api/pipelines", json={"name": "next", "from_run": 0})
+    r = c.post("/api/pipelines", json={"name": "next", "from_run": run_id_of(c)})
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["toml"] == toml and "[[pocket.site]]" in body["toml"]
@@ -122,14 +122,14 @@ def test_a_recorded_input_that_is_missing_from_the_run_dir_is_409_and_creates_no
     _record_config(run_dir, 'campaign = "x"\n', {"inputs/abc.pdb": "ATOM\n"})
     (run_dir / "inputs" / "abc.pdb").unlink()
     c, _ = client_for(run_dir)
-    r = c.post("/api/pipelines", json={"name": "next", "from_run": 0})
+    r = c.post("/api/pipelines", json={"name": "next", "from_run": run_id_of(c)})
     assert r.status_code == 409 and "abc.pdb" in r.json()["reason"]
     assert c.get("/api/pipelines").json() == []
 
 
 def test_an_unknown_run_is_404(client_for):
     c, _ = client_for()
-    assert c.post("/api/pipelines", json={"name": "n", "from_run": 5}).status_code == 404
+    assert c.post("/api/pipelines", json={"name": "n", "from_run": "deadbeefcafe-999999"}).status_code == 404
 
 
 def test_a_blank_pipeline_with_an_odd_parent_is_a_saved_draft_not_a_500(client_for):

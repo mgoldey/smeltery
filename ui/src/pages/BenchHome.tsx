@@ -30,7 +30,7 @@ export function BenchHome() {
   const [pipeName, setPipeName] = useState("");
   const [fromRun, setFromRun] = useState("");
   const newPipeline = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: Number(fromRun) } })),
+    mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: fromRun } })),
     onSuccess: (d) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
       navigate(`/pipelines/${d.name}?run=${fromRun}`);
@@ -42,15 +42,15 @@ export function BenchHome() {
     mutationFn: async (p: string) => {
       const name = (prebuiltName[p] ?? p).trim();
       const made = await unwrap(api.POST("/api/pipelines", { body: { name, from_prebuilt: p } }));
-      // The example run was copied into the new pipeline's folder, so the run store lists it: find its index now.
+      // The example run was copied into the new pipeline's folder, so the run store lists it: find its id now.
       const list = await unwrap(api.GET("/api/runs"));
       const mine = list.find((r) => r.path.includes(`/pipelines/${made.name}/run/`));
-      return { name: made.name, idx: mine?.idx ?? null };
+      return { name: made.name, runId: mine?.id ?? null };
     },
-    onSuccess: ({ name, idx }) => {
+    onSuccess: ({ name, runId }) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
       void qc.invalidateQueries({ queryKey: ["runs"] });
-      navigate(`/pipelines/${name}?${idx === null ? "" : `run=${idx}&`}step=measure`);
+      navigate(`/pipelines/${name}?${runId === null ? "" : `run=${runId}&`}step=measure`);
     },
   });
   const [blank, setBlank] = useState({ name: "", campaign: "", parent: "", parentSmiles: "", analogues: "" });
@@ -217,8 +217,8 @@ export function BenchHome() {
                     <select id="pipeline-from" value={fromRun} onChange={(e) => setFromRun(e.target.value)}>
                       <option value="">choose a run</option>
                       {(runs.data ?? []).map((r) => (
-                        <option key={r.idx} value={String(r.idx)}>
-                          {r.idx}: {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
+                        <option key={r.id} value={r.id}>
+                          {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
                         </option>
                       ))}
                     </select>
@@ -279,9 +279,9 @@ export function BenchHome() {
                 </thead>
                 <tbody>
                   {(runs.data ?? []).map((r) => (
-                    <tr key={r.idx}>
+                    <tr key={r.id}>
                       <td>
-                        <Link to={`/run/${r.idx}`}>{r.campaign ?? r.path}</Link>
+                        <Link to={`/run/${r.id}`}>{r.campaign ?? r.path}</Link>
                         {r.error ? <div className="field-error">{r.error}</div> : null}
                       </td>
                       <td>{r.parent}</td>

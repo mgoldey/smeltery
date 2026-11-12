@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, fixture, IDX, newPipeline, openWorkspace, replaceToml, test } from "./bench";
+import { expect, fixture, id, IDX, newPipeline, openWorkspace, replaceToml, test } from "./bench";
 
 type Doc = { toml: string; sha256: string; ok: boolean; issues: { level: string; stage: string | null; message: string }[] };
 type Catalog = { methods: Record<string, { key: string; label: string }> };
@@ -180,7 +180,7 @@ test("switching the measurement from RHF to KS-DFT: one click, and the TOML foll
 
 test("a run's Pipeline tab opens the workspace on the pipeline made from that run", async ({ page }) => {
   await page.goto(`/run/${IDX.a_resolved}/pipeline`);
-  await expect(page).toHaveURL(new RegExp(`/pipelines/[a-z0-9_-]+\\?run=${IDX.a_resolved}`));
+  await expect(page).toHaveURL(new RegExp(`/pipelines/[a-z0-9_-]+\\?run=${id("a_resolved")}`));
   const name = new URL(page.url()).pathname.split("/").pop()!;
   expect((await page.request.get(`/api/pipelines/${name}`)).status()).toBe(200);
   await expect(page.getByRole("navigation", { name: "Pipeline steps" }).locator("[data-step]")).toHaveCount(6);

@@ -23,19 +23,19 @@ export function convergenceSummary(lines: Record<string, unknown>[]): string {
  * candidate's poses, as `/scene` takes it; the log is read at the original pose index the API maps it to.
  */
 export function ScfLog({
-  idx,
+  runId,
   candidate,
   position,
   summary = false,
 }: {
-  idx: number;
+  runId: string;
   candidate: string;
   position: number;
   summary?: boolean;
 }) {
   const log = useQuery({
-    queryKey: ["calcs", idx, candidate, position],
-    queryFn: () => getJson<CalcLines>(`/api/runs/${idx}/calcs?candidate=${encodeURIComponent(candidate)}&pose=${position}`),
+    queryKey: ["calcs", runId, candidate, position],
+    queryFn: () => getJson<CalcLines>(`/api/runs/${runId}/calcs?candidate=${encodeURIComponent(candidate)}&pose=${position}`),
   });
   if (log.isError) return <div className="banner" role="alert">{log.error.message}</div>;
   if (!log.data) return <p className="lede">Loading the SCF log.</p>;

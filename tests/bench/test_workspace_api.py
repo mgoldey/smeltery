@@ -4,6 +4,7 @@ import json
 import tomllib
 from pathlib import Path
 
+from bench.conftest import run_id_of
 from bench.fakes import FakeTaskQueue
 
 HAND = (
@@ -336,7 +337,7 @@ def test_from_a_run_keeps_the_runs_value_whatever_the_workspace_default(client_f
     rec_path.write_text(json.dumps(rec))
     c, _ = client_for(run_dir)
     assert c.put("/api/methods/paired_poses", json={"defaults": {"n_poses": 12}}).status_code == 200
-    made = c.post("/api/pipelines", json={"name": "next", "from_run": 0})
+    made = c.post("/api/pipelines", json={"name": "next", "from_run": run_id_of(c)})
     assert made.status_code == 201, made.text
     assert made.json()["toml"] == HAND  # n_poses = 6 as the run had it, byte for byte
 
@@ -352,7 +353,7 @@ def test_a_rebuilt_run_keeps_its_own_gate_settings_not_the_workspace_defaults(cl
     _gates_record(run_dir, {"forcefield": True, "max_strain_kcal": 7.0})
     c, _ = client_for(run_dir)
     assert c.put("/api/methods/forcefield", json={"defaults": {"max_strain_kcal": 9.5}}).status_code == 200
-    made = c.post("/api/pipelines", json={"name": "next", "from_run": 0}).json()
+    made = c.post("/api/pipelines", json={"name": "next", "from_run": run_id_of(c)}).json()
     assert tomllib.loads(made["toml"])["gates"] == {"forcefield": True, "max_strain_kcal": 7.0}
 
 
@@ -360,7 +361,7 @@ def test_a_rebuilt_run_without_a_strain_setting_gets_none_from_the_workspace(cli
     _gates_record(run_dir, {"forcefield": True})
     c, _ = client_for(run_dir)
     assert c.put("/api/methods/forcefield", json={"defaults": {"max_strain_kcal": 9.5}}).status_code == 200
-    made = c.post("/api/pipelines", json={"name": "next", "from_run": 0}).json()
+    made = c.post("/api/pipelines", json={"name": "next", "from_run": run_id_of(c)}).json()
     assert tomllib.loads(made["toml"])["gates"] == {"forcefield": True}
 
 

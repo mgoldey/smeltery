@@ -23,7 +23,7 @@ test("start from benzoic-pbe: every step is ready and step 5 shows the committed
   await row.getByLabel("Name of your copy").fill(name);
   await row.getByRole("button", { name: "Start from benzoic-pbe" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/pipelines/${name}\\?run=\\d+&step=measure`));
+  await expect(page).toHaveURL(new RegExp(`/pipelines/${name}\\?run=[0-9a-f]+-[0-9a-f]+&step=measure`));
   const steps = page.getByRole("navigation", { name: "Pipeline steps" }).locator("[data-step]");
   await expect(steps).toHaveCount(6);
   for (const s of await steps.all()) {

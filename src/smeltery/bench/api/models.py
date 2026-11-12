@@ -15,7 +15,7 @@ class Verdict(BaseModel):
 
 
 class RunSummary(BaseModel):
-    idx: int
+    id: str = Field(description="the run's stable id; what every /api/runs/{run_id} route takes")
     path: str
     campaign: str | None = None
     parent: str | None = None
@@ -26,7 +26,7 @@ class RunSummary(BaseModel):
 
 
 class RunDetail(BaseModel):
-    idx: int
+    id: str
     path: str
     out_dir: str
     campaign: str
@@ -177,13 +177,13 @@ class BlankPipeline(BaseModel):
 
 class PipelineCreate(BaseModel):
     name: str
-    from_run: int | None = None
+    from_run: str | None = None
     from_prebuilt: str | None = None
     blank: BlankPipeline | None = None
 
 
 class PipelineFromRun(BaseModel):
-    run: int
+    run: str
 
 
 class Provisional(BaseModel):
@@ -319,7 +319,7 @@ class FileRef(BaseModel):
 class EntryIn(BaseModel):
     title: str
     body: str = ""
-    runs: list[int] = []
+    runs: list[str] = Field(default=[], description="run ids to attach")
     files: list[FileRef] = Field(default=[], description="files already uploaded to /notebook/artifacts")
     supersedes: str | None = None
 

@@ -15,31 +15,31 @@ import { VerdictBanner } from "../components/VerdictBanner";
  * and propose a candidate; nothing here edits the method or starts work.
  */
 export function Report() {
-  const idx = Number(useParams().idx);
+  const runId = useParams().runId ?? "";
   const verdict = useQuery({
-    queryKey: ["verdict", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
+    queryKey: ["verdict", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/verdict", { params: { path: { run_id: runId } } })),
   });
   const ok = verdict.data !== undefined && verdict.data.state !== "INCOMPLETE";
   const detail = useQuery({
-    queryKey: ["run", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}", { params: { path: { idx } } })),
+    queryKey: ["run", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })),
     enabled: ok,
   });
   const table = useQuery({
-    queryKey: ["ddE", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/ddE", { params: { path: { idx } } })),
+    queryKey: ["ddE", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/ddE", { params: { path: { run_id: runId } } })),
     enabled: ok,
   });
   const theme = useScheme();
   const forest = useQuery({
-    queryKey: ["figure", idx, "forest", theme],
+    queryKey: ["figure", runId, "forest", theme],
     queryFn: () =>
-      unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name: "forest" }, query: { theme } } })),
+      unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name: "forest" }, query: { theme } } })),
     enabled: ok,
   });
   const snapshot = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/runs/{idx}/snapshot", { params: { path: { idx } } })),
+    mutationFn: () => unwrap(api.POST("/api/runs/{run_id}/snapshot", { params: { path: { run_id: runId } } })),
   });
   const limits = useQuery({
     queryKey: ["limits"],
@@ -53,7 +53,7 @@ export function Report() {
     <Shell>
       <div className="body">
         <main className="work report">
-          <VerdictBanner idx={idx} />
+          <VerdictBanner runId={runId} />
           {d ? (
             <p className="lede" data-testid="floor-statement">
               {d.floor_statement}
@@ -81,7 +81,7 @@ export function Report() {
                       ± <span className="num">{r.sem.toFixed(2)}</span> {table.data.unit},{" "}
                       {(sizes.get(r.group) ?? 1) > 1 ? `tie group ${r.group + 1} (no order)` : `group ${r.group + 1}`}
                       {r.survivor === true ? ", kept" : r.survivor === false ? ", not kept" : ", unranked"}
-                      <CommentThread idx={idx} anchor={`candidate:${r.candidate}`} title={r.candidate} />
+                      <CommentThread runId={runId} anchor={`candidate:${r.candidate}`} title={r.candidate} />
                     </div>
                   </li>
                 ))}
@@ -92,17 +92,17 @@ export function Report() {
             <section aria-label="Poses">
               <h2>Poses</h2>
               <PoseExplorer
-                idx={idx}
+                runId={runId}
                 detail={d}
                 label="report pose viewer"
-                footer={(c, p) => <CommentThread idx={idx} anchor={`pose:${c}:${p}`} title={`pose ${p} of ${c}`} />}
+                footer={(c, p) => <CommentThread runId={runId} anchor={`pose:${c}:${p}`} title={`pose ${p} of ${c}`} />}
               />
             </section>
           ) : null}
-          <ProposeForm idx={idx} />
+          <ProposeForm runId={runId} />
           <section aria-label="Discussion">
             <h2>Discussion</h2>
-            <CommentThread idx={idx} anchor="run" title="this run" />
+            <CommentThread runId={runId} anchor="run" title="this run" />
           </section>
           {limits.data ? (
             <section aria-label="What this result cannot tell you">

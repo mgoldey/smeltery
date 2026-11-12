@@ -24,12 +24,12 @@ export function App() {
         <Route path="/" element={<Navigate to="/bench" replace />} />
         <Route path="/bench" element={<BenchHome />} />
         <Route path="/studies/:module" element={<Study />} />
-        <Route path="/report/:idx" element={<Report />} />
+        <Route path="/report/:runId" element={<Report />} />
         <Route path="/campaigns/:id" element={<Notebook />} />
         <Route path="/compare" element={<Compare />} />
         <Route path="/methods" element={<Methods />} />
         <Route path="/pipelines/:name" element={<Workspace />} />
-        <Route path="/run/:idx" element={<RunLayout />}>
+        <Route path="/run/:runId" element={<RunLayout />}>
           <Route index element={<Navigate to="results" replace />} />
           <Route path="results" element={<Results />} />
           <Route path="poses" element={<Poses />} />

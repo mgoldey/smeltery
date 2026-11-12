@@ -12,8 +12,8 @@ const withSem = (v: number, sem: number | null) => (sem === null ? v.toFixed(2) 
  * pooling of unlike things. */
 export function Compare() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
-  const [a, setA] = useState<number | null>(null);
-  const [b, setB] = useState<number | null>(null);
+  const [a, setA] = useState<string | null>(null);
+  const [b, setB] = useState<string | null>(null);
   const theme = useScheme();
   const cmp = useQuery({
     queryKey: ["compare", a, b, theme],
@@ -21,7 +21,7 @@ export function Compare() {
     enabled: a !== null && b !== null,
   });
   const usable = (runs.data ?? []).filter((r) => r.verdict && r.verdict.state !== "INCOMPLETE");
-  const pick = (set: (v: number | null) => void) => (v: string) => set(v === "" ? null : Number(v));
+  const pick = (set: (v: string | null) => void) => (v: string) => set(v === "" ? null : v);
   return (
     <Shell>
       <div className="body">
@@ -44,7 +44,7 @@ export function Compare() {
                 <select id={`arm-${arm}`} value={(arm === "A" ? a : b) ?? ""} onChange={(e) => pick(arm === "A" ? setA : setB)(e.target.value)}>
                   <option value="">choose a run</option>
                   {usable.map((r) => (
-                    <option key={r.idx} value={r.idx}>
+                    <option key={r.id} value={r.id}>
                       {r.campaign} {r.digest?.slice(0, 12)} ({r.verdict?.state.toLowerCase()})
                     </option>
                   ))}

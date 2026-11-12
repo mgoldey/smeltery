@@ -99,7 +99,7 @@ export function StepPanel({
 }: {
   pipeline: string;
   toml: string;
-  sourceRun: number | null;
+  sourceRun: string | null;
   step: Step;
   steps: Step[];
   index: number;

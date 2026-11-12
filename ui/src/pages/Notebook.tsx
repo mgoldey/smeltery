@@ -40,7 +40,7 @@ export function Notebook() {
   const titleRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [attach, setAttach] = useState<number[]>([]);
+  const [attach, setAttach] = useState<string[]>([]);
   const [files, setFiles] = useState<FileRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -143,11 +143,11 @@ export function Notebook() {
               <fieldset className="attach">
                 <legend>Attach runs (recorded by the hash of their run record)</legend>
                 {(runs.data ?? []).map((r) => (
-                  <label key={r.idx} className="check">
+                  <label key={r.id} className="check">
                     <input
                       type="checkbox"
-                      checked={attach.includes(r.idx)}
-                      onChange={(e) => setAttach((a) => (e.target.checked ? [...a, r.idx] : a.filter((x) => x !== r.idx)))}
+                      checked={attach.includes(r.id)}
+                      onChange={(e) => setAttach((a) => (e.target.checked ? [...a, r.id] : a.filter((x) => x !== r.id)))}
                     />{" "}
                     {r.campaign} <span className="mono">{r.digest?.slice(0, 12)}</span>
                   </label>

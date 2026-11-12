@@ -181,9 +181,12 @@ def test_project_store_old_database_ends_at_the_fresh_schema(tmp_path):
     assert version(old.db_path) == version(fresh.db_path) == project_store.SCHEMA_VERSION
 
 
-def test_run_store_is_versioned(tmp_path):
-    s = FilesystemRunStore(tmp_path)
-    assert version(s._db) == run_store.SCHEMA_VERSION
+def test_the_run_store_keeps_no_database(tmp_path):
+    """B04 deleted the dead sqlite run index: the stat-keyed parse cache is the index, and the records are the only
+    source of truth, so there is no second copy to version or migrate."""
+    FilesystemRunStore(tmp_path).list_runs()
+    assert [p.name for p in tmp_path.rglob("*.sqlite")] == []
+    assert not hasattr(run_store, "SCHEMA_VERSION")
 
 
 @pytest.mark.parametrize(

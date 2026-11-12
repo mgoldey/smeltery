@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrap } from "../../api/client";
+import { api, runByRef, unwrap } from "../../api/client";
 import { EmptyState } from "../../components/EmptyState";
 import { Structure2D } from "../../components/Structure2D";
-import { useRunIdx } from "./RunLayout";
+import { useRunId } from "./RunLayout";
 
 /** The computational chemist's review queue: what bench chemists proposed after reading this run's report. */
 export function Proposals() {
-  const idx = useRunIdx();
+  const runId = useRunId();
   const verdict = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
-  const digest = verdict.data?.find((r) => r.idx === idx)?.digest ?? undefined;
+  const digest = runByRef(verdict.data, runId)?.digest ?? undefined;
   const proposals = useQuery({
     queryKey: ["proposals", digest],
     queryFn: () => unwrap(api.GET("/api/proposals", { params: { query: { run: digest ?? "" } } })),
@@ -19,7 +19,7 @@ export function Proposals() {
       <main className="work">
         <h1>Proposals</h1>
         <p className="lede">Candidates proposed from this run's report. Add one to the next pipeline's candidates if you agree.</p>
-        {proposals.data && proposals.data.length === 0 ? <EmptyState action={{ label: "Open the report", to: `/report/${idx}` }}>
+        {proposals.data && proposals.data.length === 0 ? <EmptyState action={{ label: "Open the report", to: `/report/${runId}` }}>
             Nothing has been proposed from this run yet. Bench chemists propose candidates after reading its report.
           </EmptyState> : null}
         {proposals.data && proposals.data.length ? (

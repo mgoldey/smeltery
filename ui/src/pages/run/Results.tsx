@@ -7,14 +7,14 @@ import { PerPoseTable } from "../../components/PerPoseTable";
 import { PlotlyFigure } from "../../components/PlotlyFigure";
 import { VerdictBanner } from "../../components/VerdictBanner";
 import { useScheme } from "../../styles/scheme";
-import { useRunIdx } from "./RunLayout";
+import { useRunId } from "./RunLayout";
 
-function useFigure(idx: number, name: "forest" | "matrix" | "per_pose" | "per_pose_values", enabled: boolean) {
+function useFigure(runId: string, name: "forest" | "matrix" | "per_pose" | "per_pose_values", enabled: boolean) {
   const theme = useScheme();
   return useQuery({
-    queryKey: ["figure", idx, name, theme],
+    queryKey: ["figure", runId, name, theme],
     queryFn: () =>
-      unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name }, query: { theme } } })),
+      unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name }, query: { theme } } })),
     enabled,
   });
 }
@@ -24,26 +24,26 @@ function groupLabel(group: number, size: number): string {
 }
 
 export function Results() {
-  const idx = useRunIdx();
+  const runId = useRunId();
   const [traced, setTraced] = useState<string | null>(null);
   const [pairs, setPairs] = useState(true);
   const verdict = useQuery({
-    queryKey: ["verdict", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
+    queryKey: ["verdict", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/verdict", { params: { path: { run_id: runId } } })),
   });
   const ok = verdict.data !== undefined && verdict.data.state !== "INCOMPLETE";
   const table = useQuery({
-    queryKey: ["ddE", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/ddE", { params: { path: { idx } } })),
+    queryKey: ["ddE", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/ddE", { params: { path: { run_id: runId } } })),
     enabled: ok,
   });
-  const forest = useFigure(idx, "forest", ok);
-  const matrix = useFigure(idx, "matrix", ok);
-  const perPose = useFigure(idx, "per_pose", ok);
-  const perPoseValues = useFigure(idx, "per_pose_values", ok && !pairs);
+  const forest = useFigure(runId, "forest", ok);
+  const matrix = useFigure(runId, "matrix", ok);
+  const perPose = useFigure(runId, "per_pose", ok);
+  const perPoseValues = useFigure(runId, "per_pose_values", ok && !pairs);
   const rows = useQuery({
-    queryKey: ["per_pose", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/per_pose", { params: { path: { idx } } })),
+    queryKey: ["per_pose", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/per_pose", { params: { path: { run_id: runId } } })),
     enabled: ok,
   });
   const sizes = new Map<number, number>();
@@ -52,7 +52,7 @@ export function Results() {
   return (
     <div className="body">
       <main className="work">
-        <VerdictBanner idx={idx} />
+        <VerdictBanner runId={runId} />
         {ok && table.data ? (
           <>
             <h2>Paired ΔΔE against the parent</h2>
@@ -61,7 +61,7 @@ export function Results() {
               order inside it means nothing.
             </p>
             {table.data.rows.length === 0 ? (
-              <EmptyState action={{ label: "Open the run overview", to: `/run/${idx}/overview` }}>
+              <EmptyState action={{ label: "Open the run overview", to: `/run/${runId}/overview` }}>
                 No analogue has a paired ΔΔE in this run; the parent alone gives nothing to compare.
               </EmptyState>
             ) : null}
@@ -132,11 +132,11 @@ export function Results() {
               </>
             )}
             {rows.isError && !(pairs ? perPose.isError : perPoseValues.isError) ? <p className="empty-state">{rows.error.message}</p> : null}
-            {rows.data ? <PerPoseTable rows={rows.data} unit={table.data.unit} fileName={`per_pose_${idx}.csv`} /> : null}
+            {rows.data ? <PerPoseTable rows={rows.data} unit={table.data.unit} fileName={`per_pose_${runId}.csv`} /> : null}
           </>
         ) : null}
       </main>
-      {traced !== null ? <LineageInspector idx={idx} candidate={traced} onClose={() => setTraced(null)} /> : null}
+      {traced !== null ? <LineageInspector runId={runId} candidate={traced} onClose={() => setTraced(null)} /> : null}
     </div>
   );
 }

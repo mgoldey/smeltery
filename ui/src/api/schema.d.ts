@@ -103,7 +103,8 @@ export interface paths {
         };
         /**
          * Compare
-         * @description Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn.
+         * @description Two runs as arms, one comparison key each. An arm compared with itself is refused, not drawn. Each arm is a
+         *     run id (an old positional integer still resolves, as everywhere else).
          */
         get: operations["compare_api_compare_get"];
         put?: never;
@@ -734,7 +735,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}": {
+    "/api/runs/{run_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -742,7 +743,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Detail */
-        get: operations["run_detail_api_runs__idx__get"];
+        get: operations["run_detail_api_runs__run_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -751,7 +752,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/calcs": {
+    "/api/runs/{run_id}/calcs": {
         parameters: {
             query?: never;
             header?: never;
@@ -766,7 +767,7 @@ export interface paths {
          *     candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
          *     409 when the run kept no SCF log.
          */
-        get: operations["run_calcs_api_runs__idx__calcs_get"];
+        get: operations["run_calcs_api_runs__run_id__calcs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -775,7 +776,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/charge_sensitivity": {
+    "/api/runs/{run_id}/charge_sensitivity": {
         parameters: {
             query?: never;
             header?: never;
@@ -783,7 +784,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Charge Sensitivity */
-        get: operations["run_charge_sensitivity_api_runs__idx__charge_sensitivity_get"];
+        get: operations["run_charge_sensitivity_api_runs__run_id__charge_sensitivity_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -792,7 +793,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/comments": {
+    "/api/runs/{run_id}/comments": {
         parameters: {
             query?: never;
             header?: never;
@@ -800,17 +801,17 @@ export interface paths {
             cookie?: never;
         };
         /** List Comments */
-        get: operations["list_comments_api_runs__idx__comments_get"];
+        get: operations["list_comments_api_runs__run_id__comments_get"];
         put?: never;
         /** Add Comment */
-        post: operations["add_comment_api_runs__idx__comments_post"];
+        post: operations["add_comment_api_runs__run_id__comments_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/ddE": {
+    "/api/runs/{run_id}/ddE": {
         parameters: {
             query?: never;
             header?: never;
@@ -818,7 +819,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Dde */
-        get: operations["run_dde_api_runs__idx__ddE_get"];
+        get: operations["run_dde_api_runs__run_id__ddE_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -827,7 +828,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions": {
+    "/api/runs/{run_id}/decisions": {
         parameters: {
             query?: never;
             header?: never;
@@ -835,20 +836,20 @@ export interface paths {
             cookie?: never;
         };
         /** List Decisions */
-        get: operations["list_decisions_api_runs__idx__decisions_get"];
+        get: operations["list_decisions_api_runs__run_id__decisions_get"];
         put?: never;
         /**
          * Record Decision
          * @description Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`.
          */
-        post: operations["record_decision_api_runs__idx__decisions_post"];
+        post: operations["record_decision_api_runs__run_id__decisions_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions.csv": {
+    "/api/runs/{run_id}/decisions.csv": {
         parameters: {
             query?: never;
             header?: never;
@@ -856,7 +857,7 @@ export interface paths {
             cookie?: never;
         };
         /** Decisions Csv */
-        get: operations["decisions_csv_api_runs__idx__decisions_csv_get"];
+        get: operations["decisions_csv_api_runs__run_id__decisions_csv_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -865,7 +866,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions.sdf": {
+    "/api/runs/{run_id}/decisions.sdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -873,7 +874,7 @@ export interface paths {
             cookie?: never;
         };
         /** Decisions Sdf */
-        get: operations["decisions_sdf_api_runs__idx__decisions_sdf_get"];
+        get: operations["decisions_sdf_api_runs__run_id__decisions_sdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -882,7 +883,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/decisions/bulk": {
+    "/api/runs/{run_id}/decisions/bulk": {
         parameters: {
             query?: never;
             header?: never;
@@ -896,14 +897,14 @@ export interface paths {
          * @description One decision applied to many candidates, all or nothing: any unknown candidate or invalid decision is a 400
          *     naming every problem, and nothing is written. The file is written once.
          */
-        post: operations["record_decisions_bulk_api_runs__idx__decisions_bulk_post"];
+        post: operations["record_decisions_bulk_api_runs__run_id__decisions_bulk_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/dropped_poses": {
+    "/api/runs/{run_id}/dropped_poses": {
         parameters: {
             query?: never;
             header?: never;
@@ -911,7 +912,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Dropped Poses */
-        get: operations["run_dropped_poses_api_runs__idx__dropped_poses_get"];
+        get: operations["run_dropped_poses_api_runs__run_id__dropped_poses_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -920,7 +921,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/export.sdf": {
+    "/api/runs/{run_id}/export.sdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -932,7 +933,7 @@ export interface paths {
          * @description Every pose of the run as one 3D SDF, with ddE, tie group, survivor, gate results and decisions as properties
          *     (`smeltery.sdf_export`). Unlike decisions.sdf (2D, one record per decided candidate) this is the poses.
          */
-        get: operations["export_sdf_api_runs__idx__export_sdf_get"];
+        get: operations["export_sdf_api_runs__run_id__export_sdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -941,7 +942,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/figures/{name}": {
+    "/api/runs/{run_id}/figures/{name}": {
         parameters: {
             query?: never;
             header?: never;
@@ -953,7 +954,7 @@ export interface paths {
          * @description The figure `smeltery.gui.views` builds, as Plotly JSON, coloured for `theme`. The browser draws it; it never
          *     re-derives or recolours it.
          */
-        get: operations["run_figure_api_runs__idx__figures__name__get"];
+        get: operations["run_figure_api_runs__run_id__figures__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -962,7 +963,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/gates": {
+    "/api/runs/{run_id}/gates": {
         parameters: {
             query?: never;
             header?: never;
@@ -970,7 +971,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Gates */
-        get: operations["run_gates_api_runs__idx__gates_get"];
+        get: operations["run_gates_api_runs__run_id__gates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -979,7 +980,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/lineage": {
+    "/api/runs/{run_id}/lineage": {
         parameters: {
             query?: never;
             header?: never;
@@ -987,7 +988,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Lineage */
-        get: operations["run_lineage_api_runs__idx__lineage_get"];
+        get: operations["run_lineage_api_runs__run_id__lineage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -996,7 +997,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/per_pose": {
+    "/api/runs/{run_id}/per_pose": {
         parameters: {
             query?: never;
             header?: never;
@@ -1004,7 +1005,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Per Pose */
-        get: operations["run_per_pose_api_runs__idx__per_pose_get"];
+        get: operations["run_per_pose_api_runs__run_id__per_pose_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1013,7 +1014,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/pose_atoms": {
+    "/api/runs/{run_id}/pose_atoms": {
         parameters: {
             query?: never;
             header?: never;
@@ -1025,7 +1026,7 @@ export interface paths {
          * @description Atom symbols in the order of the candidate's pose SDF -- the order `[[pocket.site]]` indexes. Read from the
          *     SDF bytes, never derived from the SMILES, so a mismatch with any depiction is detectable.
          */
-        get: operations["run_pose_atoms_api_runs__idx__pose_atoms_get"];
+        get: operations["run_pose_atoms_api_runs__run_id__pose_atoms_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1034,7 +1035,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/pose_maps": {
+    "/api/runs/{run_id}/pose_maps": {
         parameters: {
             query?: never;
             header?: never;
@@ -1045,7 +1046,7 @@ export interface paths {
          * Run Pose Maps
          * @description Empty for a record written before pose maps were kept; the Poses view then cannot tell core from the rest.
          */
-        get: operations["run_pose_maps_api_runs__idx__pose_maps_get"];
+        get: operations["run_pose_maps_api_runs__run_id__pose_maps_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1054,7 +1055,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/proposals": {
+    "/api/runs/{run_id}/proposals": {
         parameters: {
             query?: never;
             header?: never;
@@ -1067,14 +1068,14 @@ export interface paths {
          * Propose
          * @description Store a proposal for review. This route never touches the task queue: a comment must not start compute.
          */
-        post: operations["propose_api_runs__idx__proposals_post"];
+        post: operations["propose_api_runs__run_id__proposals_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/pymol.zip": {
+    "/api/runs/{run_id}/pymol.zip": {
         parameters: {
             query?: never;
             header?: never;
@@ -1086,7 +1087,7 @@ export interface paths {
          * @description The run's poses as a PyMOL bundle: receptor.pdb, one SDF per candidate (the run's own pose files, unchanged,
          *     sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut.
          */
-        get: operations["run_pymol_api_runs__idx__pymol_zip_get"];
+        get: operations["run_pymol_api_runs__run_id__pymol_zip_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1095,7 +1096,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/resolved": {
+    "/api/runs/{run_id}/resolved": {
         parameters: {
             query?: never;
             header?: never;
@@ -1103,7 +1104,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Resolved */
-        get: operations["run_resolved_api_runs__idx__resolved_get"];
+        get: operations["run_resolved_api_runs__run_id__resolved_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1112,7 +1113,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/scene": {
+    "/api/runs/{run_id}/scene": {
         parameters: {
             query?: never;
             header?: never;
@@ -1120,7 +1121,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Scene */
-        get: operations["run_scene_api_runs__idx__scene_get"];
+        get: operations["run_scene_api_runs__run_id__scene_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1129,7 +1130,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/snapshot": {
+    "/api/runs/{run_id}/snapshot": {
         parameters: {
             query?: never;
             header?: never;
@@ -1143,14 +1144,14 @@ export interface paths {
          * @description Write the frozen report beside the run, unmodified. Its numbers, plots and tables are inline; its only
          *     external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load.
          */
-        post: operations["snapshot_api_runs__idx__snapshot_post"];
+        post: operations["snapshot_api_runs__run_id__snapshot_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{idx}/verdict": {
+    "/api/runs/{run_id}/verdict": {
         parameters: {
             query?: never;
             header?: never;
@@ -1158,7 +1159,7 @@ export interface paths {
             cookie?: never;
         };
         /** Run Verdict */
-        get: operations["run_verdict_api_runs__idx__verdict_get"];
+        get: operations["run_verdict_api_runs__run_id__verdict_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1756,9 +1757,10 @@ export interface components {
             files: components["schemas"]["FileRef"][];
             /**
              * Runs
+             * @description run ids to attach
              * @default []
              */
-            runs: number[];
+            runs: string[];
             /** Supersedes */
             supersedes?: string | null;
             /** Title */
@@ -1896,7 +1898,7 @@ export interface components {
             /** Name */
             name?: string | null;
             /** Source Run */
-            source_run?: number | null;
+            source_run?: string | null;
             /** Toml */
             toml: string;
         };
@@ -2498,7 +2500,7 @@ export interface components {
             /** From Prebuilt */
             from_prebuilt?: string | null;
             /** From Run */
-            from_run?: number | null;
+            from_run?: string | null;
             /** Name */
             name: string;
         };
@@ -2748,8 +2750,8 @@ export interface components {
             groups: string[][];
             /** Has Pose Output */
             has_pose_output: boolean;
-            /** Idx */
-            idx: number;
+            /** Id */
+            id: string;
             /** Keep */
             keep: number;
             /** N Poses */
@@ -2780,8 +2782,11 @@ export interface components {
             digest?: string | null;
             /** Error */
             error?: string | null;
-            /** Idx */
-            idx: number;
+            /**
+             * Id
+             * @description the run's stable id; what every /api/runs/{run_id} route takes
+             */
+            id: string;
             /** N Candidates */
             n_candidates?: number | null;
             /** Parent */
@@ -3432,8 +3437,8 @@ export interface operations {
     compare_api_compare_get: {
         parameters: {
             query: {
-                a: number;
-                b: number;
+                a: string;
+                b: string;
                 theme?: "light" | "dark";
             };
             header?: never;
@@ -5049,12 +5054,12 @@ export interface operations {
             };
         };
     };
-    run_detail_api_runs__idx__get: {
+    run_detail_api_runs__run_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5089,7 +5094,7 @@ export interface operations {
             };
         };
     };
-    run_calcs_api_runs__idx__calcs_get: {
+    run_calcs_api_runs__run_id__calcs_get: {
         parameters: {
             query: {
                 candidate: string;
@@ -5098,7 +5103,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5133,12 +5138,12 @@ export interface operations {
             };
         };
     };
-    run_charge_sensitivity_api_runs__idx__charge_sensitivity_get: {
+    run_charge_sensitivity_api_runs__run_id__charge_sensitivity_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5173,12 +5178,12 @@ export interface operations {
             };
         };
     };
-    list_comments_api_runs__idx__comments_get: {
+    list_comments_api_runs__run_id__comments_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5213,12 +5218,12 @@ export interface operations {
             };
         };
     };
-    add_comment_api_runs__idx__comments_post: {
+    add_comment_api_runs__run_id__comments_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5257,12 +5262,12 @@ export interface operations {
             };
         };
     };
-    run_dde_api_runs__idx__ddE_get: {
+    run_dde_api_runs__run_id__ddE_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5297,12 +5302,12 @@ export interface operations {
             };
         };
     };
-    list_decisions_api_runs__idx__decisions_get: {
+    list_decisions_api_runs__run_id__decisions_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5337,12 +5342,12 @@ export interface operations {
             };
         };
     };
-    record_decision_api_runs__idx__decisions_post: {
+    record_decision_api_runs__run_id__decisions_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5381,12 +5386,12 @@ export interface operations {
             };
         };
     };
-    decisions_csv_api_runs__idx__decisions_csv_get: {
+    decisions_csv_api_runs__run_id__decisions_csv_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5421,12 +5426,12 @@ export interface operations {
             };
         };
     };
-    decisions_sdf_api_runs__idx__decisions_sdf_get: {
+    decisions_sdf_api_runs__run_id__decisions_sdf_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5461,12 +5466,12 @@ export interface operations {
             };
         };
     };
-    record_decisions_bulk_api_runs__idx__decisions_bulk_post: {
+    record_decisions_bulk_api_runs__run_id__decisions_bulk_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5505,12 +5510,12 @@ export interface operations {
             };
         };
     };
-    run_dropped_poses_api_runs__idx__dropped_poses_get: {
+    run_dropped_poses_api_runs__run_id__dropped_poses_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5545,12 +5550,12 @@ export interface operations {
             };
         };
     };
-    export_sdf_api_runs__idx__export_sdf_get: {
+    export_sdf_api_runs__run_id__export_sdf_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5585,14 +5590,14 @@ export interface operations {
             };
         };
     };
-    run_figure_api_runs__idx__figures__name__get: {
+    run_figure_api_runs__run_id__figures__name__get: {
         parameters: {
             query?: {
                 theme?: "light" | "dark";
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
                 name: string;
             };
             cookie?: never;
@@ -5630,12 +5635,12 @@ export interface operations {
             };
         };
     };
-    run_gates_api_runs__idx__gates_get: {
+    run_gates_api_runs__run_id__gates_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5670,14 +5675,14 @@ export interface operations {
             };
         };
     };
-    run_lineage_api_runs__idx__lineage_get: {
+    run_lineage_api_runs__run_id__lineage_get: {
         parameters: {
             query: {
                 candidate: string;
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5712,14 +5717,14 @@ export interface operations {
             };
         };
     };
-    run_per_pose_api_runs__idx__per_pose_get: {
+    run_per_pose_api_runs__run_id__per_pose_get: {
         parameters: {
             query?: {
                 quantity?: string;
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5754,14 +5759,14 @@ export interface operations {
             };
         };
     };
-    run_pose_atoms_api_runs__idx__pose_atoms_get: {
+    run_pose_atoms_api_runs__run_id__pose_atoms_get: {
         parameters: {
             query: {
                 candidate: string;
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5796,12 +5801,12 @@ export interface operations {
             };
         };
     };
-    run_pose_maps_api_runs__idx__pose_maps_get: {
+    run_pose_maps_api_runs__run_id__pose_maps_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5836,12 +5841,12 @@ export interface operations {
             };
         };
     };
-    propose_api_runs__idx__proposals_post: {
+    propose_api_runs__run_id__proposals_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5880,12 +5885,12 @@ export interface operations {
             };
         };
     };
-    run_pymol_api_runs__idx__pymol_zip_get: {
+    run_pymol_api_runs__run_id__pymol_zip_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5920,12 +5925,12 @@ export interface operations {
             };
         };
     };
-    run_resolved_api_runs__idx__resolved_get: {
+    run_resolved_api_runs__run_id__resolved_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -5960,7 +5965,7 @@ export interface operations {
             };
         };
     };
-    run_scene_api_runs__idx__scene_get: {
+    run_scene_api_runs__run_id__scene_get: {
         parameters: {
             query: {
                 candidate: string;
@@ -5969,7 +5974,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -6006,12 +6011,12 @@ export interface operations {
             };
         };
     };
-    snapshot_api_runs__idx__snapshot_post: {
+    snapshot_api_runs__run_id__snapshot_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };
@@ -6046,12 +6051,12 @@ export interface operations {
             };
         };
     };
-    run_verdict_api_runs__idx__verdict_get: {
+    run_verdict_api_runs__run_id__verdict_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                idx: number;
+                run_id: string;
             };
             cookie?: never;
         };

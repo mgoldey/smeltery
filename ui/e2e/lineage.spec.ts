@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, IDX, test } from "./bench";
+import { expect, id, IDX, test } from "./bench";
 
 type Lineage = {
   candidate: string;
@@ -61,7 +61,7 @@ test("the lineage opens the pipeline that made the number, and 'change a setting
   await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
   const panel = page.getByRole("complementary", { name: "Lineage" });
   await panel.getByRole("button", { name: "Open the pipeline that made this" }).click();
-  await expect(page).toHaveURL(new RegExp(`/pipelines/[a-z0-9_-]+\\?run=${IDX.a_resolved}$`));
+  await expect(page).toHaveURL(new RegExp(`/pipelines/[a-z0-9_-]+\\?run=${id("a_resolved")}$`));
   const pipeline = new URL(page.url()).pathname.split("/").pop()!;
   // Data source: the pipeline the API now holds was made from this run (its campaign and candidates).
   const doc = await get<{ toml: string }>(page, `/api/pipelines/${pipeline}`);
@@ -72,7 +72,7 @@ test("the lineage opens the pipeline that made the number, and 'change a setting
   await page.goto(`/run/${IDX.a_resolved}/results`);
   await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
   await panel.getByRole("button", { name: "Change a setting and re-run" }).click();
-  await expect(page).toHaveURL(new RegExp(`/pipelines/${pipeline}\\?run=${IDX.a_resolved}&step=measure$`));
+  await expect(page).toHaveURL(new RegExp(`/pipelines/${pipeline}\\?run=${id("a_resolved")}&step=measure$`));
   const measure = page.getByRole("navigation", { name: "Pipeline steps" }).locator('[data-step="measure"]');
   await expect(measure).toHaveAttribute("aria-current", "step");
   await expect(page.locator('[data-panel="measure"]')).toBeVisible();

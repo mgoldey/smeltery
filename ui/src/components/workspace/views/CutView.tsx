@@ -5,19 +5,19 @@ import { useScheme } from "../../../styles/scheme";
 import type { StepViewProps } from "./registry";
 import { NotRun } from "./PosesView";
 
-function useCutFigure(idx: number, name: "forest" | "matrix", enabled: boolean) {
+function useCutFigure(runId: string, name: "forest" | "matrix", enabled: boolean) {
   const theme = useScheme();
   return useQuery({
-    queryKey: ["figure", idx, name, theme],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name }, query: { theme } } })),
+    queryKey: ["figure", runId, name, theme],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name }, query: { theme } } })),
     enabled,
   });
 }
 
 /** Step 6: the cut. The forest and the resolved matrix Results draws, unchanged. */
 export function CutView({ sourceRun }: StepViewProps) {
-  const forest = useCutFigure(sourceRun ?? 0, "forest", sourceRun !== null);
-  const matrix = useCutFigure(sourceRun ?? 0, "matrix", sourceRun !== null);
+  const forest = useCutFigure(sourceRun ?? "", "forest", sourceRun !== null);
+  const matrix = useCutFigure(sourceRun ?? "", "matrix", sourceRun !== null);
   if (sourceRun === null) return <NotRun step="cut" shows="the paired ΔΔE of each analogue against the parent and which pairs the cut could tell apart" />;
   const err = forest.error ?? matrix.error;
   if (err) return <div className="banner" role="alert">{err.message}</div>;

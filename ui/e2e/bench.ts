@@ -4,6 +4,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface FixtureRun {
+  /** The run's stable id: what a `/run/<id>` URL and every `/api/runs/<id>` route take. */
+  id: string;
+  /** Its position in `GET /api/runs`, for pages that offer the nth run. Never an address. */
   idx: number;
   name: string;
   path: string;
@@ -24,9 +27,17 @@ export function fixture(): Fixture {
   return JSON.parse(readFileSync(resolve(here, ".fixture.json"), "utf8")) as Fixture;
 }
 
-/** Run indices, fixed by construction: serve_fixture.py lists runs in path order, and the names sort a < b < c.
- * Usable when tests are collected, before the server has written .fixture.json; shell.spec.ts checks them. */
+/** Run POSITIONS, fixed by construction: serve_fixture.py lists runs in path order, and the names sort a < b < c.
+ * Usable when tests are collected, before the server has written .fixture.json; shell.spec.ts checks them.
+ *
+ * A position is a deprecated run reference (B04): it still resolves, so routes.ts can use it at collection time, but
+ * a test that can read .fixture.json uses `id(name)` instead -- that is what the app itself links to. */
 export const IDX = { a_resolved: 0, b_unranked: 1, c_incomplete: 2, d_floor: 3, e_noposes: 4 } as const;
+
+/** A fixture run's stable id, from .fixture.json (so only inside a test, not at collection time). */
+export function id(name: keyof typeof IDX): string {
+  return run(name).id;
+}
 
 /** The pipeline serve_fixture.py makes from run a_resolved at start, for pages that only read it (axe, theme).
  * Tests that edit a pipeline make their own, so this one stays as made. */
@@ -67,7 +78,7 @@ export async function newPipeline(
   edit?: (text: string) => string,
 ): Promise<{ name: string; toml: string }> {
   const name = `w-${Date.now().toString(36)}-${made++}`;
-  const r = await page.request.post("/api/pipelines", { data: { name, from_run: IDX.a_resolved } });
+  const r = await page.request.post("/api/pipelines", { data: { name, from_run: id("a_resolved") } });
   expect(r.status(), await r.text()).toBe(201);
   let doc = (await r.json()) as { toml: string; sha256: string };
   if (edit) {
@@ -80,7 +91,7 @@ export async function newPipeline(
 
 /** Open a pipeline in the workspace on one step, and wait for the drawing. */
 export async function openWorkspace(page: Page, name: string, step?: string, { unfoldToml = true } = {}) {
-  await page.goto(`/pipelines/${name}?run=${IDX.a_resolved}${step ? `&step=${step}` : ""}`);
+  await page.goto(`/pipelines/${name}?run=${id("a_resolved")}${step ? `&step=${step}` : ""}`);
   await expect(page.getByRole("navigation", { name: "Pipeline steps" }).locator("[data-step]")).toHaveCount(6);
   // The raw TOML pane is folded under "Edit as TOML" by default; most specs read it, so unfold it for them.
   if (unfoldToml) await tomlPane(page);

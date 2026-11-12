@@ -61,11 +61,10 @@ def test_read_run_returns_a_Run_whose_candidates_match(store, run_dir):
     assert sorted(run.candidates) == ["4-Br", "4-Cl", "4-F", "benzoic"]
 
 
-def test_the_index_is_a_cache_the_records_win_over(store, run_dir):
-    store.list_runs()
-    for db in store.root.rglob("*.db"):
-        db.unlink()
-    assert sum("error" not in r for r in store.list_runs()) == 1
+def test_every_row_carries_a_stable_id(store, run_dir):
+    (row,) = store.list_runs()
+    assert row["id"] and not row["id"].isdigit()
+    assert row["id"] == store.list_runs()[0]["id"], "listing twice gives the same id"
 
 
 def test_adapter_satisfies_the_protocol(store):
