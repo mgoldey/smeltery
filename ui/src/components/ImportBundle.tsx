@@ -24,7 +24,7 @@ export function ImportBundle() {
       });
       if (res.status === 422) {
         const body = (await res.json()) as Imported;
-        setProblems(body.files.filter((f) => !f.ok).map((f) => `${f.path}: ${f.message ?? "refused"}`));
+        setProblems((body.files ?? []).filter((f) => !f.ok).map((f) => `${f.path}: ${f.message ?? "refused"}`));
       } else if (!res.ok) {
         setProblems([await reasonOf(res)]);
       } else {

@@ -85,7 +85,7 @@ def test_an_upload_over_the_limit_is_refused_on_its_declared_length(client_for):
         content=b"x",
         headers={"content-length": str(MAX_UPLOAD + 1)},
     )
-    assert r.status_code == 413 and "larger than" in r.json()["detail"]
+    assert r.status_code == 413 and "larger than" in r.json()["reason"]
     assert c.get(f"/api/pipelines/{name}/files").json() == []
 
 

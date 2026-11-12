@@ -126,7 +126,10 @@ class TaskLog(BaseModel):
 
 
 class Problem(BaseModel):
-    reason: str
+    """The one error body: every 4xx/5xx the API returns. `errors` is FastAPI's structured list, on a 422 only."""
+
+    reason: str = Field(description="a human-readable sentence")
+    errors: list[dict[str, Any]] | None = Field(default=None, description="per-field detail of a 422")
 
 
 class Issue(BaseModel):

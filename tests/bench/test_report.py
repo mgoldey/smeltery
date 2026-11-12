@@ -82,7 +82,7 @@ def test_compare_differences_two_runs_and_refuses_one_run_in_both_arms(client_fo
     (row,) = body["rows"]
     assert row["diff"] == -1.0 and not row["unpaired"] and body["unit"]
     same = c.get("/api/compare", params={"a": 0, "b": 0})
-    assert same.status_code == 400 and "both arms" in same.json()["detail"]
+    assert same.status_code == 400 and "both arms" in same.json()["reason"]
 
 
 def test_two_runs_of_one_campaign_are_named_apart_in_the_comparison(client_for, tmp_path):

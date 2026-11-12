@@ -52,7 +52,7 @@ def test_unparseable_toml_is_400_with_its_line_and_is_not_saved(client_for):
     c, _ = client_for()
     made = _make(c)
     r = c.put("/api/pipelines/p1", json={"toml": 'campaign = "x"\nbad = = 1\n', "base_sha256": made["sha256"]})
-    assert r.status_code == 400 and "line 2" in r.json()["detail"]
+    assert r.status_code == 400 and "line 2" in r.json()["reason"]
     assert c.get("/api/pipelines/p1").json()["toml"] == made["toml"]
 
 
@@ -76,7 +76,7 @@ def test_create_needs_exactly_one_source(client_for):
 def test_from_prebuilt_is_unknown_until_there_are_any(client_for):
     c, _ = client_for()
     r = c.post("/api/pipelines", json={"name": "p1", "from_prebuilt": "anything"})
-    assert r.status_code == 400 and "unknown prebuilt pipeline" in r.json()["detail"]
+    assert r.status_code == 400 and "unknown prebuilt pipeline" in r.json()["reason"]
     assert c.get("/api/pipelines").json() == []
 
 

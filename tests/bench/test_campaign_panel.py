@@ -34,5 +34,5 @@ def test_a_cached_cell_is_reported_cached(client_for):
 def test_an_unconfigured_or_unimportable_study_is_404_naming_it(client_for):
     c, _ = client_for(studies=["nope.nothing"])
     r = c.get("/api/studies/nope.nothing/dag")
-    assert r.status_code == 404 and "nope.nothing" in r.json()["detail"]
+    assert r.status_code == 404 and "nope.nothing" in r.json()["reason"]
     assert c.get(f"/api/studies/{STUDY}/dag").status_code == 404

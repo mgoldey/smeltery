@@ -123,7 +123,7 @@ def test_a_run_without_a_receptor_is_409_with_a_clear_detail(tmp_path):
     from gui_fixture import make_run_dir
 
     r = client(make_run_dir(tmp_path)).get("/api/runs/0/pymol.zip")
-    assert r.status_code == 409 and "no receptor" in r.json()["detail"]
+    assert r.status_code == 409 and "no receptor" in r.json()["reason"]
 
 
 def test_a_changed_receptor_file_is_409_not_a_silently_wrong_scene(tmp_path):
@@ -132,7 +132,7 @@ def test_a_changed_receptor_file_is_409_not_a_silently_wrong_scene(tmp_path):
     run_dir = make_run_dir(tmp_path)
     give_receptor(run_dir).write_text("tampered\n")
     r = client(run_dir).get("/api/runs/0/pymol.zip")
-    assert r.status_code == 409 and "sha256" in r.json()["detail"]
+    assert r.status_code == 409 and "sha256" in r.json()["reason"]
 
 
 def test_a_record_that_predates_pose_output_is_409(tmp_path):
@@ -144,7 +144,7 @@ def test_a_record_that_predates_pose_output_is_409(tmp_path):
     del rec["results"]["poses"]
     path.write_text(json.dumps(rec))
     r = client(run_dir).get("/api/runs/0/pymol.zip")
-    assert r.status_code == 409 and "predates pose output" in r.json()["detail"]
+    assert r.status_code == 409 and "predates pose output" in r.json()["reason"]
 
 
 def test_awkward_candidate_names_give_flat_unique_zip_entries_and_matching_load_lines(tmp_path):

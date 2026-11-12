@@ -3,22 +3,20 @@ import { describeReason } from "./http";
 
 describe("describeReason", () => {
   it("keeps a specific server detail verbatim", () => {
-    expect(describeReason(404, "Not Found", { detail: "no campaign abc" })).toBe("no campaign abc");
+    expect(describeReason(404, "Not Found", { reason: "no campaign abc" })).toBe("no campaign abc");
   });
   it("replaces generic fallbacks with an actionable sentence", () => {
     expect(describeReason(500, "Internal Server Error", null)).toContain("smeltery bench");
     expect(describeReason(409, "Conflict", {})).toContain("Reload");
   });
   it("treats a detail equal to the status text as generic", () => {
-    expect(describeReason(404, "Not Found", { detail: "Not Found" })).toContain("Not found.");
+    expect(describeReason(404, "Not Found", { reason: "Not Found" })).toContain("Not found.");
   });
-  it("renders FastAPI validation arrays as field: msg", () => {
-    const detail = [
-      { loc: ["body", "name"], msg: "Field required", type: "missing" },
-      { loc: ["query", "n"], msg: "Input should be a valid integer" },
-    ];
-    expect(describeReason(422, "Unprocessable", { detail })).toBe(
-      "name: Field required; query.n: Input should be a valid integer",
-    );
+  it("reads the reason of a validation problem, not its structured errors", () => {
+    const body = { reason: "name: Field required", errors: [{ loc: ["body", "name"], msg: "Field required" }] };
+    expect(describeReason(422, "Unprocessable", body)).toBe("name: Field required");
+  });
+  it("falls back when the body is not a Problem", () => {
+    expect(describeReason(422, "Unprocessable", { detail: "x" })).toContain("rejected");
   });
 });

@@ -107,7 +107,7 @@ def test_a_hand_broken_methods_file_is_a_409_naming_it_not_a_500(client_for):
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text("[cut]\nz = = 1\n")
     for r in (c.get("/api/methods"), c.put("/api/methods/cut", json={"defaults": {"z": 3.0}})):
-        assert r.status_code == 409 and "methods.toml" in r.json()["detail"] and "line 2" in r.json()["detail"]
+        assert r.status_code == 409 and "methods.toml" in r.json()["reason"] and "line 2" in r.json()["reason"]
 
 
 def _edit(c, toml, op, key, **kw):

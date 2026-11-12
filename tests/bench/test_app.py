@@ -80,7 +80,7 @@ def test_verdict_endpoint_for_each_state(request, client_for, fixture, state, wi
 def test_an_incomplete_run_is_409_naming_what_it_lacks(client_for, incomplete_run_dir):
     c, _ = client_for(incomplete_run_dir)
     r = c.get("/api/runs/0/ddE")
-    assert r.status_code == 409 and "cut" in r.json()["detail"]
+    assert r.status_code == 409 and "cut" in r.json()["reason"]
 
 
 def test_unknown_paths_are_404(client_for):

@@ -168,7 +168,7 @@ def test_a_symlink_entry_is_refused(client_for):
 
 def test_entries_outside_the_single_top_folder_are_refused(client_for):
     r = _refused(client_for()[0], _bundle({"config.toml": CFG}, extra={"other/x.txt": b"x"}))
-    assert "one top folder" in r.json()["detail"]
+    assert "one top folder" in r.json()["reason"]
 
 
 def test_a_sha_mismatch_is_refused_naming_the_file(client_for):
@@ -195,7 +195,7 @@ def test_not_a_zip_and_no_manifest_are_refused(client_for):
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("p/config.toml", CFG)
     r = _import(c, buf.getvalue())
-    assert r.status_code == 400 and "manifest" in r.json()["detail"]
+    assert r.status_code == 400 and "manifest" in r.json()["reason"]
 
 
 def test_oversize_bundles_are_refused(client_for, monkeypatch):
