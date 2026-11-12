@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useCapabilities } from "../api/capabilities";
 import { api, unwrap, type Schemas } from "../api/client";
 
 type Task = Schemas["Task"];
@@ -135,6 +136,7 @@ export function TaskInspector({ id, onClose }: { id: string; onClose: () => void
     queryFn: () => unwrap(api.GET("/api/tasks/{task_id}/log", { params: { path: { task_id: id }, query: { lines: 200 } } })),
     refetchInterval: task && LIVE.has(task.status) ? 1500 : false,
   });
+  const { readOnly } = useCapabilities();
   const cancel = useMutation({
     mutationFn: () => unwrap(api.POST("/api/tasks/{task_id}/cancel", { params: { path: { task_id: id } } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
@@ -166,7 +168,7 @@ export function TaskInspector({ id, onClose }: { id: string; onClose: () => void
             {task.stalled ? ` No output for ${fmt(Math.round(task.heartbeat_age_s ?? 0))}. ${STALLED_HELP}` : ""}
             {task.returncode !== null && task.returncode !== undefined ? ` with exit code ${task.returncode}` : ""}
           </p>
-          {LIVE.has(task.status) ? (
+          {LIVE.has(task.status) && !readOnly ? (
             <button type="button" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
               Cancel task
             </button>

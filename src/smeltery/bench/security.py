@@ -7,6 +7,9 @@
   refused with 403. No Origin (curl, scripts) and same-origin requests pass.
 - Token: when one is configured (required for a non-loopback bind), every request except `/healthz` and `/livez`
   needs `Authorization: Bearer <token>` or the cookie that visiting `/?token=<token>` sets. Compared in constant time.
+- Read-only: with `read_only`, an unsafe method that got past the checks above is refused with 403, whatever the
+  route. There is no safelist: a POST that only computes (an edit preview, a structure lookup) is refused too, so
+  a public demo cannot write, and cannot be made to fetch or compute on a visitor's say-so.
 
 `SecurityConfig` is plain data passed to `build_app`, so tests and other composition roots configure it the same way.
 """
@@ -64,6 +67,7 @@ class SecurityConfig:
     bind_host: str = "127.0.0.1"
     allowed_hosts: tuple[str, ...] = ()
     token: str | None = None
+    read_only: bool = False
 
     def hosts(self) -> frozenset[str]:
         return LOOPBACK_NAMES | {_bare(self.bind_host)} | {_bare(h) for h in self.allowed_hosts}
@@ -91,7 +95,10 @@ class SecurityMiddleware:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        response = self.check(HTTPConnection(scope), scope.get("method", "GET"))
+        conn, method = HTTPConnection(scope), scope.get("method", "GET")
+        response = self.check(conn, method)
+        if response is None and self.config.read_only and method in UNSAFE_METHODS:
+            response = _problem(403, f"this Bench is read-only: {method} {conn.url.path} is refused")
         if response is None:
             await self.app(scope, receive, send)
         else:

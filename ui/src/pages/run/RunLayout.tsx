@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useParams } from "react-router-dom";
+import { useCapabilities } from "../../api/capabilities";
 import { Shell } from "../../components/Shell";
 
 /** The Run area's tabs. A tab is listed here only once its page exists. */
@@ -12,6 +13,9 @@ export const RUN_TABS: { to: string; label: string }[] = [
   { to: "overview", label: "Overview" },
 ];
 
+/** Tabs whose page only writes (or reads through a POST): not offered when the server is read-only. */
+const WRITE_TABS = new Set(["decisions", "structure"]);
+
 export function useRunIdx(): number {
   const { idx } = useParams();
   const n = Number(idx);
@@ -21,9 +25,10 @@ export function useRunIdx(): number {
 
 export function RunLayout() {
   const { idx } = useParams();
+  const { readOnly } = useCapabilities();
   const tabs = (
     <nav className="tabs" aria-label="Run views">
-      {RUN_TABS.map((t) => (
+      {RUN_TABS.filter((t) => !(readOnly && WRITE_TABS.has(t.to))).map((t) => (
         <NavLink key={t.to} to={`/run/${idx}/${t.to}`}>
           {t.label}
         </NavLink>

@@ -17,6 +17,8 @@ services:
       SMELTERY_BENCH_LOG_LEVEL: info
     # Stop (or restart) leaves clean `cancelled` task rows instead of supervisors the runtime SIGKILLs.
     command: ["--demo", "--stop-tasks-on-exit"]
+    # A public demo: refuse every write (403) and hide the controls that would write. See docs/bench.md ("Read-only").
+    # command: ["--demo", "--stop-tasks-on-exit", "--read-only"]   # or: SMELTERY_BENCH_READ_ONLY: "1" above
     stop_grace_period: 15s
     restart: unless-stopped
 

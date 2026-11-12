@@ -1,3 +1,4 @@
+import { NeedsWrite } from "./components/ReadOnly";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BenchHome } from "./pages/BenchHome";
@@ -28,14 +29,14 @@ export function App() {
         <Route path="/campaigns/:id" element={<Notebook />} />
         <Route path="/compare" element={<Compare />} />
         <Route path="/methods" element={<Methods />} />
-        <Route path="/pipelines/:name" element={<Workspace />} />
+        <Route path="/pipelines/:name" element={<NeedsWrite what="Pipeline editor"><Workspace /></NeedsWrite>} />
         <Route path="/run/:idx" element={<RunLayout />}>
           <Route index element={<Navigate to="results" replace />} />
           <Route path="results" element={<Results />} />
           <Route path="poses" element={<Poses />} />
-          <Route path="structure" element={<Structure />} />
+          <Route path="structure" element={<NeedsWrite what="Structure"><Structure /></NeedsWrite>} />
           <Route path="pipeline" element={<RunPipeline />} />
-          <Route path="decisions" element={<Decisions />} />
+          <Route path="decisions" element={<NeedsWrite what="Decisions"><Decisions /></NeedsWrite>} />
           <Route path="proposals" element={<Proposals />} />
           <Route path="overview" element={<Overview />} />
         </Route>

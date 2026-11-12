@@ -154,6 +154,26 @@ Binding `0.0.0.0` and browsing by the machine's name needs that name allowed:
 `smeltery bench ROOT --host 0.0.0.0 --allow-host bench.lab --token "$(openssl rand -hex 16)"`.
 The token travels in clear over HTTP; put Bench behind TLS when it leaves a trusted network.
 
+## Read-only
+
+`smeltery bench ROOT --read-only` (or `SMELTERY_BENCH_READ_ONLY=1`; default off) serves Bench so it can
+be shown publicly: every POST, PUT, PATCH and DELETE gets **403** `{"reason": "this Bench is read-only: ..."}`,
+whatever the route. It is enforced once, in the security middleware, so a route added later is covered.
+Order of refusal: Host (400), Origin (403), token (401), then read-only (403); an unauthenticated client never
+learns the mode from a write.
+
+- **Still served:** the UI, every GET (runs, results, poses, reports, lineage, figures, exports),
+  `/healthz`, `/livez` and `/readyz`.
+- **No safelist.** Some POSTs only compute (the pipeline editor's `steps`, `edit` and `impact`, the
+  structure lookup, which can also fetch from the network). They are refused with the rest: a demo that cannot
+  render one is better than one that can be made to write, fetch or compute on a visitor's say-so.
+- **The UI follows.** `GET /api/whoami` carries `read_only`. The UI then shows a "Read-only" badge and hides
+  starting, importing, running, editing, cancelling, recording a decision, commenting, proposing and archiving.
+  The pages that exist only to write (the pipeline editor, Decisions, Structure) are replaced by a sentence
+  saying so, and their tabs are not offered. Methods and the run's Pipeline view stay readable.
+- **Pair it with a seeded workspace and a token or a proxy:** `--demo --read-only`, as in the commented
+  line in `compose.yaml`. Read-only does not authenticate anyone; the token rules above still apply off loopback.
+
 ## The workspace
 
 The pipeline is the page. A pipeline is a folder `ROOT/pipelines/<name>/` holding `config.toml`

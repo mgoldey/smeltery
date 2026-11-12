@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, unwrap } from "../api/client";
+import { Writable } from "../components/ReadOnly";
 import { ImportBundle } from "../components/ImportBundle";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
@@ -97,6 +98,7 @@ export function BenchHome() {
             run it. Finished runs are listed under Your work, and two of them <Link to="/compare">compare</Link>.
           </p>
 
+          <Writable>
           <section className="start" aria-labelledby="start-h" role="region">
             <h2 id="start-h">Start here</h2>
             <div className="start-ways">
@@ -232,6 +234,7 @@ export function BenchHome() {
               </div>
             </div>
           </section>
+          </Writable>
 
           <h2 className="section-break">Your work</h2>
           <section aria-labelledby="pipelines-h">
@@ -253,7 +256,9 @@ export function BenchHome() {
             ) : (
               <p className="empty-state">No pipelines yet. Start one above.</p>
             )}
-            <ImportBundle />
+            <Writable>
+              <ImportBundle />
+            </Writable>
           </section>
           <section aria-labelledby="runs-h">
             <h3 id="runs-h">Runs</h3>
@@ -318,6 +323,7 @@ export function BenchHome() {
             ) : (
               <p className="empty-state">No notebooks yet. Start one for a campaign below.</p>
             )}
+            <Writable>
             <form
               className="controls"
               onSubmit={(e) => {
@@ -333,6 +339,7 @@ export function BenchHome() {
                 Start notebook
               </button>
             </form>
+            </Writable>
           </section>
           <section aria-labelledby="studies-h">
             <h3 id="studies-h">Studies</h3>

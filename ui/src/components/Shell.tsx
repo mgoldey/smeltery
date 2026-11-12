@@ -1,3 +1,4 @@
+import { useCapabilities } from "../api/capabilities";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { NavLink, useMatch, useSearchParams } from "react-router-dom";
@@ -59,6 +60,7 @@ export function ContextBar({ tabs }: { tabs?: ReactNode }) {
 
 export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNode }) {
   const who = useQuery({ queryKey: ["whoami"], queryFn: () => unwrap(api.GET("/api/whoami")) });
+  const { readOnly } = useCapabilities();
   const { idx, runMatch, pipeline } = useLocation();
   const [search] = useSearchParams();
   return (
@@ -90,6 +92,11 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
             </>
           )}
         </nav>
+        {readOnly ? (
+          <div className="who" data-testid="read-only-badge" title="Every write is refused by the server">
+            Read-only
+          </div>
+        ) : null}
         <div className="who">{who.data ? `Signed in locally as ${who.data.user}` : " "}</div>
       </aside>
       <div className="main">
