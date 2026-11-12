@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { NavLink, Outlet, useParams } from "react-router-dom";
 import { Shell } from "../../components/Shell";
 
@@ -33,7 +34,9 @@ export function RunLayout() {
   );
   return (
     <Shell tabs={tabs}>
-      <Outlet />
+      <Suspense fallback={<p className="lede">Loading the view.</p>}>
+        <Outlet />
+      </Suspense>
     </Shell>
   );
 }

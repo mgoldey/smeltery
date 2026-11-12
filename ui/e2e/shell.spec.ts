@@ -54,6 +54,7 @@ test("a run id addresses the same record whatever its position, and the old inte
   expect(byPosition.headers()["link"]).toBe(`</api/runs/${r.id}>; rel="canonical"`);
   // The page the app itself links to is the id one: every run link on Bench is /run/<an id>, never /run/<n>.
   await page.goto("/bench");
+  await expect(page.locator('a[href^="/run/"]').first()).toBeVisible(); // the page is its own chunk: wait for it
   const hrefs = await page.locator('a[href^="/run/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
   expect(hrefs).toContain(`/run/${r.id}`);
   expect(hrefs.filter((h) => /^\/run\/\d+$/.test(h ?? ""))).toEqual([]);
