@@ -37,6 +37,21 @@ from .security import TOKEN_ENV, SecurityConfig, install, is_loopback
 
 #: Where `npm run build` (in ui/) writes the app. Build output: never edited or committed.
 WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# Vite names everything under assets/ by content hash, so a URL never changes meaning: cache it for good. index.html
+# keeps one name and points at the current hashes, so it must be revalidated or a redeploy would never be seen.
+_IMMUTABLE = "public, max-age=31536000, immutable"
+_REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class _HashedAssets(StaticFiles):
+    def file_response(self, *args: Any, **kwargs: Any) -> Any:
+        response = super().file_response(*args, **kwargs)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = _IMMUTABLE
+        return response
+
+
 BUILD_HINT = "the Bench UI is not built: run `cd ui && npm ci && npm run build`"
 
 
@@ -241,7 +256,7 @@ def create_app(
     if index.is_file():
         assets = settings.web_dir / "assets"
         if assets.is_dir():
-            app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+            app.mount("/assets", _HashedAssets(directory=str(assets)), name="assets")
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:
@@ -249,8 +264,8 @@ def create_app(
                 raise HTTPException(status_code=404, detail=f"no API route /{path}")
             f = settings.web_dir / path
             if path and f.is_file() and settings.web_dir in f.resolve().parents:
-                return FileResponse(f)
-            return FileResponse(index)
+                return FileResponse(f, headers=_REVALIDATE)
+            return FileResponse(index, headers=_REVALIDATE)
 
     return app
 

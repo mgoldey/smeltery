@@ -129,6 +129,31 @@ def test_web_index_is_served_with_spa_fallback(tmp_path, run_dir):
     assert c.get("/api/runs").status_code == 200
 
 
+def test_hashed_assets_are_immutable_and_index_html_is_never_cached_that_way(tmp_path, run_dir):
+    web = tmp_path / "web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("<!doctype html><div id=root></div>")
+    (web / "assets" / "index-AbC123.js").write_text("console.log(1)")
+    from bench.fakes import FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
+
+    app = create_app(
+        run_store=FakeRunStore(run_dir),
+        task_queue=FakeTaskQueue(),
+        identity=FakeIdentity(),
+        clock=FixedClock(),
+        settings=Settings(root=tmp_path / "r", web_dir=web),
+    )
+    c = TestClient(app)
+    asset = c.get("/assets/index-AbC123.js")
+    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+    for path in ("/", "/index.html", "/run/x/results"):
+        cc = c.get(path).headers["cache-control"]
+        assert cc == "no-cache" and "immutable" not in cc, (path, cc)
+    # A missing hashed file is a 404 that must not be remembered as immutable either.
+    miss = c.get("/assets/gone-ZZZ.js")
+    assert miss.status_code == 404 and "immutable" not in miss.headers.get("cache-control", "")
+
+
 def test_bench_refuses_without_a_built_ui(monkeypatch, tmp_path, capsys):
     import smeltery.bench.app as appmod
 
