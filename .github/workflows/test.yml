@@ -338,3 +338,47 @@ jobs:
 
       - name: PoseBusters tests on 3.12
         run: uv run --no-sync pytest -q tests/test_posebusters_gate.py
+
+  # The Docker image serves the demo (issue B08). Builds the image (which builds the UI itself: src/smeltery/bench/web
+  # is gitignored), runs it with a known token, waits for the container's own healthcheck, then asserts that /readyz
+  # is 200 and /api/runs is non-empty, which only holds if the pip install, the prebuilt pipelines and --demo all
+  # worked. Also asserts that an unauthenticated /api/runs is refused (the token is enforced off loopback).
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TOKEN: ci-docker-token
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build the image
+        run: docker build --tag smeltery-bench:ci .
+      - name: Run it (the demo)
+        run: >
+          docker run --detach --name bench --publish 127.0.0.1:8765:8765
+          --env SMELTERY_BENCH_TOKEN="$TOKEN" smeltery-bench:ci
+      - name: Wait for the healthcheck
+        run: |
+          for _ in $(seq 1 60); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' bench)"
+            [ "$status" = healthy ] && exit 0
+            [ "$(docker inspect --format '{{.State.Running}}' bench)" = true ] || break
+            sleep 2
+          done
+          echo "::error::the container never became healthy (last status: $status)"
+          exit 1
+      - name: /readyz is 200 and /api/runs is non-empty
+        run: |
+          curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/readyz
+          code="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8765/api/runs)"
+          [ "$code" = 401 ] || { echo "::error::/api/runs without the token returned $code, expected 401"; exit 1; }
+          curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/api/runs > runs.json
+          python3 - <<'PY'
+          import json
+          runs = json.load(open("runs.json"))
+          runs = runs.get("runs", runs) if isinstance(runs, dict) else runs
+          assert runs, "/api/runs is empty: the demo was not seeded"
+          print(len(runs), "runs")
+          PY
+      - name: Container logs
+        if: always()
+        run: docker logs bench || true
