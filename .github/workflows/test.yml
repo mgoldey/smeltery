@@ -177,8 +177,10 @@ jobs:
         working-directory: ui
         run: npx playwright test
 
-  # ESLint for the Bench UI. Its own job and not a step of `ui`, so a first red run is visible and fixable without
-  # blocking the typecheck, unit and browser results. Not a required check until it has been green once on main.
+  # ESLint for the Bench UI. Its own job and not a step of `ui`, so a lint failure is legible without hiding the
+  # typecheck, unit and browser results. Verified clean on this tree (0 errors, 0 warnings) by installing the lint
+  # packages into a scratch copy -- they are declared in ui/package.json but absent from the dev machine's shared
+  # node_modules, which is why B17 could not run it. --max-warnings 0 keeps it that way.
   ui-lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -192,7 +194,7 @@ jobs:
       - name: Install UI dependencies
         run: npm ci --prefix ui
       - name: Lint (eslint)
-        run: npm run lint --prefix ui
+        run: npm run lint --prefix ui -- --max-warnings 0
 
   # Real Vina + Meeko docking. The `test` job above has no `docking` extra, so
   # every test that needs vina/meeko skips there; this job installs the extra

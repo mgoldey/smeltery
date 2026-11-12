@@ -146,8 +146,8 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
       if (now[k] !== was[k] && now[k] !== "") set[k](now[k]);
     }
     seeded.current = now;
-    // Only the draft drives this; the fields themselves are free to be typed into between drafts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Only the draft drives this; the fields themselves are free to be typed into between drafts. (The setters
+    // are stable and the refs are not reactive, so exhaustive-deps does not ask for them: no disable needed.)
   }, [toml]);
 
   const sites = (toml.match(/^\[\[pocket\.site\]\]/gm) ?? []).length;
