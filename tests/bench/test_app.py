@@ -159,7 +159,9 @@ def _serve_spy(monkeypatch, appmod):
 
     seen: dict = {}
     real_build = appmod.build_app
-    monkeypatch.setattr(uvicorn, "run", lambda app, host, port, log_level: seen.update(host=host, port=port))
+    # **kw, not an exact signature: main() passes log_config and access_log too (see app.py), and a spy that
+    # names every argument turns any new uvicorn.run keyword into a TypeError in tests about something else.
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port, **kw: seen.update(host=host, port=port))
     monkeypatch.setattr(appmod, "build_app", lambda root, **kw: seen.update(root=Path(root)) or real_build(root, **kw))
     return seen
 
