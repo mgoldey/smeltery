@@ -35,6 +35,9 @@ per-user Bench directory and opens on the `benzoic-rhf` run. It is idempotent: a
 never overwrites your edits. Add a `ROOT` argument to use another directory. Details in
 [docs/bench.md](docs/bench.md).
 
+No Node or Python setup: `docker compose up --build`, then read the sign-in URL from
+`docker compose logs bench` ([Docker](docs/bench.md#docker)).
+
 ## Quickstart
 
 You need Linux x86_64, Python 3.11 or 3.12, and [uv](https://docs.astral.sh/uv/). ferric

@@ -55,6 +55,38 @@ and drawn by Plotly; structures are drawn by Mol* from MolViewSpec scenes the AP
 depictions and atom picking use RDKit.js. The pipeline exists only as TOML, carried through
 `smeltery.gui.pipeline.Pipeline`; every view of it is derived from that text.
 
+## Docker
+
+The repo's `Dockerfile` builds the UI in a Node stage and installs `.[bench]` into a slim Python image
+(non-root user, base images pinned by digest). The default command is `--demo`, so the container
+serves finished example runs and runs no SCF.
+
+```
+docker compose up --build              # or: docker build -t smeltery-bench . && docker run ... (below)
+docker compose logs bench              # the sign-in URL, with the token
+docker run --rm -p 127.0.0.1:8765:8765 -v smeltery-data:/data -e SMELTERY_BENCH_TOKEN=secret smeltery-bench
+```
+
+- **Token.** The container binds `0.0.0.0`, so Bench requires a token (see Security). Set
+  `SMELTERY_BENCH_TOKEN` to choose one; if it is unset the entrypoint (`docker/entrypoint.sh`)
+  generates a random one for that start and Bench prints the `open http://localhost:8765/?token=...`
+  sign-in URL on stderr (`docker logs`). A generated token changes on every start.
+- **Data.** `/data` is the Bench ROOT (`SMELTERY_BENCH_ROOT`) and a volume. `--demo` seeds it once
+  and never overwrites it, so your edits survive a restart.
+- **Shutdown.** `compose.yaml` passes `--stop-tasks-on-exit` (the image also sets
+  `SMELTERY_BENCH_STOP_TASKS_ON_EXIT=1`), so `docker stop` cancels tasks cleanly; see Shutdown.
+- **Logs.** JSON, one object per line (`SMELTERY_BENCH_LOG_JSON=1`).
+- **Health.** The image's `HEALTHCHECK` calls `/healthz`, which needs no token. `/readyz` checks
+  the root and the task queue but needs the token (`Authorization: Bearer`).
+- **Network.** Compose publishes the port on `127.0.0.1` only. To serve other machines, drop that
+  prefix, add `--allow-host NAME` to `command`, and put TLS in front.
+- **Build context.** `.dockerignore` keeps `ui/node_modules`, `.venv`, `.git`, `benchmarks/` and the
+  host's `src/smeltery/bench/web` out; the image installs and builds its own. The version baked in is
+  `0.0.0+docker` unless you pass `--build-arg SMELTERY_VERSION=X`.
+
+The CI job `docker` builds the image, runs it, and asserts `/readyz` is 200 and `/api/runs` is
+non-empty.
+
 ## Logging
 
 `--log-level {debug,info,warning,error}` (default `info`; env `SMELTERY_BENCH_LOG_LEVEL`) and
