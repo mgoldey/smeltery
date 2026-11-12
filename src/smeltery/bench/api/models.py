@@ -96,6 +96,12 @@ class PoseAtoms(BaseModel):
     source: str = Field(description="where the symbols were read from: the candidate's pose SDF")
 
 
+class TaskProgress(BaseModel):
+    done: int = Field(description="SCFs finished so far, reused ones included (the line count of the checkpoint)")
+    total: int = Field(description="SCFs the run plans; raised to `done` if a remedy ladder adds more")
+    reused: int = Field(description="of `done`, the SCFs a resumed run took from an earlier attempt")
+
+
 class Task(BaseModel):
     id: str
     name: str
@@ -119,6 +125,10 @@ class Task(BaseModel):
     peak_rss_gb: float | None = Field(default=None, description="largest resident set observed, GB")
     oom: bool = Field(default=False, description="killed for exceeding memory_limit_gb")
     memory_limit_gb: float | None = Field(default=None, description="the cap it was submitted with, GB")
+    progress: TaskProgress | None = Field(
+        default=None,
+        description="SCFs done of planned, for a run in flight that checkpoints; null otherwise (never 0 of N)",
+    )
 
 
 class TaskLog(BaseModel):

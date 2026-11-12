@@ -3104,6 +3104,8 @@ export interface components {
              * @description largest resident set observed, GB
              */
             peak_rss_gb?: number | null;
+            /** @description SCFs done of planned, for a run in flight that checkpoints; null otherwise (never 0 of N) */
+            progress?: components["schemas"]["TaskProgress"] | null;
             /** Returncode */
             returncode?: number | null;
             /** Run Id */
@@ -3123,6 +3125,24 @@ export interface components {
         TaskLog: {
             /** Log */
             log: string;
+        };
+        /** TaskProgress */
+        TaskProgress: {
+            /**
+             * Done
+             * @description SCFs finished so far, reused ones included (the line count of the checkpoint)
+             */
+            done: number;
+            /**
+             * Reused
+             * @description of `done`, the SCFs a resumed run took from an earlier attempt
+             */
+            reused: number;
+            /**
+             * Total
+             * @description SCFs the run plans; raised to `done` if a remedy ladder adds more
+             */
+            total: number;
         };
         /** UnmeasuredLimit */
         UnmeasuredLimit: {

@@ -88,3 +88,110 @@ def test_a_timeout_reaches_the_queue(client_for):
     client_for(queue=q)
     q.submit("sleep", ["sleep", "60"], timeout_s=30)
     assert q.options[-1]["timeout_s"] == 30
+
+
+# ------------------------------------------------------------------------------------------------- run progress
+
+
+def _running_run(q, out, *, cwd=None, command=None):
+    tid = q.submit("run x", command or ["smeltery", "run", "c.toml", "--out", str(out)], cwd=cwd or str(out.parent))
+    q.tasks[-1].status = "running"
+    return tid
+
+
+def _checkpoint(out, total, lines, reused=0):
+    import json
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "progress.json").write_text(
+        json.dumps({"partial": "calcs.partial.jsonl", "total_scfs": total, "reused": reused})
+    )
+    (out / "calcs.partial.jsonl").write_text("".join(f'{{"i": {i}}}\n' for i in range(lines)))
+
+
+def _progress(c, tid):
+    return next(t for t in c.get("/api/tasks").json() if t["id"] == tid)["progress"]
+
+
+def test_a_running_run_reports_scfs_done_of_planned(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    out = tmp_path / "out"
+    _checkpoint(out, total=12, lines=5)
+    tid = _running_run(q, out)
+    assert _progress(c, tid) == {"done": 5, "total": 12, "reused": 0}
+    with (out / "calcs.partial.jsonl").open("a") as f:  # the next poll counts only what was appended
+        f.write('{"i": 5}\n{"i": 6}\n{"half')
+    assert _progress(c, tid)["done"] == 7  # the half-written line is not counted yet
+
+
+def test_a_relative_out_resolves_against_the_task_cwd(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    _checkpoint(tmp_path / "out", total=4, lines=1)
+    tid = _running_run(q, tmp_path / "out", cwd=str(tmp_path), command=["smeltery", "run", "c.toml", "--out", "out"])
+    assert _progress(c, tid) == {"done": 1, "total": 4, "reused": 0}
+
+
+def test_no_progress_file_means_no_progress_not_zero(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    (tmp_path / "out").mkdir()
+    tid = _running_run(q, tmp_path / "out")
+    other = _running_run(q, tmp_path / "out", command=["sleep", "60"])  # not a run at all
+    assert _progress(c, tid) is None
+    assert _progress(c, other) is None
+
+
+def test_a_finished_task_has_no_progress_even_if_files_linger(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    _checkpoint(tmp_path / "out", total=4, lines=2)
+    tid = _running_run(q, tmp_path / "out")
+    q.tasks[-1].status = "failed"
+    assert _progress(c, tid) is None
+
+
+def test_a_resumed_run_counts_reused_scfs_as_done(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    _checkpoint(tmp_path / "out", total=10, lines=6, reused=6)  # six taken from the earlier attempt, none new yet
+    tid = _running_run(q, tmp_path / "out")
+    assert _progress(c, tid) == {"done": 6, "total": 10, "reused": 6}
+
+
+def test_a_progress_file_with_no_checkpoint_yet_is_zero_done(client_for, tmp_path):
+    import json
+
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "progress.json").write_text(json.dumps({"partial": "calcs.partial.jsonl", "total_scfs": 8}))
+    assert _progress(c, _running_run(q, tmp_path / "out")) == {"done": 0, "total": 8, "reused": 0}
+
+
+def test_a_remedy_ladder_grows_the_plan_instead_of_overflowing_it(client_for, tmp_path):
+    q = FakeTaskQueue()
+    c, _ = client_for(queue=q)
+    _checkpoint(tmp_path / "out", total=2, lines=3)
+    assert _progress(c, _running_run(q, tmp_path / "out")) == {"done": 3, "total": 3, "reused": 0}
+
+
+def test_counting_a_large_checkpoint_is_incremental_and_cheap(tmp_path):
+    import time
+
+    from smeltery.bench.progress import RunProgress
+
+    p = tmp_path / "calcs.partial.jsonl"
+    p.write_text("".join(f'{{"candidate": "c{i}", "pad": "{"x" * 400}"}}\n' for i in range(5000)))
+    rp = RunProgress()
+    assert rp.lines(p) == 5000
+    t0 = time.perf_counter()
+    for _ in range(200):
+        assert rp.lines(p) == 5000
+    assert (time.perf_counter() - t0) / 200 < 0.005  # an unchanged file costs a stat, not a re-read
+    with p.open("a") as f:
+        f.write("{}\n")
+    assert rp.lines(p) == 5001
+    p.write_text("{}\n")  # replaced by a shorter file (--force): counted afresh
+    assert rp.lines(p) == 1
