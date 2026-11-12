@@ -193,7 +193,9 @@ flowchart LR
   client -- "HTTP / JSON" --> api
   adapters --> fs[("run and pipeline files<br/>under ROOT")]
   adapters --> sql[("sqlite<br/>comments, projects, tasks")]
-  adapters --> proc["task subprocesses<br/>smeltery run"]
+  adapters --> sup["task_supervisor.py<br/>one process per task"]
+  sup --> proc["smeltery run"]
+  sup -- "exit code, heartbeat, peak RSS" --> sql
 ```
 
 - **`api/`** holds the routers (`runs`, `pipelines`, `work`, `lineage`, `methods`, `prebuilt`,
@@ -204,8 +206,12 @@ flowchart LR
   `ProjectStore`, `ArtifactStore`, `StructureSource`, `MethodDefaults`, `Identity` and `Clock`.
 - **`adapters/`** implements them. Runs, pipelines and artefacts are files under ROOT; comments,
   projects and the task table are sqlite (`comments.sqlite`, `projects.sqlite`, `tasks.sqlite`).
-  `SubprocessTaskQueue` runs each launch as its own `smeltery run` process group and records its
-  state in sqlite; `TemporalTaskQueue` is the alternative backed by Temporal.
+  `SubprocessTaskQueue` hands each launch to a `task_supervisor.py` process, which owns the
+  `smeltery run` child, reaps its exit code and writes status, heartbeat and peak RSS to sqlite
+  itself. That is what makes a job's fate survive restarting the API: the server only reads the
+  table and signals, so a queued run still starts, and a finished one is still recorded as
+  finished, if Bench is restarted mid-flight. `TemporalTaskQueue` is the alternative backed by
+  Temporal.
 
 Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 
