@@ -45,7 +45,7 @@ def test_readyz_is_503_when_the_task_db_cannot_open(client_for, tmp_path):
 def test_runs_list_is_served_from_the_run_store(client_for, run_dir):
     c, _ = client_for(run_dir)
     (row,) = c.get("/api/runs").json()
-    assert row["idx"] == 0 and row["parent"] == "benzoic" and row["verdict"]["state"] == "RESOLVED"
+    assert row["id"] and row["parent"] == "benzoic" and row["verdict"]["state"] == "RESOLVED"
     assert len(row["digest"]) == 64
 
 

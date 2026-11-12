@@ -12,11 +12,11 @@ export async function getJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function useRunDetail(idx: number | null) {
+export function useRunDetail(runId: string | null) {
   return useQuery({
-    queryKey: ["run", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}", { params: { path: { idx: idx ?? 0 } } })),
-    enabled: idx !== null,
+    queryKey: ["run", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId ?? "" } } })),
+    enabled: runId !== null,
   });
 }
 
@@ -30,20 +30,20 @@ export function NotRun({ step, shows }: { step: string; shows: string }) {
 }
 
 /** The pairs of a run's `results.pose_maps`, read once per run. */
-export function usePoseMaps(idx: number | null) {
+export function usePoseMaps(runId: string | null) {
   return useQuery({
-    queryKey: ["pose_maps", idx],
-    queryFn: () => getJson<{ maps: Record<string, number[][]> }>(`/api/runs/${idx}/pose_maps`),
-    enabled: idx !== null,
+    queryKey: ["pose_maps", runId],
+    queryFn: () => getJson<{ maps: Record<string, number[][]> }>(`/api/runs/${runId}/pose_maps`),
+    enabled: runId !== null,
   });
 }
 
 /** One ligand's pose in the site, its shared core drawn solid and the other atoms as lines. */
-export function CorePose({ idx, candidate, pose, label }: { idx: number; candidate: string; pose: number; label: string }) {
+export function CorePose({ runId, candidate, pose, label }: { runId: string; candidate: string; pose: number; label: string }) {
   const scene = useQuery({
-    queryKey: ["scene-core", idx, candidate, pose],
+    queryKey: ["scene-core", runId, candidate, pose],
     queryFn: () =>
-      getJson<Record<string, unknown>>(`/api/runs/${idx}/scene?candidate=${encodeURIComponent(candidate)}&pose=${pose}&core=true`),
+      getJson<Record<string, unknown>>(`/api/runs/${runId}/scene?candidate=${encodeURIComponent(candidate)}&pose=${pose}&core=true`),
   });
   return (
     <>
@@ -118,7 +118,7 @@ export function PosesView({ sourceRun }: StepViewProps) {
       <p className="pairing" data-testid="core-caption" data-core={core}>
         {coreCaption(core, chosen, d.parent)}
       </p>
-      <CorePose idx={sourceRun} candidate={chosen} pose={pose} label="poses step" />
+      <CorePose runId={sourceRun} candidate={chosen} pose={pose} label="poses step" />
     </div>
   );
 }

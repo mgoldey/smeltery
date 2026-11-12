@@ -3,18 +3,18 @@ import { useState } from "react";
 import { api, unwrap } from "../api/client";
 
 /** Comments anchored to the run, a candidate (`candidate:<name>`) or a pose (`pose:<name>:<i>`). Text is text. */
-export function CommentThread({ idx, anchor, title }: { idx: number; anchor: string; title: string }) {
+export function CommentThread({ runId, anchor, title }: { runId: string; anchor: string; title: string }) {
   const qc = useQueryClient();
   const all = useQuery({
-    queryKey: ["comments", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/comments", { params: { path: { idx } } })),
+    queryKey: ["comments", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/comments", { params: { path: { run_id: runId } } })),
   });
   const [body, setBody] = useState("");
   const add = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/runs/{idx}/comments", { params: { path: { idx } }, body: { anchor, body } })),
+    mutationFn: () => unwrap(api.POST("/api/runs/{run_id}/comments", { params: { path: { run_id: runId } }, body: { anchor, body } })),
     onSuccess: () => {
       setBody("");
-      return qc.invalidateQueries({ queryKey: ["comments", idx] });
+      return qc.invalidateQueries({ queryKey: ["comments", runId] });
     },
   });
   const mine = (all.data ?? []).filter((c) => c.anchor === anchor);

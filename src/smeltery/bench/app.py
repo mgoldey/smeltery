@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .adapters.task_supervisor import LOG_JSON_ENV, LOG_LEVEL_ENV, setup_logging
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
+from .api.common import install_run_ref_deprecation
 from .errors import install_errors
 from .ports.task_queue import StoppableTasks
 from .security import TOKEN_ENV, SecurityConfig, install, is_loopback
@@ -192,6 +193,7 @@ def create_app(
     st.stop_tasks_on_exit = stop_tasks_on_exit
     st.structures = {}  # sha256 -> PDB text of structures opened this session (a cache, rebuilt by reopening)
     install_errors(app)
+    install_run_ref_deprecation(app)
     if security is not None:
         install(app, security)
 

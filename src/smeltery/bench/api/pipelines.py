@@ -48,7 +48,7 @@ router = APIRouter(prefix="/api", tags=["pipelines"])
 class ImpactRequest(BaseModel):
     toml: str
     baseline_toml: str
-    source_run: int | None = None
+    source_run: str | None = None
     name: str | None = None  # the saved pipeline: its folder resolves relative paths and holds `preview/`
 
 
@@ -360,14 +360,14 @@ def pipeline_bundle(request: Request, name: str) -> FileResponse:
     )
 
 
-def _from_run(request: Request, idx: int) -> tuple[str, dict[str, Path], list[str]]:
-    """(config text, {relative path: file to copy}, notes) for a new pipeline built from run `idx`."""
-    r = row(request, idx)
+def _from_run(request: Request, run_id: str) -> tuple[str, dict[str, Path], list[str]]:
+    """(config text, {relative path: file to copy}, notes) for a new pipeline built from run `run_id`."""
+    r = row(request, run_id)
     out_dir = Path(r["path"]).parent
-    cfg = record(request, idx).get("results", {}).get("config")
+    cfg = record(request, run_id).get("results", {}).get("config")
     cfg_file = out_dir / cfg["file"] if isinstance(cfg, dict) and cfg.get("file") else None
     if cfg_file is None or not cfg_file.is_file():
-        state = pipeline_from_run(request, M.PipelineFromRun(run=idx))
+        state = pipeline_from_run(request, M.PipelineFromRun(run=run_id))
         return state.toml, {}, state.notes
     files: dict[str, Path] = {}
     for dotted, info in (cfg.get("inputs") or {}).items():

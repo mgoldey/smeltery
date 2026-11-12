@@ -12,6 +12,15 @@ export type Schemas = components["schemas"];
 export type Verdict = Schemas["Verdict"];
 export type RunSummary = Schemas["RunSummary"];
 
+/**
+ * The run a `/run/<ref>` URL names, out of a `GET /api/runs` listing. `ref` is normally a stable id, matched on
+ * `id`; an older all-digits link is still its position in that listing, which is what the API does too (B04).
+ */
+export function runByRef(runs: RunSummary[] | undefined, ref: string | undefined): RunSummary | undefined {
+  if (ref === undefined || runs === undefined) return undefined;
+  return /^\d+$/.test(ref) ? runs[Number(ref)] : runs.find((r) => r.id === ref);
+}
+
 /** Unwrap an openapi-fetch result: the data, or an ApiError carrying the API's own reason. */
 export async function unwrap<T>(
   pending: Promise<{ data?: T; error?: unknown; response: Response }>,

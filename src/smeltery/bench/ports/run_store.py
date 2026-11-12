@@ -1,4 +1,4 @@
-"""Port: find, read, index runs and their artefacts."""
+"""Port: find and read runs. Each row carries the run's stable `id` (see `adapters/run_store.run_id`)."""
 
 from __future__ import annotations
 
@@ -15,3 +15,7 @@ class RunStore(Protocol):
         ...
 
     def find_runs(self, root: str | Path | None = None) -> list[Path]: ...
+
+    def read_record(self, path: str | Path) -> dict[str, Any] | None:
+        """The record's raw JSON object, or None when it is unreadable or not an object."""
+        ...

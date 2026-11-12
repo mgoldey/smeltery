@@ -81,14 +81,14 @@ function MadeBy({ l }: { l: Lineage }) {
 }
 
 /** What made one candidate's paired ΔΔE: its poses, then the steps and records behind them. */
-export function LineageInspector({ idx, candidate, onClose }: { idx: number; candidate: string; onClose: () => void }) {
+export function LineageInspector({ runId, candidate, onClose }: { runId: string; candidate: string; onClose: () => void }) {
   const q = useQuery({
-    queryKey: ["lineage", idx, candidate],
+    queryKey: ["lineage", runId, candidate],
     queryFn: () =>
-      unwrap(api.GET("/api/runs/{idx}/lineage", { params: { path: { idx }, query: { candidate } } })),
+      unwrap(api.GET("/api/runs/{run_id}/lineage", { params: { path: { run_id: runId }, query: { candidate } } })),
   });
   const l = q.data;
-  const open = useOpenRunPipeline(idx);
+  const open = useOpenRunPipeline(runId);
   return (
     <aside className="inspector" aria-label="Lineage">
       <h2 style={{ marginTop: 0 }}>{candidate}</h2>

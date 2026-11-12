@@ -3,12 +3,12 @@ import { useEffect, useState } from "react";
 import { api, unwrap, type Schemas } from "../../api/client";
 import { Structure2D } from "../../components/Structure2D";
 import { EmptyState } from "../../components/EmptyState";
-import { useRunIdx } from "./RunLayout";
+import { useRunId } from "./RunLayout";
 
 type Decision = Schemas["DecisionOut"];
 
 function Row({
-  idx,
+  runId,
   name,
   smiles,
   current,
@@ -17,7 +17,7 @@ function Row({
   selected,
   onSelect,
 }: {
-  idx: number;
+  runId: string;
   name: string;
   smiles: string;
   current: Decision | undefined;
@@ -31,8 +31,8 @@ function Row({
   const [reason, setReason] = useState(current?.reason ?? "");
   const [note, setNote] = useState(current?.note ?? "");
   const save = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/runs/{idx}/decisions", { params: { path: { idx } }, body: { candidate: name, status, reason, note } })),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["decisions", idx] }),
+    mutationFn: () => unwrap(api.POST("/api/runs/{run_id}/decisions", { params: { path: { run_id: runId } }, body: { candidate: name, status, reason, note } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["decisions", runId] }),
   });
   const needsNote = vocab.note_required.includes(reason);
   const id = (k: string) => `${k}-${name}`;
@@ -94,16 +94,16 @@ function Row({
   );
 }
 
-function BulkBar({ idx, selected, vocab, onDone }: { idx: number; selected: string[]; vocab: Schemas["Vocabulary"]; onDone: () => void }) {
+function BulkBar({ runId, selected, vocab, onDone }: { runId: string; selected: string[]; vocab: Schemas["Vocabulary"]; onDone: () => void }) {
   const qc = useQueryClient();
   const [status, setStatus] = useState("");
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const apply = useMutation({
     mutationFn: () =>
-      unwrap(api.POST("/api/runs/{idx}/decisions/bulk", { params: { path: { idx } }, body: { candidates: selected, status, reason, note } })),
+      unwrap(api.POST("/api/runs/{run_id}/decisions/bulk", { params: { path: { run_id: runId } }, body: { candidates: selected, status, reason, note } })),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["decisions", idx] });
+      qc.invalidateQueries({ queryKey: ["decisions", runId] });
       onDone();
     },
   });
@@ -144,16 +144,16 @@ function BulkBar({ idx, selected, vocab, onDone }: { idx: number; selected: stri
 }
 
 export function Decisions() {
-  const idx = useRunIdx();
-  const detail = useQuery({ queryKey: ["run", idx], queryFn: () => unwrap(api.GET("/api/runs/{idx}", { params: { path: { idx } } })) });
+  const runId = useRunId();
+  const detail = useQuery({ queryKey: ["run", runId], queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })) });
   const vocab = useQuery({ queryKey: ["vocab"], queryFn: () => unwrap(api.GET("/api/decisions/vocabulary")) });
   const decisions = useQuery({
-    queryKey: ["decisions", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/decisions", { params: { path: { idx } } })),
+    queryKey: ["decisions", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/decisions", { params: { path: { run_id: runId } } })),
   });
   const d = detail.data;
   const [picked, setPicked] = useState<string[]>([]);
-  useEffect(() => setPicked([]), [idx]);
+  useEffect(() => setPicked([]), [runId]);
   const toggle = (n: string, on: boolean) => setPicked((p) => (on ? [...p.filter((x) => x !== n), n] : p.filter((x) => x !== n)));
   const groupOf = new Map<string, string>();
   d?.groups.forEach((g, i) => g.forEach((n) => groupOf.set(n, g.length > 1 ? `tie group ${i + 1} (no order)` : `group ${i + 1}`)));
@@ -171,23 +171,23 @@ export function Decisions() {
           </div>
         ) : null}
         <p>
-          <a href={`/api/runs/${idx}/decisions.csv`} download>
+          <a href={`/api/runs/${runId}/decisions.csv`} download>
             Download CSV
           </a>{" "}
-          <a href={`/api/runs/${idx}/decisions.sdf`} download>
+          <a href={`/api/runs/${runId}/decisions.sdf`} download>
             Download SDF
           </a>{" "}
-          <a href={`/api/runs/${idx}/export.sdf`} download title="3D poses with ddE, tie group, gates and decisions as properties">
+          <a href={`/api/runs/${runId}/export.sdf`} download title="3D poses with ddE, tie group, gates and decisions as properties">
             Download enriched pose SDF
           </a>
         </p>
         {d && d.analogues.length === 0 ? (
-          <EmptyState action={{ label: "Open the run overview", to: `/run/${idx}/overview` }}>
+          <EmptyState action={{ label: "Open the run overview", to: `/run/${runId}/overview` }}>
             This run holds only the parent; there are no analogues to decide on.
           </EmptyState>
         ) : null}
         {d && vocab.data && decisions.data && picked.length ? (
-          <BulkBar idx={idx} selected={picked} vocab={vocab.data} onDone={() => setPicked([])} />
+          <BulkBar runId={runId} selected={picked} vocab={vocab.data} onDone={() => setPicked([])} />
         ) : null}
         {d && d.analogues.length > 0 && vocab.data && decisions.data ? (
           <table className="grid" aria-label="Decisions">
@@ -213,7 +213,7 @@ export function Decisions() {
               {d.analogues.map((n) => (
                 <Row
                   key={`${n}-${decisions.data.find((x) => x.candidate === n)?.time ?? ""}`}
-                  idx={idx}
+                  runId={runId}
                   name={n}
                   smiles={d.candidates[n] ?? ""}
                   current={decisions.data.find((x) => x.candidate === n)}

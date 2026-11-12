@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { expect, IDX, test } from "./bench";
+import { expect, id, test } from "./bench";
 
-const RUN = IDX.a_resolved;
+const RUN = () => id("a_resolved");
 
 test("the report leads with the verdict, then the plot, then the candidates", async ({ page }) => {
-  await page.goto(`/report/${RUN}`);
+  await page.goto(`/report/${RUN()}`);
   await expect(page.locator('[data-figure="forest"] .main-svg').first()).toBeVisible();
   const order = await page.evaluate(() => {
     const at = (sel: string) => {
@@ -21,13 +21,13 @@ test("the report leads with the verdict, then the plot, then the candidates", as
 
 test("a comment on a candidate appears in its thread with the author from Identity", async ({ page }) => {
   const who = ((await (await page.request.get("/api/whoami")).json()) as { user: string }).user;
-  await page.goto(`/report/${RUN}`);
+  await page.goto(`/report/${RUN()}`);
   const thread = page.locator('[data-thread="candidate:4-F"]');
   await thread.getByLabel("Comment on 4-F").fill("nitro on an aniline: we will not make this");
   await thread.getByRole("button", { name: "Add comment" }).click();
   await expect(thread.locator(".comments li")).toContainText("nitro on an aniline");
   await expect(thread.locator(".comment-author")).toHaveText(who);
-  const stored = (await (await page.request.get(`/api/runs/${RUN}/comments`)).json()) as { anchor: string; body: string; author: string }[];
+  const stored = (await (await page.request.get(`/api/runs/${RUN()}/comments`)).json()) as { anchor: string; body: string; author: string }[];
   expect(stored.find((c) => c.body.startsWith("nitro on an aniline"))).toMatchObject({ anchor: "candidate:4-F", author: who });
 });
 
@@ -40,7 +40,7 @@ test("nothing on the report edits the method or starts work", async ({ page }) =
       forbidden.push(`${r.method()} ${u.pathname}`);
     }
   });
-  await page.goto(`/report/${RUN}`);
+  await page.goto(`/report/${RUN()}`);
   await expect(page.locator('[data-figure="forest"] .main-svg').first()).toBeVisible();
   // Exercise every control on the page: every enabled button, and every select.
   for (const sel of await page.locator("main select").all()) {
@@ -57,7 +57,7 @@ test("nothing on the report edits the method or starts work", async ({ page }) =
 });
 
 test("the archived snapshot is the run's numbers, and its only external references are its pinned libraries", async ({ page }) => {
-  await page.goto(`/report/${RUN}`);
+  await page.goto(`/report/${RUN()}`);
   await expect(page.locator('[data-testid^="mean-"]').first()).toBeVisible();
   const means = await page.locator('[data-testid^="mean-"]').allInnerTexts(); // data source: the page as displayed
   expect(means.length).toBeGreaterThan(0);
@@ -74,7 +74,7 @@ test("the archived snapshot is the run's numbers, and its only external referenc
 });
 
 test("the report states the floor and lists what the result cannot tell you", async ({ page }) => {
-  await page.goto(`/report/${RUN}`);
+  await page.goto(`/report/${RUN()}`);
   await expect(page.getByTestId("floor-statement")).toContainText("The floor is");
   const section = page.getByRole("region", { name: "What this result cannot tell you" });
   await expect(section.locator("details")).not.toHaveAttribute("open", "");

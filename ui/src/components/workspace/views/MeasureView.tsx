@@ -149,31 +149,31 @@ function useClicks(host: React.RefObject<HTMLDivElement | null>, onPick: (p: Pic
 
 /** Step 5: what the SCFs measured, a point per ligand and pose. Click one to see that pose and every ligand's value there. */
 export function MeasureView({ sourceRun }: StepViewProps) {
-  const idx = sourceRun ?? 0;
+  const runId = sourceRun ?? "";
   const theme = useScheme();
   const host = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [showLog, setShowLog] = useState(false);
   const detail = useRunDetail(sourceRun);
   const figure = useQuery({
-    queryKey: ["figure", idx, "per_pose_values", theme],
+    queryKey: ["figure", runId, "per_pose_values", theme],
     queryFn: () =>
-      unwrap(api.GET("/api/runs/{idx}/figures/{name}", { params: { path: { idx, name: "per_pose_values" }, query: { theme } } })),
+      unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name: "per_pose_values" }, query: { theme } } })),
     enabled: sourceRun !== null,
   });
   const rows = useQuery({
-    queryKey: ["per_pose", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/per_pose", { params: { path: { idx } } })),
+    queryKey: ["per_pose", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/per_pose", { params: { path: { run_id: runId } } })),
     enabled: sourceRun !== null,
   });
   const sensitivity = useQuery({
-    queryKey: ["charge_sensitivity", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/charge_sensitivity", { params: { path: { idx } } })),
+    queryKey: ["charge_sensitivity", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/charge_sensitivity", { params: { path: { run_id: runId } } })),
     enabled: sourceRun !== null,
   });
   const drops = useQuery({
-    queryKey: ["dropped_poses", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/dropped_poses", { params: { path: { idx } } })),
+    queryKey: ["dropped_poses", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/dropped_poses", { params: { path: { run_id: runId } } })),
     enabled: sourceRun !== null,
   });
   useClicks(host, (p) => {
@@ -226,8 +226,8 @@ export function MeasureView({ sourceRun }: StepViewProps) {
               ))}
             </tbody>
           </table>
-          {showLog ? <ScfLog idx={idx} candidate={picked.candidate} position={picked.position} /> : null}
-          <CorePose idx={sourceRun} candidate={picked.candidate} pose={picked.position} label="measure step" />
+          {showLog ? <ScfLog runId={runId} candidate={picked.candidate} position={picked.position} /> : null}
+          <CorePose runId={sourceRun} candidate={picked.candidate} pose={picked.position} label="measure step" />
         </section>
       ) : null}
     </div>

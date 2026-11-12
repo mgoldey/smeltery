@@ -111,6 +111,9 @@ class FakeRunStore:
     def find_runs(self, root=None):
         return self._store.find_runs(root)
 
+    def read_record(self, path):
+        return self._store.read_record(path)
+
 
 class FakeArtifactStore(FilesystemArtifactStore):
     pass

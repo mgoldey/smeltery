@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { expect, run, test } from "./bench";
+import { expect, id, run, test } from "./bench";
 
 test("a notebook entry records attached runs by the sha256 of their record", async ({ page }) => {
   const r = run("a_resolved");
@@ -38,7 +38,7 @@ test("a correction supersedes; the old entry stays readable and marked; nothing 
 test("axe finds no serious or critical violations on a notebook with entries", async ({ page }) => {
   const { default: AxeBuilder } = await import("@axe-core/playwright");
   const c = (await (await page.request.post("/api/campaigns", { data: { name: `a11y-${Date.now()}` } })).json()) as { id: string };
-  await page.request.post(`/api/campaigns/${c.id}/entries`, { data: { title: "one", body: "b", runs: [0] } });
+  await page.request.post(`/api/campaigns/${c.id}/entries`, { data: { title: "one", body: "b", runs: [id("a_resolved")] } });
   await page.goto(`/campaigns/${c.id}`);
   await expect(page.locator(".entry")).toHaveCount(1);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();

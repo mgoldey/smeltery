@@ -12,19 +12,20 @@ export const RUN_TABS: { to: string; label: string }[] = [
   { to: "overview", label: "Overview" },
 ];
 
-export function useRunIdx(): number {
-  const { idx } = useParams();
-  const n = Number(idx);
-  if (!Number.isInteger(n) || n < 0) throw new Error(`not a run index: ${idx}`);
-  return n;
+/** The run this page is about: the stable id from the URL (`/run/:runId`). An old all-digits link is passed through
+ * unchanged -- the API still resolves it positionally and says so with a Deprecation header. */
+export function useRunId(): string {
+  const { runId } = useParams();
+  if (!runId) throw new Error("no run in the URL");
+  return runId;
 }
 
 export function RunLayout() {
-  const { idx } = useParams();
+  const { runId } = useParams();
   const tabs = (
     <nav className="tabs" aria-label="Run views">
       {RUN_TABS.map((t) => (
-        <NavLink key={t.to} to={`/run/${idx}/${t.to}`}>
+        <NavLink key={t.to} to={`/run/${runId}/${t.to}`}>
           {t.label}
         </NavLink>
       ))}

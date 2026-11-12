@@ -3,14 +3,14 @@ import { api, unwrap } from "../api/client";
 
 /** The one loud thing on a run page. It makes exactly the decision the cut made and no more: UNRANKED is a result,
  * shown as prominently as a resolved one, and INCOMPLETE is never a blank. */
-export function VerdictBanner({ idx }: { idx: number }) {
+export function VerdictBanner({ runId }: { runId: string }) {
   const v = useQuery({
-    queryKey: ["verdict", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}/verdict", { params: { path: { idx } } })),
+    queryKey: ["verdict", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/verdict", { params: { path: { run_id: runId } } })),
   });
   const d = useQuery({
-    queryKey: ["run", idx],
-    queryFn: () => unwrap(api.GET("/api/runs/{idx}", { params: { path: { idx } } })),
+    queryKey: ["run", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })),
     enabled: v.data !== undefined && v.data.state !== "INCOMPLETE",
   });
   if (v.isError) {

@@ -120,8 +120,11 @@ def main() -> int:
     port = int(os.environ.get("BENCH_E2E_PORT", "8799"))
     root = Path(tempfile.mkdtemp(prefix="bench-e2e-"))
     runs = build(root)
+    from smeltery.bench.adapters.run_store import run_id
+
     for i, r in enumerate(runs):
-        r["idx"] = i
+        r["idx"] = i  # the position in this listing, for the pages that offer the nth run
+        r["id"] = run_id(root, Path(r["path"]), r["digest"])  # the stable id every /run/<id> URL uses
     pdb = HERE / "data" / "site.pdb"
     (HERE / ".fixture.json").write_text(
         json.dumps({"root": str(root), "runs": runs, "study": "bench.study_dag_fixture", "pdb": str(pdb)}, indent=1)
@@ -137,7 +140,7 @@ def main() -> int:
 
     add_e2e_task_route(app)
     made = TestClient(app, base_url=f"http://127.0.0.1:{port}").post(  # e2e/bench.ts PIPELINE
-        "/api/pipelines", json={"name": "e2e", "from_run": 0}
+        "/api/pipelines", json={"name": "e2e", "from_run": runs[0]["id"]}
     )
     assert made.status_code == 201, made.text
     if os.environ.get("BENCH_E2E_BROKEN_QUEUE"):
