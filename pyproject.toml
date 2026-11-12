@@ -7,7 +7,7 @@ license = { text = "MIT OR Apache-2.0" }
 authors = [{ name = "Matthew Goldey" }]
 keywords = ["computational-chemistry", "drug-discovery", "quantum-chemistry", "virtual-screening"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "License :: OSI Approved :: Apache Software License",
