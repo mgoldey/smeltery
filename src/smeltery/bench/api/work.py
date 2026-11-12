@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from smeltery.bench.progress import RunProgress, out_dir_of
 from smeltery.bench.provisional import provisional_pose
 from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import catalog, catalog_json, method
@@ -33,8 +34,15 @@ router = APIRouter(prefix="/api", tags=["work"])
 # ---------------------------------------------------------------------------------------------------- tasks
 
 
+_progress = RunProgress()
+
+
 def _task(t: Any) -> M.Task:
-    return M.Task(**(t.to_dict() if hasattr(t, "to_dict") else t))
+    d = dict(t.to_dict() if hasattr(t, "to_dict") else t)
+    # only a live run has progress; a finished one has deleted its checkpoint, and a stale file must not show
+    if d.get("status") == "running":
+        d["progress"] = _progress.of(out_dir_of(list(d.get("command") or []), d.get("cwd") or ""))
+    return M.Task(**d)
 
 
 @router.get("/tasks", response_model=list[M.Task], responses={503: {"model": M.Problem}})

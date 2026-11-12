@@ -24,6 +24,21 @@ function fmt(s: number | null): string {
   return m < 60 ? `${m} min ${s % 60} s` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
+/** "n of N SCFs" with a bar, for a run that checkpoints; nothing at all when the task has no progress to report. */
+export function RunProgress({ progress }: { progress: Task["progress"] }) {
+  if (!progress) return null;
+  const { done, total, reused } = progress;
+  const resumed = reused > 0 ? ` (${reused} reused from an earlier attempt)` : "";
+  return (
+    <div className="run-progress" data-testid="run-progress">
+      <progress value={done} max={Math.max(total, 1)} aria-label="SCFs finished" />
+      <span className="run-progress-text">
+        {done} of {total} SCFs{resumed}
+      </span>
+    </div>
+  );
+}
+
 /**
  * How long a running task has been silent, in seconds, counted from the browser's clock so it advances between
  * polls. `heartbeat_age_s` is the server's age at the moment it answered, so the time since that answer is added.
@@ -105,6 +120,7 @@ export function WorkPanel({ selected, onSelect }: { selected: string | null; onS
                       OOM
                     </span>
                   ) : null}
+                  <RunProgress progress={t.progress} />
                 </td>
                 <td className="num" data-testid="elapsed">
                   {fmt(seconds(t.started_at ?? t.created_at, t.finished_at, now))}

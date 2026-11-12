@@ -59,6 +59,9 @@ table.grid tr.selected { background: var(--sunken); }
 .queued-hint { color: var(--ink-muted); font-size: 12px; }
 .status[data-state="cancelled"], .status[data-state="UNRANKED"] { color: var(--pending); }
 /* Worker health. "stalled" is a warning, not a failure: the task is still running. "OOM" is why it failed. */
+.run-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.run-progress progress { width: 120px; height: 8px; accent-color: var(--accent); }
+.run-progress-text { color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .status[data-state="stalled"] { color: var(--pending); margin-left: 6px; }
 .status[data-state="oom"] { color: var(--bad); margin-left: 6px; font-weight: 700; }
 
