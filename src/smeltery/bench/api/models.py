@@ -179,37 +179,8 @@ class PipelineCreate(BaseModel):
     blank: BlankPipeline | None = None
 
 
-class PipelineCheck(BaseModel):
-    toml: str
-
-
-class PipelineEdit(BaseModel):
-    toml: str
-    op: Literal["add", "remove", "move", "set"]
-    key: str
-    params: dict[str, Any] | None = None
-    at: int | None = None
-    to: int | None = None
-
-
-class SiteRequest(BaseModel):
-    toml: str
-    atom: int
-    from_atom: int
-    q: float = 1.0
-    distance: float = 3.0
-
-
 class PipelineFromRun(BaseModel):
     run: int
-
-
-class LaunchRequest(BaseModel):
-    toml: str
-    out: str | None = None
-    timeout_s: float | None = Field(
-        default=None, gt=0, description="fail the run after this many wall-clock seconds; omit for no limit"
-    )
 
 
 class Provisional(BaseModel):

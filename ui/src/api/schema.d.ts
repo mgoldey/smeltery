@@ -228,101 +228,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/pipeline/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pipeline Check */
-        post: operations["pipeline_check_api_pipeline_check_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/edit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pipeline Edit */
-        post: operations["pipeline_edit_api_pipeline_edit_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/from_run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pipeline From Run
-         * @description A starting pipeline for the next round, rebuilt from what the run record holds: its candidates and parent,
-         *     the cut's keep and z, a floor that came from the config, and the gates that ran. The record stores the field's
-         *     charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
-         *     notes say so, and click-to-place puts them back.
-         */
-        post: operations["pipeline_from_run_api_pipeline_from_run_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/launch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pipeline Launch
-         * @description Stage inputs into OUT by hash, write OUT/config.toml, and submit `smeltery run` on it. Refused while
-         *     `Pipeline.check()` reports any error.
-         */
-        post: operations["pipeline_launch_api_pipeline_launch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pipeline/site": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pipeline Site */
-        post: operations["pipeline_site_api_pipeline_site_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/pipelines": {
         parameters: {
             query?: never;
@@ -2072,18 +1977,6 @@ export interface components {
             /** Stage */
             stage: string | null;
         };
-        /** LaunchRequest */
-        LaunchRequest: {
-            /** Out */
-            out?: string | null;
-            /**
-             * Timeout S
-             * @description fail the run after this many wall-clock seconds; omit for no limit
-             */
-            timeout_s?: number | null;
-            /** Toml */
-            toml: string;
-        };
         /** LigandCheck */
         LigandCheck: {
             /**
@@ -2574,11 +2467,6 @@ export interface components {
             /** Value */
             value: number;
         };
-        /** PipelineCheck */
-        PipelineCheck: {
-            /** Toml */
-            toml: string;
-        };
         /** PipelineCreate */
         PipelineCreate: {
             blank?: components["schemas"]["BlankPipeline"] | null;
@@ -2612,31 +2500,6 @@ export interface components {
             /** Toml */
             toml: string;
         };
-        /** PipelineEdit */
-        PipelineEdit: {
-            /** At */
-            at?: number | null;
-            /** Key */
-            key: string;
-            /**
-             * Op
-             * @enum {string}
-             */
-            op: "add" | "remove" | "move" | "set";
-            /** Params */
-            params?: {
-                [key: string]: unknown;
-            } | null;
-            /** To */
-            to?: number | null;
-            /** Toml */
-            toml: string;
-        };
-        /** PipelineFromRun */
-        PipelineFromRun: {
-            /** Run */
-            run: number;
-        };
         /** PipelineLaunch */
         PipelineLaunch: {
             /** Out */
@@ -2651,51 +2514,6 @@ export interface components {
         PipelinePut: {
             /** Base Sha256 */
             base_sha256?: string | null;
-            /** Toml */
-            toml: string;
-        };
-        /** PipelineState */
-        PipelineState: {
-            /** Addable */
-            addable: string[];
-            /** Campaign */
-            campaign: string;
-            /** Candidates */
-            candidates: {
-                [key: string]: string;
-            };
-            /** Issues */
-            issues: components["schemas"]["Issue"][];
-            /**
-             * Notes
-             * @default []
-             */
-            notes: string[];
-            /** Ok */
-            ok: boolean;
-            /**
-             * Params
-             * @description knobs the user set, per placed stage
-             */
-            params: {
-                [key: string]: {
-                    [key: string]: unknown;
-                };
-            };
-            /** Parent */
-            parent: string;
-            /**
-             * Placed
-             * @description the stages the user placed, in their order
-             */
-            placed: string[];
-            /**
-             * Stages
-             * @description Pipeline.view(): stages as smeltery run executes them
-             */
-            stages: {
-                [key: string]: unknown;
-            }[];
             /** Toml */
             toml: string;
         };
@@ -2963,25 +2781,6 @@ export interface components {
             kind: string;
             /** Name */
             name: string;
-        };
-        /** SiteRequest */
-        SiteRequest: {
-            /** Atom */
-            atom: number;
-            /**
-             * Distance
-             * @default 3
-             */
-            distance: number;
-            /** From Atom */
-            from_atom: number;
-            /**
-             * Q
-             * @default 1
-             */
-            q: number;
-            /** Toml */
-            toml: string;
         };
         /** SiteSpec */
         SiteSpec: {
@@ -3790,180 +3589,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Problem"];
-                };
-            };
-        };
-    };
-    pipeline_check_api_pipeline_check_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PipelineCheck"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_edit_api_pipeline_edit_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PipelineEdit"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_from_run_api_pipeline_from_run_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PipelineFromRun"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_launch_api_pipeline_launch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LaunchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pipeline_site_api_pipeline_site_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SiteRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineState"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

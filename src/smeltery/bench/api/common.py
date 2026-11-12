@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from smeltery.bench.verdict import verdict_of
 from smeltery.gui.results import Run, load_run
@@ -54,3 +55,21 @@ def run(request: Request, idx: int) -> Run:
 
 def utc_iso(when: Any) -> str:
     return when.strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(when, "strftime") else str(when)
+
+
+def confined_out(root: Path, requested: str | None, default: Path) -> Path | JSONResponse:
+    """Where a launched run may write: strictly inside ROOT, after `~`, `..` and symlinks are resolved.
+
+    A relative `requested` is read from ROOT. Anything that resolves outside ROOT (an absolute path elsewhere, `../x`,
+    a symlink under ROOT that leaves it) is a 400 `{"reason": ...}` returned for the route to hand back, because a
+    request must never stage files or write a run wherever the server user can write."""
+    base = root.resolve()
+    if not requested:
+        return default
+    p = Path(requested).expanduser()
+    out = (p if p.is_absolute() else base / p).resolve()
+    if out == base or not out.is_relative_to(base):
+        return JSONResponse(
+            status_code=400, content={"reason": f"out {requested!r} must be a directory inside the workspace {base}"}
+        )
+    return out
