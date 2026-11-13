@@ -25,7 +25,7 @@ from smeltery.gui import results as R
 from smeltery.gui.compare import Comparison as Cmp
 from smeltery.gui.compare import candidate_rows
 from smeltery.gui.limits import floor_statement
-from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, write_report
+from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, render_html
 from smeltery.gui.scenes import pose_scene
 from smeltery.gui.views._style import themed
 from smeltery.gui.views.compare import compare_figure, comparison_caption
@@ -690,28 +690,105 @@ def propose(request: Request, run_id: str, body: M.ProposalIn) -> M.ProposalOut:
     return _proposal_out(p)
 
 
+# ---------------------------------------------------------------------------------------------------- config
+
+
+@router.get("/runs/{run_id}/config", response_model=M.RunConfig)
+def run_config(request: Request, run_id: str) -> M.RunConfig:
+    """The config file this run was executed from, as text, comments and all.
+
+    The record names the file it read (`results.config`) and keeps its sha256, so what is returned is the input
+    itself rather than a config rebuilt from the record: a rebuild drops the comments, and in this project the
+    comments are the documentation. A run whose config was not kept beside it reports `text = None` instead of a
+    reconstruction, because a plausible-looking config that is not the one that ran is worse than none.
+    """
+    r = run(request, run_id)
+    cfg = r.record.get("results", {}).get("config")
+    if not isinstance(cfg, dict) or not cfg.get("file"):
+        return M.RunConfig(file=None, sha256=None, text=None, reason="this run's record does not name a config file")
+    out = Path(r.out_dir).resolve()
+    path = (out / cfg["file"]).resolve()
+    # The name comes out of the record, which is a file on disk: it is not to be trusted to stay inside the run
+    # directory. Nothing here should ever serve a file from elsewhere on the machine.
+    if not path.is_relative_to(out):
+        return M.RunConfig(
+            file=cfg["file"],
+            sha256=cfg.get("sha256"),
+            text=None,
+            reason=f"the record names {cfg['file']}, which is outside the run directory",
+        )
+    if not path.is_file():
+        return M.RunConfig(
+            file=cfg["file"],
+            sha256=cfg.get("sha256"),
+            text=None,
+            reason=f"the record names {cfg['file']}, but it is no longer beside the run",
+        )
+    text = path.read_text()
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    recorded = cfg.get("sha256")
+    # A changed file is still shown -- it is what is on disk -- but never silently: a run is only reproducible
+    # from the bytes that ran, and an edited config would otherwise read as provenance.
+    changed = bool(recorded) and recorded != digest
+    return M.RunConfig(
+        file=cfg["file"],
+        sha256=digest,
+        text=text,
+        reason="this file has changed since the run read it" if changed else None,
+        changed=changed,
+    )
+
+
 # ---------------------------------------------------------------------------------------------------- snapshot
 
 
-@router.post("/runs/{run_id}/snapshot", response_model=M.Snapshot)
-def snapshot(request: Request, run_id: str) -> M.Snapshot:
-    """Write the frozen report beside the run, unmodified. Its numbers, plots and tables are inline; its only
-    external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load."""
+def _render_report(request: Request, run_id: str) -> tuple[R.Run, str]:
+    """The frozen report's HTML for `run_id`, rendered in memory, with the run it describes.
+
+    Shared by the two ways out, so the file a chemist downloads is byte-for-byte the file the notebook archives.
+    Rendering and writing are separate on purpose: the download writes nothing, which is what lets it work on a
+    `--read-only` server, where `POST .../snapshot` is refused with 403.
+    """
     r = run(request, run_id)
-    path = Path(r.out_dir) / f"report-{r.record['input_digest'][:12]}.html"
     digest = r.record["input_digest"]
     comments = [
         {"anchor": c.anchor_text or "run", "author": c.author, "time": utc_iso(c.created_at), "body": c.body}
         for c in ports(request).comment_store.for_run(digest)
     ]
     decisions = [d.__dict__ for d in _load_decisions(r).decisions]
-    write_report(r, path, comments, decisions)
-    data = path.read_bytes()
+    return r, render_html(r, comments, decisions)
+
+
+def _external(data: bytes) -> list[str]:
     found = sorted(set(re.findall(rb"https?://[^\s\"'<>)]+", data)))
-    return M.Snapshot(
-        path=str(path),
-        sha256=hashlib.sha256(data).hexdigest(),
-        external=[u.decode() for u in found if u.decode() in REPORT_EXTERNAL],
+    return [u.decode() for u in found if u.decode() in REPORT_EXTERNAL]
+
+
+@router.post("/runs/{run_id}/snapshot", response_model=M.Snapshot)
+def snapshot(request: Request, run_id: str) -> M.Snapshot:
+    """Write the frozen report beside the run, unmodified. Its numbers, plots and tables are inline; its only
+    external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load."""
+    r, html = _render_report(request, run_id)
+    path = Path(r.out_dir) / f"report-{r.record['input_digest'][:12]}.html"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html, encoding="utf-8")
+    data = path.read_bytes()
+    return M.Snapshot(path=str(path), sha256=hashlib.sha256(data).hexdigest(), external=_external(data))
+
+
+@router.get("/runs/{run_id}/report.html")
+def run_report_download(request: Request, run_id: str) -> Response:
+    """The same frozen report, as a download.
+
+    `POST .../snapshot` leaves the file on the server and names a path, which only helps someone with a shell on
+    that machine. This hands the bytes to whoever is reading the page.
+    """
+    r, html = _render_report(request, run_id)
+    digest = r.record["input_digest"][:12]
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="report-{digest}.html"'},
     )
 
 

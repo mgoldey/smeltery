@@ -5,6 +5,7 @@ import { useCanWrite } from "../api/capabilities";
 import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
 import { EmptyState } from "../components/EmptyState";
+import { Limits } from "../components/Limits";
 
 type Method = Schemas["MethodInfo"];
 type Param = Schemas["MethodParam"];
@@ -281,6 +282,11 @@ export function Methods() {
             workspace default is copied into a step when you add the method, so
             a run can always be redone from its own folder.
           </p>
+          {/* The limits come before the methods: they are the frame a method is chosen inside, and they used to
+              live only on Report, collapsed, where the person picking a method never saw them. Collapsed, but
+              with its count in the summary, so it reads as something to open rather than something to scroll
+              past: opened by default it is 1561px of table and the page's own methods start below the fold. */}
+          <Limits lede="What the funnel cannot tell you, whichever method you place here. Each limit rests on one system or one model pair (docs/limits.md)." />
           {q.isError ? (
             <div className="banner" role="alert">
               {q.error.message}

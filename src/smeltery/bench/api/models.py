@@ -317,6 +317,20 @@ class Snapshot(BaseModel):
     external: list[str] = Field(description="the only external URLs in the file: pinned, integrity-hashed libraries")
 
 
+class RunConfig(BaseModel):
+    """The config file a run was executed from, as text.
+
+    `text` is None when the file is not beside the run; `reason` then says why, rather than the page inventing a
+    config that never ran. `changed` marks a file edited since the run read it, so provenance is never implied.
+    """
+
+    file: str | None
+    sha256: str | None
+    text: str | None
+    reason: str | None = None
+    changed: bool = False
+
+
 class CampaignIn(BaseModel):
     name: str
     description: str = ""

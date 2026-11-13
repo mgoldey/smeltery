@@ -352,6 +352,10 @@ out (for example "memory is modelled for STO-3G only"), its systematic floor in 
 "unmeasured", the pipelines in this workspace that place it, and a table of every setting with its
 built-in default, a workspace default and what the setting does.
 
+The page opens with **what the funnel cannot tell you**: the measured limits of
+[limits.md](limits.md), counted in the summary and one click from open. They are the frame a method
+is chosen inside, so they sit above the catalogue rather than only on a report someone reads later.
+
 A workspace default is **copied** into a step when the method is added to a pipeline, and the step
 then holds the value explicitly in its config. A config never refers to workspace defaults, so
 changing one reaches no existing pipeline and a run can always be redone from its own directory.
@@ -409,6 +413,12 @@ setting and re-run" opens it at the ΔE_int step. The panel only joins fields th
 made before these were recorded shows "not recorded for this run" for each missing item; nothing is
 filled in.
 
+The **Provenance** tab ends with the run's config as text, comments and all: the file the record
+names, read from beside the run, with its sha256. A run whose config was not kept says so instead of
+showing a config rebuilt from the record, which would read as provenance while being a guess; a file
+edited since the run read it is shown but flagged, because a run is reproducible only from the bytes
+it ran on.
+
 ## Other areas
 
 **Methods** (`/methods`) is described above.
@@ -418,7 +428,9 @@ filled in.
 - `/campaigns/{id}`: a campaign notebook. Entries are append-only. A correction is a new entry
   that supersedes the old one, which stays readable. Attached runs are recorded by the sha256
   of their record.
-- `/compare`: two runs chosen as arms, side by side, with the difference of their ddE values.
+- `/compare?a=&b=`: two runs chosen as arms, side by side, with the difference of their ddE values.
+  The arms are in the URL, so a comparison can be linked to and sent on. A run's Results page links in
+  with its own id already set ("Compare this run with another"), and each arm links back to its run.
 
 **Run** (`/run/{run_id}/...`) is the computational chemist's instrument panel for one run. A
 context bar shows the campaign, input digest and verdict.
@@ -452,8 +464,10 @@ reads the TOML.
 
 **Report** (`/report/{run_id}`) is what a bench chemist reads: the verdict, figures and poses, with
 comment threads anchored to the run, a candidate or a pose, and proposals. It offers no control
-that starts work. "Snapshot" writes a self-contained `report-<digest>.html` beside the run for
-archiving.
+that starts work. Under the verdict, "Download this report" hands over a self-contained
+`report-<digest>.html`: every number, plot and table inline, its only external references the pinned,
+integrity-hashed 2D/3D libraries. `POST /api/runs/{run_id}/snapshot` writes the same bytes beside the
+run instead, for a notebook that archives from the server.
 
 ## Addressing a run
 
@@ -482,7 +496,8 @@ change without that regeneration fails CI.
 - `/healthz`, `/api/whoami`
 - runs: `/api/runs`, `/api/runs/{run_id}` and its `verdict`, `ddE`, `resolved`, `per_pose`,
   `figures/{name}`, `scene`, `pose_maps`, `pose_atoms`, `gates`, `calcs`, `lineage`, `decisions`,
-  `comments`, `proposals`, `snapshot`; `/api/compare`; `/api/decisions/vocabulary`,
+  `comments`, `proposals`, `snapshot`, `report.html` (the same frozen report as a download),
+  `config` (the config the run read, as text); `/api/compare`; `/api/decisions/vocabulary`,
   `/api/proposals`, `/api/proposals/vocabulary`
 - workspace pipelines: `/api/pipelines` (list, create from a prebuilt, a run or blank),
   `/api/pipelines/{name}` (read, save with a base hash), `/api/pipelines/{name}/launch`,

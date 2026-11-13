@@ -119,6 +119,17 @@ export function Results() {
                 </span>
               </p>
             ) : null}
+            {table.data.rows.length ? (
+              // Deciding is the primary move off this page; comparing is a side road, so it is a quiet link and
+              // not a second button competing with it. Compare had no way in from a run at all before this.
+              <p className="lede" data-testid="go-compare-line">
+                Ran this series another way?{" "}
+                <Link to={`/compare?a=${encodeURIComponent(runId)}`} data-testid="go-compare">
+                  Compare this run with another
+                </Link>
+                .
+              </p>
+            ) : null}
             <h2>Can these two be told apart?</h2>
             <p className="lede">The funnel's own test for each pair, at the same z and floor as the cut.</p>
             {matrix.data && table.data.rows.length ? <PlotlyFigure figure={matrix.data} name="matrix" /> : null}

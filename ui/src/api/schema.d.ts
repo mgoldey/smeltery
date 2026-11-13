@@ -811,6 +811,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Config
+         * @description The config file this run was executed from, as text, comments and all.
+         *
+         *     The record names the file it read (`results.config`) and keeps its sha256, so what is returned is the input
+         *     itself rather than a config rebuilt from the record: a rebuild drops the comments, and in this project the
+         *     comments are the documentation. A run whose config was not kept beside it reports `text = None` instead of a
+         *     reconstruction, because a plausible-looking config that is not the one that ran is worse than none.
+         */
+        get: operations["run_config_api_runs__run_id__config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/ddE": {
         parameters: {
             query?: never;
@@ -1088,6 +1113,29 @@ export interface paths {
          *     sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut.
          */
         get: operations["run_pymol_api_runs__run_id__pymol_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/report.html": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Report Download
+         * @description The same frozen report, as a download.
+         *
+         *     `POST .../snapshot` leaves the file on the server and names a path, which only helps someone with a shell on
+         *     that machine. This hands the bytes to whoever is reading the page.
+         */
+        get: operations["run_report_download_api_runs__run_id__report_html_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2764,6 +2812,28 @@ export interface components {
             matrix: boolean[][];
             /** Names */
             names: string[];
+        };
+        /**
+         * RunConfig
+         * @description The config file a run was executed from, as text.
+         *
+         *     `text` is None when the file is not beside the run; `reason` then says why, rather than the page inventing a
+         *     config that never ran. `changed` marks a file edited since the run read it, so provenance is never implied.
+         */
+        RunConfig: {
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            /** File */
+            file: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Sha256 */
+            sha256: string | null;
+            /** Text */
+            text: string | null;
         };
         /** RunDetail */
         RunDetail: {
@@ -5343,6 +5413,46 @@ export interface operations {
             };
         };
     };
+    run_config_api_runs__run_id__config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     run_dde_api_runs__run_id__ddE_get: {
         parameters: {
             query?: never;
@@ -5967,6 +6077,46 @@ export interface operations {
         };
     };
     run_pymol_api_runs__run_id__pymol_zip_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    run_report_download_api_runs__run_id__report_html_get: {
         parameters: {
             query?: never;
             header?: never;
