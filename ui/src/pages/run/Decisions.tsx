@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 import { api, unwrap, type Schemas } from "../../api/client";
 import { Structure2D } from "../../components/Structure2D";
 import { EmptyState } from "../../components/EmptyState";
+import { Writable } from "../../components/ReadOnly";
+import { useStartNextRound } from "../../components/workspace/openFromRun";
 import { useRunId } from "./RunLayout";
 
 type Decision = Schemas["DecisionOut"];
+type DdeRow = Schemas["DdeTable"]["rows"][number];
 
 function Row({
   runId,
@@ -14,6 +17,8 @@ function Row({
   current,
   vocab,
   group,
+  evidence,
+  unit,
   selected,
   onSelect,
 }: {
@@ -23,6 +28,8 @@ function Row({
   current: Decision | undefined;
   vocab: Schemas["Vocabulary"];
   group: string;
+  evidence: DdeRow | undefined;
+  unit: string;
   selected: boolean;
   onSelect: (on: boolean) => void;
 }) {
@@ -46,6 +53,17 @@ function Row({
       </td>
       <td>
         <div>{name}</div>
+        {/* The number the decision is about. Without it the user reads a verdict on Results, comes here, and is
+            asked to judge a bare name -- so they tab back and forth, or decide on the name alone. */}
+        {evidence ? (
+          <div className="lede" data-testid={`evidence-${name}`}>
+            {evidence.mean >= 0 ? "+" : ""}
+            {evidence.mean.toFixed(2)} ± {evidence.sem.toFixed(2)} {unit} ·{" "}
+            {/* Three states, as on Results: an unranked run has no survivors, and calling those "not kept"
+                would state a cut outcome the run never reached. */}
+            {evidence.survivor === null ? "not ranked" : evidence.survivor ? "kept by the cut" : "not kept"}
+          </div>
+        ) : null}
         <div className="lede">{group}</div>
         {current ? (
           <div className="lede" data-testid={`recorded-${name}`}>
@@ -151,6 +169,12 @@ export function Decisions() {
     queryKey: ["decisions", runId],
     queryFn: () => unwrap(api.GET("/api/runs/{run_id}/decisions", { params: { path: { run_id: runId } } })),
   });
+  // The same table Results draws its forest plot from, so the row and the plot cannot disagree.
+  const dde = useQuery({
+    queryKey: ["ddE", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/ddE", { params: { path: { run_id: runId } } })),
+  });
+  const byCandidate = new Map((dde.data?.rows ?? []).map((r) => [r.candidate, r]));
   const d = detail.data;
   const [picked, setPicked] = useState<string[]>([]);
   useEffect(() => setPicked([]), [runId]);
@@ -182,7 +206,7 @@ export function Decisions() {
           </a>
         </p>
         {d && d.analogues.length === 0 ? (
-          <EmptyState action={{ label: "Open the run overview", to: `/run/${runId}/overview` }}>
+          <EmptyState action={{ label: "Open the run provenance", to: `/run/${runId}/provenance` }}>
             This run holds only the parent; there are no analogues to decide on.
           </EmptyState>
         ) : null}
@@ -219,6 +243,8 @@ export function Decisions() {
                   current={decisions.data.find((x) => x.candidate === n)}
                   vocab={vocab.data}
                   group={groupOf.get(n) ?? ""}
+                  evidence={byCandidate.get(n)}
+                  unit={d.unit}
                   selected={picked.includes(n)}
                   onSelect={(on) => toggle(n, on)}
                 />
@@ -226,7 +252,48 @@ export function Decisions() {
             </tbody>
           </table>
         ) : null}
+        {decisions.data?.length ? <NextRound runId={runId} recorded={decisions.data.length} /> : null}
       </main>
     </div>
+  );
+}
+
+/**
+ * The exit this page never had.
+ *
+ * The lede above has always promised decisions are "carried into the next run", and until now the only way to do that
+ * was to leave Bench and hand-edit `[decisions] file = "..."` into a TOML. This makes the promise true: the server
+ * copies the decisions file into a new pipeline, writes the reference, and says in `notes` what it carried.
+ *
+ * Shown only once something is recorded -- an empty next round is refused by the server, and offering a button that
+ * can only fail is worse than offering none.
+ */
+function NextRound({ runId, recorded }: { runId: string; recorded: number }) {
+  const start = useStartNextRound(runId);
+  return (
+    <section className="next-round">
+      <h2>Carry these forward</h2>
+      <p className="lede">
+        Starts a pipeline from this run's config with {recorded === 1 ? "this decision" : `these ${recorded} decisions`}{" "}
+        referenced, so <span className="mono">smeltery run</span> drops what you rejected. Opens on its candidates; the
+        original run is untouched.
+      </p>
+      {start.isError ? (
+        <p className="field-error" role="alert">
+          {start.error.message}
+        </p>
+      ) : null}
+      <Writable>
+        <button
+          className="primary"
+          type="button"
+          disabled={start.isPending}
+          onClick={() => start.mutate({})}
+          data-testid="start-next-round"
+        >
+          {start.isPending ? "Starting the next round…" : "Start the next round"}
+        </button>
+      </Writable>
+    </section>
   );
 }

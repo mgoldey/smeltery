@@ -66,7 +66,11 @@ def _needs(text: str) -> str | None:
 def test_every_prebuilt_config_validates(name):
     folder = PREBUILT / name
     assert (folder / "pipeline.toml").is_file()
-    assert len(folder.joinpath("about.md").read_text().strip().splitlines()) == 2
+    # about.md is exactly three lines, in the order the API reads them: what it shows, what re-running it needs,
+    # and what its committed run came out as (`about`, `needs`, `teaches`).
+    lines = folder.joinpath("about.md").read_text().strip().splitlines()
+    assert len(lines) == 3, lines
+    assert all(ln.strip() for ln in lines)
     why = _needs((folder / "pipeline.toml").read_text())
     if why:
         pytest.skip(why)

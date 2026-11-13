@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { EmptyState } from "../components/EmptyState";
@@ -12,8 +12,19 @@ const withSem = (v: number, sem: number | null) => (sem === null ? v.toFixed(2) 
  * pooling of unlike things. */
 export function Compare() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
-  const [a, setA] = useState<string | null>(null);
-  const [b, setB] = useState<string | null>(null);
+  // The arms live in the URL, not in component state. That is what lets a run link into a comparison already
+  // holding it ("Compare with another run"), and what makes a comparison worth sending to a colleague.
+  const [params, setParams] = useSearchParams();
+  const a = params.get("a");
+  const b = params.get("b");
+  const setArm = (arm: "a" | "b") => (v: string | null) => {
+    const next = new URLSearchParams(params);
+    if (v === null) next.delete(arm);
+    else next.set(arm, v);
+    setParams(next, { replace: true });
+  };
+  const setA = setArm("a");
+  const setB = setArm("b");
   const theme = useScheme();
   const cmp = useQuery({
     queryKey: ["compare", a, b, theme],
@@ -61,6 +72,17 @@ export function Compare() {
             <>
               <p className="verdict-detail" data-testid="compare-caption">
                 {cmp.data.caption}
+              </p>
+              {/* A comparison is a reading of two runs; it should never be the end of the road. Each arm links
+                  back to the run it is, so a difference worth chasing can be chased. */}
+              <p className="next-step" data-testid="compare-arms">
+                <Link className="button" to={`/run/${a}/results`} data-testid="open-arm-a">
+                  Open arm A
+                </Link>{" "}
+                <Link className="button" to={`/run/${b}/results`} data-testid="open-arm-b">
+                  Open arm B
+                </Link>{" "}
+                <span className="lede">Each arm's own result, with its poses, decisions and provenance.</span>
               </p>
               <PlotlyFigure figure={cmp.data.figure} name="compare" />
               <table data-testid="compare-rows">

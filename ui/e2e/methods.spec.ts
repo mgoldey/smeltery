@@ -71,3 +71,21 @@ test("a default the setting would refuse says why and stores nothing", async ({ 
   await expect(sec.getByRole("alert")).toContainText("z must be a number");
   expect((await methods(page)).find((m) => m.key === "cut")!.params.every((p) => p.workspace_default === null)).toBe(true);
 });
+
+test("Methods names the funnel's limits up front, counted, instead of leaving them only on Report", async ({ page }) => {
+  // These used to exist only on Report, inside a collapsed <details>, where the person choosing a method never
+  // met them.
+  await page.goto("/methods");
+  const limits = page.getByRole("region", { name: "What this result cannot tell you" });
+  await expect(limits).toBeVisible();
+  const api = (await (await page.request.get("/api/limits")).json()) as {
+    measured: { id: string }[];
+    unmeasured: { id: string }[];
+  };
+  // Closed, but it says how much it holds: opened by default the table is 1561px and pushes every method on this
+  // page below the fold, which is the same wall-of-text mistake in a different place.
+  await expect(limits.locator("details")).not.toHaveAttribute("open", "");
+  await expect(limits).toContainText(`${api.measured.length} measured limits`); // data source: /api/limits
+  await limits.getByRole("heading", { name: "What this result cannot tell you" }).click();
+  for (const l of api.measured) await expect(limits).toContainText(l.id);
+});

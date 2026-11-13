@@ -1,13 +1,13 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { PoseExplorer } from "../components/PoseExplorer";
-import { useCanWrite } from "../api/capabilities";
 import { Writable } from "../components/ReadOnly";
 import { ProposeForm } from "../components/ProposeForm";
+import { Limits } from "../components/Limits";
 import { Shell } from "../components/Shell";
 import { Structure2D } from "../components/Structure2D";
 import { VerdictBanner } from "../components/VerdictBanner";
@@ -57,19 +57,6 @@ export function Report() {
       ),
     enabled: ok,
   });
-  const canWrite = useCanWrite();
-  const snapshot = useMutation({
-    mutationFn: () =>
-      unwrap(
-        api.POST("/api/runs/{run_id}/snapshot", {
-          params: { path: { run_id: runId } },
-        }),
-      ),
-  });
-  const limits = useQuery({
-    queryKey: ["limits"],
-    queryFn: () => unwrap(api.GET("/api/limits")),
-  });
   const d = detail.data;
   const sizes = new Map<number, number>();
   for (const r of table.data?.rows ?? [])
@@ -83,6 +70,24 @@ export function Report() {
           {d ? (
             <p className="lede" data-testid="floor-statement">
               {d.floor_statement}
+            </p>
+          ) : null}
+          {ok ? (
+            <p className="next-step">
+              <a
+                className="button"
+                href={`/api/runs/${runId}/report.html`}
+                download
+                data-testid="download-report"
+              >
+                Download this report
+              </a>{" "}
+              <span className="lede">
+                One self-contained HTML file for the notebook: every number,
+                plot and table is inside it, and its 2D and 3D views load
+                pinned, integrity-checked libraries and say so when they
+                cannot.
+              </span>
             </p>
           ) : null}
           {ok && forest.data ? (
@@ -156,92 +161,7 @@ export function Report() {
             <h2>Discussion</h2>
             <CommentThread runId={runId} anchor="run" title="this run" />
           </section>
-          {limits.data ? (
-            <section aria-label="What this result cannot tell you">
-              <details>
-                <summary>
-                  <h2 style={{ display: "inline" }}>
-                    What this result cannot tell you
-                  </h2>
-                </summary>
-                <p className="lede">
-                  Measured limits of the funnel (docs/limits.md). Each rests on
-                  one system or one model pair.
-                </p>
-                <table className="grid">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Limit</th>
-                      <th>Magnitude</th>
-                      <th>Claim it forbids</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {limits.data.measured.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.id}</td>
-                        <td>{l.limit}</td>
-                        <td>{l.magnitude}</td>
-                        <td>{l.forbids}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <h3>Not yet measured</h3>
-                <table className="grid">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Limit</th>
-                      <th>Status</th>
-                      <th>Claim it forbids until measured</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {limits.data.unmeasured.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.id}</td>
-                        <td>{l.limit}</td>
-                        <td>{l.status}</td>
-                        <td>{l.forbids}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </details>
-            </section>
-          ) : null}
-          {ok && canWrite ? (
-            <section aria-label="Archive">
-              <h2>Archive</h2>
-              <p className="lede">
-                A self-contained HTML copy for the notebook: every number, plot
-                and table is inside the file. Its 2D and 3D views load pinned,
-                integrity-checked libraries and say so when they cannot.
-              </p>
-              <button
-                type="button"
-                onClick={() => snapshot.mutate()}
-                disabled={snapshot.isPending}
-              >
-                Archive snapshot
-              </button>
-              {snapshot.isError ? (
-                <p className="field-error">{snapshot.error.message}</p>
-              ) : null}
-              {snapshot.data ? (
-                <p role="status" data-testid="snapshot">
-                  Written to <span className="mono">{snapshot.data.path}</span>,
-                  sha256{" "}
-                  <span className="mono" data-testid="snapshot-sha">
-                    {snapshot.data.sha256}
-                  </span>
-                  .
-                </p>
-              ) : null}
-            </section>
-          ) : null}
+          <Limits />
         </main>
       </div>
     </Shell>

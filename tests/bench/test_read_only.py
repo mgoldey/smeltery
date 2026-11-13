@@ -95,6 +95,15 @@ def test_whoami_exposes_the_mode(ro, rw):
     assert rw.get("/api/whoami").json()["read_only"] is False
 
 
+def test_a_next_round_is_refused_before_it_reads_anything(ro, rw):
+    """The walk above covers POST /api/pipelines with an empty body; this sends the next_round mode's own body, so
+    the one route that would write a decisions file into a new folder is named in the suite."""
+    body = {"name": "round2", "next_round": {"run": "deadbeefcafe-000000", "drop": ["4-Cl"]}}
+    r = ro.post("/api/pipelines", json=body)
+    assert r.status_code == 403 and "read-only" in r.json()["reason"]
+    assert rw.post("/api/pipelines", json=body).status_code != 403  # writable: refused on its merits, not the mode
+
+
 def test_the_token_is_checked_before_read_only(tmp_path):
     _, c = _make(tmp_path, read_only=True, token="t0ken")
     assert c.post("/api/campaigns").status_code == 401

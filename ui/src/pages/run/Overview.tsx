@@ -21,7 +21,7 @@ export function Overview() {
   return (
     <div className="body">
       <main className="work">
-        <h1>Overview</h1>
+        <h1>Provenance</h1>
         {detail.isError ? (
           <div className="banner" role="alert">
             {verdict.data?.state === "INCOMPLETE"
@@ -64,9 +64,52 @@ export function Overview() {
             <h2>Record</h2>
             <p className="mono">{d.path}</p>
             <p className="mono">input digest {d.digest}</p>
+            <RunConfig runId={runId} />
           </>
         ) : null}
       </main>
     </div>
+  );
+}
+
+/**
+ * The config this run was executed from, as text.
+ *
+ * Provenance named the file and its hash but never showed it, so answering "what did this actually run?" meant
+ * leaving the app for a shell. The comments come with it: `config_text` preserves them on purpose, and in this
+ * project they are the documentation of why a round exists.
+ */
+function RunConfig({ runId }: { runId: string }) {
+  const cfg = useQuery({
+    queryKey: ["run_config", runId],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/config", { params: { path: { run_id: runId } } })),
+  });
+  const c = cfg.data;
+  if (!c) return null;
+  return (
+    <section aria-label="Config">
+      <h2>Config</h2>
+      {c.text === null ? (
+        <p className="lede" data-testid="config-absent">
+          {c.reason}
+        </p>
+      ) : (
+        <>
+          <p className="lede">
+            <span className="mono">{c.file}</span>, sha256 <span className="mono">{c.sha256?.slice(0, 12)}</span>.
+            This is the file as it is on disk, comments and all.
+          </p>
+          {c.changed ? (
+            <div className="banner" role="alert" data-testid="config-changed">
+              {c.reason}: the run is reproducible only from the bytes it read, so treat this as the current file
+              rather than as provenance.
+            </div>
+          ) : null}
+          <pre className="mono config-text" data-testid="config-text">
+            {c.text}
+          </pre>
+        </>
+      )}
+    </section>
   );
 }

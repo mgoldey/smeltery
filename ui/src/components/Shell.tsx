@@ -1,8 +1,11 @@
-import { useCapabilities } from "../api/capabilities";
+import { useCanWrite, useCapabilities } from "../api/capabilities";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { NavLink, useMatch, useSearchParams } from "react-router-dom";
 import { api, runByRef, unwrap } from "../api/client";
+// Not RunLayout's useRunId: RunLayout imports Shell, so that would be a cycle. The id comes from this file's own
+// useLocation, which already matches the route.
+import { useOpenRunPipeline } from "./workspace/openFromRun";
 
 /**
  * Where the page is: a run (its stable id), or a pipeline and the run it was opened from (`?run=<id>`). A pipeline
@@ -30,7 +33,7 @@ function useCurrentRun() {
 
 export function ContextBar({ tabs }: { tabs?: ReactNode }) {
   const run = useCurrentRun();
-  const { pipeline } = useLocation();
+  const { runId, pipeline } = useLocation();
   return (
     <header className="context-bar" aria-label="Current run">
       {pipeline ? (
@@ -53,8 +56,34 @@ export function ContextBar({ tabs }: { tabs?: ReactNode }) {
       ) : (
         <span className="empty">No run selected</span>
       )}
+      {run && !pipeline && runId ? <OpenRunPipeline runId={runId} /> : null}
       {tabs}
     </header>
+  );
+}
+
+/**
+ * "Open the pipeline" as what it is: an action on this run, not a view of it.
+ *
+ * This was a tab that rendered a spinner and navigated away -- clicking it left the Run area entirely. As a button it
+ * does the same thing without promising to show you a page first. Hidden on a read-only server, where opening the
+ * editor would only lead to a refusal.
+ */
+function OpenRunPipeline({ runId }: { runId: string }) {
+  const open = useOpenRunPipeline(runId);
+  const canWrite = useCanWrite();
+  if (!canWrite) return null;
+  return (
+    <button
+      type="button"
+      className="link-button"
+      data-testid="context-open-pipeline"
+      disabled={open.isPending}
+      onClick={() => open.mutate({})}
+      title="Open the pipeline that made this run, in the workspace"
+    >
+      {open.isPending ? "Opening the pipeline…" : "Open the pipeline"}
+    </button>
   );
 }
 

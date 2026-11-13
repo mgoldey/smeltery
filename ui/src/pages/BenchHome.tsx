@@ -1,11 +1,56 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { api, unwrap } from "../api/client";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { api, unwrap, type Schemas } from "../api/client";
 import { Writable } from "../components/ReadOnly";
 import { ImportBundle } from "../components/ImportBundle";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
+
+type Prebuilt = Schemas["Prebuilt"];
+
+/** One card per tier, in the order the API returned them, with each variant folded under the example it varies. */
+export function groupPrebuilt(list: Prebuilt[]): { card: Prebuilt; variants: Prebuilt[] }[] {
+  const cards = list.filter((p) => p.tier !== "variant").map((card) => ({ card, variants: [] as Prebuilt[] }));
+  for (const p of list.filter((p) => p.tier === "variant")) {
+    // A variant whose parent is not listed would otherwise vanish: show it as a card of its own rather than drop it.
+    const under = cards.find((c) => c.card.name === p.variant_of);
+    if (under) under.variants.push(p);
+    else cards.push({ card: p, variants: [] });
+  }
+  return cards;
+}
+
+/** What each tier's card is headed, and the one line under that heading. The heading says what you are looking at:
+ * "working pipeline" cannot head a card whose own verdict reads "does not resolve". */
+const TIER_COPY: Record<string, { heading: string; lede: string }> = {
+  start_here: {
+    // Not "Start here": the section around all three ways is already headed that, and two headings of one name in
+    // one region tell a screen reader nothing. This one says which example, and why it is the one.
+    heading: "Start with this one",
+    lede: "The teaching example: the whole six-step shape, small enough to re-run while you read it.",
+  },
+  teaches_unranked: {
+    heading: "What an inconclusive result looks like",
+    lede: "A finished, correct run that refuses to rank. Worth reading before you trust one that does.",
+  },
+  real_campaign: {
+    heading: "Real campaigns",
+    lede: "A full campaign kept as a record to read. Copy it to read the run; re-running it costs CPU-hours.",
+  },
+};
+
+/** How a variant is introduced under the example it varies: the difference, not the name. */
+const VARIANT_LABEL: Record<string, string> = {
+  "benzoic-pbe": "also with DFT instead of RHF:",
+  structure: "also from a raw PDB:",
+};
+
+/** The default name of a copy, so nobody has to name a thing they have not seen yet. Prefixed rather than the
+ * packaged name itself: the copy is the reader's, and the name says so at a glance in the pipeline list. */
+export function copyName(prebuilt: string): string {
+  return `my-${prebuilt}`;
+}
 
 /** "name SMILES" per line; at least one analogue. */
 export function parseAnalogues(text: string): { ok: boolean; candidates: Record<string, string>; why: string } {
@@ -21,7 +66,10 @@ export function parseAnalogues(text: string): { ok: boolean; candidates: Record<
 
 export function BenchHome() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
-  const [task, setTask] = useState<string | null>(null);
+  // `?task=<id>` opens that task's inspector on arrival, so launching a run can hand the user straight to the thing
+  // they just started instead of to the top of this page with the Work panel somewhere below the fold.
+  const [params] = useSearchParams();
+  const [task, setTask] = useState<string | null>(params.get("task"));
   const studies = useQuery({ queryKey: ["studies"], queryFn: () => unwrap(api.GET("/api/studies")) });
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: () => unwrap(api.GET("/api/campaigns")) });
   const qc = useQueryClient();
@@ -41,7 +89,7 @@ export function BenchHome() {
   const [prebuiltName, setPrebuiltName] = useState<Record<string, string>>({});
   const startPrebuilt = useMutation({
     mutationFn: async (p: string) => {
-      const name = (prebuiltName[p] ?? p).trim();
+      const name = (prebuiltName[p] ?? copyName(p)).trim();
       const made = await unwrap(api.POST("/api/pipelines", { body: { name, from_prebuilt: p } }));
       // The example run was copied into the new pipeline's folder, so the run store lists it: find its id now.
       const list = await unwrap(api.GET("/api/runs"));
@@ -104,43 +152,88 @@ export function BenchHome() {
             <div className="start-ways">
               <div className="start-way" data-way="prebuilt">
                 <h3 className="start-step">
-                  <span className="start-n">1</span> Copy a working pipeline
-                  <span className="start-best">easiest</span>
+                  <span className="start-n">1</span> Copy an example pipeline
                 </h3>
                 <p className="lede">
-                  Five pipelines that already run, each with a finished example run to read. You get your own copy to
-                  change; the original is never touched.
+                  You get your own copy to change; the original is never touched. Each one ships the finished run its
+                  own config produced, so what you read is what you would get.
                 </p>
                 <div role="group" aria-labelledby="prebuilt-h">
-                  <h4 id="prebuilt-h">Start from a working pipeline</h4>
+                  <h4 id="prebuilt-h">Examples you can copy</h4>
                   {prebuilt.isError ? (
                     <div className="banner" role="alert">
-                      Working pipelines could not be listed: {prebuilt.error.message}
+                      Examples could not be listed: {prebuilt.error.message}
                     </div>
                   ) : (
                     <ul className="prebuilt-list">
-                      {(prebuilt.data ?? []).map((p) => (
-                        <li key={p.name} data-prebuilt={p.name}>
+                      {groupPrebuilt(prebuilt.data ?? []).map(({ card, variants }) => (
+                        <li key={card.name} data-prebuilt={card.name} data-tier={card.tier}>
                           <div className="prebuilt-head">
-                            <strong className="mono">{p.name}</strong>{" "}
-                            <span className="status" data-state={p.verdict.state}>
-                              {p.verdict.state === "UNRANKED" ? "does not resolve" : p.verdict.state}
-                            </span>
+                            <h5 className="prebuilt-tier">{TIER_COPY[card.tier]?.heading ?? card.name}</h5>
+                            {card.tier === "start_here" ? <span className="start-best">easiest</span> : null}
+                            {card.tier === "real_campaign" ? (
+                              // The copy is yours and editable; the badge is about the run, which cost CPU-hours.
+                              // Copy it to read the record, not to press Run.
+                              <span className="prebuilt-note" title="copy it to read the record, not to re-run it">
+                                read-only reference
+                              </span>
+                            ) : null}
                           </div>
-                          <div className="prebuilt-about">{p.about}</div>
-                          <div className="lede prebuilt-needs">{p.needs}</div>
+                          {TIER_COPY[card.tier] ? (
+                            <p className="lede prebuilt-why">{TIER_COPY[card.tier]!.lede}</p>
+                          ) : null}
+                          <div className="prebuilt-name mono">{card.name}</div>
+                          <div className="prebuilt-about">{card.about}</div>
+                          <details className="prebuilt-more">
+                            <summary>What it shows, and what it needs</summary>
+                            <div className="prebuilt-teaches">{card.teaches}</div>
+                            <div className="lede prebuilt-needs">{card.needs}</div>
+                          </details>
                           <div className="prebuilt-go">
-                            <label htmlFor={`prebuilt-name-${p.name}`}>Name of your copy</label>{" "}
+                            <label htmlFor={`prebuilt-name-${card.name}`}>Name of your copy</label>{" "}
                             <input
-                              id={`prebuilt-name-${p.name}`}
+                              id={`prebuilt-name-${card.name}`}
                               className="mono"
-                              value={prebuiltName[p.name] ?? p.name}
-                              onChange={(e) => setPrebuiltName((m) => ({ ...m, [p.name]: e.target.value }))}
+                              value={prebuiltName[card.name] ?? copyName(card.name)}
+                              onChange={(e) => setPrebuiltName((m) => ({ ...m, [card.name]: e.target.value }))}
                             />{" "}
-                            <button type="button" disabled={startPrebuilt.isPending} onClick={() => startPrebuilt.mutate(p.name)}>
-                              Start from {p.name}
+                            <button
+                              className={card.tier === "start_here" ? "primary" : undefined}
+                              type="button"
+                              disabled={startPrebuilt.isPending}
+                              onClick={() => startPrebuilt.mutate(card.name)}
+                            >
+                              Start from {card.name}
                             </button>
                           </div>
+                          {variants.map((v) => (
+                            <div key={v.name} className="prebuilt-variant" data-prebuilt-variant={v.name}>
+                              <div className="prebuilt-head">
+                                <span className="prebuilt-also">{VARIANT_LABEL[v.name] ?? "also"}</span>{" "}
+                                <strong className="mono">{v.name}</strong>
+                              </div>
+                              <details className="prebuilt-more">
+                                <summary>What this one shows</summary>
+                                <div className="prebuilt-teaches">{v.teaches}</div>
+                              </details>
+                              <div className="prebuilt-go">
+                                <label htmlFor={`prebuilt-name-${v.name}`}>Name of your copy</label>{" "}
+                                <input
+                                  id={`prebuilt-name-${v.name}`}
+                                  className="mono"
+                                  value={prebuiltName[v.name] ?? copyName(v.name)}
+                                  onChange={(e) => setPrebuiltName((m) => ({ ...m, [v.name]: e.target.value }))}
+                                />{" "}
+                                <button
+                                  type="button"
+                                  disabled={startPrebuilt.isPending}
+                                  onClick={() => startPrebuilt.mutate(v.name)}
+                                >
+                                  Start from {v.name}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </li>
                       ))}
                     </ul>
@@ -194,13 +287,12 @@ export function BenchHome() {
                 {newBlank.isError ? <p className="field-error">{newBlank.error.message}</p> : null}
               </div>
 
-              <div className="start-way" data-way="from-run">
-                <h3 className="start-step">
-                  <span className="start-n">3</span> Continue from a finished run
-                </h3>
+              <div className="start-way start-way-aside" data-way="from-run">
+                <h3 className="start-step">Or: continue from a finished run</h3>
                 <p className="lede">
-                  Copies the config that made that run, with its input files. The run itself is never changed: running
-                  your copy writes a new run directory.
+                  Copies the config that made that run, with its input files, under a name you choose. A run page's
+                  "Open the pipeline" does the same thing for the run you are reading. The run itself is never
+                  changed: running your copy writes a new run directory.
                 </p>
                 <form
                   className="controls"

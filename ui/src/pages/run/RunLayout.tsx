@@ -3,19 +3,24 @@ import { NavLink, Outlet, useParams } from "react-router-dom";
 import { useCapabilities } from "../../api/capabilities";
 import { Shell } from "../../components/Shell";
 
-/** The Run area's tabs. A tab is listed here only once its page exists. */
+/**
+ * The Run area's tabs: views OF this run, in the order you read them.
+ *
+ * Two former tabs are deliberately absent. "Pipeline" was not a view -- it rendered "Opening the pipeline that made
+ * this run…" and navigated away, so a tab click landed in a different area with different nav state; it is a button
+ * in the context bar instead, which is what it always was. "Structure" never referenced the run at all (no `runId`),
+ * so nesting it under `/run/:runId` misstated its scope; it is a top-level inspector now.
+ */
 export const RUN_TABS: { to: string; label: string }[] = [
   { to: "results", label: "Results" },
   { to: "poses", label: "Poses" },
   { to: "decisions", label: "Decisions" },
   { to: "proposals", label: "Proposals" },
-  { to: "structure", label: "Structure" },
-  { to: "pipeline", label: "Pipeline" },
-  { to: "overview", label: "Overview" },
+  { to: "provenance", label: "Provenance" },
 ];
 
 /** Tabs whose page only writes (or reads through a POST): not offered when the server is read-only. */
-const WRITE_TABS = new Set(["decisions", "structure"]);
+const WRITE_TABS = new Set(["decisions"]);
 
 /** The run this page is about: the stable id from the URL (`/run/:runId`). An old all-digits link is passed through
  * unchanged -- the API still resolves it positionally and says so with a Deprecation header. */

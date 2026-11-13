@@ -106,3 +106,16 @@ test("B03: a second launched run waits as queued, and cancelling it means it nev
   await page.request.post(`/api/tasks/${first}/cancel`); // do not leave a real SCF running
   await expect(row2.locator(".status").first()).toHaveText("cancelled");
 });
+
+test("a launch link opens the task it started, not just the page containing it", async ({ page }) => {
+  // The Work panel sits below the fold on /bench, so a bare link left the user hunting for the run they had just
+  // started. `?task=<id>` must open that task's inspector on arrival.
+  const res = await page.request.post("/e2e/tasks", {
+    data: { name: "e2e-deeplink", command: ["bash", "-c", "printf 'hello\\n'; sleep 30"] },
+  });
+  expect(res.status()).toBe(201);
+  const id = ((await res.json()) as { id: string }).id;
+  await page.goto(`/bench?task=${id}`);
+  await expect(page.getByTestId("task-log")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("task-log")).toContainText("hello", { timeout: 15_000 });
+});

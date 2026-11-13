@@ -811,6 +811,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Config
+         * @description The config file this run was executed from, as text, comments and all.
+         *
+         *     The record names the file it read (`results.config`) and keeps its sha256, so what is returned is the input
+         *     itself rather than a config rebuilt from the record: a rebuild drops the comments, and in this project the
+         *     comments are the documentation. A run whose config was not kept beside it reports `text = None` instead of a
+         *     reconstruction, because a plausible-looking config that is not the one that ran is worse than none.
+         */
+        get: operations["run_config_api_runs__run_id__config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/ddE": {
         parameters: {
             query?: never;
@@ -1088,6 +1113,29 @@ export interface paths {
          *     sha256-checked) and session.pml, which loads them relative to itself and colours ligands by the cut.
          */
         get: operations["run_pymol_api_runs__run_id__pymol_zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/report.html": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Report Download
+         * @description The same frozen report, as a download.
+         *
+         *     `POST .../snapshot` leaves the file on the server and names a path, which only helps someone with a shell on
+         *     that machine. This hands the bytes to whoever is reading the page.
+         */
+        get: operations["run_report_download_api_runs__run_id__report_html_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2451,6 +2499,33 @@ export interface components {
             /** New Name */
             new_name: string;
         };
+        /**
+         * NextRoundIn
+         * @description The next round of a run: its config, with the decisions and accepted proposals made on it carried in.
+         */
+        NextRoundIn: {
+            /**
+             * Add Proposals
+             * @description proposal ids to add under [candidates]
+             */
+            add_proposals?: string[];
+            /**
+             * Carry Decisions
+             * @description write [decisions] file = "<the copied file>" into the new config
+             * @default true
+             */
+            carry_decisions: boolean;
+            /**
+             * Drop
+             * @description candidate names to delete outright; a reject stays and `smeltery run` drops it, a drop does not
+             */
+            drop?: string[];
+            /**
+             * Run
+             * @description the run whose decisions and proposals seed the next round
+             */
+            run: string;
+        };
         /** ParamOut */
         ParamOut: {
             /**
@@ -2506,6 +2581,7 @@ export interface components {
             from_run?: string | null;
             /** Name */
             name: string;
+            next_round?: components["schemas"]["NextRoundIn"] | null;
         };
         /**
          * PipelineDoc
@@ -2627,6 +2703,15 @@ export interface components {
             name: string;
             /** Needs */
             needs: string;
+            /** Teaches */
+            teaches: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "start_here" | "teaches_unranked" | "real_campaign" | "variant";
+            /** Variant Of */
+            variant_of?: string | null;
             verdict: components["schemas"]["Verdict"];
         };
         /** PreviewStarted */
@@ -2727,6 +2812,28 @@ export interface components {
             matrix: boolean[][];
             /** Names */
             names: string[];
+        };
+        /**
+         * RunConfig
+         * @description The config file a run was executed from, as text.
+         *
+         *     `text` is None when the file is not beside the run; `reason` then says why, rather than the page inventing a
+         *     config that never ran. `changed` marks a file edited since the run read it, so provenance is never implied.
+         */
+        RunConfig: {
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            /** File */
+            file: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Sha256 */
+            sha256: string | null;
+            /** Text */
+            text: string | null;
         };
         /** RunDetail */
         RunDetail: {
@@ -3842,6 +3949,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Conflict */
@@ -5297,6 +5413,46 @@ export interface operations {
             };
         };
     };
+    run_config_api_runs__run_id__config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     run_dde_api_runs__run_id__ddE_get: {
         parameters: {
             query?: never;
@@ -5921,6 +6077,46 @@ export interface operations {
         };
     };
     run_pymol_api_runs__run_id__pymol_zip_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    run_report_download_api_runs__run_id__report_html_get: {
         parameters: {
             query?: never;
             header?: never;

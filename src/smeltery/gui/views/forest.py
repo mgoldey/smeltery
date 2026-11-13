@@ -205,7 +205,15 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
         title=f"Paired ddE vs {run.parent}: mean -/+ {run.z:g}*SEM, {floor_txt}",
         height=max(260, 70 * n + 140),
     )
-    fig.update_layout(margin={"r": 170, "t": 90 if run.unranked else 60})
+    # The shared legend sits at a fixed y of -0.18, which on this plot's variable height lands on top of the
+    # x-axis title. Put the legend below the title and give the bottom margin room for both.
+    # The shared legend sits below the plot; the x-axis title would land on the same line (legend y is a fraction
+    # of plot height, so no single y clears it at every height). Put the legend first and stand the title off
+    # below it, with bottom margin for both.
+    fig.update_layout(
+        margin={"r": 170, "t": 90 if run.unranked else 60, "b": 120},
+        legend={"orientation": "h", "yref": "paper", "y": -0.12, "yanchor": "top", "x": 0},
+    )
     fig.update_yaxes(
         tickmode="array",
         tickvals=y,
@@ -215,5 +223,8 @@ def forest_figure(rows: list[dict], run, unit: str = "kcal/mol"):
         zeroline=False,
         title=None,
     )
-    fig.update_xaxes(title=f"paired ddE ({unit}), lower is better; ticks are single poses", zeroline=False)
+    fig.update_xaxes(
+        title={"text": f"paired ddE ({unit}), lower is better; ticks are single poses", "standoff": 45},
+        zeroline=False,
+    )
     return fig
