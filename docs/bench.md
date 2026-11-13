@@ -195,14 +195,17 @@ A pipeline starts in one of three ways. Names are lower case letters, digits, `-
   original is never written to, and the config is copied exactly (workspace defaults are not applied).
 
   They are not peers, and the page does not list them as five alphabetical rows. `GET /api/prebuilt`
-  returns a curated order with a `tier` per entry (`src/smeltery/bench/api/prebuilt.py`: `ORDER`,
-  `TIERS`), and the page renders one card per tier with the variants folded under the example they
-  vary: **Start with this one** (`benzoic-rhf`, with `benzoic-pbe` under it), **What an inconclusive
+  returns a curated order with a `tier` per entry — each example declares its own `rank`, `tier` and
+  optional `variant_of` in its folder's `gallery.toml`, not in a list in library code, which would
+  have to name every campaign it ships (`tests/test_migration_rules.py`). The page renders one card
+  per tier with the variants folded under the example they vary: **Start with this one**
+  (`benzoic-rhf`, with `benzoic-pbe` under it), **What an inconclusive
   result looks like** (`docking`, with `structure` under it), and **Real campaigns**
   (`danuglipron-halogen`, a read-only reference). An example that does not resolve is shipped as a
   lesson, not hidden: each `about.md` has a third line (`teaches`) stating what its committed run
-  came out as, which is what the card shows. A sixth prebuilt has to be given a place in `ORDER` and
-  `TIERS` or the route refuses to list any of them.
+  came out as, which is what the card shows. A sixth prebuilt has to ship a `gallery.toml` of its own
+  or the route refuses to list any of them; two examples claiming one `rank` are refused too. The
+  file describes the shipped example, so starting a pipeline from one does not copy it.
   - `benzoic-rhf`: benzoic acid and two para analogues (4-F, 4-Cl) in a clamp of two +1 charges,
     ranked by field-interaction RHF. Re-running needs only the base install.
   - `benzoic-pbe`: the same clamp ranked with KS-DFT (PBE). Re-running needs only the base install.

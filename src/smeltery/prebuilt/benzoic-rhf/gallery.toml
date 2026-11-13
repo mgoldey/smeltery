@@ -1,0 +1,4 @@
+# Where this example sits on the Bench landing page. It lives beside the example, not in a list in
+# library code: naming a campaign there couples the library to one campaign (tests/test_migration_rules.py).
+rank = 1          # the order the gallery shows, lowest first
+tier = "start_here"
