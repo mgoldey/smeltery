@@ -147,7 +147,8 @@ export function StepPanel({
           <h3>Method</h3>
           {step.methods.length === 0 ? (
             <p className="lede">
-              The campaign, parent and candidates are the pipeline's own inputs: edit <code>[candidates]</code> in the TOML pane.
+              The campaign, parent and candidates are the pipeline's own inputs: change them in the list on the right,
+              or in <code>[candidates]</code> under "Edit as TOML" above.
             </p>
           ) : null}
           <div className="method-choice">

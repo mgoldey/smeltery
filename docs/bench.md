@@ -184,15 +184,25 @@ in the browser.
 ### Starting
 
 The Bench home page (`/bench`) opens on **Start here**: the three numbered ways to start a pipeline,
-with copying a working pipeline marked as the easiest. Below it, **Your work** lists the pipelines in
-the workspace and the runs under ROOT, then the work panel (running and finished tasks, their logs,
-cancel), and last the campaign notebooks and configured studies.
+the first of which copies an example. Below it, **Your work** lists the pipelines in the workspace
+and the runs under ROOT, then the work panel (running and finished tasks, their logs, cancel), and
+last the campaign notebooks and configured studies.
 A pipeline starts in one of three ways. Names are lower case letters, digits, `-` and `_`.
 
-- **Start from a working pipeline.** Five pipelines ship with smeltery. Each is copied into the
+- **Examples you can copy.** Five pipelines ship with smeltery. Each is copied into the
   workspace as your own pipeline, with the input files its config reads and a finished example run,
   so the result, the views and the provenance can be read before anything is changed. The packaged
   original is never written to, and the config is copied exactly (workspace defaults are not applied).
+
+  They are not peers, and the page does not list them as five alphabetical rows. `GET /api/prebuilt`
+  returns a curated order with a `tier` per entry (`src/smeltery/bench/api/prebuilt.py`: `ORDER`,
+  `TIERS`), and the page renders one card per tier with the variants folded under the example they
+  vary: **Start with this one** (`benzoic-rhf`, with `benzoic-pbe` under it), **What an inconclusive
+  result looks like** (`docking`, with `structure` under it), and **Real campaigns**
+  (`danuglipron-halogen`, a read-only reference). An example that does not resolve is shipped as a
+  lesson, not hidden: each `about.md` has a third line (`teaches`) stating what its committed run
+  came out as, which is what the card shows. A sixth prebuilt has to be given a place in `ORDER` and
+  `TIERS` or the route refuses to list any of them.
   - `benzoic-rhf`: benzoic acid and two para analogues (4-F, 4-Cl) in a clamp of two +1 charges,
     ranked by field-interaction RHF. Re-running needs only the base install.
   - `benzoic-pbe`: the same clamp ranked with KS-DFT (PBE). Re-running needs only the base install.
@@ -413,15 +423,32 @@ filled in.
 **Run** (`/run/{run_id}/...`) is the computational chemist's instrument panel for one run. A
 context bar shows the campaign, input digest and verdict.
 
-- `overview`: the verdict and what the run did.
-- `results`: the forest plot of ddE with the floor band, the resolved table, and per-pose values.
+The five tabs follow the path a run is read along -- what it says, what it rests on, what you
+decide, what to do next -- rather than listing every page that mentions the run:
+
+- `results`: the verdict, the forest plot of ddE with the floor band, the resolved table, and
+  per-pose values. It ends with "Decide on these candidates", which is the next step.
 - `poses`: each candidate's poses in the pocket (Mol*), with the per-pose energies.
-- `structure`: open a local PDB (or a PDB id when network access is allowed), its hash and
-  origin, what preparation drops, drawn in 3D.
-- `pipeline`: opens the workspace on the pipeline that made this run (see above).
 - `decisions`: keep, reject or hold each candidate with a reason from the core's vocabulary;
-  the core refuses, for example, a within-tie choice that has no note.
-- `proposals`: candidates proposed for review. A proposal starts no work.
+  the core refuses, for example, a within-tie choice that has no note. Each row carries its own
+  mean +/- SEM and whether the cut kept it, so the judgement is made beside the number. Once
+  something is recorded, "Start the next round" writes a new pipeline from this run's config with
+  the decisions carried (see below).
+- `proposals`: candidates proposed for review. A proposal starts no work. Tick the ones you agree
+  with and "Start the next round" adds them to the new pipeline's `[candidates]`.
+- `provenance`: the verdict and what the run did -- every setting, hash and log the record holds.
+
+Two pages that used to be tabs are reached otherwise: the workspace for this run's pipeline is the
+"Open the pipeline" button in the context bar, and the structure viewer is `/structure`, which
+belongs to no run. Links written before the move still resolve.
+
+**The next round.** A decision is only useful if it reaches the next run. "Start the next round",
+on either `decisions` or `proposals`, creates a pipeline from this run's config with
+`[decisions] file` pointing at a copy of the decisions (so `smeltery run` drops what you rejected
+before posing) and any accepted proposals added to `[candidates]`. The original run is never
+changed. The new config opens with a header comment naming what it carried, and Bench reads that
+comment back, so the pipeline explains itself on every later visit and to anyone who only ever
+reads the TOML.
 
 **Report** (`/report/{run_id}`) is what a bench chemist reads: the verdict, figures and poses, with
 comment threads anchored to the run, a candidate or a pose, and proposals. It offers no control

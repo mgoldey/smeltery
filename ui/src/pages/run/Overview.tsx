@@ -21,7 +21,7 @@ export function Overview() {
   return (
     <div className="body">
       <main className="work">
-        <h1>Overview</h1>
+        <h1>Provenance</h1>
         {detail.isError ? (
           <div className="banner" role="alert">
             {verdict.data?.state === "INCOMPLETE"

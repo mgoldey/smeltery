@@ -185,11 +185,24 @@ class BlankPipeline(BaseModel):
     candidates: dict[str, str]
 
 
+class NextRoundIn(BaseModel):
+    """The next round of a run: its config, with the decisions and accepted proposals made on it carried in."""
+
+    run: str = Field(description="the run whose decisions and proposals seed the next round")
+    carry_decisions: bool = Field(True, description='write [decisions] file = "<the copied file>" into the new config')
+    add_proposals: list[str] = Field(default_factory=list, description="proposal ids to add under [candidates]")
+    drop: list[str] = Field(
+        default_factory=list,
+        description="candidate names to delete outright; a reject stays and `smeltery run` drops it, a drop does not",
+    )
+
+
 class PipelineCreate(BaseModel):
     name: str
     from_run: str | None = None
     from_prebuilt: str | None = None
     blank: BlankPipeline | None = None
+    next_round: NextRoundIn | None = None
 
 
 class PipelineFromRun(BaseModel):

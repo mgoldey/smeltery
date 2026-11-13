@@ -10,6 +10,7 @@ import json
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -29,10 +30,29 @@ IMPORTED_DIR = "imported"
 NOT_RUN_FILES = ("temporal", "running.json")
 
 
+Tier = Literal["start_here", "teaches_unranked", "real_campaign", "variant"]
+
+#: The one example to start from, then the ones that teach something else, then the campaigns — and under each, the
+#: variants of it. The list route returns this order, not alphabetical: `benzoic-pbe` sorts above `benzoic-rhf`, and
+#: the landing page's first card must be the teaching example. `variant_of` names the prebuilt a variant belongs
+#: under, so the page can fold it there instead of showing it as a peer.
+ORDER: tuple[str, ...] = ("benzoic-rhf", "benzoic-pbe", "docking", "structure", "danuglipron-halogen")
+TIERS: dict[str, tuple[Tier, str | None]] = {
+    "benzoic-rhf": ("start_here", None),
+    "benzoic-pbe": ("variant", "benzoic-rhf"),
+    "docking": ("teaches_unranked", None),
+    "structure": ("variant", "docking"),
+    "danuglipron-halogen": ("real_campaign", None),
+}
+
+
 class Prebuilt(BaseModel):
     name: str
     about: str  # what it shows
     needs: str  # what re-running it needs
+    teaches: str  # the outcome of the example run and what reading it demonstrates
+    tier: Tier  # where the landing page files it: one card per non-variant tier
+    variant_of: str | None = None  # the prebuilt this is a variant of, folded under its card
     verdict: M.Verdict  # of the example run
 
 
@@ -42,6 +62,24 @@ def root() -> Traversable:
 
 def names() -> list[str]:
     return sorted(p.name for p in root().iterdir() if p.is_dir() and p.joinpath("pipeline.toml").is_file())
+
+
+def ordered_names() -> list[str]:
+    """`names()` in the curated order. A prebuilt that nobody ranked is a mistake, not a tail entry: ranking it is
+    how its place on the landing page gets decided, so the guard below refuses to guess."""
+    found, order, tiers = set(names()), set(ORDER), set(TIERS)
+    if found != order or found != tiers:
+        raise RuntimeError(
+            "smeltery.bench.api.prebuilt.ORDER/TIERS do not match the shipped prebuilts: "
+            f"unranked {sorted(found - order)}, untiered {sorted(found - tiers)}, "
+            f"ranked but absent {sorted((order | tiers) - found)}. Give each one a place in both."
+        )
+    for n, (tier, under) in TIERS.items():
+        if (tier == "variant") != (under is not None):
+            raise RuntimeError(f"{n}: a variant names what it varies, and only a variant names one (tier {tier!r})")
+        if under is not None and TIERS.get(under, ("variant", None))[0] == "variant":
+            raise RuntimeError(f"{n}: variant_of {under!r} is not a card of its own, so nothing would show {n}")
+    return list(ORDER)
 
 
 def folder(name: str) -> Traversable | None:
@@ -98,14 +136,18 @@ def _example_verdict(f: Traversable) -> M.Verdict:
 @router.get("/prebuilt", response_model=list[Prebuilt])
 def list_prebuilt() -> list[Prebuilt]:
     out = []
-    for n in names():
+    for n in ordered_names():
         f = root().joinpath(n)
         lines = [ln.strip() for ln in f.joinpath("about.md").read_text().strip().splitlines() if ln.strip()]
+        tier, variant_of = TIERS[n]
         out.append(
             Prebuilt(
                 name=n,
                 about=lines[0] if lines else "",
                 needs=lines[1] if len(lines) > 1 else "",
+                teaches=lines[2] if len(lines) > 2 else "",
+                tier=tier,
+                variant_of=variant_of,
                 verdict=_example_verdict(f),
             )
         )

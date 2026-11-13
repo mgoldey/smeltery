@@ -51,3 +51,29 @@ test("a decision recorded with the keyboard alone lands in the decisions file wi
   const after = await get<{ candidate: string; status: string; reason: string; user: string }[]>(page, `/api/runs/${id("a_resolved")}/decisions`);
   expect(after.find((x) => x.candidate === kept)).toMatchObject({ status: "keep", reason: "cut_survivor", user: who.user });
 });
+
+test("a recorded decision can start the next round, and the new pipeline references it", async ({ page }) => {
+  // The loop this app existed to support: decide, then carry the decision into the next run. Before this, the only
+  // route was to leave Bench and hand-edit [decisions] file = "..." into a TOML.
+  const d = await get<{ analogues: string[] }>(page, `/api/runs/${id("a_resolved")}`);
+  const target = d.analogues[0];
+  await page.goto(`/run/${id("a_resolved")}/decisions`);
+  const row = page.locator(`tbody tr`).filter({ hasText: target }).first();
+  await row.getByLabel("Status").selectOption("reject");
+  await row.getByLabel("Reason").selectOption("liability");
+  await row.getByRole("button", { name: `Record decision for ${target}` }).click();
+  await expect(page.getByTestId("start-next-round")).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId("start-next-round").click();
+  // Lands in the workspace on the new pipeline's candidates.
+  await expect(page).toHaveURL(/\/pipelines\/.*step=ligands/, { timeout: 20_000 });
+  // The new config really references the copied decisions file, which is the whole point, and says in its header
+  // what it carried. The TOML is folded away by default, so open it before looking.
+  await page.getByRole("group").getByText("Edit as TOML", { exact: true }).click();
+  const toml = page.getByLabel("Pipeline TOML");
+  await expect(toml).toContainText("[decisions]", { timeout: 20_000 });
+  await expect(toml).toContainText(`${target} was rejected`);
+  // Written into the config, not just into one API response, so it survives a reload.
+  await page.reload();
+  await page.getByRole("group").getByText("Edit as TOML", { exact: true }).click();
+  await expect(page.getByLabel("Pipeline TOML")).toContainText(`${target} was rejected`);
+});

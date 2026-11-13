@@ -69,7 +69,7 @@ table.grid tr.selected { background: var(--sunken); }
 .empty-state { color: var(--ink-muted); padding: 18px 0; }
 
 button, .button { font: inherit; padding: 6px 12px; border: 1px solid var(--hairline); background: var(--panel); color: var(--ink); border-radius: 3px; cursor: pointer; }
-button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary, .button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 input, select, textarea { font: inherit; padding: 5px 8px; border: 1px solid var(--hairline); background: var(--panel); color: var(--ink); border-radius: 3px; }
 label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0 4px; }
@@ -233,10 +233,17 @@ label.check { display: block; color: var(--ink); font-size: 14px; margin: 4px 0;
 .start-way .lede { margin: 0 0 8px; }
 .start-way h4 { font-size: 11px; letter-spacing: 0.02em; color: var(--ink-muted); margin: 0 0 6px; font-weight: 600; text-transform: uppercase; }
 .prebuilt-list { list-style: none; margin: 0; padding: 0; }
-.prebuilt-list > li { border-top: 1px solid var(--hairline); padding: 8px 0; }
+.prebuilt-list > li { border-top: 1px solid var(--hairline); padding: 10px 0; }
 .prebuilt-list > li:first-child { border-top: 0; }
-.prebuilt-head { display: flex; gap: 8px; align-items: baseline; }
+.prebuilt-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.prebuilt-tier { font-size: 13px; font-weight: 700; margin: 0; }
+.prebuilt-note { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-muted); font-weight: 700; }
+.prebuilt-why { font-size: 12px; margin: 2px 0 6px; }
+.prebuilt-name { font-size: 12px; font-weight: 700; }
 .prebuilt-about { font-size: 12px; }
+.prebuilt-teaches { font-size: 12px; margin: 2px 0; }
+.prebuilt-variant { border-left: 2px solid var(--hairline); margin: 8px 0 0; padding: 4px 0 0 10px; }
+.prebuilt-also { font-size: 11px; color: var(--ink-muted); }
 .prebuilt-needs { font-size: 11px; margin: 2px 0 6px; }
 .prebuilt-go { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .prebuilt-go label { font-size: 11px; color: var(--ink-muted); margin: 0; }
@@ -246,3 +253,39 @@ label.check { display: block; color: var(--ink); font-size: 14px; margin: 4px 0;
 .more h3 { color: var(--ink-muted); }
 .error-boundary { max-width: 640px; margin: 64px auto; padding: 0 16px; }
 .error-boundary p.mono { color: var(--ink-muted); overflow-wrap: anywhere; }
+
+/* The handoff from reading a result to acting on it, and the round-closing sections that end Decisions and
+   Proposals. A link styled as the primary action gets the button's look without losing link behaviour. */
+.next-step {
+  margin: 1.5rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+a.button {
+  display: inline-block;
+  text-decoration: none;
+}
+.next-round {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--hairline);
+}
+.next-round h2 {
+  margin-top: 0;
+}
+
+/* The folded detail on an example card, and the secondary entry point that is not one of the numbered steps. */
+.prebuilt-more > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+.prebuilt-more[open] > summary {
+  margin-bottom: 0.4rem;
+}
+.start-way-aside {
+  border-top: 1px solid var(--hairline);
+  padding-top: 1rem;
+}

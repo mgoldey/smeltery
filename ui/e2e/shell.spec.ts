@@ -20,7 +20,7 @@ test("the context bar shows the run's campaign and input digest", async ({ page 
 
 test("an incomplete run says what it is missing instead of rendering blank", async ({ page }) => {
   const r = run("c_incomplete");
-  await page.goto(`/run/${r.id}/overview`);
+  await page.goto(`/run/${r.id}/provenance`);
   await expect(page.getByRole("alert")).toContainText("incomplete");
   await expect(page.getByRole("alert")).toContainText("cut");
 });

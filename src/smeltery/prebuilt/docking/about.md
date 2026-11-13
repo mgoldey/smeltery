@@ -1,2 +1,3 @@
 Ethanol docked into a committed pentapeptide pocket with Vina; propanol and butanol paired to its poses, gated, then ranked by field-interaction SCFs.
 Re-running needs the docking and posebusters extras and pdb2pqr30 on PATH.
+Does not resolve: butanol (-0.19 ± 1.09) and propanol (+1.08 ± 1.33) sit 1.27 kcal/mol apart on a combined SEM of 1.72, so the cut's z = 2.0 is nowhere near met (z = 0.74) and each mean falls inside the other's interval. Three poses of a floppy alcohol on a shallow 5-residue surface cannot separate them; this is what an honest refusal looks like, not a misconfigured example.

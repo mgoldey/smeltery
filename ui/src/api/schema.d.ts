@@ -2451,6 +2451,33 @@ export interface components {
             /** New Name */
             new_name: string;
         };
+        /**
+         * NextRoundIn
+         * @description The next round of a run: its config, with the decisions and accepted proposals made on it carried in.
+         */
+        NextRoundIn: {
+            /**
+             * Add Proposals
+             * @description proposal ids to add under [candidates]
+             */
+            add_proposals?: string[];
+            /**
+             * Carry Decisions
+             * @description write [decisions] file = "<the copied file>" into the new config
+             * @default true
+             */
+            carry_decisions: boolean;
+            /**
+             * Drop
+             * @description candidate names to delete outright; a reject stays and `smeltery run` drops it, a drop does not
+             */
+            drop?: string[];
+            /**
+             * Run
+             * @description the run whose decisions and proposals seed the next round
+             */
+            run: string;
+        };
         /** ParamOut */
         ParamOut: {
             /**
@@ -2506,6 +2533,7 @@ export interface components {
             from_run?: string | null;
             /** Name */
             name: string;
+            next_round?: components["schemas"]["NextRoundIn"] | null;
         };
         /**
          * PipelineDoc
@@ -2627,6 +2655,15 @@ export interface components {
             name: string;
             /** Needs */
             needs: string;
+            /** Teaches */
+            teaches: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "start_here" | "teaches_unranked" | "real_campaign" | "variant";
+            /** Variant Of */
+            variant_of?: string | null;
             verdict: components["schemas"]["Verdict"];
         };
         /** PreviewStarted */
@@ -3842,6 +3879,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineDoc"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Conflict */

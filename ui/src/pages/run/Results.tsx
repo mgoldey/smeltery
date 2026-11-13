@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, unwrap } from "../../api/client";
 import { LineageInspector } from "../../components/LineageInspector";
 import { EmptyState } from "../../components/EmptyState";
@@ -61,7 +62,7 @@ export function Results() {
               order inside it means nothing.
             </p>
             {table.data.rows.length === 0 ? (
-              <EmptyState action={{ label: "Open the run overview", to: `/run/${runId}/overview` }}>
+              <EmptyState action={{ label: "Open the run provenance", to: `/run/${runId}/provenance` }}>
                 No analogue has a paired ΔΔE in this run; the parent alone gives nothing to compare.
               </EmptyState>
             ) : null}
@@ -105,6 +106,18 @@ export function Results() {
                   ))}
                 </tbody>
               </table>
+            ) : null}
+            {/* The verdict is a reading, not a decision. This is the one step the app exists to support, and until
+                now it was a tab you had to know to click. */}
+            {table.data.rows.length ? (
+              <p className="next-step">
+                <Link className="button primary" to={`/run/${runId}/decisions`} data-testid="go-decide">
+                  Decide on these candidates
+                </Link>{" "}
+                <span className="lede">
+                  Keep, reject or hold each one with a reason, then carry those decisions into the next round.
+                </span>
+              </p>
             ) : null}
             <h2>Can these two be told apart?</h2>
             <p className="lede">The funnel's own test for each pair, at the same z and floor as the cut.</p>
