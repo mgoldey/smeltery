@@ -8,17 +8,19 @@ import io
 import json
 import math
 import re
+import tomllib
 import zipfile
 from pathlib import Path
 from typing import Any, Literal, get_args
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from molviewspec.nodes import RepresentationTypeT, validate_state_tree
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rdkit import Chem
 
 from smeltery.bench.pymol_export import ligand_filename, ligand_stems, pymol_session
+from smeltery.bench.use_cases.launch_run import smeltery_command
 from smeltery.bench.verdict import verdict_of
 from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet, to_csv, to_sdf
 from smeltery.gui import results as R
@@ -37,7 +39,7 @@ from smeltery.project import Proposal, make_entry_id
 from smeltery.sdf_export import enriched_sdf
 
 from . import models as M
-from .common import ports, record, row, rows, run, utc_iso
+from .common import confined_out, ports, record, row, rows, run, utc_iso
 
 router = APIRouter(prefix="/api", tags=["runs"])
 
@@ -112,7 +114,26 @@ def run_detail(request: Request, run_id: str) -> M.RunDetail:
         n_poses={k: int(v["n_poses"]) for k, v in poses.items()},
         unit=_unit(r),
         verdict=_verdict(raw),
+        decisions_in=_decisions_in(raw),
     )
+
+
+def _decisions_in(raw: dict) -> M.DecisionsIn | None:
+    """`results.decisions_in`, or None when this round carried no decisions file.
+
+    Written only when the config had a `[decisions]` section, so absence is the ordinary case and is reported as
+    "nothing carried in" rather than as a missing field. A record that has the key but not its shape (an imported
+    one) is also None: inventing a file name or an empty `excluded` would claim a provenance the record does not
+    hold.
+    """
+    got = raw.get("results", {}).get("decisions_in")
+    if not isinstance(got, dict):
+        return None
+    file, sha = got.get("file"), got.get("sha256")
+    excluded = got.get("excluded", [])
+    if not isinstance(file, str) or not isinstance(sha, str) or not isinstance(excluded, list):
+        return None
+    return M.DecisionsIn(file=file, sha256=sha, excluded=[str(x) for x in excluded])
 
 
 @router.get("/runs/{run_id}/verdict", response_model=M.Verdict)
@@ -509,6 +530,39 @@ def run_pymol(request: Request, run_id: str) -> Response:
     )
 
 
+@router.get("/runs/{run_id}/bundle.zip")
+def run_bundle(request: Request, run_id: str) -> Response:
+    """The whole run directory as one zip: record, poses, receptor, decisions, and a report if one was written.
+
+    The unit of sharing is the run directory (`docs/golden-path.md`), and until now the only way to get one was
+    `smeltery golden bundle` in a shell -- which the person reading a Bench they did not start cannot run. The
+    zip is built in memory and nothing is written beside the run, so this answers on a `--read-only` server too;
+    a GET that writes would slip past the middleware, which refuses by method.
+    """
+    r = run(request, run_id)
+    out = Path(r.out_dir).resolve()
+    if not out.is_dir():
+        raise HTTPException(status_code=409, detail=f"the run directory {out.name} is no longer on disk")
+    digest = r.record["input_digest"][:12]
+    buf = io.BytesIO()
+    total = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(out.rglob("*")):
+            # Symlinks and anything resolving outside the directory are skipped rather than followed: the
+            # directory is read off disk, so its contents are not to be trusted to stay inside it.
+            if not p.is_file() or p.is_symlink() or not p.resolve().is_relative_to(out):
+                continue
+            z.write(p, Path(f"run-{digest}") / p.relative_to(out))
+            total += 1
+    if total == 0:
+        raise HTTPException(status_code=409, detail=f"the run directory {out.name} holds no files to bundle")
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="run-{digest}-bundle.zip"'},
+    )
+
+
 # ---------------------------------------------------------------------------------------------------- decisions
 
 
@@ -841,3 +895,75 @@ def compare(request: Request, a: str, b: str, theme: Theme = "light") -> M.Compa
         candidates=candidates,
         candidates_note=note,
     )
+
+
+class ResumeRun(BaseModel):
+    """Which half-finished run directory to pick up."""
+
+    out: str = Field(description="the run directory, relative to ROOT when not absolute")
+
+
+@router.post(
+    "/runs/resume",
+    response_model=M.Task,
+    status_code=201,
+    responses={400: {"model": M.Problem}, 409: {"model": M.Problem}},
+)
+def resume_run(request: Request, body: ResumeRun) -> Any:
+    """Re-submit `smeltery run` on a run directory that stopped before it finished.
+
+    The run reads the checkpoint already in the directory and recomputes only what is missing, so the SCFs an
+    interrupted attempt finished are reused rather than paid for twice (`RunProgress.reused` is that count). The
+    directory's own staged `config.toml` is what is re-run -- not a pipeline's, which may have been edited since,
+    and which a run records no name for in any case.
+
+    Refused when the directory holds a run record (that is a finished result, and overwriting it would destroy a
+    conclusion someone may have cited) or when it holds no `config.toml` (nothing to re-run; inferring one would
+    run different inputs under this directory's name)."""
+    st = ports(request)
+    root = Path(st.settings.root)
+    # `confined_out` takes an empty request to mean "use the default", and it refuses the workspace root only when
+    # the root was asked for by name. Resume has no sensible default -- there is one directory it means, and the
+    # caller knows it -- so an empty `out` is a bad request, not a licence to run whatever config sits at ROOT.
+    if not body.out.strip():
+        return JSONResponse(status_code=400, content={"reason": "out is required: name the run directory to resume"})
+    out = confined_out(root, body.out, root)
+    if isinstance(out, JSONResponse):
+        return out
+    if not out.is_dir():
+        return JSONResponse(status_code=409, content={"reason": f"{body.out} is not a directory on this Bench"})
+    if done := sorted(out.glob("run-*.json")):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "reason": f"{out.name} already holds the run record {done[0].name}: it finished, so there is "
+                "nothing to resume. Run the pipeline again to start a new round."
+            },
+        )
+    config = out / "config.toml"
+    if not config.is_file():
+        return JSONResponse(
+            status_code=409,
+            content={"reason": f"{out.name} holds no config.toml, so there is no staged run in it to resume"},
+        )
+    campaign = _campaign_of(config)
+    tid = st.task_queue.submit(
+        f"run {campaign}" if campaign else f"resume {out.name}",
+        [*smeltery_command(), "run", str(config), "--out", str(out)],
+        cwd=str(out.parent),
+        note=f"resumed by user={st.identity.current()} time={st.clock.now().isoformat()}",
+        capped=True,
+    )
+    t = st.task_queue.get(tid)
+    if t is None:
+        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
+    return M.Task(**(t.to_dict() if hasattr(t, "to_dict") else t))
+
+
+def _campaign_of(config: Path) -> str | None:
+    """The campaign name out of a staged config, for the task's name. Unreadable or absent is not an error: the
+    task gets named after its directory instead, which is still the thing the user is looking for."""
+    try:
+        return tomllib.loads(config.read_text()).get("campaign", {}).get("name") or None
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None

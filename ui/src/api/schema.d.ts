@@ -735,6 +735,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Run
+         * @description Re-submit `smeltery run` on a run directory that stopped before it finished.
+         *
+         *     The run reads the checkpoint already in the directory and recomputes only what is missing, so the SCFs an
+         *     interrupted attempt finished are reused rather than paid for twice (`RunProgress.reused` is that count). The
+         *     directory's own staged `config.toml` is what is re-run -- not a pipeline's, which may have been edited since,
+         *     and which a run records no name for in any case.
+         *
+         *     Refused when the directory holds a run record (that is a finished result, and overwriting it would destroy a
+         *     conclusion someone may have cited) or when it holds no `config.toml` (nothing to re-run; inferring one would
+         *     run different inputs under this directory's name).
+         */
+        post: operations["resume_run_api_runs_resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -744,6 +773,31 @@ export interface paths {
         };
         /** Run Detail */
         get: operations["run_detail_api_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/bundle.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Bundle
+         * @description The whole run directory as one zip: record, poses, receptor, decisions, and a report if one was written.
+         *
+         *     The unit of sharing is the run directory (`docs/golden-path.md`), and until now the only way to get one was
+         *     `smeltery golden bundle` in a shell -- which the person reading a Bench they did not start cannot run. The
+         *     zip is built in memory and nothing is written beside the run, so this answers on a `--read-only` server too;
+         *     a GET that writes would slip past the middleware, which refuses by method.
+         */
+        get: operations["run_bundle_api_runs__run_id__bundle_zip_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1752,6 +1806,31 @@ export interface components {
             time: string;
             /** User */
             user: string;
+        };
+        /**
+         * DecisionsIn
+         * @description The decisions file a run was given, as `results.decisions_in` recorded it (docs/gui-contract.md section 1).
+         *
+         *     Present only when the config had a `[decisions]` section, so `None` on a `RunDetail` means this round carried
+         *     nothing in -- not that the carry failed. `excluded` is empty when a decisions file was read and rejected
+         *     nobody, which is a different fact from having no file at all.
+         */
+        DecisionsIn: {
+            /**
+             * Excluded
+             * @description candidates rejected before the run; empty when the file rejected none
+             */
+            excluded: string[];
+            /**
+             * File
+             * @description the decisions file, relative to OUT when inside it, else absolute
+             */
+            file: string;
+            /**
+             * Sha256
+             * @description the file's digest, the one hashed into input_digest
+             */
+            sha256: string;
         };
         /** DiffLine */
         DiffLine: {
@@ -2814,6 +2893,17 @@ export interface components {
             names: string[];
         };
         /**
+         * ResumeRun
+         * @description Which half-finished run directory to pick up.
+         */
+        ResumeRun: {
+            /**
+             * Out
+             * @description the run directory, relative to ROOT when not absolute
+             */
+            out: string;
+        };
+        /**
          * RunConfig
          * @description The config file a run was executed from, as text.
          *
@@ -2845,6 +2935,8 @@ export interface components {
             candidates: {
                 [key: string]: string;
             };
+            /** @description the decisions this round carried in; None when the config had no [decisions] */
+            decisions_in?: components["schemas"]["DecisionsIn"] | null;
             /** Digest */
             digest: string;
             /** Floor */
@@ -5205,6 +5297,66 @@ export interface operations {
             };
         };
     };
+    resume_run_api_runs_resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeRun"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     run_detail_api_runs__run_id__get: {
         parameters: {
             query?: never;
@@ -5223,6 +5375,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    run_bundle_api_runs__run_id__bundle_zip_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
