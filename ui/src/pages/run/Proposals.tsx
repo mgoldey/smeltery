@@ -32,6 +32,20 @@ export function Proposals() {
           into the new pipeline's <span className="mono">[candidates]</span> beside this run's, which is what records
           that you took them.
         </p>
+        {/* "Nothing proposed yet" and "the queue could not be read" are different facts, and the EmptyState below
+            states the first one. A failure must not borrow it. */}
+        {verdict.isError ? (
+          <div className="banner" role="alert">
+            The run listing could not be read: {verdict.error.message}. Without it this run's proposals cannot be
+            looked up; reload to try again.
+          </div>
+        ) : null}
+        {proposals.isError ? (
+          <div className="banner" role="alert">
+            The review queue could not be read: {proposals.error.message}. Whether anything has been proposed from
+            this run is unknown; reload to try again.
+          </div>
+        ) : null}
         {proposals.data && proposals.data.length === 0 ? (
           <EmptyState action={{ label: "Open the report", to: `/report/${runId}` }}>
             Nothing has been proposed from this run yet. Bench chemists propose candidates after reading its report.

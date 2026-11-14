@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "../api/client";
+import { Writable } from "./ReadOnly";
 import { useOpenRunPipeline } from "./workspace/openFromRun";
 
 type Lineage = Schemas["Lineage"];
@@ -120,15 +121,25 @@ export function LineageInspector({ runId, candidate, onClose }: { runId: string;
             </tbody>
           </table>
           <MadeBy l={l} />
-          <p className="controls">
-            <button type="button" disabled={open.isPending} onClick={() => open.mutate({})}>
-              Open the pipeline that made this
-            </button>
-            <button type="button" disabled={open.isPending} onClick={() => open.mutate({ step: "measure" })}>
-              Change a setting and re-run
-            </button>
-          </p>
-          {open.isError ? <p className="field-error">{open.error.message}</p> : null}
+          {/*
+           * Both buttons open the workspace on this run's pipeline, which creates it when it does not exist yet
+           * (`POST /api/pipelines`). A read-only Bench refuses that, so offering them there is offering a 403 --
+           * the same reason the shell hides its "Open the pipeline". The guard wraps the whole `.controls` row and
+           * the mutation's error line, not each button: an empty `.controls` is still a flex row with margins, and
+           * an error can only come from a click that is now impossible. Everything above stays -- the per-pose
+           * table and Made by are reads, and lineage is exactly what a read-only Bench is for.
+           */}
+          <Writable>
+            <p className="controls">
+              <button type="button" disabled={open.isPending} onClick={() => open.mutate({})}>
+                Open the pipeline that made this
+              </button>
+              <button type="button" disabled={open.isPending} onClick={() => open.mutate({ step: "measure" })}>
+                Change a setting and re-run
+              </button>
+            </p>
+            {open.isError ? <p className="field-error">{open.error.message}</p> : null}
+          </Writable>
         </>
       ) : null}
       <button type="button" onClick={onClose}>

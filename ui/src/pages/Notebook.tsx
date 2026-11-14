@@ -106,6 +106,15 @@ export function Notebook() {
             Entries are never edited. To correct one, write a new entry that
             supersedes it; the old one stays readable.
           </p>
+          {/* An empty <ol> on a failed read is indistinguishable from a notebook nobody has written in. The
+              EmptyState below claims the second; this claims only the first. */}
+          {entries.isError ? (
+            <div className="banner" role="alert">
+              The entries could not be read: {entries.error.message}. This
+              notebook may well have entries; none can be shown. Reload to try
+              again.
+            </div>
+          ) : null}
           <ol className="entries">
             {(entries.data ?? []).map((e) => (
               <li

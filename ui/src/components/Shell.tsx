@@ -102,6 +102,10 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
           <NavLink to="/bench">Bench</NavLink>
           <NavLink to="/compare">Compare</NavLink>
           <NavLink to="/methods">Methods</NavLink>
+          {/* A top-level inspector, not a view of a run: it reads a .pdb path, a PDB id or a UniProt accession and
+              never touches the run id. So it sits with Bench/Compare/Methods, above the run-dependent entries, and
+              needs no disabled form -- it is reachable whatever the page is about. */}
+          <NavLink to="/structure">Structure</NavLink>
           {pipeline ? (
             <NavLink to={`/pipelines/${pipeline}?${search.toString()}`} className="active" aria-current="page">
               Pipeline · {pipeline}

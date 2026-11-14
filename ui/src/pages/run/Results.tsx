@@ -54,6 +54,15 @@ export function Results() {
     <div className="body">
       <main className="work">
         <VerdictBanner runId={runId} />
+        {/* A failed ΔΔE read used to leave the verdict banner over empty space, which reads as "this run has no
+            analogues" rather than "the table could not be fetched". The two are different facts. */}
+        {table.isError ? (
+          <div className="banner" role="alert">
+            The paired ΔΔE table could not be read: {table.error.message}. The verdict above still holds; reload to
+            try again.
+          </div>
+        ) : null}
+        {ok && table.isPending ? <p className="empty-state">Reading the paired ΔΔE table…</p> : null}
         {ok && table.data ? (
           <>
             <h2>Paired ΔΔE against the parent</h2>
@@ -66,6 +75,7 @@ export function Results() {
                 No analogue has a paired ΔΔE in this run; the parent alone gives nothing to compare.
               </EmptyState>
             ) : null}
+            {forest.isError ? <p className="empty-state">The forest plot could not be drawn: {forest.error.message}</p> : null}
             {forest.data && table.data.rows.length ? <PlotlyFigure figure={forest.data} name="forest" /> : null}
             {table.data.rows.length ? (
               <table className="grid" aria-label="Paired ΔΔE">
@@ -132,6 +142,7 @@ export function Results() {
             ) : null}
             <h2>Can these two be told apart?</h2>
             <p className="lede">The funnel's own test for each pair, at the same z and floor as the cut.</p>
+            {matrix.isError ? <p className="empty-state">The pair matrix could not be drawn: {matrix.error.message}</p> : null}
             {matrix.data && table.data.rows.length ? <PlotlyFigure figure={matrix.data} name="matrix" /> : null}
             <h2>Per-pose pairs</h2>
             <div className="controls" role="group" aria-label="Per-pose view">

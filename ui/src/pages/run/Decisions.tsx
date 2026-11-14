@@ -42,6 +42,9 @@ function Row({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["decisions", runId] }),
   });
   const needsNote = vocab.note_required.includes(reason);
+  // The core refuses these reasons without a note (decisions.py, `.strip()`), so a blank one here can only come back
+  // as a red server error. Hold the button and say which reason is asking, rather than offering a doomed click.
+  const missingNote = needsNote && !note.trim();
   const id = (k: string) => `${k}-${name}`;
   return (
     <tr data-candidate={name}>
@@ -98,9 +101,19 @@ function Row({
         <input id={id("note")} value={note} onChange={(e) => setNote(e.target.value)} />
       </td>
       <td>
-        <button type="button" onClick={() => save.mutate()} disabled={save.isPending || !status || !reason} aria-label={`Record decision for ${name}`}>
+        <button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={save.isPending || !status || !reason || missingNote}
+          aria-label={`Record decision for ${name}`}
+        >
           Record
         </button>
+        {missingNote ? (
+          <div className="lede" data-testid={`needs-note-${name}`}>
+            {reason.replaceAll("_", " ")} needs a note saying why, so Record waits for one.
+          </div>
+        ) : null}
         {save.isError ? (
           <div className="field-error" role="alert" data-testid={`refusal-${name}`}>
             {save.error.message}
@@ -126,6 +139,9 @@ function BulkBar({ runId, selected, vocab, onDone }: { runId: string; selected: 
     },
   });
   const needsNote = vocab.note_required.includes(reason);
+  // A bulk apply is all-or-nothing in the core, so one blank note refuses every selected candidate -- not one of
+  // them. Hold the button and say how many the blank note would cost.
+  const missingNote = needsNote && !note.trim();
   return (
     <div className="bulk-bar" role="group" aria-label="Bulk decision">
       <span>{selected.length} selected</span>
@@ -149,9 +165,15 @@ function BulkBar({ runId, selected, vocab, onDone }: { runId: string; selected: 
       </select>
       <label htmlFor="bulk-note">Note{needsNote ? " (required for this reason)" : ""}</label>
       <input id="bulk-note" value={note} onChange={(e) => setNote(e.target.value)} />
-      <button type="button" onClick={() => apply.mutate()} disabled={apply.isPending || !selected.length || !status || !reason}>
+      <button type="button" onClick={() => apply.mutate()} disabled={apply.isPending || !selected.length || !status || !reason || missingNote}>
         Apply to selected
       </button>
+      {missingNote ? (
+        <span className="lede" data-testid="bulk-needs-note">
+          {reason.replaceAll("_", " ")} needs a note saying why, and one apply is all or nothing, so a blank note would
+          refuse all {selected.length}. Apply waits for a note.
+        </span>
+      ) : null}
       {apply.isError ? (
         <div className="field-error" role="alert">
           {apply.error.message}

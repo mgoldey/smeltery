@@ -358,6 +358,9 @@ export function BenchHome() {
               <div className="banner" role="alert">
                 Runs could not be listed: {String(runs.error.message)}
               </div>
+            ) : runs.isPending ? (
+              // A header row over nothing was the first paint, which reads the same as "nothing has run yet".
+              <p className="empty-state">Listing the runs…</p>
             ) : runs.data && runs.data.length === 0 ? (
               <p className="empty-state">
                 Nothing has run yet. Start a pipeline above and press Run, or point Bench at a directory that already

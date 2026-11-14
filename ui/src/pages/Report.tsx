@@ -67,6 +67,14 @@ export function Report() {
       <div className="body">
         <main className="work report">
           <VerdictBanner runId={runId} />
+          {/* This page is often the whole app for someone sent a link: a section that silently disappears on a
+              failed fetch reads as "the run has none of that", so each failure says so instead. */}
+          {detail.isError ? (
+            <div className="banner" role="alert">
+              The run record could not be read: {detail.error.message}. The floor statement and the poses below are
+              missing for that reason, not because the run lacks them. Reload to try again.
+            </div>
+          ) : null}
           {d ? (
             <p className="lede" data-testid="floor-statement">
               {d.floor_statement}
@@ -90,6 +98,11 @@ export function Report() {
               </span>
             </p>
           ) : null}
+          {forest.isError ? (
+            <p className="empty-state">
+              The forest plot could not be drawn: {forest.error.message}
+            </p>
+          ) : null}
           {ok && forest.data ? (
             <section aria-label="Result plot">
               <h2>Paired ΔΔE against the parent</h2>
@@ -98,6 +111,16 @@ export function Report() {
                 apart; their order inside it means nothing.
               </p>
               <PlotlyFigure figure={forest.data} name="forest" />
+            </section>
+          ) : null}
+          {table.isError ? (
+            <section aria-label="Candidates">
+              <h2>Candidates</h2>
+              <div className="banner" role="alert">
+                The paired ΔΔE table could not be read: {table.error.message}.
+                This run's candidates cannot be listed here; reload to try
+                again.
+              </div>
             </section>
           ) : null}
           {d && table.data ? (
@@ -135,6 +158,14 @@ export function Report() {
                   </li>
                 ))}
               </ul>
+            </section>
+          ) : null}
+          {detail.isError ? (
+            <section aria-label="Poses">
+              <h2>Poses</h2>
+              <p className="empty-state">
+                The poses could not be loaded: {detail.error.message}
+              </p>
             </section>
           ) : null}
           {d ? (

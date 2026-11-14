@@ -15,6 +15,17 @@ export function Limits({ open = false, lede }: { open?: boolean; lede?: string }
   // is the first thing Methods draws.
   const measured = limits.data?.measured ?? [];
   const unmeasured = limits.data?.unmeasured ?? [];
+  // This section is what stops a result being over-read, so vanishing on a failed fetch is the one outcome it must
+  // not have: a reader who sees nothing concludes there are no caveats. Say that the list is missing instead.
+  if (limits.isError)
+    return (
+      <section aria-label="What this result cannot tell you" className="limits">
+        <div className="banner" role="alert">
+          The funnel's known limits could not be read: {limits.error.message}. They still apply to this result; read
+          docs/limits.md, or reload to try again.
+        </div>
+      </section>
+    );
   if (!limits.data || (measured.length === 0 && unmeasured.length === 0)) return null;
   return (
     <section aria-label="What this result cannot tell you" className="limits">
