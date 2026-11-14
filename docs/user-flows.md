@@ -216,10 +216,10 @@ running app, it says so.
    (`ui/src/App.tsx:74`, `:97`). The page renders no `Shell` (`ui/src/pages/run/Structure.tsx:31`), so it
    has no rail to leave by, and it offers no way to use the structure it just opened in a pipeline.
    [bench.md](bench.md) still describes opening a structure as the first thing a chemist does.
-2. **A failed or interrupted run cannot be resumed from the UI.** The task inspector offers only **Cancel
-   task** (`ui/src/components/WorkPanel.tsx:272`), and **Run pipeline** defaults to a new dated directory,
-   so pressing it again starts the work over rather than resuming. The way back is to copy the `--out` path
-   out of the task's command, or to use the CLI.
+2. **A failed or interrupted run cannot be resumed from the UI.** *(Fixed — see the end of this page.)* The
+   task inspector offered only **Cancel task**, meaningless once the task was over, and **Run pipeline**
+   defaults to a new dated directory, so pressing it again started the work over rather than resuming. The way
+   back was to copy the `--out` path out of the task's command, or to use the CLI.
 3. **No run bundle in the UI.** The record keeper's one deliverable is a CLI command. "Download saved
    bundle" in the workspace is the *pipeline*, not the run (`ui/src/pages/run/Workspace.tsx:373`).
 4. **Study cells are view-only.** Each cell shows "to run" with no control to run it
@@ -287,16 +287,63 @@ running app, it says so.
 
 ## Already addressed
 
-Fixed from the list above: **1** (`/structure` has its own Shell and a rail entry), **8** in part (Record and
-bulk Apply hold until a required note is typed, and say which reason is waiting), **13** in part (failed reads
-now say so instead of rendering as "there is none" — Results, Report, Study, Proposals, Notebook, Limits), and
-the two unguarded write buttons in the lineage panel.
+**Closed: 1, 2, 3, 5, 8, 9, 10, 11, 12, 13.** Three remain, each blocked on a decision rather than on work:
+
+- **4** (run a study cell) needs a route that executes a cell out of a study module. Unlike resuming a run,
+  which re-submits a CLI command that already exists, this would make Bench an executor of study code, and the
+  study cache decides what "already done" means. Worth settling deliberately, not in passing.
+- **6** and **7** are one problem: a run records no pipeline name (`api/pipelines.py:562`, by design), and a
+  launch writes to `ROOT/out/<campaign>-<timestamp>`, outside any pipeline folder. So neither the `?run=` link
+  nor "open the pipeline that made this run" can be fixed in the client — the provenance the design leaves out
+  has to be recorded first.
+
+- **1** — `/structure` renders its own `Shell` and has a rail entry, so it can be reached and left.
+- **2** — `POST /api/runs/resume` re-submits `smeltery run` on a run directory that stopped, and a failed,
+  cancelled or timed-out run task offers **Resume this run**. The directory holds its own staged `config.toml`,
+  so it is re-run rather than a pipeline's, which may have been edited since — and which a run records no name
+  for anyway. The run reads the checkpoint already there and recomputes only what is missing, so the SCFs an
+  interrupted attempt finished are not paid for twice; `progress.reused` was already reporting that count with
+  no way to cause it. A directory holding a run record is refused as finished, one with no `config.toml` as
+  having nothing staged, and the path is confined to the workspace like every launch — an empty `out` is a bad
+  request rather than a default, because `confined_out` would otherwise read it as "the root" and run whatever
+  config sat there, and a symlink to a finished run is still refused because the path is resolved first. Both
+  of those were found by testing the route rather than by reading it.
+- **3** — `GET /runs/{id}/bundle.zip` serves the whole run directory under one `run-<digest>/` folder, linked
+  from Poses. It writes nothing beside the run: the zip is built in memory, which is what keeps it legal on a
+  `--read-only` Bench. A missing directory is a 409 naming it, not an empty download.
+- **5** — run identity moved into one module (`ui/src/components/runIdentity.ts`), so a row, an arm picker and a
+  "start from a run" picker all name a run the same way: date, out-directory and pipeline, not digest alone.
+- **8** — "n of N analogues have a recorded decision", stated only once both reads land so a failed fetch never
+  reads as "0 of N". Rows typed into but never recorded are named beside the exit, and the exit separates what
+  it carries from what it merely leaves undecided. Still no undo: the API has no `DELETE`, by design.
+- **9** — the lede now describes the rule the server actually enforces. A tied row names its fellow members and
+  marks which reason is the one for a tie; it guides and never blocks.
+- **10** — `decisions_in` is served and rendered, with three distinct states: no `[decisions]`, a file that
+  rejected nobody, and a file naming the excluded. Absence and a malformed record both read as "none" rather
+  than as half a provenance.
+- **11** — the Proposals tab carries a count, and comments are visible from the run tabs instead of the Report
+  page alone.
+- **12** — a notebook entry's attached runs are links when this Bench still serves them, and an unmatched hash
+  gets no link rather than a dead one.
+- **13** — on a read-only Bench the Proposals queue is a table: the tick boxes are the hidden button's argument,
+  so they go when it goes, and the lede stops describing a control the reader cannot use.
 
 Found and fixed alongside them, in the core rather than the UI: `funnel.cut()` grouped candidates by comparing
 each to the previous group's *last* member. Non-significance does not chain, so a run of unresolved neighbours
 collapsed into one group even when its endpoints were resolved — reporting UNRANKED and discarding a
 distinction the statistics support. Candidates are now compared against every member of a group they would
 join.
+
+Three things the fixes exposed rather than solved. `--read-only` refuses by HTTP method, so a GET that writes
+passes it; the bundle route is safe because it builds in memory, not because the middleware stopped it. The e2e
+specs share one fixture server for the whole suite and nothing deletes what they add, so state leaks forward
+between files in alphabetical order: a spec that asserts over a whole API list is order-dependent, which is how
+`run_identity.spec.ts` came to assert that every run shares one campaign and then fail after
+`workspace.spec.ts` launched a pipeline whose campaign was `e2e`. It passed alone and in pairs, because
+Playwright starts a fresh server per invocation — only a full serial run reproduces it. Such a spec must narrow
+to its own fixture rows and read expected counts from the API at test time. And there is no
+`GET /api/tasks/{id}`: the queue is served as one list plus `GET /api/tasks/{id}/log`, so a test that waits for
+one task's status polls the list and finds its own row — polling the per-task URL waits on a 404 for ever.
 
 Recorded so they are not re-reported: Results links into Compare, Methods carries the limits table,
 Provenance shows the run's commented config, the report downloads without writing to disk, each decision row
