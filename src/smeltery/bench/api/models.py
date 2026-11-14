@@ -25,6 +25,19 @@ class RunSummary(BaseModel):
     error: str | None = None
 
 
+class DecisionsIn(BaseModel):
+    """The decisions file a run was given, as `results.decisions_in` recorded it (docs/gui-contract.md section 1).
+
+    Present only when the config had a `[decisions]` section, so `None` on a `RunDetail` means this round carried
+    nothing in -- not that the carry failed. `excluded` is empty when a decisions file was read and rejected
+    nobody, which is a different fact from having no file at all.
+    """
+
+    file: str = Field(description="the decisions file, relative to OUT when inside it, else absolute")
+    sha256: str = Field(description="the file's digest, the one hashed into input_digest")
+    excluded: list[str] = Field(description="candidates rejected before the run; empty when the file rejected none")
+
+
 class RunDetail(BaseModel):
     id: str
     path: str
@@ -46,6 +59,9 @@ class RunDetail(BaseModel):
     n_poses: dict[str, int]
     unit: str
     verdict: Verdict
+    decisions_in: DecisionsIn | None = Field(
+        default=None, description="the decisions this round carried in; None when the config had no [decisions]"
+    )
 
 
 class DdeRow(BaseModel):

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, unwrap, type Schemas } from "../../api/client";
 import { Structure2D } from "../../components/Structure2D";
 import { EmptyState } from "../../components/EmptyState";
@@ -17,10 +17,12 @@ function Row({
   current,
   vocab,
   group,
+  tie,
   evidence,
   unit,
   selected,
   onSelect,
+  onEdited,
 }: {
   runId: string;
   name: string;
@@ -28,10 +30,13 @@ function Row({
   current: Decision | undefined;
   vocab: Schemas["Vocabulary"];
   group: string;
+  /** The other members of this candidate's tie group, or null when it is alone in its group. */
+  tie: string[] | null;
   evidence: DdeRow | undefined;
   unit: string;
   selected: boolean;
   onSelect: (on: boolean) => void;
+  onEdited: (edited: boolean) => void;
 }) {
   const qc = useQueryClient();
   const [status, setStatus] = useState(current?.status ?? "");
@@ -45,6 +50,27 @@ function Row({
   // The core refuses these reasons without a note (decisions.py, `.strip()`), so a blank one here can only come back
   // as a red server error. Hold the button and say which reason is asking, rather than offering a doomed click.
   const missingNote = needsNote && !note.trim();
+  // Typed into but not sent. The page used to offer the next round the moment ONE decision was recorded, with no sign
+  // that four other rows had been filled in and left; this is what the exit below counts as being about to lose. A
+  // recorded row refetches and remounts (the key carries `current.time`), so a saved row's draft is never "edited".
+  const edited = status !== (current?.status ?? "") || reason !== (current?.reason ?? "") || note !== (current?.note ?? "");
+  useEffect(() => {
+    onEdited(edited);
+    return () => onEdited(false);
+  }, [edited, onEdited]);
+  // A tie group is the one place the page's own lede promised more than the server enforces: the server requires a
+  // note for the REASON `within_tie_choice`, never for the position. Keeping one member as `cut_survivor` with no
+  // note is accepted, and reads as "the cut chose this", which inside a tie group is exactly what did not happen.
+  // So say what the row is and point at the reason that is honest about it -- without refusing the others, because a
+  // liability or a synthesis problem is a legitimate reason to break a tie and has its own name here.
+  //
+  // Named from the served vocabulary (`smeltery.decisions.REASONS`), so a renamed reason drops this guidance rather
+  // than pointing at a dead option.
+  const tieReason = vocab.reasons.includes("within_tie_choice") ? "within_tie_choice" : null;
+  // Only `keep` can misread: keeping a tie member for `cut_survivor` says the cut chose it, which inside a tie group
+  // is what did not happen. Rejecting one for a liability claims nothing about the cut, and a reason that already
+  // requires a note (`other`) is asking for the explanation anyway.
+  const tieMisread = tie !== null && tieReason !== null && status === "keep" && reason !== "" && reason !== tieReason && !needsNote;
   const id = (k: string) => `${k}-${name}`;
   return (
     <tr data-candidate={name}>
@@ -67,7 +93,19 @@ function Row({
             {evidence.survivor === null ? "not ranked" : evidence.survivor ? "kept by the cut" : "not kept"}
           </div>
         ) : null}
-        <div className="lede">{group}</div>
+        {/* The group, and -- when it is a tie -- who it is tied WITH. A bare "tie group 2 (no order)" told the user
+            a fact about the cut; it did not tell them that choosing this row over those names is the judgement the
+            lede has always said needs a note. */}
+        <div className="lede" data-testid={`group-${name}`}>
+          {group}
+          {tie !== null ? (
+            <>
+              {" · tied with "}
+              {tie.join(", ")}
+              {": the statistics do not separate them, so keeping this one over those is a judgement."}
+            </>
+          ) : null}
+        </div>
         {current ? (
           <div className="lede" data-testid={`recorded-${name}`}>
             Recorded: {current.status}, {current.reason} by {current.user}
@@ -92,9 +130,22 @@ function Row({
           {vocab.reasons.map((r) => (
             <option key={r} value={r}>
               {r.replaceAll("_", " ")}
+              {tie !== null && r === tieReason ? " — the one for a tie" : ""}
             </option>
           ))}
         </select>
+        {/* Guidance, not a rule: the server takes `cut_survivor` here and will go on taking it, and a liability or a
+            synthesis problem really can break a tie. What it must not do is pass silently as though the cut had
+            chosen, so the honest reason is named and offered, and the click that records it stays available. */}
+        {tieMisread ? (
+          <div className="lede" data-testid={`tie-reason-${name}`}>
+            Inside a tie group the cut kept nobody, so {reason.replaceAll("_", " ")} is a reason of your own.{" "}
+            <button type="button" className="link" onClick={() => setReason(tieReason ?? "")}>
+              Call it a tie choice
+            </button>{" "}
+            to record why, or record this reason as it stands.
+          </div>
+        ) : null}
       </td>
       <td>
         <label htmlFor={id("note")}>Note{needsNote ? " (required for this reason)" : ""}</label>
@@ -202,19 +253,69 @@ export function Decisions() {
   useEffect(() => setPicked([]), [runId]);
   const toggle = (n: string, on: boolean) => setPicked((p) => (on ? [...p.filter((x) => x !== n), n] : p.filter((x) => x !== n)));
   const groupOf = new Map<string, string>();
-  d?.groups.forEach((g, i) => g.forEach((n) => groupOf.set(n, g.length > 1 ? `tie group ${i + 1} (no order)` : `group ${i + 1}`)));
+  const tieOf = new Map<string, string[]>();
+  d?.groups.forEach((g, i) => {
+    g.forEach((n) => {
+      groupOf.set(n, g.length > 1 ? `tie group ${i + 1} (no order)` : `group ${i + 1}`);
+      // The row's own view of its tie: the OTHER members, which is what makes keeping this one a judgement. A
+      // single-member group is not a tie and gets nothing.
+      if (g.length > 1) tieOf.set(n, g.filter((m) => m !== n));
+    });
+  });
+  // Rows typed into and left unrecorded. A decision reaches the next round only by being recorded, so this is what
+  // the exit below is about to leave behind. One stable callback per candidate: an unstable one would re-fire the
+  // row's effect on every render of this page.
+  const [edited, setEdited] = useState<Record<string, boolean>>({});
+  useEffect(() => setEdited({}), [runId]);
+  const onEdited = useRef(new Map<string, (on: boolean) => void>()).current;
+  const editedCb = (n: string) => {
+    let cb = onEdited.get(n);
+    if (!cb) {
+      cb = (on: boolean) => setEdited((e) => (!!e[n] === on ? e : { ...e, [n]: on }));
+      onEdited.set(n, cb);
+    }
+    return cb;
+  };
+  const unrecorded = (d?.analogues ?? []).filter((n) => edited[n]);
+  const recorded = new Set((decisions.data ?? []).map((x) => x.candidate));
+  const decidedAnalogues = (d?.analogues ?? []).filter((n) => recorded.has(n));
   return (
     <div className="body">
       <main className="work">
         <h1>Decisions</h1>
+        {/* The old wording said a tie choice "needs a note saying why", which is not the rule: the note is required
+            for the REASON `within_tie_choice` (or `other`), never for the position in a group. Rows in a tie say so
+            themselves now, so this says what the rule actually is. */}
         <p className="lede">
-          Keep, reject or hold each candidate, with a reason. Choosing inside a tie group is a judgement, not a ranking, so
-          it needs a note saying why. Decisions are kept apart from the run record and carried into the next run.
+          Keep, reject or hold each candidate, with a reason. Choosing inside a tie group is a judgement, not a ranking:
+          each such row says who it is tied with, and the reason that names it asks for a note. Decisions are kept apart
+          from the run record and carried into the next run.
         </p>
         {detail.isError ? (
           <div className="banner" role="alert">
             {detail.error.message}
           </div>
+        ) : null}
+        {/* How far through this is. Nothing on the page said how many analogues there were against how many had been
+            judged, so a half-finished page and a finished one looked the same -- and the exit appeared on the first
+            recorded row either way. Said only when both reads are in: "0 of N" because a fetch broke would be worse
+            than saying nothing. */}
+        {d && d.analogues.length > 0 && decisions.data ? (
+          <p className="lede" data-testid="decided-progress">
+            <strong>
+              {decidedAnalogues.length} of {d.analogues.length}
+            </strong>{" "}
+            {d.analogues.length === 1 ? "analogue has" : "analogues have"} a recorded decision
+            {unrecorded.length ? (
+              <>
+                , and {unrecorded.length === 1 ? "one row is" : `${unrecorded.length} rows are`} filled in but not
+                recorded: <span className="mono">{unrecorded.join(", ")}</span>. A decision reaches the next round
+                only once Record has been pressed.
+              </>
+            ) : (
+              "."
+            )}
+          </p>
         ) : null}
         <p>
           <a href={`/api/runs/${runId}/decisions.csv`} download>
@@ -265,16 +366,26 @@ export function Decisions() {
                   current={decisions.data.find((x) => x.candidate === n)}
                   vocab={vocab.data}
                   group={groupOf.get(n) ?? ""}
+                  tie={tieOf.get(n) ?? null}
                   evidence={byCandidate.get(n)}
                   unit={d.unit}
                   selected={picked.includes(n)}
                   onSelect={(on) => toggle(n, on)}
+                  onEdited={editedCb(n)}
                 />
               ))}
             </tbody>
           </table>
         ) : null}
-        {decisions.data?.length ? <NextRound runId={runId} recorded={decisions.data.length} /> : null}
+        {decisions.data?.length ? (
+          <NextRound
+            runId={runId}
+            recorded={decisions.data.length}
+            analogues={d?.analogues.length ?? 0}
+            decided={decidedAnalogues.length}
+            unrecorded={unrecorded}
+          />
+        ) : null}
       </main>
     </div>
   );
@@ -289,9 +400,28 @@ export function Decisions() {
  *
  * Shown only once something is recorded -- an empty next round is refused by the server, and offering a button that
  * can only fail is worse than offering none.
+ *
+ * It appears on the FIRST recorded decision, which is correct (one judgement is a legitimate round) and was also the
+ * defect: it said "these N decisions" and nothing else, so a user who had judged three of twelve analogues, and had
+ * four more rows typed in and unsent, read it as carrying their work forward. A decision cannot be cleared -- there
+ * is no DELETE anywhere in this API, by design, because the file is an auditable record -- so the remedy is not an
+ * undo but saying exactly what the click takes: the recorded rows, and only those.
  */
-function NextRound({ runId, recorded }: { runId: string; recorded: number }) {
+function NextRound({
+  runId,
+  recorded,
+  analogues,
+  decided,
+  unrecorded,
+}: {
+  runId: string;
+  recorded: number;
+  analogues: number;
+  decided: number;
+  unrecorded: string[];
+}) {
   const start = useStartNextRound(runId);
+  const partial = decided < analogues;
   return (
     <section className="next-round">
       <h2>Carry these forward</h2>
@@ -300,6 +430,27 @@ function NextRound({ runId, recorded }: { runId: string; recorded: number }) {
         referenced, so <span className="mono">smeltery run</span> drops what you rejected. Opens on its candidates; the
         original run is untouched.
       </p>
+      {/* What the click carries, against what is on this page. Two different gaps, said separately: an undecided row
+          is a choice (the next round simply poses it again), an unrecorded draft is work about to be lost. */}
+      <p className="lede" data-testid="next-round-carries">
+        It carries the {decided === 1 ? "one analogue" : `${decided} analogues`} with a recorded decision.{" "}
+        {partial ? (
+          <>
+            The other {analogues - decided === 1 ? "one is" : `${analogues - decided} are`} undecided and will be posed
+            again unchanged.
+          </>
+        ) : (
+          <>Every analogue on this run has one.</>
+        )}
+      </p>
+      {unrecorded.length ? (
+        <p className="banner note" role="status" data-testid="next-round-unrecorded">
+          {unrecorded.length === 1 ? "One row is" : `${unrecorded.length} rows are`} filled in and not recorded:{" "}
+          <span className="mono">{unrecorded.join(", ")}</span>. Starting the next round now leaves{" "}
+          {unrecorded.length === 1 ? "that one" : "those"} out, and this page's drafts do not survive it. Press Record
+          on {unrecorded.length === 1 ? "it" : "each"} first to carry {unrecorded.length === 1 ? "it" : "them"} too.
+        </p>
+      ) : null}
       {start.isError ? (
         <p className="field-error" role="alert">
           {start.error.message}

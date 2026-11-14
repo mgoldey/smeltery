@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, unwrap, type Schemas } from "../../api/client";
+import { inOut, taskOut } from "../runIdentity";
 
 /**
  * Run the KEPT pipeline. Only Run is blocked by errors (a draft with errors is still kept): the button is disabled,
@@ -77,26 +78,17 @@ export function Launch({ name, errors, dirty }: { name: string; errors: Schemas[
  * green and then had to find the new run in a table of runs that look alike. A finished run writes its record into
  * the out directory the command names, so the run store lists it under that path; `Task.run_id` cannot be used,
  * since it is the Temporal workflow id, not a Bench run.
- */
-/**
- * A run's `path` is its record file directly inside the out directory.
  *
- * The record is a direct child, so the remainder after the directory must hold no further separator: a prefix
- * test alone would match every run nested under a typed-in parent directory such as `out/`, and the first of
- * those would be linked as "the result" of a run that has not finished.
+ * This link is still the fastest one, but it is no longer the only one: it used to be the *only* one, and it lived
+ * in this component's state, so "Follow it in Work" unmounted the component and destroyed it. The Work panel and
+ * the task inspector now find the same run from the same `--out` (`runIdentity.runOfTask`), so leaving this page
+ * no longer loses the result.
  */
-function inOut(path: string, out: string | undefined): boolean {
-  if (out === undefined) return false;
-  const dir = out.endsWith("/") ? out : `${out}/`;
-  return path.startsWith(dir) && !path.slice(dir.length).includes("/");
-}
-
 type RunRow = { path: string; id: string };
 
 function OpenResult({ command }: { command: string[] }) {
   const qc = useQueryClient();
-  const i = command.indexOf("--out");
-  const out = i >= 0 ? command[i + 1] : undefined;
+  const out = taskOut(command);
   // Runs that already existed when this launch started. An out directory the user typed may already hold a
   // record (another run's, or an earlier attempt's), and linking to that one would show the wrong numbers
   // under the word "result". Only a run that appears after the launch is this launch's.

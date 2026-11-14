@@ -6,6 +6,7 @@ import { Writable } from "../components/ReadOnly";
 import { ImportBundle } from "../components/ImportBundle";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
+import { outName, pipelineHref, pipelineOfRun, runDate, runLabel } from "../components/runIdentity";
 
 type Prebuilt = Schemas["Prebuilt"];
 
@@ -310,9 +311,11 @@ export function BenchHome() {
                     <label htmlFor="pipeline-from">Start from run</label>
                     <select id="pipeline-from" value={fromRun} onChange={(e) => setFromRun(e.target.value)}>
                       <option value="">choose a run</option>
+                      {/* Campaign and digest alone made two rounds of one campaign indistinguishable here, and
+                          this picker decides which run gets copied. The run directory says which is which. */}
                       {(runs.data ?? []).map((r) => (
                         <option key={r.id} value={r.id}>
-                          {r.campaign ?? r.path} {r.digest?.slice(0, 12)}
+                          {runLabel(r)}
                         </option>
                       ))}
                     </select>
@@ -337,9 +340,13 @@ export function BenchHome() {
               </div>
             ) : pipelines.data && pipelines.data.length ? (
               <ul>
+                {/* With no `?run=`, the Poses, Checks, dE_int and Cut views all report that the step has not run
+                    and tell the user to open the pipeline from a run -- including for a copied example that
+                    ships with a finished one. A pipeline's own runs live under its folder, so when there is one
+                    this link carries it; when there is not, it stays a bare link rather than guess a run. */}
                 {pipelines.data.map((n) => (
                   <li key={n}>
-                    <Link className="mono" to={`/pipelines/${n}`}>
+                    <Link className="mono" to={pipelineHref(n, runs.data)} data-pipeline={n}>
                       {n}
                     </Link>
                   </li>
@@ -371,6 +378,11 @@ export function BenchHome() {
                 <thead>
                   <tr>
                     <th>Campaign</th>
+                    {/* Two rounds of one campaign used to differ only by digest and candidate count, which is
+                        not how anyone recognises their own run. The out directory is: Bench names a launch's own
+                        directory `<campaign>-<date>-<time>`, and a pipeline's runs sit under its folder. */}
+                    <th>Run directory</th>
+                    <th>Pipeline</th>
                     <th>Parent</th>
                     <th className="num">Candidates</th>
                     <th>Verdict</th>
@@ -378,11 +390,31 @@ export function BenchHome() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(runs.data ?? []).map((r) => (
+                  {(runs.data ?? []).map((r) => {
+                    const of = pipelineOfRun(r.path);
+                    const when = runDate(r.path);
+                    return (
                     <tr key={r.id}>
                       <td>
                         <Link to={`/run/${r.id}`}>{r.campaign ?? r.path}</Link>
                         {r.error ? <div className="field-error">{r.error}</div> : null}
+                      </td>
+                      <td className="mono" data-cell="where" title={r.path}>
+                        {outName(r.path) || r.path}
+                        {/* Only a directory Bench named itself carries a date. One the user typed does not, and
+                            a file's mtime would be a different fact wearing this label. */}
+                        {when ? <div className="lede">{when}</div> : null}
+                      </td>
+                      <td data-cell="pipeline">
+                        {of ? (
+                          <Link className="mono" to={pipelineHref(of, runs.data)}>
+                            {of}
+                          </Link>
+                        ) : (
+                          // A run launched into out/ records no pipeline name, by design: it keeps its own
+                          // staged copy of the config instead. Naming a pipeline here would be a guess.
+                          <span className="lede">none recorded</span>
+                        )}
                       </td>
                       <td>{r.parent}</td>
                       <td className="num">{r.n_candidates ?? ""}</td>
@@ -393,7 +425,8 @@ export function BenchHome() {
                       </td>
                       <td className="mono">{r.digest?.slice(0, 12)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}

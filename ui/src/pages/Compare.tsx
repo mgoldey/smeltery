@@ -5,6 +5,7 @@ import { PlotlyFigure } from "../components/PlotlyFigure";
 import { EmptyState } from "../components/EmptyState";
 import { useScheme } from "../styles/scheme";
 import { Shell } from "../components/Shell";
+import { runLabel } from "../components/runIdentity";
 
 const withSem = (v: number, sem: number | null) => (sem === null ? v.toFixed(2) : `${v.toFixed(2)} ± ${sem.toFixed(2)}`);
 
@@ -54,9 +55,12 @@ export function Compare() {
                 <label htmlFor={`arm-${arm}`}>Arm {arm}</label>
                 <select id={`arm-${arm}`} value={(arm === "A" ? a : b) ?? ""} onChange={(e) => pick(arm === "A" ? setA : setB)(e.target.value)}>
                   <option value="">choose a run</option>
+                  {/* Two rounds of one campaign read identically on campaign and digest alone, and choosing the
+                      wrong arm here is how a comparison quietly becomes a comparison of something else. The run
+                      directory names which round it is; the verdict stays, since an arm's state matters. */}
                   {usable.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.campaign} {r.digest?.slice(0, 12)} ({r.verdict?.state.toLowerCase()})
+                      {runLabel(r)} ({r.verdict?.state.toLowerCase()})
                     </option>
                   ))}
                 </select>

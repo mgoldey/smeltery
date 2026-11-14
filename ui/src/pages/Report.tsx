@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
@@ -187,6 +187,16 @@ export function Report() {
           ) : null}
           <Writable>
             <ProposeForm runId={runId} />
+            {/* A proposal is recorded and then goes quiet: the store only adds and lists, so nothing marks one
+                accepted, rejected or seen, and no notification goes anywhere. Saying where it landed and that the
+                outcome has to be asked for is the honest version -- the alternative is "waiting for review" and a
+                reader who waits. A real lifecycle needs a status on the proposal store and a route to set it. */}
+            <p className="lede" data-testid="proposal-afterwards">
+              A proposal lands in this run's{" "}
+              <Link to={`/run/${runId}/proposals`}>review queue</Link>, where the computational chemist can take it
+              into a next round. Nothing here reports back when they do: the queue records who proposed what, and
+              not what was decided about it, so ask them if you need to know.
+            </p>
           </Writable>
           <section aria-label="Discussion">
             <h2>Discussion</h2>

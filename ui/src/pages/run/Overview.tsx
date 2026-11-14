@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrap } from "../../api/client";
+import { api, unwrap, type Schemas } from "../../api/client";
 import { DroppedPoses } from "../../components/DroppedPoses";
+import { VerdictBanner } from "../../components/VerdictBanner";
 import { useRunId } from "./RunLayout";
 
 export function Overview() {
@@ -22,11 +23,15 @@ export function Overview() {
     <div className="body">
       <main className="work">
         <h1>Provenance</h1>
-        {detail.isError ? (
+        {/* The reading this record supports, beside the record itself. Provenance answered "what ran" and left
+            "what it concluded" to another tab, so an archived page was a path and a digest with no result attached. */}
+        <VerdictBanner runId={runId} />
+        {/* A read failure the verdict does not already explain. The banner above states INCOMPLETE in the app's one
+            wording for it, so repeating that here in a second wording would be two voices on one fact; what is left
+            for this banner is the case the verdict cannot account for. */}
+        {detail.isError && verdict.data?.state !== "INCOMPLETE" ? (
           <div className="banner" role="alert">
-            {verdict.data?.state === "INCOMPLETE"
-              ? `This run is incomplete: its record has no ${verdict.data.missing.join(", ")}. It stopped before the cut, so there is no result to show.`
-              : `This run cannot be read: ${detail.error.message}`}
+            This run cannot be read: {detail.error.message}
           </div>
         ) : null}
         {d ? (
@@ -64,11 +69,60 @@ export function Overview() {
             <h2>Record</h2>
             <p className="mono">{d.path}</p>
             <p className="mono">input digest {d.digest}</p>
+            <CarriedIn carried={d.decisions_in} />
             <RunConfig runId={runId} />
           </>
         ) : null}
       </main>
     </div>
+  );
+}
+
+/**
+ * What this round carried in from the last one.
+ *
+ * `results.decisions_in` has been in the record since `[decisions]` existed and nothing rendered it, so a round
+ * started from a previous round's judgement looked exactly like a round started from nothing: the only trace of
+ * what had been dropped was a comment inside the config text below. The digest is the point -- it is the one
+ * hashed into `input_digest`, so it is what ties this run to the decisions file that shaped it.
+ *
+ * Three states, not two. No `[decisions]` section is "carried nothing in"; a file that rejected nobody is a file
+ * that was read and excluded no one, which is a different fact and is said in those words.
+ */
+function CarriedIn({ carried }: { carried: Schemas["RunDetail"]["decisions_in"] }) {
+  if (!carried) {
+    return (
+      <p className="lede" data-testid="carried-none">
+        This round carried no decisions in: its config named no <span className="mono">[decisions]</span> file, so
+        every candidate in it was posed.
+      </p>
+    );
+  }
+  const { file, sha256, excluded } = carried;
+  return (
+    <section aria-label="Carried in" data-testid="carried-in">
+      <p className="lede">
+        Carried in from the decisions made on the previous round: <span className="mono">{file}</span>, sha256{" "}
+        <span className="mono">{sha256.slice(0, 12)}</span>. That digest is hashed into this run's input digest, so
+        the two cannot drift apart.
+      </p>
+      {excluded.length === 0 ? (
+        <p className="lede" data-testid="carried-excluded-none">
+          It rejected nobody, so every candidate was posed anyway.
+        </p>
+      ) : (
+        <p className="lede" data-testid="carried-excluded">
+          Rejected before this run, so never posed or measured:{" "}
+          {excluded.map((n, i) => (
+            <span key={n}>
+              {i ? ", " : ""}
+              <span className="mono">{n}</span>
+            </span>
+          ))}
+          .
+        </p>
+      )}
+    </section>
   );
 }
 

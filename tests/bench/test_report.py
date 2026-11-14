@@ -1,8 +1,10 @@
 """The report surface's API: anchored comments, proposals that start no work, the frozen snapshot, and compare."""
 
 import hashlib
+import io
 import json
 import re
+import zipfile
 from pathlib import Path
 
 from bench.fakes import FakeTaskQueue
@@ -239,3 +241,30 @@ def test_candidates_missing_from_one_run_are_rows_when_parents_match(client_for,
     rows = {r["candidate"]: r for r in body["candidates"]}
     assert rows["4-Br"]["ddE_b"] is None and rows["4-Br"]["ddE_a"] is not None and rows["4-Br"]["resolved"] is None
     assert rows["4-F"]["diff_sem"] is not None
+
+
+def test_the_run_bundle_holds_the_run_directory_under_one_folder(client_for, run_dir):
+    """The unit of sharing is the run directory, and `smeltery golden bundle` needs a shell nobody reading a
+    published Bench has. Data source: the files actually in the run directory."""
+    c, _ = client_for(run_dir)
+    r = c.get("/api/runs/0/bundle.zip")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    assert "bundle.zip" in r.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        names = z.namelist()
+    on_disk = sorted(p.relative_to(run_dir).as_posix() for p in Path(run_dir).rglob("*") if p.is_file())
+    assert names, "the bundle is empty"
+    # Everything sits under one folder, so unzipping beside other work cannot scatter files over it.
+    roots = {n.split("/")[0] for n in names}
+    assert len(roots) == 1, f"a bundle must unzip into one folder, got {roots}"
+    assert sorted(n.split("/", 1)[1] for n in names) == on_disk
+
+
+def test_bundling_a_run_writes_nothing_beside_it(client_for, run_dir):
+    """A GET that writes is a write nobody refuses: `--read-only` is enforced by HTTP method, so the zip is
+    built in memory. Data source: the run directory before and after."""
+    c, _ = client_for(run_dir)
+    before = sorted(p.relative_to(run_dir).as_posix() for p in Path(run_dir).rglob("*"))
+    assert c.get("/api/runs/0/bundle.zip").status_code == 200
+    assert sorted(p.relative_to(run_dir).as_posix() for p in Path(run_dir).rglob("*")) == before

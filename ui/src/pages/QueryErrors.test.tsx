@@ -6,12 +6,17 @@
  * endpoint a section depends on and asserts a visible message naming the failure.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, configure, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
 import { Report } from "./Report";
 import { Results } from "./run/Results";
+
+// These pages mount molstar, plotly and rdkit, so a first render under a loaded full suite can take longer than
+// testing-library's 1s default -- which showed up as a flake in roughly one full run in four, never in isolation.
+// The wait is a ceiling, not a delay: a passing assertion still returns as soon as the element appears.
+configure({ asyncUtilTimeout: 10_000 });
 
 /**
  * Which GETs fail with a 500 for the current test, by exact route — or, for the figures route, by figure name.

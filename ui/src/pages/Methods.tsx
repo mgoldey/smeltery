@@ -6,6 +6,7 @@ import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
 import { EmptyState } from "../components/EmptyState";
 import { Limits } from "../components/Limits";
+import { pipelineHref } from "../components/runIdentity";
 
 type Method = Schemas["MethodInfo"];
 type Param = Schemas["MethodParam"];
@@ -69,6 +70,12 @@ function differs(p: Param): boolean {
 
 function MethodCard({ m }: { m: Method }) {
   const qc = useQueryClient();
+  // "Used by" links into the pipeline editor, where the step views read a run. Without `?run=` each of them says
+  // the step has not run, so the link that is meant to show this method at work shows nothing of it.
+  const runs = useQuery({
+    queryKey: ["runs"],
+    queryFn: () => unwrap(api.GET("/api/runs")),
+  });
   const editable = m.params.filter((p) => p.kind !== "sites");
   const saved = Object.fromEntries(
     editable.map((p) => [p.name, show(p.workspace_default)]),
@@ -160,7 +167,9 @@ function MethodCard({ m }: { m: Method }) {
             ? m.used_by.map((n, i) => (
                 <span key={n}>
                   {i ? ", " : ""}
-                  <Link to={`/pipelines/${encodeURIComponent(n)}`}>{n}</Link>
+                  <Link to={pipelineHref(n, runs.data)} data-pipeline={n}>
+                    {n}
+                  </Link>
                 </span>
               ))
             : "no pipeline in this workspace"}
