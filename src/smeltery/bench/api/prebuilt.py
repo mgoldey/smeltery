@@ -56,7 +56,10 @@ class Place:
 
 
 def _place(name: str) -> Place:
-    f = root().joinpath(name, GALLERY_FILE)
+    # One component per `joinpath` call: `MultiplexedPath.joinpath` took a single argument until Python 3.12,
+    # so the two-argument form raises TypeError on 3.11 and every prebuilt route 500s there. CI's bench (3.11)
+    # job caught what a 3.12 venv cannot.
+    f = root().joinpath(name).joinpath(GALLERY_FILE)
     if not f.is_file():
         raise RuntimeError(f"{name} ships no {GALLERY_FILE}: an example nobody placed has no place on the page")
     data = tomllib.loads(f.read_text())
