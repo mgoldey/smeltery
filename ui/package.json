@@ -29,7 +29,7 @@
     "@tanstack/react-query": "^5.107.1",
     "molstar": "^5.13.1",
     "openapi-fetch": "^0.17.0",
-    "plotly.js-cartesian-dist-min": "^4.2.0",
+    "plotly.js-cartesian-dist-min": "^4.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5"
@@ -48,12 +48,12 @@
     "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.14.0",
-    "jsdom": "^31.0.0",
+    "jsdom": "^31.0.1",
     "openapi-typescript": "^7.13.0",
     "pngjs": "^6.0.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "8.72.2",
-    "vite": "^8.3.7",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   }
 }
