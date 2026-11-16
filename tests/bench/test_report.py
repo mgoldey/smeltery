@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import re
+import time
 import zipfile
 from pathlib import Path
 
@@ -78,6 +79,24 @@ def test_the_report_downloads_as_the_same_bytes_the_snapshot_archives(client_for
     assert got.headers["content-disposition"] == f'attachment; filename="report-{digest}.html"'
     archived = Path(c.post("/api/runs/0/snapshot").json()["path"]).read_bytes()
     assert got.content == archived
+
+
+def test_the_two_ways_out_agree_even_when_a_second_passes_between_them(client_for, run_dir):
+    """The promise above must not depend on the two renders landing in the same second.
+
+    The defect: the report states the time it was written to the second, and each render used to read the wall
+    clock for itself. When a tick fell between the download and the snapshot, the files differed by one digit at
+    byte 6196 and the byte-for-byte test failed -- a flake that said nothing about the report. CI hit it on
+    2026-11-16; forcing the sleep reproduced it at the same offset. Both renders now take one stamp from the
+    injected clock.
+
+    Data source: the download's body and the archived file, with a real second between the two requests.
+    """
+    c, _ = client_for(run_dir)
+    got = c.get("/api/runs/0/report.html")
+    time.sleep(1.05)  # cross a second boundary, which is what CI did by luck
+    archived = Path(c.post("/api/runs/0/snapshot").json()["path"]).read_bytes()
+    assert got.content == archived, "the download and the snapshot differ when a second passes between them"
 
 
 def _record_config(run_dir, text: str, name: str = "config.toml") -> Path:

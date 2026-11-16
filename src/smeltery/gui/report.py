@@ -128,7 +128,12 @@ def _read_receptor(run, rec: object) -> tuple[str | None, str | None]:
         return None, f"receptor could not be read ({e}); not shown"
 
 
-def report_data(run, comments: list[dict] | None = None, decisions: list[dict] | None = None) -> dict:
+def report_data(
+    run,
+    comments: list[dict] | None = None,
+    decisions: list[dict] | None = None,
+    generated_utc: str | None = None,
+) -> dict:
     """Everything the page shows, as plain data. Raises nothing for missing optional parts (per-pose values, pose
     files, receptor): each absence becomes a note the page displays.
 
@@ -210,7 +215,10 @@ def report_data(run, comments: list[dict] | None = None, decisions: list[dict] |
         "smeltery_version": rec.get("smeltery_version", ""),
         "started_utc": rec.get("started_utc", ""),
         "report_version": _version(),
-        "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        # A caller that renders the same report twice -- the download and the archived snapshot -- must get
+        # the same bytes, so it passes one stamp for both. Second resolution means two unpinned renders
+        # straddling a tick differ by a digit, which is a byte difference and no real difference at all.
+        "generated_utc": generated_utc or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
 
@@ -727,9 +735,14 @@ withTimeout(loadScript(CDN.molstar_js),30000,'Mol*').then(function(){
 """
 
 
-def render_html(run, comments: list[dict] | None = None, decisions: list[dict] | None = None) -> str:
+def render_html(
+    run,
+    comments: list[dict] | None = None,
+    decisions: list[dict] | None = None,
+    generated_utc: str | None = None,
+) -> str:
     """The report page as a string. See the module docstring for what it shows and refuses to show."""
-    d = report_data(run, comments, decisions)
+    d = report_data(run, comments, decisions, generated_utc)
     cdn = {
         "rdkit_js": RDKIT_JS,
         "rdkit_wasm": RDKIT_WASM,

@@ -810,7 +810,10 @@ def _render_report(request: Request, run_id: str) -> tuple[R.Run, str]:
         for c in ports(request).comment_store.for_run(digest)
     ]
     decisions = [d.__dict__ for d in _load_decisions(r).decisions]
-    return r, render_html(r, comments, decisions)
+    # One stamp from the injected clock, not two readings of the wall clock. The download and the snapshot render
+    # the same report, and the report carries the time it was written to the second: rendering twice across a tick
+    # produced two files differing by one digit, which failed the byte-for-byte promise above for no real reason.
+    return r, render_html(r, comments, decisions, utc_iso(ports(request).clock.now()))
 
 
 def _external(data: bytes) -> list[str]:
