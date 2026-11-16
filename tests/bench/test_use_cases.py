@@ -1,6 +1,7 @@
 import json
 import pathlib
 import re
+import tomllib
 
 import pytest
 from gui_fixture import make_run_dir
@@ -283,3 +284,220 @@ def test_a_launched_run_takes_its_memory_limit_from_a_matching_preview(tmp_path,
     (preview / "plan.json").write_text(json.dumps(plan))
     uc.run(pipeline, out_dir=tmp_path / "out2", config_dir=tmp_path, preview_dir=preview)
     assert q.options[-1]["memory_limit_gb"] == pytest.approx(64.0 * 0.8)
+
+
+# ---- next_round: the edge from a decision to the next run -------------------------------------------------------
+
+NEXT_ROUND_CONFIG = """\
+# round 1: three para analogues of benzoic acid
+campaign = "benzoic"
+parent = "benzoic"
+
+[candidates]
+benzoic = "OC(=O)c1ccccc1"   # the parent every ddE is measured against
+4-F = "OC(=O)c1ccc(F)cc1"
+4-Cl = "OC(=O)c1ccc(Cl)cc1"
+"""
+
+NEXT_ROUND_CANDIDATES = {
+    "benzoic": "OC(=O)c1ccccc1",
+    "4-F": "OC(=O)c1ccc(F)cc1",
+    "4-Cl": "OC(=O)c1ccc(Cl)cc1",
+}
+
+
+def _decisions(**status):
+    from smeltery.decisions import DecisionSet
+
+    ds = DecisionSet(campaign="benzoic", run="d" * 64, candidates=dict(NEXT_ROUND_CANDIDATES))
+    for name, st in status.items():
+        ds.set(name.replace("_", "-"), st, "liability", user="mg")
+    return ds
+
+
+def _plan(tmp_path, **kw):
+    from smeltery.bench.use_cases import next_round
+
+    return next_round.plan(
+        text=kw.pop("text", NEXT_ROUND_CONFIG),
+        candidates=kw.pop("candidates", dict(NEXT_ROUND_CANDIDATES)),
+        parent=kw.pop("parent", "benzoic"),
+        staging=kw.pop("staging", tmp_path / "staging"),
+        **kw,
+    )
+
+
+def test_next_round_carries_the_decisions_file_and_keeps_the_config_comments(tmp_path):
+    made = _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="decisions-abc123456789.json")
+    assert '[decisions]\nfile = "decisions-abc123456789.json"' in made.toml
+    assert "# the parent every ddE is measured against" in made.toml
+    assert "# round 1: three para analogues" in made.toml
+    assert made.files == {"decisions-abc123456789.json": tmp_path / "staging" / "decisions-abc123456789.json"}
+    assert any("4-Cl was rejected and is dropped before posing" in n for n in made.notes)
+    assert any("new input digest" in n for n in made.notes)
+
+
+def test_next_round_leaves_the_rejected_candidate_in_the_candidates_table(tmp_path):
+    # the engine drops it (cli._apply_decisions) and records what it excluded; we do not rewrite the chemistry
+    made = _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d.json")
+    assert '4-Cl = "OC(=O)c1ccc(Cl)cc1"' in made.toml
+
+
+def test_next_round_does_not_resurrect_a_candidate_rejected_in_an_earlier_round(tmp_path):
+    """Round 3 must not pose what round 1 rejected.
+
+    The run record's `inputs.candidates` is written after `cli._apply_decisions`, so an earlier round's reject is
+    already gone from it while the config text still lists the molecule. Building the new candidate set from the
+    record, and the new decisions file from this round's decisions alone, let that molecule back in: nothing named
+    it any more, and `[decisions] file` had just been repointed at the new file.
+    """
+    from smeltery.decisions import DecisionSet
+
+    # Round 2's record: 4-Cl was rejected in round 1, so the engine left it out of the record's candidates.
+    record_candidates = {"benzoic": "OC(=O)c1ccccc1", "4-F": "OC(=O)c1ccc(F)cc1"}
+    # Round 2's decisions only concern what round 2 actually posed.
+    ds = DecisionSet(campaign="benzoic", run="d" * 64, candidates=dict(record_candidates))
+    ds.set("4-F", "hold", "synthesis", user="mg")
+    made = _plan(tmp_path, candidates=record_candidates, decisions=ds, decisions_name="d.json")
+
+    # The config still lists it, which is how smeltery run is told to drop it...
+    assert '4-Cl = "OC(=O)c1ccc(Cl)cc1"' in made.toml
+    # ...so the carried decisions file must still reject it, or it is posed again.
+    import json
+
+    copied = json.loads((tmp_path / "staging" / "d.json").read_text())
+    by_name = {d["candidate"]: d for d in copied["decisions"]}
+    assert by_name["4-Cl"]["status"] == "reject"
+    assert "earlier round" in by_name["4-Cl"]["note"]
+    assert by_name["4-F"]["status"] == "hold"
+    assert any("4-Cl" in n and "rejected" in n for n in made.notes)
+
+
+def test_next_round_does_not_stack_a_second_header_on_a_round_that_already_has_one(tmp_path):
+    """A round built from a round's config carries one header, not two that disagree."""
+    first = _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d.json")
+    assert first.toml.count("# Next round, carried forward by Bench:") == 1
+    second = _plan(
+        tmp_path,
+        text=first.toml,
+        decisions=_decisions(**{"4_F": "reject"}),
+        decisions_name="d2.json",
+        staging=tmp_path / "staging2",
+    )
+    assert second.toml.count("# Next round, carried forward by Bench:") == 1
+    assert "4-F was rejected" in second.toml
+    # The round-1 note is gone, not left behind to contradict the new one.
+    assert "4-Cl was rejected" not in second.toml.split("[candidates]")[0]
+    # And the config still parses, with its chemistry intact.
+    import tomllib
+
+    assert "4-F" in tomllib.loads(second.toml)["candidates"]
+
+
+def test_the_header_notes_go_quiet_once_the_config_stops_agreeing_with_them(tmp_path):
+    """A comment cannot follow an edit, so it is only trusted while the config still backs it up."""
+    from smeltery.bench.use_cases.next_round import notes_in
+
+    made = _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d.json")
+    assert any("4-Cl was rejected" in n for n in notes_in(made.toml))
+
+    # The user removes the decisions reference the notes are about: the banners would now misstate the config.
+    without = made.toml.replace('[decisions]\nfile = "d.json"\n', "")
+    assert "[decisions]" not in without
+    assert notes_in(without) == []
+
+    # A config mid-edit says nothing about its own history rather than guessing.
+    assert notes_in(made.toml + "\n[cut\n") == []
+    # And a config that was never a next round has no notes to invent.
+    assert notes_in(NEXT_ROUND_CONFIG) == []
+
+
+def test_next_round_drops_a_candidate_and_prunes_its_decision(tmp_path):
+    from smeltery.decisions import DecisionSet
+
+    made = _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d.json", drop=["4-Cl"])
+    assert "4-Cl" not in tomllib.loads(made.toml)["candidates"]  # gone from the chemistry, not just rejected
+    assert '4-F = "OC(=O)c1ccc(F)cc1"' in made.toml and "# the parent every ddE" in made.toml
+    # a decision on a candidate the config no longer lists is a ConfigError in `smeltery run`, so it is left out
+    copied = DecisionSet.load(made.files["d.json"])
+    assert [d.candidate for d in copied.decisions] == []
+    assert any("dropped 1 candidate: 4-Cl" in n for n in made.notes)
+    assert any("left out of the copied decisions" in n for n in made.notes)
+
+
+def test_a_proposal_cannot_take_the_name_of_a_candidate_this_round_dropped(tmp_path):
+    """Reusing the name would leave the dropped candidate's decision pointing at a different molecule."""
+    from smeltery.bench.use_cases.next_round import Proposed
+
+    made = _plan(
+        tmp_path,
+        decisions=_decisions(**{"4_Cl": "reject"}),
+        decisions_name="d.json",
+        drop=["4-F"],
+        proposals=[Proposed(id="p1", candidate="4-F", smiles="OC(=O)c1ccc(I)cc1")],
+    )
+    cands = tomllib.loads(made.toml)["candidates"]
+    assert "4-F" not in cands or cands["4-F"] != "OC(=O)c1ccc(I)cc1"
+    assert "OC(=O)c1ccc(I)cc1" in cands.values()  # it is there, under a name of its own
+
+
+def test_next_round_refuses_dropping_the_parent(tmp_path):
+    from smeltery.bench.use_cases.next_round import NextRoundRefused
+
+    with pytest.raises(NextRoundRefused) as e:
+        _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d.json", drop=["benzoic"])
+    assert "every analogue is measured against it" in str(e.value)
+
+
+def test_next_round_refuses_an_unknown_drop_and_an_empty_round(tmp_path):
+    from smeltery.bench.use_cases.next_round import NextRoundRefused
+
+    with pytest.raises(NextRoundRefused) as e:
+        _plan(tmp_path, decisions=None, decisions_name=None, drop=["4-I"])
+    assert "4-I" in str(e.value)
+    with pytest.raises(NextRoundRefused) as e:
+        _plan(tmp_path, decisions=None, decisions_name=None)
+    assert "no decisions file" in str(e.value)
+    with pytest.raises(NextRoundRefused) as e:
+        _plan(tmp_path, decisions=_decisions(), decisions_name="d.json", carry_decisions=False)
+    assert "nothing to carry forward" in str(e.value)
+
+
+def test_next_round_adds_a_proposal_and_gives_a_name_clash_its_own_name(tmp_path):
+    from smeltery.bench.use_cases.next_round import Proposed
+
+    made = _plan(
+        tmp_path,
+        decisions=None,
+        decisions_name=None,
+        proposals=[
+            Proposed(id="p1", candidate="4-Br", smiles="OC(=O)c1ccc(Br)cc1"),
+            Proposed(id="p2", candidate="4-F", smiles="OC(=O)c1ccc(F)cc1"),
+            Proposed(id="p3abcdef", candidate="", smiles="OC(=O)c1ccc(I)cc1"),
+        ],
+    )
+    assert '4-Br = "OC(=O)c1ccc(Br)cc1"' in made.toml
+    assert '4-F-2 = "OC(=O)c1ccc(F)cc1"' in made.toml  # 4-F is taken, so the proposal gets its own name
+    assert 'proposed-p3abcdef = "OC(=O)c1ccc(I)cc1"' in made.toml  # a proposal with no name is named after its id
+    assert any("added 3 proposed candidates: 4-Br, 4-F-2, proposed-p3abcdef" in n for n in made.notes)
+
+
+def test_next_round_says_so_when_nothing_is_rejected_and_lists_what_is_held(tmp_path):
+    made = _plan(tmp_path, decisions=_decisions(**{"4_F": "hold"}), decisions_name="d.json")
+    assert any("nothing is rejected" in n for n in made.notes)
+    assert any("on hold, and still in the run: 4-F" in n for n in made.notes)
+
+
+def test_next_round_warns_when_the_rejects_leave_too_few_analogues_for_the_cut(tmp_path):
+    text = NEXT_ROUND_CONFIG + "\n[cut]\nkeep = 2\nz = 2.0\nfloor = 0.0\n"
+    made = _plan(
+        tmp_path,
+        text=text,
+        decisions=_decisions(**{"4_Cl": "reject", "4_F": "reject"}),
+        decisions_name="d.json",
+    )
+    assert any("[cut] keep = 2 but only 0 analogue(s) are left" in n for n in made.notes)
+    # keep = 1 and one analogue left: the cut still has what it needs, so nothing is said
+    one = NEXT_ROUND_CONFIG + "\n[cut]\nkeep = 1\nz = 2.0\nfloor = 0.0\n"
+    ok = _plan(tmp_path, text=one, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d2.json")
+    assert not any("[cut] keep" in n for n in ok.notes)

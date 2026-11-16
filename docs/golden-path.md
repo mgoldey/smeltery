@@ -48,19 +48,26 @@ smeltery report out/myrun -o out/myrun/report.html
 
 ## 5. Decide
 
-In the GUI **Grid** tab: tick candidates, set `keep`/`reject`/`hold` with a reason, **Record decision**.
-This writes `out/myrun/decisions-<digest>.json` (separate from the run record).
+In Bench, the run's **Decisions** tab (or "Decide on these candidates" at the foot of **Results**): set
+`keep`/`reject`/`hold` with a reason and **Record**. Each row shows its own mean +/- SEM and whether the cut kept
+it, so the judgement is made beside the number. This writes `out/myrun/decisions-<digest>.json`, separate from the
+run record.
 
 ## 6. Iterate
 
-Add to the next config:
+**Start the next round**, at the foot of Decisions (or of **Proposals**, to take proposed candidates with you).
+Bench creates a new pipeline from this run's config, copies the decisions file into it, writes the `[decisions]`
+reference, and opens on its candidates. The original run is never changed.
+
+By hand, the same thing is two steps: copy the decisions file next to the next config, and add
 
 ```toml
 [decisions]
 file = "decisions-<digest>.json"
 ```
 
-Rejected candidates are dropped before posing; the new record lists them under `results.decisions_in.excluded`.
+Either way, rejected candidates are dropped before posing and the new record lists them under
+`results.decisions_in.excluded`.
 
 ## 7. Share / ELN
 

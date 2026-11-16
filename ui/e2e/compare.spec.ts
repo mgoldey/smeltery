@@ -25,3 +25,26 @@ test("with fewer than two finished runs the page says what to do and links to Be
   await empty.getByRole("link", { name: "Go to Bench" }).click();
   await expect(page).toHaveURL(/\/bench$/);
 });
+
+test("a run links into a comparison already holding it, and each arm links back", async ({ page }) => {
+  // Compare used to be reachable only from the sidebar, with the arms in component state: there was no way in
+  // from a run you were reading, and no way back out to the runs being compared.
+  await page.goto(`/run/${id("a_resolved")}/results`);
+  await page.getByTestId("go-compare").click();
+  await expect(page).toHaveURL(new RegExp(`/compare\\?a=${id("a_resolved")}`));
+  await expect(page.getByLabel("Arm A")).toHaveValue(id("a_resolved")); // arrived already holding this run
+
+  await page.getByLabel("Arm B").selectOption(id("d_floor"));
+  await expect(page.getByTestId("compare-caption")).toBeVisible();
+  // The arms are in the URL, so the comparison is a thing you can send to someone.
+  await expect(page).toHaveURL(new RegExp(`b=${id("d_floor")}`));
+
+  await page.getByTestId("open-arm-b").click();
+  await expect(page).toHaveURL(new RegExp(`/run/${id("d_floor")}/results`));
+});
+
+test("a comparison opened from a link needs no clicking to draw", async ({ page }) => {
+  await page.goto(`/compare?a=${id("a_resolved")}&b=${id("d_floor")}`);
+  await expect(page.getByTestId("compare-caption")).toBeVisible();
+  await expect(page.locator('[data-figure="compare"] .main-svg').first()).toBeVisible();
+});

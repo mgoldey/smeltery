@@ -226,6 +226,7 @@ Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 | Go from a target to a shareable result | [docs/golden-path.md](docs/golden-path.md) |
 | See what each tier computes, costs and may claim | [docs/tiers/index.md](docs/tiers/index.md) |
 | Use the Bench web app | [docs/bench.md](docs/bench.md) |
+| See who Bench is for and the path each person takes | [docs/user-flows.md](docs/user-flows.md) |
 | Use the Marimo GUI | [docs/gui.md](docs/gui.md) |
 | Plug in structure, docking, scoring or potential providers | [docs/providers.md](docs/providers.md) |
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |

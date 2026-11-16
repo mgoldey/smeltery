@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { expect, fixture, test } from "./bench";
+import { expect, fixture, run, test } from "./bench";
 import { distinctColours } from "./pixels";
 
 test("opening a local PDB shows its hash, origin, what is dropped, and draws it", async ({ page }) => {
@@ -9,7 +9,7 @@ test("opening a local PDB shows its hash, origin, what is dropped, and draws it"
   const text = readFileSync(path, "utf8");
   const sha = createHash("sha256").update(text).digest("hex");
   const het = [...new Set(text.split("\n").filter((l) => l.startsWith("HETATM")).map((l) => l.slice(17, 21).trim()))];
-  await page.goto("/run/0/structure");
+  await page.goto("/structure");
   await page.getByLabel("Path, PDB id or UniProt accession").fill(path);
   await page.getByRole("button", { name: "Open structure" }).click();
   await expect(page.getByTestId("structure-sha")).toHaveText(sha);
@@ -21,15 +21,29 @@ test("opening a local PDB shows its hash, origin, what is dropped, and draws it"
 });
 
 test("a missing path is reported inline with the API's message", async ({ page }) => {
-  await page.goto("/run/0/structure");
+  await page.goto("/structure");
   await page.getByLabel("Path, PDB id or UniProt accession").fill("/nowhere/absent.pdb");
   await page.getByRole("button", { name: "Open structure" }).click();
   await expect(page.locator("#structure-error")).toContainText("absent.pdb");
 });
 
 test("a PDB id without network permission is refused, saying why", async ({ page }) => {
-  await page.goto("/run/0/structure");
+  await page.goto("/structure");
   await page.getByLabel("Path, PDB id or UniProt accession").fill("1ABC");
   await page.getByRole("button", { name: "Open structure" }).click();
   await expect(page.locator("#structure-error")).toContainText("network");
+});
+
+test("links written before the move still resolve", async ({ page }) => {
+  // Structure was a tab under /run/:runId even though its page never read the run id. It is top-level now, but a
+  // bookmark or a pasted link from before that change must not 404.
+  const r = run("a_resolved");
+  await page.goto(`/run/${r.id}/structure`);
+  await expect(page).toHaveURL(/\/structure$/);
+  await expect(page.getByLabel("Path, PDB id or UniProt accession")).toBeVisible();
+
+  // Same for the Overview -> Provenance rename.
+  await page.goto(`/run/${r.id}/overview`);
+  await expect(page).toHaveURL(new RegExp(`/run/${r.id}/provenance$`));
+  await expect(page.getByRole("heading", { name: "Provenance" })).toBeVisible();
 });

@@ -1,8 +1,8 @@
 """Seed a Bench workspace from the prebuilt pipelines, so a first run opens on finished work and runs no SCF.
 
-Each prebuilt becomes `ROOT/pipelines/<name>/` exactly as "start from a working pipeline" makes it: its config, its
-inputs and its example run, copied through the helpers in `api/prebuilt.py`. A pipeline already in ROOT is left alone,
-so seeding twice changes nothing (and never overwrites what the user edited).
+Each prebuilt becomes `ROOT/pipelines/<name>/` exactly as copying it from "Examples you can copy" makes it: its
+config, its inputs and its example run, through the helpers in `api/prebuilt.py`. A pipeline already in ROOT is
+left alone, so seeding twice changes nothing (and never overwrites what the user edited).
 """
 
 from __future__ import annotations

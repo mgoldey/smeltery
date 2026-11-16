@@ -11,7 +11,7 @@ test("the config is a download, and the raw TOML is folded away until asked for"
   const text = readFileSync((await dl.path())!, "utf8");
   expect(text).toContain("[candidates]");
 
-  await page.getByText("Edit as TOML").click();
+  await page.getByRole("group").getByText("Edit as TOML", { exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Pipeline TOML" })).toContainText("[candidates]");
 });
 

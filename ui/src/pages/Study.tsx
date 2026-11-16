@@ -87,6 +87,18 @@ export function Study() {
               <Dag rows={rows} />
             </>
           ) : null}
+          {/* Only when the steps came back: an unconfigured module fails both queries, and two alerts saying the
+              same thing is one more than the page has news. The banner above already names it. */}
+          {cells.isError && !dag.isError ? (
+            <>
+              <h2>Cells</h2>
+              <div className="banner" role="alert">
+                The cells could not be read: {cells.error.message}. Nothing is
+                shown about what is cached or what would run; reload to try
+                again.
+              </div>
+            </>
+          ) : null}
           {cells.data ? (
             <>
               <h2>

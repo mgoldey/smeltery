@@ -4,7 +4,8 @@ Terms as smeltery uses them. Each entry names the page or source that owns the d
 
 **Analogue.** A candidate other than the parent. Its pose *i* is built on the parent's pose *i*. See [paired_poses](tiers/paired_poses.md).
 
-**Bench.** The web app for running, reviewing and commenting on runs. See [bench.md](bench.md).
+**Bench.** The web app for running, reviewing and commenting on runs. See [bench.md](bench.md), and
+[user-flows.md](user-flows.md) for who it is for and how each of them moves through it.
 
 **Bench gate.** The fast test set run before a commit: `tests/bench` plus `tests/test_study_plan_cells.py` (about 3 minutes). Defined in `AGENTS.md`, not a scientific gate.
 

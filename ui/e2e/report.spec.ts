@@ -56,19 +56,37 @@ test("nothing on the report edits the method or starts work", async ({ page }) =
   expect(forbidden).toEqual([]);
 });
 
-test("the archived snapshot is the run's numbers, and its only external references are its pinned libraries", async ({ page }) => {
+test("the report downloads as a file holding the run's numbers, referencing only its pinned libraries", async ({
+  page,
+}) => {
+  // The take-away is a real download now. It used to be a button that wrote a file onto the server and printed
+  // the path, which only helps someone with a shell on that machine.
   await page.goto(`/report/${RUN()}`);
   await expect(page.locator('[data-testid^="mean-"]').first()).toBeVisible();
   const means = await page.locator('[data-testid^="mean-"]').allInnerTexts(); // data source: the page as displayed
   expect(means.length).toBeGreaterThan(0);
-  const resp = page.waitForResponse((r) => r.url().endsWith("/snapshot"));
-  await page.getByRole("button", { name: "Archive snapshot" }).click();
-  const snap = (await (await resp).json()) as { path: string; sha256: string; external: string[] };
-  await expect(page.getByTestId("snapshot-sha")).toHaveText(snap.sha256);
-  const bytes = readFileSync(snap.path);
-  expect(createHash("sha256").update(bytes).digest("hex")).toBe(snap.sha256);
-  const html = bytes.toString("utf8");
+
+  const start = page.waitForEvent("download");
+  await page.getByTestId("download-report").click();
+  const download = await start;
+  expect(download.suggestedFilename()).toMatch(/^report-[0-9a-f]{12}\.html$/);
+  const saved = await download.path();
+  const html = readFileSync(saved).toString("utf8");
+
   for (const m of means) expect(html, m).toContain(m);
+
+  // The archived copy is the same bytes as the download, so what the chemist saves is what the notebook keeps.
+  // Both are built here, back to back: the report embeds the run's comments and decisions, so a write by any
+  // other test between two builds legitimately changes the file, and comparing across that gap would be
+  // asserting the report ignores the discussion it is supposed to carry.
+  const snap = (await (await page.request.post(`/api/runs/${RUN()}/snapshot`)).json()) as {
+    path: string;
+    sha256: string;
+    external: string[];
+  };
+  const again = await page.request.get(`/api/runs/${RUN()}/report.html`);
+  expect(createHash("sha256").update(Buffer.from(await again.body())).digest("hex")).toBe(snap.sha256);
+
   const urls = new Set(html.match(/https?:\/\/[^\s"'<>)]+/g) ?? []);
   for (const u of urls) expect(snap.external, u).toContain(u);
 });

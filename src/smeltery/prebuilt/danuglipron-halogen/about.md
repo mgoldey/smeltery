@@ -1,2 +1,3 @@
 The danuglipron halogen campaign: 12 F/Cl/CH3 analogues of danuglipron at four aromatic sites, paired poses in the 7LCJ pocket, RHF/STO-3G field interaction; the 2026-10-16 result is imported under imported/ (UNRANKED at the declared 1.26 kcal/mol floor).
 Re-running needs pdb2pqr30; the 2026-10-16 run measured 12.14 CPU-h for 2 poses per candidate (first_pose_index 1) on 6 workers.
+Does not resolve: all 12 analogues land in one group at the declared 1.26 kcal/mol floor, from -4.11 ± 0.76 (bnz-C34-F) to +5.58 ± 5.20 (bnz-C34-Cl), so keep = 3 has nothing to keep. A real campaign to read, not a starting point: the committed 2026-11-05 run summed 38.4 CPU-h of SCF over Temporal, and the 2026-10-16 result is kept beside it under imported/.

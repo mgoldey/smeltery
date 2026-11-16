@@ -1,10 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useCanWrite } from "../api/capabilities";
 import { api, unwrap, type Schemas } from "../api/client";
+import { outName, runOfTask, taskOut } from "./runIdentity";
 
 type Task = Schemas["Task"];
 const LIVE = new Set(["queued", "running"]);
+// Over, one way or another. A run in any of these states has stopped writing, so its directory can be picked up.
+const ENDED = new Set(["failed", "cancelled", "timeout"]);
 const QUEUED_HELP =
   "Launched runs share a fixed number of slots (one by default) so two heavy runs never compete for memory. This one " +
   "starts by itself when a slot frees, even if Bench restarts meanwhile.";
@@ -65,6 +69,47 @@ function silenceFor(t: Task, now: number, fetchedAt: number): number | null {
   return Math.max(0, Math.round(t.heartbeat_age_s + (now - fetchedAt) / 1000));
 }
 
+/**
+ * The run a task produced, as a link, or the directory it is writing into.
+ *
+ * The launch-to-result link used to exist only inside the Launch component, so "Follow it in Work" -- the link
+ * meant to bring you here -- destroyed it, and this panel then showed a task going green beside no way to reach
+ * what it had made. `Task.run_id` is the Temporal workflow id, not a Bench run, so the task's own `--out` is what
+ * the two ends have in common: the run store lists a finished run under that directory.
+ *
+ * Before the record exists there is nothing to link, and saying so is still worth a cell: the out directory is
+ * what tells two runs of one campaign apart everywhere else in the app.
+ */
+function TaskResult({ task }: { task: Task }) {
+  const runs = useRuns();
+  const out = taskOut(task.command);
+  if (out === undefined) return null; // not a run: a preview, or anything else the queue was given
+  const run = runOfTask(task.command, runs.data);
+  const where = outName(`${out}/x`) || out;
+  if (!run) {
+    return (
+      <span className="lede" data-testid="task-out" title={out}>
+        {where}
+      </span>
+    );
+  }
+  return (
+    <Link to={`/run/${run.id}/results`} data-testid="task-run" title={out}>
+      {where}
+    </Link>
+  );
+}
+
+/** The run list, shared by the panel and the inspector; polled while a task may still be writing a record. */
+function useRuns() {
+  return useQuery({
+    queryKey: ["runs"],
+    queryFn: () => unwrap(api.GET("/api/runs")),
+    // A run's record appears only when it finishes, and the queue page is where someone waits for it.
+    refetchInterval: 10_000,
+  });
+}
+
 /** The tasks the queue knows, refreshed while any is queued or running. A dead backend degrades this panel only. */
 export function WorkPanel({
   selected,
@@ -111,6 +156,9 @@ export function WorkPanel({
           <thead>
             <tr>
               <th>Task</th>
+              {/* Which run this task is making, and a link to it once there is one: the end of the launch's
+                  first leg, which used to be reachable only from the page the launch happened on. */}
+              <th>Run</th>
               <th>Status</th>
               <th className="num">Elapsed</th>
               <th className="num">Last output</th>
@@ -134,6 +182,9 @@ export function WorkPanel({
                   >
                     {t.name}
                   </button>
+                </td>
+                <td>
+                  <TaskResult task={t} />
                 </td>
                 <td>
                   <span className="status" data-state={t.status}>
@@ -197,6 +248,35 @@ export function WorkPanel({
   );
 }
 
+/**
+ * The result of the task being inspected: a button to its run, or where that run will be written.
+ *
+ * The inspector is where someone sits while a run finishes, so it is the place the finished run should be one
+ * click away from. It was the place with no link at all: Cancel task was the only control it offered.
+ */
+function InspectorResult({ task }: { task: Task }) {
+  const runs = useRuns();
+  const out = taskOut(task.command);
+  if (out === undefined) return null;
+  const run = runOfTask(task.command, runs.data);
+  if (!run) {
+    return (
+      <p className="lede" data-testid="inspector-out">
+        Writing into <span className="mono">{out}</span>. The result is linked here once the run writes its
+        record; a run that fails never writes one, and the log below says why.
+      </p>
+    );
+  }
+  return (
+    <p className="next-step">
+      <Link className="button primary" to={`/run/${run.id}/results`} data-testid="inspector-run">
+        Open the result
+      </Link>{" "}
+      <span className="lede mono">{out}</span>
+    </p>
+  );
+}
+
 /** One task: its command, its log tail (as text, never HTML), and cancel while it is live. */
 export function TaskInspector({
   id,
@@ -231,6 +311,13 @@ export function TaskInspector({
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
   });
+  // A run that ended badly leaves a directory holding every SCF it did finish. `smeltery run` on that directory
+  // recomputes only what is missing, so resuming is not a retry: it is the rest of the work.
+  const resumeOut = task ? taskOut(task.command) : undefined;
+  const resume = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/runs/resume", { body: { out: resumeOut ?? "" } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
+  });
   return (
     <aside className="inspector" aria-label="Task">
       <h2 style={{ marginTop: 0 }}>{task?.name ?? id}</h2>
@@ -245,6 +332,7 @@ export function TaskInspector({
               ? ` attempt ${task.attempt ?? 1}/${task.max_attempts}`
               : ""}
           </p>
+          <InspectorResult task={task} />
           {task.status === "queued" ? (
             <p className="lede" data-testid="queued-help">
               Waiting for a run slot. {QUEUED_HELP} Cancelling it now means it
@@ -277,6 +365,29 @@ export function TaskInspector({
             >
               Cancel task
             </button>
+          ) : null}
+          {/* The way back into a run that stopped. Only for a run (one with an --out), only once it is over, and
+              only on a Bench that may launch work. A finished run is refused by the server, not hidden here: the
+              record is what decides, and this panel cannot see it. */}
+          {ENDED.has(task.status) && resumeOut !== undefined && canWrite ? (
+            <>
+              <button
+                type="button"
+                className="primary"
+                data-testid="resume-run"
+                onClick={() => resume.mutate()}
+                disabled={resume.isPending}
+              >
+                {resume.isPending ? "Resuming…" : "Resume this run"}
+              </button>
+              <p className="lede" data-testid="resume-note">
+                Runs the config already staged in <span className="mono">{resumeOut}</span> again. Every SCF that
+                finished is read from that directory, so only the missing work is computed.
+              </p>
+            </>
+          ) : null}
+          {resume.isError ? (
+            <p className="field-error">{resume.error.message}</p>
           ) : null}
           {cancel.isError ? (
             <p className="field-error">{cancel.error.message}</p>

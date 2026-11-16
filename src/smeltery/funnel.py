@@ -160,7 +160,12 @@ def cut(
     order = sorted(measurements, key=lambda k: measurements[k].mean)
     groups: list[list[str]] = []
     for name in order:
-        if groups and not resolved(measurements[groups[-1][-1]], measurements[name], z, floor):
+        # Against EVERY member, not just the last one. Non-significance does not chain: with means
+        # 0.00/0.25/0.50/0.75 at sem 0.10 each adjacent pair is unresolved while the ends are resolved,
+        # and comparing neighbours alone swept all four into one group and called the cut UNRANKED --
+        # discarding a distinction the statistics do support. A group now means what CutResult says it
+        # means: no member is resolved from any other, so there is genuinely no order inside it.
+        if groups and not any(resolved(measurements[other], measurements[name], z, floor) for other in groups[-1]):
             groups[-1].append(name)
         else:
             groups.append([name])

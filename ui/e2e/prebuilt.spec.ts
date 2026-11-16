@@ -14,12 +14,19 @@ const committed = (): Rec => {
 test("start from benzoic-pbe: every step is ready and step 5 shows the committed numbers", async ({ page }) => {
   const name = `pbe-${Date.now().toString(36)}`;
   await page.goto("/bench");
-  const card = page.getByRole("group", { name: "Start from a working pipeline" });
-  const listed = (await (await page.request.get("/api/prebuilt")).json()) as unknown[]; // data source: the API
-  await expect(card.locator("[data-prebuilt]")).toHaveCount(listed.length);
-  const row = card.locator('[data-prebuilt="benzoic-pbe"]');
-  await expect(row).toContainText("ranked by field-interaction DFT");
-  await expect(row.locator(".status")).toHaveAttribute("data-state", "RESOLVED");
+  const card = page.getByRole("group", { name: "Examples you can copy" });
+  // Data source: the API. One card per non-variant tier, and each variant folded under the example it varies —
+  // not one row per prebuilt, which is what made five alphabetical peers out of one example and four others.
+  const listed = (await (await page.request.get("/api/prebuilt")).json()) as { tier: string }[];
+  const variants = listed.filter((p) => p.tier === "variant");
+  await expect(card.locator("[data-prebuilt]")).toHaveCount(listed.length - variants.length);
+  await expect(card.locator("[data-prebuilt-variant]")).toHaveCount(variants.length);
+  // benzoic-rhf is THE example: its card comes first and carries the badge.
+  await expect(card.locator("[data-prebuilt]").first()).toHaveAttribute("data-prebuilt", "benzoic-rhf");
+  await expect(card.locator('[data-prebuilt="benzoic-rhf"] .start-best')).toHaveText("easiest");
+  const row = card.locator('[data-prebuilt-variant="benzoic-pbe"]');
+  await expect(row).toContainText("Resolves to the same winner by a different method");
+  await expect(card.locator('[data-prebuilt="docking"]')).toContainText("Does not resolve");
   await row.getByLabel("Name of your copy").fill(name);
   await row.getByRole("button", { name: "Start from benzoic-pbe" }).click();
 

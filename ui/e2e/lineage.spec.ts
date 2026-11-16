@@ -77,3 +77,15 @@ test("the lineage opens the pipeline that made the number, and 'change a setting
   await expect(measure).toHaveAttribute("aria-current", "step");
   await expect(page.locator('[data-panel="measure"]')).toBeVisible();
 });
+
+test("Provenance says plainly when the run kept no config, rather than showing one that never ran", async ({
+  page,
+}) => {
+  // Provenance named the config file and its hash but never showed the text. These fixture runs record no config
+  // at all, which is the case that matters most: a rebuilt config would read as provenance while being a guess.
+  await page.goto(`/run/${id("a_resolved")}/provenance`);
+  const config = page.getByRole("region", { name: "Config" });
+  await expect(config).toBeVisible();
+  await expect(config.getByTestId("config-absent")).toContainText("does not name a config");
+  await expect(config.getByTestId("config-text")).toHaveCount(0); // nothing invented to fill the space
+});

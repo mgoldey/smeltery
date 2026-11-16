@@ -20,9 +20,13 @@ test("the context bar shows the run's campaign and input digest", async ({ page 
 
 test("an incomplete run says what it is missing instead of rendering blank", async ({ page }) => {
   const r = run("c_incomplete");
-  await page.goto(`/run/${r.id}/overview`);
-  await expect(page.getByRole("alert")).toContainText("incomplete");
-  await expect(page.getByRole("alert")).toContainText("cut");
+  await page.goto(`/run/${r.id}/provenance`);
+  // The verdict says it, in the app's one wording for INCOMPLETE. Provenance used to state it a second time in a
+  // banner of its own; now it shows the same VerdictBanner every run page shows, so the fact has one voice. The
+  // test asserts what the page tells the reader, not which element carries it.
+  const verdict = page.getByRole("region", { name: "Verdict" });
+  await expect(verdict).toContainText("Incomplete");
+  await expect(verdict).toContainText("cut");
 });
 
 test("an unknown address is a page that says so", async ({ page }) => {

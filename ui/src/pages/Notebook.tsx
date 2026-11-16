@@ -1,8 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useCanWrite } from "../api/capabilities";
-import { api, unwrap } from "../api/client";
+import { api, unwrap, type RunSummary } from "../api/client";
 import { ApiError, reasonOf } from "../api/http";
 import { EmptyState } from "../components/EmptyState";
 import { Markdown } from "../components/Markdown";
@@ -34,6 +34,90 @@ async function uploadNotebookFile(file: File): Promise<FileRef> {
   );
   if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
   return (await res.json()) as FileRef;
+}
+
+/**
+ * An attached run's hash, turned back into a run you can open.
+ *
+ * The notebook stores an attachment as the sha256 of the run record's *bytes*, which is deliberately not the run's
+ * id (an id names a run directory that could be moved or re-listed; the hash names the content, which is the point
+ * of an archive). Nothing serves that mapping, so the join is done here out of two routes that already exist: the
+ * archived bytes are fetched back and their `input_digest` read, and that digest is matched against the one every
+ * run in `GET /api/runs` reports. It is an identity, not a guess -- an unmatched hash gets no link rather than a
+ * likely one.
+ *
+ * `null` means the archived record was read and no run on this Bench has that digest: the usual reason is a record
+ * archived from a run directory that is no longer served, which is exactly the case the hash exists to survive.
+ */
+function useAttachedRuns(digests: string[], runs: RunSummary[] | undefined) {
+  const byDigest = new Map((runs ?? []).filter((r) => r.digest).map((r) => [r.digest, r]));
+  const records = useQueries({
+    queries: digests.map((d) => ({
+      queryKey: ["notebook-record", d],
+      // Not `api.GET`: the artifact route serves bytes with a media type from the filename, so it is outside the
+      // generated client's typed surface. The record is JSON and small (a few KB); only `input_digest` is read.
+      queryFn: async (): Promise<string | null> => {
+        const res = await fetch(`/api/notebook/artifacts/${d}`);
+        if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
+        const rec = (await res.json()) as { input_digest?: unknown };
+        return typeof rec.input_digest === "string" ? rec.input_digest : null;
+      },
+      staleTime: Infinity, // content-addressed: these bytes cannot change under this hash
+      retry: false,
+    })),
+  });
+  const out = new Map<string, RunSummary | null | undefined>();
+  digests.forEach((d, i) => {
+    // In flight, failed, or the record carried no digest: all three are "not known to be a run served here", and
+    // the hash is shown with no claim either way rather than with a wrong one.
+    const data = records[i]?.data;
+    out.set(d, data == null ? undefined : (byDigest.get(data) ?? null));
+  });
+  return out;
+}
+
+/** An entry's attached runs: each one's hash, linked to the run when this Bench still serves it. */
+function AttachedRuns({
+  digests,
+  resolved,
+}: {
+  digests: string[];
+  resolved: Map<string, RunSummary | null | undefined>;
+}) {
+  return (
+    <ul className="artefacts" aria-label="Attached runs">
+      {digests.map((h) => {
+        const run = resolved.get(h);
+        return (
+          <li key={h} data-artefact={h}>
+            {run ? (
+              <Link to={`/run/${run.id}/results`} className="mono">
+                {h}
+              </Link>
+            ) : (
+              <span className="mono">{h}</span>
+            )}
+            {run ? (
+              <span className="lede">
+                {" "}
+                · {run.campaign} {run.digest?.slice(0, 12)}
+              </span>
+            ) : run === null ? (
+              // Not "the run was deleted": the record is archived and readable, it is the run directory that this
+              // Bench no longer lists. Offering the archived bytes is the one thing that is certainly still true.
+              <span className="lede">
+                {" "}
+                · no run with this record is served here;{" "}
+                <a href={`/api/notebook/artifacts/${h}?name=${h.slice(0, 12)}.json`} download>
+                  download the archived record
+                </a>
+              </span>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /**
@@ -92,6 +176,12 @@ export function Notebook() {
     },
   });
   const titleOf = new Map((entries.data ?? []).map((e) => [e.id, e.title]));
+  // One read per distinct hash, however many entries attached it: an entry and its correction normally attach the
+  // same run, and the records are content-addressed so a repeat read would answer identically.
+  const attached = useAttachedRuns(
+    [...new Set((entries.data ?? []).flatMap((e) => e.artefacts))],
+    runs.data,
+  );
   return (
     <Shell>
       <div className="body">
@@ -106,6 +196,15 @@ export function Notebook() {
             Entries are never edited. To correct one, write a new entry that
             supersedes it; the old one stays readable.
           </p>
+          {/* An empty <ol> on a failed read is indistinguishable from a notebook nobody has written in. The
+              EmptyState below claims the second; this claims only the first. */}
+          {entries.isError ? (
+            <div className="banner" role="alert">
+              The entries could not be read: {entries.error.message}. This
+              notebook may well have entries; none can be shown. Reload to try
+              again.
+            </div>
+          ) : null}
           <ol className="entries">
             {(entries.data ?? []).map((e) => (
               <li
@@ -134,13 +233,7 @@ export function Notebook() {
                 </p>
                 <Markdown source={e.body} />
                 {e.artefacts.length ? (
-                  <ul className="artefacts" aria-label="Attached runs">
-                    {e.artefacts.map((h) => (
-                      <li key={h} className="mono" data-artefact={h}>
-                        {h}
-                      </li>
-                    ))}
-                  </ul>
+                  <AttachedRuns digests={e.artefacts} resolved={attached} />
                 ) : null}
                 {e.files.length ? (
                   <ul className="artefacts files" aria-label="Attached files">
