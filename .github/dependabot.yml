@@ -25,6 +25,18 @@ updates:
     groups:
       ui:
         patterns: ["*"]
+    ignore:
+      # molstar declares `peerOptional pngjs@"^6.0.0"`, so a pngjs major turns `npm ci` into an ERESOLVE and
+      # every job that installs node_modules (ui, ui-lint, docker, wheel-build) dies before it compiles
+      # anything. PR #129 hit exactly that. pngjs is used in one place -- e2e/pixels.ts, reading screenshot
+      # bytes -- so a major buys nothing; unignore it when molstar widens the peer range.
+      - dependency-name: pngjs
+        update-types: ["version-update:semver-major"]
+      # typescript majors are a type-checker change, not a dependency bump: new inference and stricter lib
+      # types surface errors across the whole tree at once, and `~` already takes the patches. Bump it by
+      # hand so the fallout lands in its own reviewable commit.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   # The SHA-pinned actions in .github/workflows/. Dependabot updates the SHA and rewrites the "# vX.Y.Z" comment.
   - package-ecosystem: github-actions
