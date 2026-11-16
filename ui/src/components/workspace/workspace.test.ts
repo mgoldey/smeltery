@@ -54,3 +54,28 @@ describe("parseAnalogues", () => {
     expect(parseAnalogues("4-F").why).toContain("give a name and a SMILES");
   });
 });
+
+describe("groupPrebuilt", () => {
+  type P = Parameters<typeof import("../../pages/BenchHome").groupPrebuilt>[0][number];
+  const p = (name: string, tier: P["tier"], variant_of: string | null = null): P =>
+    ({ name, tier, variant_of, about: "", needs: "", teaches: "", verdict: { state: "RESOLVED", winner: null, floor: null, missing: [] } }) as P;
+
+  it("makes one card per tier and folds each variant under what it varies", async () => {
+    const { groupPrebuilt } = await import("../../pages/BenchHome");
+    const got = groupPrebuilt([
+      p("benzoic-rhf", "start_here"),
+      p("benzoic-pbe", "variant", "benzoic-rhf"),
+      p("docking", "teaches_unranked"),
+      p("structure", "variant", "docking"),
+      p("danuglipron-halogen", "real_campaign"),
+    ]);
+    expect(got.map((g) => g.card.name)).toEqual(["benzoic-rhf", "docking", "danuglipron-halogen"]);
+    expect(got.map((g) => g.variants.map((v) => v.name))).toEqual([["benzoic-pbe"], ["structure"], []]);
+  });
+
+  it("shows an orphaned variant rather than dropping it", async () => {
+    const { groupPrebuilt } = await import("../../pages/BenchHome");
+    const got = groupPrebuilt([p("docking", "teaches_unranked"), p("lonely", "variant", "absent")]);
+    expect(got.map((g) => g.card.name)).toEqual(["docking", "lonely"]);
+  });
+});

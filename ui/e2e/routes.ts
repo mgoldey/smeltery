@@ -5,12 +5,12 @@ import { IDX, PIPELINE } from "./bench";
 export function routes(): string[] {
   return [
     "/bench",
-    `/run/${IDX.a_resolved}/overview`,
-    `/run/${IDX.c_incomplete}/overview`,
+    `/run/${IDX.a_resolved}/provenance`,
+    `/run/${IDX.c_incomplete}/provenance`,
     ...Object.values(IDX).map((i) => `/run/${i}/results`),
     `/run/${IDX.a_resolved}/poses`,
     `/run/${IDX.e_noposes}/poses`,
-    `/run/${IDX.a_resolved}/structure`,
+    `/structure`,
     `/run/${IDX.a_resolved}/pipeline`,
     `/run/${IDX.a_resolved}/decisions`,
     `/run/${IDX.a_resolved}/proposals`,

@@ -21,6 +21,14 @@ export function Poses() {
           </a>{" "}
           (receptor, every candidate's poses and a session.pml; unzip, then open session.pml in a fresh PyMOL: <code>pymol session.pml</code>; it replaces any open session)
         </p>
+        {/* The whole run directory, which is the unit of sharing. It was `smeltery golden bundle` in a shell
+            until now -- no use to someone reading a Bench they did not start. */}
+        <p>
+          <a href={`/api/runs/${runId}/bundle.zip`} download data-testid="download-bundle">
+            Download the whole run
+          </a>{" "}
+          (the record, poses, receptor, decisions and any report, as one zip for an ELN or a colleague)
+        </p>
         {detail.data ? <PoseExplorer runId={runId} detail={detail.data} /> : null}
       </main>
     </div>

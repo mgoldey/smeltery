@@ -1,13 +1,13 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useParams } from "react-router-dom";
 import { api, unwrap } from "../api/client";
 import { CommentThread } from "../components/CommentThread";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { PoseExplorer } from "../components/PoseExplorer";
-import { useCanWrite } from "../api/capabilities";
 import { Writable } from "../components/ReadOnly";
 import { ProposeForm } from "../components/ProposeForm";
+import { Limits } from "../components/Limits";
 import { Shell } from "../components/Shell";
 import { Structure2D } from "../components/Structure2D";
 import { VerdictBanner } from "../components/VerdictBanner";
@@ -57,19 +57,6 @@ export function Report() {
       ),
     enabled: ok,
   });
-  const canWrite = useCanWrite();
-  const snapshot = useMutation({
-    mutationFn: () =>
-      unwrap(
-        api.POST("/api/runs/{run_id}/snapshot", {
-          params: { path: { run_id: runId } },
-        }),
-      ),
-  });
-  const limits = useQuery({
-    queryKey: ["limits"],
-    queryFn: () => unwrap(api.GET("/api/limits")),
-  });
   const d = detail.data;
   const sizes = new Map<number, number>();
   for (const r of table.data?.rows ?? [])
@@ -80,9 +67,40 @@ export function Report() {
       <div className="body">
         <main className="work report">
           <VerdictBanner runId={runId} />
+          {/* This page is often the whole app for someone sent a link: a section that silently disappears on a
+              failed fetch reads as "the run has none of that", so each failure says so instead. */}
+          {detail.isError ? (
+            <div className="banner" role="alert">
+              The run record could not be read: {detail.error.message}. The floor statement and the poses below are
+              missing for that reason, not because the run lacks them. Reload to try again.
+            </div>
+          ) : null}
           {d ? (
             <p className="lede" data-testid="floor-statement">
               {d.floor_statement}
+            </p>
+          ) : null}
+          {ok ? (
+            <p className="next-step">
+              <a
+                className="button"
+                href={`/api/runs/${runId}/report.html`}
+                download
+                data-testid="download-report"
+              >
+                Download this report
+              </a>{" "}
+              <span className="lede">
+                One self-contained HTML file for the notebook: every number,
+                plot and table is inside it, and its 2D and 3D views load
+                pinned, integrity-checked libraries and say so when they
+                cannot.
+              </span>
+            </p>
+          ) : null}
+          {forest.isError ? (
+            <p className="empty-state">
+              The forest plot could not be drawn: {forest.error.message}
             </p>
           ) : null}
           {ok && forest.data ? (
@@ -93,6 +111,16 @@ export function Report() {
                 apart; their order inside it means nothing.
               </p>
               <PlotlyFigure figure={forest.data} name="forest" />
+            </section>
+          ) : null}
+          {table.isError ? (
+            <section aria-label="Candidates">
+              <h2>Candidates</h2>
+              <div className="banner" role="alert">
+                The paired ΔΔE table could not be read: {table.error.message}.
+                This run's candidates cannot be listed here; reload to try
+                again.
+              </div>
             </section>
           ) : null}
           {d && table.data ? (
@@ -132,6 +160,14 @@ export function Report() {
               </ul>
             </section>
           ) : null}
+          {detail.isError ? (
+            <section aria-label="Poses">
+              <h2>Poses</h2>
+              <p className="empty-state">
+                The poses could not be loaded: {detail.error.message}
+              </p>
+            </section>
+          ) : null}
           {d ? (
             <section aria-label="Poses">
               <h2>Poses</h2>
@@ -151,97 +187,22 @@ export function Report() {
           ) : null}
           <Writable>
             <ProposeForm runId={runId} />
+            {/* A proposal is recorded and then goes quiet: the store only adds and lists, so nothing marks one
+                accepted, rejected or seen, and no notification goes anywhere. Saying where it landed and that the
+                outcome has to be asked for is the honest version -- the alternative is "waiting for review" and a
+                reader who waits. A real lifecycle needs a status on the proposal store and a route to set it. */}
+            <p className="lede" data-testid="proposal-afterwards">
+              A proposal lands in this run's{" "}
+              <Link to={`/run/${runId}/proposals`}>review queue</Link>, where the computational chemist can take it
+              into a next round. Nothing here reports back when they do: the queue records who proposed what, and
+              not what was decided about it, so ask them if you need to know.
+            </p>
           </Writable>
           <section aria-label="Discussion">
             <h2>Discussion</h2>
             <CommentThread runId={runId} anchor="run" title="this run" />
           </section>
-          {limits.data ? (
-            <section aria-label="What this result cannot tell you">
-              <details>
-                <summary>
-                  <h2 style={{ display: "inline" }}>
-                    What this result cannot tell you
-                  </h2>
-                </summary>
-                <p className="lede">
-                  Measured limits of the funnel (docs/limits.md). Each rests on
-                  one system or one model pair.
-                </p>
-                <table className="grid">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Limit</th>
-                      <th>Magnitude</th>
-                      <th>Claim it forbids</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {limits.data.measured.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.id}</td>
-                        <td>{l.limit}</td>
-                        <td>{l.magnitude}</td>
-                        <td>{l.forbids}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <h3>Not yet measured</h3>
-                <table className="grid">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Limit</th>
-                      <th>Status</th>
-                      <th>Claim it forbids until measured</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {limits.data.unmeasured.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.id}</td>
-                        <td>{l.limit}</td>
-                        <td>{l.status}</td>
-                        <td>{l.forbids}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </details>
-            </section>
-          ) : null}
-          {ok && canWrite ? (
-            <section aria-label="Archive">
-              <h2>Archive</h2>
-              <p className="lede">
-                A self-contained HTML copy for the notebook: every number, plot
-                and table is inside the file. Its 2D and 3D views load pinned,
-                integrity-checked libraries and say so when they cannot.
-              </p>
-              <button
-                type="button"
-                onClick={() => snapshot.mutate()}
-                disabled={snapshot.isPending}
-              >
-                Archive snapshot
-              </button>
-              {snapshot.isError ? (
-                <p className="field-error">{snapshot.error.message}</p>
-              ) : null}
-              {snapshot.data ? (
-                <p role="status" data-testid="snapshot">
-                  Written to <span className="mono">{snapshot.data.path}</span>,
-                  sha256{" "}
-                  <span className="mono" data-testid="snapshot-sha">
-                    {snapshot.data.sha256}
-                  </span>
-                  .
-                </p>
-              ) : null}
-            </section>
-          ) : null}
+          <Limits />
         </main>
       </div>
     </Shell>

@@ -5,6 +5,8 @@ import { useCanWrite } from "../api/capabilities";
 import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
 import { EmptyState } from "../components/EmptyState";
+import { Limits } from "../components/Limits";
+import { pipelineHref } from "../components/runIdentity";
 
 type Method = Schemas["MethodInfo"];
 type Param = Schemas["MethodParam"];
@@ -68,6 +70,12 @@ function differs(p: Param): boolean {
 
 function MethodCard({ m }: { m: Method }) {
   const qc = useQueryClient();
+  // "Used by" links into the pipeline editor, where the step views read a run. Without `?run=` each of them says
+  // the step has not run, so the link that is meant to show this method at work shows nothing of it.
+  const runs = useQuery({
+    queryKey: ["runs"],
+    queryFn: () => unwrap(api.GET("/api/runs")),
+  });
   const editable = m.params.filter((p) => p.kind !== "sites");
   const saved = Object.fromEntries(
     editable.map((p) => [p.name, show(p.workspace_default)]),
@@ -159,7 +167,9 @@ function MethodCard({ m }: { m: Method }) {
             ? m.used_by.map((n, i) => (
                 <span key={n}>
                   {i ? ", " : ""}
-                  <Link to={`/pipelines/${encodeURIComponent(n)}`}>{n}</Link>
+                  <Link to={pipelineHref(n, runs.data)} data-pipeline={n}>
+                    {n}
+                  </Link>
                 </span>
               ))
             : "no pipeline in this workspace"}
@@ -281,6 +291,11 @@ export function Methods() {
             workspace default is copied into a step when you add the method, so
             a run can always be redone from its own folder.
           </p>
+          {/* The limits come before the methods: they are the frame a method is chosen inside, and they used to
+              live only on Report, collapsed, where the person picking a method never saw them. Collapsed, but
+              with its count in the summary, so it reads as something to open rather than something to scroll
+              past: opened by default it is 1561px of table and the page's own methods start below the fold. */}
+          <Limits lede="What the funnel cannot tell you, whichever method you place here. Each limit rests on one system or one model pair (docs/limits.md)." />
           {q.isError ? (
             <div className="banner" role="alert">
               {q.error.message}

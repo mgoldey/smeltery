@@ -46,3 +46,48 @@ export function useOpenRunPipeline(runId: string) {
     },
   });
 }
+
+/**
+ * Start the next round from a run's decisions and accepted proposals.
+ *
+ * This is the edge the app was missing: a decision recorded here had no way to reach the next run, so the user left
+ * Bench, hand-edited `[decisions] file = "..."` into a TOML, and came back. The server does the carrying
+ * (`use_cases/next_round.py`); this opens the workspace on the new pipeline's Ligands step, where the candidate list
+ * is what the round is about.
+ *
+ * The server's `notes` explain what it carried and dropped. The workspace reads them from the pipeline itself
+ * (they are written into its config and read back on every GET), so they survive a reload rather than vanishing
+ * like a toast.
+ */
+export function useStartNextRound(runId: string) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: async ({
+      addProposals = [],
+      drop = [],
+      carryDecisions = true,
+    }: { addProposals?: string[]; drop?: string[]; carryDecisions?: boolean } = {}) => {
+      const runs = await qc.fetchQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+      const run = runByRef(runs, runId);
+      if (!run) throw new Error(`no run ${runId}`);
+      const made = await api.POST("/api/pipelines", {
+        body: {
+          name: `${pipelineName(run)}-next`,
+          next_round: { run: run.id, carry_decisions: carryDecisions, add_proposals: addProposals, drop },
+        },
+      });
+      if (!made.response.ok) {
+        throw new ApiError(
+          made.response.status,
+          describeReason(made.response.status, made.response.statusText, made.error),
+        );
+      }
+      return made.data!;
+    },
+    onSuccess: (doc) => {
+      void qc.invalidateQueries({ queryKey: ["pipelines"] });
+      navigate(`/pipelines/${doc.name}?step=ligands`);
+    },
+  });
+}

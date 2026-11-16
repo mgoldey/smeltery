@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, unwrap } from "../../api/client";
 import { LineageInspector } from "../../components/LineageInspector";
 import { EmptyState } from "../../components/EmptyState";
@@ -53,6 +54,15 @@ export function Results() {
     <div className="body">
       <main className="work">
         <VerdictBanner runId={runId} />
+        {/* A failed ΔΔE read used to leave the verdict banner over empty space, which reads as "this run has no
+            analogues" rather than "the table could not be fetched". The two are different facts. */}
+        {table.isError ? (
+          <div className="banner" role="alert">
+            The paired ΔΔE table could not be read: {table.error.message}. The verdict above still holds; reload to
+            try again.
+          </div>
+        ) : null}
+        {ok && table.isPending ? <p className="empty-state">Reading the paired ΔΔE table…</p> : null}
         {ok && table.data ? (
           <>
             <h2>Paired ΔΔE against the parent</h2>
@@ -61,10 +71,11 @@ export function Results() {
               order inside it means nothing.
             </p>
             {table.data.rows.length === 0 ? (
-              <EmptyState action={{ label: "Open the run overview", to: `/run/${runId}/overview` }}>
+              <EmptyState action={{ label: "Open the run provenance", to: `/run/${runId}/provenance` }}>
                 No analogue has a paired ΔΔE in this run; the parent alone gives nothing to compare.
               </EmptyState>
             ) : null}
+            {forest.isError ? <p className="empty-state">The forest plot could not be drawn: {forest.error.message}</p> : null}
             {forest.data && table.data.rows.length ? <PlotlyFigure figure={forest.data} name="forest" /> : null}
             {table.data.rows.length ? (
               <table className="grid" aria-label="Paired ΔΔE">
@@ -106,8 +117,32 @@ export function Results() {
                 </tbody>
               </table>
             ) : null}
+            {/* The verdict is a reading, not a decision. This is the one step the app exists to support, and until
+                now it was a tab you had to know to click. */}
+            {table.data.rows.length ? (
+              <p className="next-step">
+                <Link className="button primary" to={`/run/${runId}/decisions`} data-testid="go-decide">
+                  Decide on these candidates
+                </Link>{" "}
+                <span className="lede">
+                  Keep, reject or hold each one with a reason, then carry those decisions into the next round.
+                </span>
+              </p>
+            ) : null}
+            {table.data.rows.length ? (
+              // Deciding is the primary move off this page; comparing is a side road, so it is a quiet link and
+              // not a second button competing with it. Compare had no way in from a run at all before this.
+              <p className="lede" data-testid="go-compare-line">
+                Ran this series another way?{" "}
+                <Link to={`/compare?a=${encodeURIComponent(runId)}`} data-testid="go-compare">
+                  Compare this run with another
+                </Link>
+                .
+              </p>
+            ) : null}
             <h2>Can these two be told apart?</h2>
             <p className="lede">The funnel's own test for each pair, at the same z and floor as the cut.</p>
+            {matrix.isError ? <p className="empty-state">The pair matrix could not be drawn: {matrix.error.message}</p> : null}
             {matrix.data && table.data.rows.length ? <PlotlyFigure figure={matrix.data} name="matrix" /> : null}
             <h2>Per-pose pairs</h2>
             <div className="controls" role="group" aria-label="Per-pose view">

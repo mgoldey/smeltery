@@ -53,7 +53,7 @@ test.describe(() => {
   });
 
   test("how much of the receptor the pocket scene asks the GPU to draw", async ({ page }) => {
-    await page.goto(`/run/${IDX.a_resolved}/structure`);
+    await page.goto(`/structure`);
     const host = page.locator("[data-viewer]").first();
     const t0 = Date.now();
     await expect.poll(async () => Number(await host.getAttribute("data-loaded")), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);

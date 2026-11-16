@@ -27,6 +27,7 @@ from starlette.background import BackgroundTask
 from smeltery import __version__ as smeltery_version
 from smeltery.bench.ports.pipeline_store import NAME, PipelineFile, StaleWrite
 from smeltery.bench.provisional import place_site
+from smeltery.decisions import DecisionSet
 from smeltery.gui import steps as step_model
 from smeltery.gui._toml import dumps
 from smeltery.gui.catalog import method
@@ -34,12 +35,12 @@ from smeltery.gui.config_text import ConfigTextError, apply, diff_lines
 from smeltery.gui.pipeline import Pipeline
 from smeltery.run_inputs import input_paths
 
-from ..use_cases import bundle_import
+from ..use_cases import bundle_import, next_round
 from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
 from . import models as M
 from . import prebuilt as prebuilt_api
-from .common import confined_out, ports, record, row
+from .common import confined_out, ports, record, row, run
 from .work import pipeline_from_run, pipeline_issues
 
 router = APIRouter(prefix="/api", tags=["pipelines"])
@@ -200,7 +201,9 @@ def _doc(f: PipelineFile, notes: list[str] | None = None) -> M.PipelineDoc:
         folder=str(f.folder),
         ok=not any(i.level == "error" for i in issues),
         issues=issues,
-        notes=notes or [],
+        # A next round says in its own config what it carried, so every GET explains it, not only the POST that
+        # made it. Without this the user is handed a pipeline whose rejected candidate looks like all the others.
+        notes=notes if notes is not None else next_round.notes_in(f.text),
     )
 
 
@@ -396,21 +399,83 @@ class _Conflict(Exception):
     pass
 
 
+def _next_round(request: Request, spec: M.NextRoundIn, staging: Path) -> tuple[str, dict[str, Path], list[str]]:
+    """The next round of run `spec.run`: its recorded config with the decisions and accepted proposals carried in.
+
+    Everything that decides the round lives in `use_cases.next_round`; this only gathers what the run holds (its
+    config and inputs, its decisions file, the proposals it names) and turns a refusal into a 400.
+    """
+    text, files, notes = _from_run(request, spec.run)
+    r = run(request, spec.run)
+    digest = r.record["input_digest"]
+    dpath = Path(r.out_dir) / f"decisions-{digest[:12]}.json"
+    decisions = None
+    if dpath.is_file():
+        try:
+            decisions = DecisionSet.load(dpath)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    by_id = {p.id: p for p in ports(request).project_store.list_proposals(digest)}
+    proposed: list[next_round.Proposed] = []
+    for pid in spec.add_proposals:
+        p = by_id.get(pid)
+        if p is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"proposal {pid!r} does not belong to run {spec.run} (digest {digest[:12]})",
+            )
+        proposed.append(next_round.Proposed(id=p.id, candidate=p.candidate, smiles=p.smiles))
+    try:
+        made = next_round.plan(
+            text=text,
+            candidates=dict(r.candidates),
+            parent=r.parent,
+            decisions=decisions,
+            decisions_name=dpath.name if decisions is not None else None,
+            carry_decisions=spec.carry_decisions,
+            proposals=proposed,
+            drop=list(spec.drop),
+            staging=staging,
+        )
+    except next_round.NextRoundRefused as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ConfigTextError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return made.toml, {**files, **made.files}, notes + made.notes
+
+
 @router.post(
     "/pipelines",
     response_model=M.PipelineDoc,
     status_code=201,
-    responses={409: {"model": M.Problem}},
+    responses={400: {"model": M.Problem}, 409: {"model": M.Problem}},
 )
 def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
-    given = [x for x in (body.from_run, body.from_prebuilt, body.blank) if x is not None]
+    given = [x for x in (body.from_run, body.from_prebuilt, body.blank, body.next_round) if x is not None]
     if len(given) != 1:
-        raise HTTPException(status_code=400, detail="give exactly one of from_run, from_prebuilt, blank")
+        raise HTTPException(status_code=400, detail="give exactly one of from_run, from_prebuilt, blank, next_round")
     store = _store(request)
     notes: list[str] = []
     files: dict[str, Path] = {}
     staging: tempfile.TemporaryDirectory[str] | None = None
-    if body.from_prebuilt is not None:
+    name = body.name
+    if body.next_round is not None:
+        if not NAME.fullmatch(name):
+            raise HTTPException(
+                status_code=400, detail=f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}"
+            )
+        staging = tempfile.TemporaryDirectory(prefix="smeltery-next-round-")
+        try:
+            text, files, notes = _next_round(request, body.next_round, Path(staging.name))
+            # a second next round from the same run is the normal case, not a mistake the user can act on
+            name = _unique_name(store, name)
+        except _Conflict as e:
+            staging.cleanup()
+            return JSONResponse(status_code=409, content={"reason": str(e)})
+        except BaseException:
+            staging.cleanup()
+            raise
+    elif body.from_prebuilt is not None:
         if prebuilt_api.folder(body.from_prebuilt) is None:
             raise HTTPException(status_code=400, detail=f"unknown prebuilt pipeline {body.from_prebuilt!r}")
         # R15: the config is copied EXACTLY, no workspace defaults. The example run goes in as run/, so the run store
@@ -435,11 +500,11 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
         except _Conflict as e:
             return JSONResponse(status_code=409, content={"reason": str(e)})
     try:
-        made = store.create(body.name, text, files)
+        made = store.create(name, text, files)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except FileExistsError:
-        return JSONResponse(status_code=409, content={"reason": f"pipeline {body.name} already exists"})
+        return JSONResponse(status_code=409, content={"reason": f"pipeline {name} already exists"})
     finally:
         if staging is not None:
             staging.cleanup()

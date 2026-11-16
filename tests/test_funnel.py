@@ -18,6 +18,7 @@ from smeltery import (
     paired_delta,
     require_same_formula,
 )
+from smeltery.funnel import resolved
 
 
 def m(mean, sem, n=6):
@@ -41,6 +42,22 @@ def test_unresolved_boundary_is_reported_not_decided():
 def test_whole_tie_group_fits_inside_keep():
     res = cut({"a": m(-1.0, 0.5), "b": m(-0.8, 0.5), "c": m(5.0, 0.1)}, keep=2)
     assert res.survivors == ["a", "b"]
+
+
+def test_a_chain_of_unresolved_neighbours_does_not_hide_a_resolved_pair():
+    """Non-significance does not chain: the ends of a run of unresolved neighbours can be resolved.
+
+    Means 0.00/0.25/0.50/0.75 at sem 0.10: every adjacent pair is unresolved, but a-c, a-d and b-d are
+    each resolved. Grouping by neighbours alone put all four in one group and reported the whole cut
+    UNRANKED, throwing away three conclusions the statistics do support. A group may only hold
+    candidates that are pairwise unresolved from *every* other member.
+    """
+    ms = {"a": m(0.00, 0.10), "b": m(0.25, 0.10), "c": m(0.50, 0.10), "d": m(0.75, 0.10)}
+    assert resolved(ms["a"], ms["d"], 2.0, 0.0)
+    res = cut(ms, keep=2)
+    assert all(not (len(g) > 1 and any(resolved(ms[x], ms[y], 2.0, 0.0) for x in g for y in g)) for g in res.groups), (
+        f"a group holds a resolved pair: {res.groups}"
+    )
 
 
 def test_systematic_floor_blocks_a_ranking_the_sem_alone_would_allow():

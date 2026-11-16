@@ -68,19 +68,20 @@ export function App() {
               </NeedsWrite>
             }
           />
+          {/* The structure inspector never referenced a run, so it lives at the top level rather than pretending
+              to be a view of one. */}
+          <Route
+            path="/structure"
+            element={
+              <NeedsWrite what="Structure">
+                <Structure />
+              </NeedsWrite>
+            }
+          />
           <Route path="/run/:runId" element={<RunLayout />}>
             <Route index element={<Navigate to="results" replace />} />
             <Route path="results" element={<Results />} />
             <Route path="poses" element={<Poses />} />
-            <Route
-              path="structure"
-              element={
-                <NeedsWrite what="Structure">
-                  <Structure />
-                </NeedsWrite>
-              }
-            />
-            <Route path="pipeline" element={<RunPipeline />} />
             <Route
               path="decisions"
               element={
@@ -90,7 +91,11 @@ export function App() {
               }
             />
             <Route path="proposals" element={<Proposals />} />
-            <Route path="overview" element={<Overview />} />
+            <Route path="provenance" element={<Overview />} />
+            {/* Links written before the rename, and the old redirect-tab, still resolve. */}
+            <Route path="overview" element={<Navigate to="../provenance" replace />} />
+            <Route path="structure" element={<Navigate to="/structure" replace />} />
+            <Route path="pipeline" element={<RunPipeline />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

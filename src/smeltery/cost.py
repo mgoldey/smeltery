@@ -267,7 +267,10 @@ class RhfCalibration:
 
 
 def load_measurements() -> dict:
-    return json.loads(resources.files("smeltery").joinpath("data", DATA_FILE).read_text())
+    # One component per `joinpath` call: see tests/test_resource_joinpath.py. `smeltery` resolves to a plain
+    # path in a source checkout, but a namespace or multi-location layout gives a `MultiplexedPath`, whose
+    # `joinpath` took a single argument until Python 3.12.
+    return json.loads(resources.files("smeltery").joinpath("data").joinpath(DATA_FILE).read_text())
 
 
 def fit_rhf_calibration(record: dict) -> RhfCalibration:
