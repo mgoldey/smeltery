@@ -44,6 +44,8 @@ def compute_energy(
     else:
         raise ValueError(f"unknown method {method!r}; expected 'rhf' or 'dft'")
     return EnergyResult(
+        # Newer ferric (mgoldey/ferric#676) has both spellings on every SCF result; older wheels give
+        # DftResult only `total_energy`, so keep the fallback while the ferric floor predates it.
         energy=raw.energy if hasattr(raw, "energy") else raw.total_energy,
         converged=raw.converged,
         raw=raw,
