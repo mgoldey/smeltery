@@ -270,7 +270,8 @@ def compute_interaction_energy(
                 f"SCF did not converge for the {label} term ({method}/{basis}). An unconverged term makes the "
                 "difference meaningless, so this is fatal rather than a warning."
             )
-        # RhfResult exposes `.energy`; DftResult exposes `.total_energy` (the split energy.compute_energy handles).
+        # Newer ferric (mgoldey/ferric#676) has both `.energy` and `.total_energy` on every SCF result; the
+        # fallback keeps older wheels, where DftResult has only `.total_energy`, working (as energy.compute_energy).
         return raw.energy if hasattr(raw, "energy") else raw.total_energy
 
     a, b = fragment_a, fragment_b

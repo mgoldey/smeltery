@@ -787,8 +787,9 @@ class FieldInteraction:
 def _dft_energy(result) -> float:
     """Total energy from a ferric `DftResult`, refusing to double-count dispersion.
 
-    `DftResult` exposes `total_energy` (not `energy`, which is `RhfResult`'s
-    name) plus `e_scf` and `e_dispersion`. A plain `functional="PBE"` applies
+    Reads `total_energy`, which every ferric `DftResult` has (ferric after
+    mgoldey/ferric#676 also exposes `energy` as an alias; released wheels may
+    not), plus `e_scf` and `e_dispersion`. A plain `functional="PBE"` applies
     NO dispersion -- verified: `e_dispersion is None` and `total_energy ==
     e_scf` -- and ferric rejects "PBE-D3"/"PBE-D3BJ"/"PBE+D3" as unknown libxc
     names, so dispersion can only be added through `d3bj_energy`. Should a
