@@ -24,20 +24,29 @@ dataclass, so each one publishes a real `outputSchema` and a client reads fields
 
 | Tool | Signature | What it does |
 |---|---|---|
-| `screen_candidates` | `(target, ligand_set, reference_ligand=None, target_class=None, keep=None, campaign=None, out_dir=None, dry_run=False, confirm=False)` | Plans the screen, checks it against the ceiling, submits it through the campaign `JobBackend` ([jobs.md](jobs.md)) and returns a **handle at once**. It never waits for a calculation. |
+| `screen_candidates` | `(target, ligand_set, reference_ligand=None, target_class=None, keep=None, campaign=None, out_dir=None, dry_run=False, confirm=False, relax_unmapped=None)` | Plans the screen, checks it against the ceiling, submits it through the campaign `JobBackend` ([jobs.md](jobs.md)) and returns a **handle at once**. It never waits for a calculation. |
 | `run_status` | `(handle)` | The job's state, when it last changed, why it stopped if it did, and progress per stage where the run leaves enough on disk to tell. |
 | `explain_drop` | `(candidate, handle)` | Which stage dropped a molecule, on what number, against what threshold and what systematic-error floor — all read from that run's own record. No new calculation. |
-| `estimate_cost` | `(target, ligand_set, reference_ligand=None, target_class=None, keep=None)` | Candidates, poses, calculation count, predicted CPU-hours and memory. Submits nothing. |
+| `estimate_cost` | `(target, ligand_set, reference_ligand=None, target_class=None, keep=None, relax_unmapped=None)` | Candidates, poses, calculation count, predicted CPU-hours and memory. Submits nothing. |
 
 There is deliberately **no fifth, catch-all tool**. A question none of these answers comes back as a refusal naming
 what is answerable, rather than landing in a bucket that answers everything badly.
 
 ### Arguments an agent can actually supply
 
-* `target` is a file: a `.pdb` or `.pqr` pocket, or a `.toml` **target definition** holding only the sections that
-  describe the target — `[pocket]` / `[[pocket.site]]`, `[structure]`, `[docking]`, `[gates]`. A target definition
-  that also names candidates or a measurement section is refused: the ligands come from `ligand_set` and the
-  measurement from the target class. Relative paths inside it resolve against the file.
+* `target` is a file: a `.pdb` or `.pqr` pocket, or a `.toml` **target definition** ([targets.md](targets.md)):
+  `schema_version = 1` plus only the sections that describe the target — `[pocket]` / `[[pocket.site]]`,
+  `[structure]`, `[docking]`, `[gates]` — each checked by `smeltery run`'s own validator. Anything else (candidates,
+  a measurement section, an unknown key) is refused with the reason: the ligands come from `ligand_set` and the
+  measurement from the target class. Relative paths inside it resolve against the file. `smeltery target check FILE`
+  runs the same check.
+* `relax_unmapped` (optional, `true`/`false`) replaces the class's default (`true`). Each analogue's shapes copy the
+  reference molecule's shape for the shared part; `true` then relaxes only the part the analogue adds, holding the
+  shared part still. `false` leaves that part exactly as placed, which risks a strained joint the pose geometry check
+  refuses as "not this molecule" — a substituted analogue can then stop the screen (tested: octanol against an
+  ethanol reference fails this way). An override is listed in the plan's `overrides` (setting, value, class default,
+  risk), and a submitted screen's `config.toml` carries the value in `[poses]` plus a comment at its top naming the
+  override, so the run is auditable.
 * `ligand_set` is `{name: SMILES}` with at least two entries, one of them the reference the others are measured
   against (`reference_ligand`, else the first).
 * `handle` is the screen's run directory. `RUN_DIR/attestation/state.json` names the backend and the job, which is
@@ -87,6 +96,14 @@ Three facts hold for every row, and each is a repository fact rather than a pref
   `explain_drop` says so in its answer: `floor_measured` is `false`.
 * **`relax_unmapped = true`** relaxes only the substituent an analogue adds, with the shared core held fixed.
   Without it the junction is left unrelaxed and the pose geometry gate rejects the pose as "not this molecule".
+  It is the one class default a caller may replace (`relax_unmapped=false`, see above), and it applies to the docked
+  forms too (`[poses] relax_unmapped`, beside docking's own pose count).
+
+**Why only `relax_unmapped` is overridable, and why as a tool argument.** It is about how the *ligands'* shapes are
+built, not about the pocket, so it does not belong in a target definition (which describes only the target, by
+design); an argument also puts the choice in the same call, and the same plan output, as the class it departs from.
+`keep` was already an argument. The basis, tier, pose count, `z` and `floor` stay with the class: they are what its
+cost model and its `why` are measured for, so replacing them would hand back numbers the class cannot vouch for.
 
 Each class also carries `why` and `limits` strings, returned with every plan, so the caller sees what the defaults
 buy and what they cost (for example: `fast-triage`'s three poses against a measured pose-ensemble noise of

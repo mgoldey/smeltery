@@ -99,7 +99,9 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
             "(poses) of each molecule are tried, how strict the ranking is -- so that nobody has to pick a basis "
             f"set or a functional. The classes are: {classes}. Set dry_run=True to get the plan and its predicted "
             "cost without submitting anything. A screen over the configured ceiling is refused unless "
-            "confirm=True. Submitting the same screen again reuses the stages an identical earlier screen in this "
+            "confirm=True. "
+            + RELAX_HELP
+            + " Submitting the same screen again reuses the stages an identical earlier screen in this "
             "workspace already finished, instead of computing them again; the answer says how many of its stages "
             "that is (reused_stages of reusable_stages). Returns the handle, the plan, and what the ceiling said."
         ),
@@ -113,6 +115,7 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
         keep: int | None = None,
         campaign: str | None = None,
         out_dir: str | None = None,
+        relax_unmapped: bool | None = None,
         dry_run: bool = False,
         confirm: bool = False,
     ) -> Screen:
@@ -124,6 +127,7 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
             target_class=target_class,
             campaign=campaign,
             keep=keep,
+            relax_unmapped=relax_unmapped,
             out_dir=out_dir,
             root=ctx.root,
             backend=ctx.backend,
@@ -175,7 +179,7 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
             "these settings -- a basis set or element it has never measured -- and the accompanying basis says "
             "which; no number is invented in its place. Where a figure does exist it is a prediction from measured "
             "reference runs, and a lower bound for a molecule whose calculations converge more slowly than the "
-            "reference did."
+            "reference did. " + RELAX_HELP
         ),
     )
     @_guard
@@ -185,6 +189,7 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
         reference_ligand: str | None = None,
         target_class: str | None = None,
         keep: int | None = None,
+        relax_unmapped: bool | None = None,
     ) -> Estimate:
         _cfg, built = screening.plan(
             target,
@@ -192,6 +197,7 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
             reference_ligand=reference_ligand,
             target_class=target_class,
             keep=keep,
+            relax_unmapped=relax_unmapped,
         )
         ceiling = screening.check_ceiling(built.cost, ctx.settings)
         return Estimate(
@@ -204,6 +210,17 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
         )
 
     return server
+
+
+#: The one class default a caller may replace, explained for a reader with no chemistry.
+RELAX_HELP = (
+    "Each analogue's shapes are built by copying the reference molecule's shape for the part they share and "
+    "placing the rest; relax_unmapped (default true, from the target class) then gently relaxes only that placed "
+    "rest, holding the shared part still. Leave it out to take the class default. Setting it to false keeps the "
+    "placed part exactly as built, which risks a strained joint that the pose geometry check rejects as not being "
+    "that molecule -- substituted analogues may then be refused and the screen stop. Any override is listed in the "
+    "plan's `overrides` and written into the screen's configuration."
+)
 
 
 @dataclass

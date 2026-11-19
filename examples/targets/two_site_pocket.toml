@@ -1,0 +1,19 @@
+# A target definition (docs/targets.md): what describes the binding pocket, and nothing else.
+# Use it as screen_candidates(target="examples/targets/two_site_pocket.toml", ...), or check it with
+#     smeltery target check examples/targets/two_site_pocket.toml
+schema_version = 1
+
+# Two explicit point charges, each `distance` Angstrom beyond reference-molecule atom `atom` along the
+# from_atom -> atom direction (0-based atom indices, first pose): +1 beyond atom 2, -0.5 beyond atom 0.
+# A real pocket is usually a file instead: [pocket] file = "pocket.pdb" (relative to this file).
+[[pocket.site]]
+q = 1.0
+atom = 2
+from_atom = 1
+distance = 3.0
+
+[[pocket.site]]
+q = -0.5
+atom = 0
+from_atom = 1
+distance = 3.5

@@ -8,6 +8,16 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- Target definition files are a documented format (`smeltery.target_file`, docs/targets.md): `schema_version = 1` plus
+  only `[pocket]`/`[[pocket.site]]`, `[structure]`, `[docking]`, `[gates]`, each checked by `smeltery run`'s own
+  validator; an unknown section or key, a missing or other version, or a missing pocket file is refused with the
+  reason. `smeltery target check FILE` runs the check; example: `examples/targets/two_site_pocket.toml`. MCP's
+  `target` now requires `schema_version`.
+- MCP `screen_candidates` / `estimate_cost` take `relax_unmapped` (default: the target class's `true`). The description
+  says what turning it off risks (the pose geometry check may refuse substituted analogues); an override is listed in
+  the plan's `overrides` and written into the screen's `config.toml` (the value, plus a comment naming the override).
+  The class default now also reaches docked screens (`[poses] relax_unmapped`), which previously got the tier's own
+  default (`false`).
 - Resumability and cancellation (`smeltery.reuse`, docs/jobs.md "Resumability"): every stage of a run gets a content
   digest over its upstream output, its settings and the code identity (smeltery's source bytes, ferric's build), and
   a resubmitted identical campaign reuses the measurement and any analysis an earlier run completed, from a

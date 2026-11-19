@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import math
 import tempfile
-import tomllib
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +29,7 @@ from . import targets
 #: The quantity the funnel cuts on; mirrors `cli.QUANTITY` (pinned equal in tests/test_mcp_server.py).
 QUANTITY = "dE_int"
 #: Config sections a target file may carry. Everything else about the screen comes from the ligands and the class.
-TARGET_SECTIONS = ("pocket", "structure", "docking", "gates")
+TARGET_SECTIONS = ("pocket", "structure", "docking", "gates")  # mirrors smeltery.target_file.SECTIONS
 #: Where a screen goes when the caller names no directory, under the workspace root.
 SCREEN_DIR = Path(".smeltery") / "screens"
 
@@ -65,10 +64,12 @@ def _ligands(ligand_set: dict[str, str], reference: str | None) -> tuple[dict[st
 def target_sections(target: str) -> dict:
     """The pocket/structure part of the config, from the target file.
 
-    A `.pdb` or `.pqr` is the pocket itself; a `.toml` is a target definition holding any of
-    `[pocket]`/`[[pocket.site]]`, `[structure]`, `[docking]`, `[gates]` -- the parts of a campaign config that
-    describe the target rather than the ligands. Relative file paths inside it are resolved against the file, so
-    the sections can be staged into a run directory from anywhere."""
+    A `.pdb` or `.pqr` is the pocket itself; a `.toml` is a target definition (`smeltery.target_file`,
+    docs/targets.md): `schema_version = 1` and any of `[pocket]`/`[[pocket.site]]`, `[structure]`, `[docking]`,
+    `[gates]`, each checked by `smeltery run`'s own validator. Relative file paths inside it are resolved against the
+    file, so the sections can be staged into a run directory from anywhere."""
+    from ..target_file import TargetFileError, load
+
     p = Path(target).expanduser()
     if not p.is_file():
         raise Refusal(f"target {target!r} is not a file; pass a .pdb or .pqr pocket, or a .toml target definition")
@@ -78,31 +79,33 @@ def target_sections(target: str) -> dict:
     if suffix != ".toml":
         raise Refusal(f"target {target!r}: expected a .pdb or .pqr pocket, or a .toml target definition")
     try:
-        cfg = tomllib.loads(p.read_text())
-    except (OSError, tomllib.TOMLDecodeError) as e:
-        raise Refusal(f"cannot read the target definition {target!r}: {e}") from e
-    extra = sorted(set(cfg) - set(TARGET_SECTIONS))
-    if extra:
-        raise Refusal(
-            f"the target definition {target!r} holds {extra}, which describe the ligands or the measurement, not "
-            f"the target; it may hold only {list(TARGET_SECTIONS)} (the ligands come from ligand_set and the "
-            "measurement from the target class)"
-        )
-    if not cfg:
-        raise Refusal(f"the target definition {target!r} is empty; it must describe the pocket")
-    return _absolute_paths(cfg, p.resolve().parent)
+        return load(p)
+    except TargetFileError as e:
+        raise Refusal(str(e)) from e
 
 
-def _absolute_paths(cfg: dict, base: Path) -> dict:
-    from ..run_inputs import input_paths
+@dataclass
+class Override:
+    """A target-class default the caller replaced, recorded so the screen is auditable."""
 
-    out = json.loads(json.dumps(cfg, default=str))
-    for table, key in input_paths():
-        section = out.get(table)
-        value = section.get(key) if isinstance(section, dict) else None
-        if isinstance(value, str) and not Path(value).is_absolute() and (base / value).is_file():
-            section[key] = str((base / value).resolve())
-    return out
+    setting: str
+    value: bool
+    class_default: bool
+    risk: str
+
+
+RELAX_RISK = (
+    "With relax_unmapped off, the part of each analogue that differs from the reference molecule is placed without "
+    "being relaxed, so the joint between the shared core and the new part can be strained; the pose geometry check "
+    "may then reject substituted analogues as not being the molecule they claim to be, which stops the screen."
+)
+
+
+def overrides(cls: targets.TargetClass, relax_unmapped: bool | None) -> list[Override]:
+    """The class defaults this screen replaces (empty when it takes the class as it is)."""
+    if relax_unmapped is None or bool(relax_unmapped) == cls.relax_unmapped:
+        return []
+    return [Override("relax_unmapped", bool(relax_unmapped), cls.relax_unmapped, "" if relax_unmapped else RELAX_RISK)]
 
 
 def build_config(
@@ -113,6 +116,7 @@ def build_config(
     target_class: str | None = None,
     campaign: str | None = None,
     keep: int | None = None,
+    relax_unmapped: bool | None = None,
 ) -> tuple[dict, targets.TargetClass]:
     """The campaign config a screen runs, and the class it came from. Validated by `smeltery run`'s own checker."""
     from ..cli import ConfigError, validate_config
@@ -138,10 +142,17 @@ def build_config(
         section: knobs,
         "cut": {"keep": n_keep, "z": cls.z, "floor": cls.floor},
     }
+    if relax_unmapped is not None and not isinstance(relax_unmapped, bool):
+        raise Refusal(
+            f"relax_unmapped must be true or false (or left out for the class default), got {relax_unmapped!r}"
+        )
+    relax = cls.relax_unmapped if relax_unmapped is None else relax_unmapped
     if "docking" not in cfg and "structure" not in cfg:
         # With docking the parent's poses are docked and `[poses] n_poses` is refused, so the class's pose count
         # applies only to the undocked form; `plan.poses_per_candidate` reports what was actually built either way.
-        cfg["poses"] = {"n_poses": cls.n_poses, "relax_unmapped": cls.relax_unmapped}
+        cfg["poses"] = {"n_poses": cls.n_poses, "relax_unmapped": relax}
+    else:  # docked: the pose count is docking's, but the analogues are still built on the docked parent's poses
+        cfg["poses"] = {"relax_unmapped": relax}
     try:
         return validate_config(json.loads(json.dumps(cfg))), cls
     except ConfigError as e:
@@ -185,6 +196,10 @@ class Plan:
     cost: Cost
     class_why: str
     class_limits: str
+    #: Whether each analogue's own part is relaxed after being placed on the reference's shape (see `overrides`).
+    relax_unmapped: bool = True
+    #: The class defaults the caller replaced; empty when the screen takes its class as it is.
+    overrides: list[Override] = field(default_factory=list)
 
 
 FLOOR_NOTE = (
@@ -215,6 +230,7 @@ def plan(
     target_class: str | None = None,
     campaign: str | None = None,
     keep: int | None = None,
+    relax_unmapped: bool | None = None,
 ) -> tuple[dict, Plan]:
     """Build the config, build the plan everything before the SCFs needs, and price it. Submits nothing."""
     cfg, built, _reuse = _plan(
@@ -224,6 +240,7 @@ def plan(
         target_class=target_class,
         campaign=campaign,
         keep=keep,
+        relax_unmapped=relax_unmapped,
     )
     return cfg, built
 
@@ -245,6 +262,7 @@ def _plan(
     target_class: str | None = None,
     campaign: str | None = None,
     keep: int | None = None,
+    relax_unmapped: bool | None = None,
     store=None,
 ) -> tuple[dict, Plan, Reuse]:
     """`plan`, plus what the stage store (`smeltery.reuse`) already holds of this screen."""
@@ -258,6 +276,7 @@ def _plan(
         target_class=target_class,
         campaign=campaign,
         keep=keep,
+        relax_unmapped=relax_unmapped,
     )
     with tempfile.TemporaryDirectory(prefix="smeltery-plan-") as scratch:
         try:
@@ -296,6 +315,8 @@ def _plan(
             cost=cost,
             class_why=cls.why,
             class_limits=cls.limits,
+            relax_unmapped=bool(cfg["poses"]["relax_unmapped"]),
+            overrides=overrides(cls, relax_unmapped),
         ),
         Reuse(reused, reusable, why_not),
     )
@@ -407,6 +428,31 @@ def _backend(settings, *, root: str | None = None, name: str | None = None):
         raise Refusal(str(e)) from e
 
 
+def _write_config(run_dir: Path, cfg: dict, changed: list[Override]) -> Path:
+    """RUN_DIR/config.toml; a replaced class default is also named in a comment at its top (staging keeps comments),
+    beside the value itself in its section, so the run's own config says it was the caller's choice."""
+    from .. import jobs
+
+    if not changed:
+        return jobs.write_config(run_dir, cfg)
+    import tomlkit
+
+    doc = tomlkit.document()
+    for o in changed:
+        doc.add(
+            tomlkit.comment(
+                f"screen_candidates override: {o.setting} = {str(o.value).lower()} "
+                f"(target class default {str(o.class_default).lower()})"
+            )
+        )
+    for k, v in cfg.items():
+        doc[k] = v
+    run_dir.mkdir(parents=True, exist_ok=True)
+    dest = run_dir / "config.toml"
+    dest.write_text(tomlkit.dumps(doc))
+    return dest
+
+
 def _run_dir(out_dir: str | None, campaign: str, settings, root: str | None) -> Path:
     if out_dir is not None:
         return Path(out_dir).expanduser().resolve()
@@ -427,6 +473,7 @@ def screen(
     target_class: str | None = None,
     campaign: str | None = None,
     keep: int | None = None,
+    relax_unmapped: bool | None = None,
     out_dir: str | None = None,
     root: str | None = None,
     dry_run: bool = False,
@@ -443,6 +490,7 @@ def screen(
         target_class=target_class,
         campaign=campaign,
         keep=keep,
+        relax_unmapped=relax_unmapped,
         store=_stage_store(settings, root, backend),
     )
     ceiling = check_ceiling(built.cost, settings)
@@ -458,7 +506,7 @@ def screen(
     backend = backend if backend is not None else _backend(settings, root=root)
     try:
         run_dir.mkdir(parents=True, exist_ok=True)
-        config_path = jobs.write_config(run_dir, cfg)
+        config_path = _write_config(run_dir, cfg, built.overrides)
         handle = backend.submit(jobs.campaign_spec(config_path, run_dir))
     except jobs.JobError as e:  # an existing run, a backend that is down: the caller is told which
         raise Refusal(str(e)) from e

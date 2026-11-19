@@ -37,6 +37,7 @@ TOOLS = {"screen_candidates", "run_status", "explain_drop", "estimate_cost"}
 #: grows with atom count, so octanol separates from propanol by more than 2 x their combined standard error).
 LIGANDS = {"ethanol": "CCO", "propanol": "CCCO", "octanol": "CCCCCCCCO"}
 TARGET = """
+schema_version = 1
 [[pocket.site]]
 q = 1.0
 atom = 2
@@ -114,7 +115,7 @@ def finished(tmp_path_factory):
                 break
             assert time.monotonic() < deadline, f"the screen never finished: {status}"
             time.sleep(0.5)
-        assert status["state"] == "complete", status
+        assert status["state"] == "complete", status["message"]
         yield s, handle, status
     finally:
         s.close()
@@ -263,6 +264,55 @@ def test_a_dry_run_returns_the_plan_and_submits_nothing(server, tmp_path):
     assert not (tmp_path / "r").exists()
 
 
+# ---- overriding a class default -----------------------------------------------------------------------------
+
+
+def test_relax_unmapped_defaults_to_the_class_and_an_override_is_reported_with_its_risk(server, tmp_path):
+    default = server.call("estimate_cost", target=_target(tmp_path), ligand_set=LIGANDS)["plan"]
+    assert default["relax_unmapped"] is True and default["overrides"] == []
+    same = server.call("estimate_cost", target=_target(tmp_path), ligand_set=LIGANDS, relax_unmapped=True)["plan"]
+    assert same["relax_unmapped"] is True and same["overrides"] == []  # the class's own value is no override
+    off = server.call("estimate_cost", target=_target(tmp_path), ligand_set=LIGANDS, relax_unmapped=False)["plan"]
+    assert off["relax_unmapped"] is False
+    (o,) = off["overrides"]
+    assert (o["setting"], o["value"], o["class_default"]) == ("relax_unmapped", False, True)
+    assert "pose geometry check" in o["risk"] and "reject" in o["risk"]
+
+
+@pytest.mark.parametrize("relax", [False, True])
+def test_either_relax_unmapped_is_written_to_the_config_and_off_risks_the_pose_check(server, tmp_path, relax):
+    out = server.call(
+        "screen_candidates",
+        target=_target(tmp_path),
+        ligand_set=LIGANDS,
+        keep=1,
+        relax_unmapped=relax,
+        out_dir=str(tmp_path / "r"),
+    )
+    assert out["plan"]["relax_unmapped"] is relax
+    text = (tmp_path / "r" / "config.toml").read_text()
+    assert f"relax_unmapped = {str(relax).lower()}" in text
+    overridden = "screen_candidates override: relax_unmapped = false (target class default true)" in text
+    assert overridden is (not relax)  # true is the class default: no override to record
+    deadline = time.monotonic() + 300
+    while not (status := server.call("run_status", handle=out["handle"]))["finished"]:
+        assert time.monotonic() < deadline, status
+        time.sleep(0.5)
+    if not relax:  # the risk the description names: octanol's added chain is placed unrelaxed, and refused
+        assert status["state"] == "failed"
+        assert "not this molecule" in status["message"] and "relax_unmapped=True" in status["message"]
+        return
+    assert status["state"] == "complete", status["message"]
+    (record,) = (tmp_path / "r").glob("run-*.json")
+    poses = next(t for t in json.loads(record.read_text())["tiers"] if t["name"] == "paired_poses")
+    assert poses["relax_unmapped"] is True
+
+
+def test_relax_unmapped_must_be_a_boolean(server, tmp_path):
+    with pytest.raises(Exception, match="relax_unmapped"):
+        server.call("estimate_cost", target=_target(tmp_path), ligand_set=LIGANDS, relax_unmapped="maybe")
+
+
 # ---- the guardrails ----------------------------------------------------------------------------------------
 
 
@@ -328,8 +378,8 @@ def test_every_refusal_reaches_the_caller_verbatim(server, tmp_path, kwargs, nee
 def test_a_target_that_is_not_a_pocket_is_refused(server, tmp_path):
     with pytest.raises(Exception, match="not a file"):
         server.call("screen_candidates", target=str(tmp_path / "missing.pdb"), ligand_set=LIGANDS)
-    ligands_in_target = _target(tmp_path, '[candidates]\nx = "CCO"\n', "wrong.toml")
-    with pytest.raises(Exception, match="describe the ligands"):
+    ligands_in_target = _target(tmp_path, 'schema_version = 1\n[candidates]\nx = "CCO"\n', "wrong.toml")
+    with pytest.raises(Exception, match="do not describe the target"):
         server.call("screen_candidates", target=ligands_in_target, ligand_set=LIGANDS)
 
 

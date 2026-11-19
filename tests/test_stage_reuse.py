@@ -422,6 +422,7 @@ def test_a_temporal_cancel_lists_its_completed_stages():
 
 
 POCKET = """
+schema_version = 1
 [[pocket.site]]
 q = 1.0
 atom = 2

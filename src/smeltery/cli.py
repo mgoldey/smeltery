@@ -1643,6 +1643,7 @@ VIEWERS = {
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
+    "target": "smeltery.target_file",
     "verify-run": "smeltery.run_tools:verify_run",
     "inspect": "smeltery.run_tools:inspect_run",
     "diff-run": "smeltery.run_tools:diff_run",
@@ -1778,6 +1779,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="a campaign job's state (smeltery status RUN_DIR)")
     sub.add_parser("cancel", help="cancel a campaign job (smeltery cancel RUN_DIR); idempotent")
     sub.add_parser("result", help="a finished campaign job's core record (smeltery result RUN_DIR)")
+    sub.add_parser("target", help="check a target definition .toml (smeltery target check FILE; docs/targets.md)")
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
