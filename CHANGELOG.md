@@ -8,6 +8,15 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- Campaign jobs: `smeltery submit CONFIG --out RUN_DIR` returns at once, and `smeltery status / cancel / result
+  RUN_DIR` follow the job (`smeltery.jobs`, the `attestation` extra). Two implementations of attestation-schema's
+  `JobBackend` behind `SMELTERY_BACKEND`: `local` (default; a capped task on Bench's SQLite queue under its own
+  supervisor, sharing `SMELTERY_MAX_RUNS`, no server) and `temporal` (the existing `PipelineRunWorkflow`, started
+  without waiting). The backend owns `RUN_DIR/attestation/state.json` (`attestation.state/1`: JCS, atomic, under a
+  `flock`, history checked against the state machine), and every terminal job has a core record: a complete run's own,
+  or a minimal `failed`/`cancelled` record. `smeltery worker` (local) settles jobs whose process ended.
+  `tests/test_job_backends.py` runs one conformance suite against both backends (the temporal leg needs a server).
+  See `docs/jobs.md`.
 - `smeltery serve` (Bench, the repo's one server, with a backend choice) and `smeltery worker` (the worker for that
   backend: a local supervisor loop, or one Temporal process polling both `smeltery-tasks` and `smeltery-pipeline`),
   configured by `SMELTERY_BACKEND`, `SMELTERY_TEMPORAL_ADDRESS`, `SMELTERY_TEMPORAL_NAMESPACE`, `SMELTERY_TASK_QUEUE`,

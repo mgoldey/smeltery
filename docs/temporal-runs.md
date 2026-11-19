@@ -18,7 +18,8 @@ Two subcommands run a deployment; both read `SMELTERY_*` environment variables, 
   the Temporal cluster instead (`TemporalTaskQueue`, which does not enforce `timeout_s` or a memory limit).
 - **`smeltery worker`** starts the worker for the same backend. `local`: a supervisor loop over the workspace's
   SQLite queue that fails tasks whose supervisor died and starts queued ones, so queued work starts even when no
-  server is up (tasks run under their own supervisors, so stopping the loop never kills one). `temporal`: ONE process
+  server is up (tasks run under their own supervisors, so stopping the loop never kills one); it also settles
+  campaign jobs (`smeltery submit`, [jobs.md](jobs.md)) whose process ended, writing their terminal record. `temporal`: ONE process
   polling both queues, `smeltery-tasks` (Bench's shell tasks) and `smeltery-pipeline` (the SCF legs of
   `run --temporal`), over one connection to the cluster. One process because both are the same deployment's work
   and one container is simpler to run; the two kinds of work do not share slots (`SMELTERY_TASK_CONCURRENCY` bounds
@@ -29,11 +30,14 @@ SMELTERY_BACKEND=temporal SMELTERY_WORKERS=6 smeltery worker
 SMELTERY_BACKEND=temporal smeltery serve --demo
 ```
 
+`smeltery submit CONFIG --out RUN_DIR` submits a whole run as a campaign job on the same backend and returns at once;
+`smeltery status / cancel / result RUN_DIR` follow it. See [jobs.md](jobs.md).
+
 ### Environment variables
 
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
-| `SMELTERY_BACKEND` | `local` | `serve`, `worker` | `local` (SQLite + subprocess supervisors, no server) or `temporal`. Anything else is refused. |
+| `SMELTERY_BACKEND` | `local` | `serve`, `worker`, `submit` | `local` (SQLite + subprocess supervisors, no server) or `temporal`. Anything else is refused. |
 | `SMELTERY_TEMPORAL_ADDRESS` | `localhost:7233` | all Temporal commands | The Temporal frontend, `host:port`. Flag: `--host` (`task-worker`, `temporal-worker`, `run`), `--temporal-address` (`serve`, `worker`). |
 | `SMELTERY_TEMPORAL_NAMESPACE` | `default` | all Temporal commands | The Temporal namespace. Flag: `--namespace`. |
 | `SMELTERY_TASK_QUEUE` | `smeltery-tasks` | `serve`, `worker`, `task-worker` | Queue for Bench's shell tasks. Flag: `--task-queue`. |

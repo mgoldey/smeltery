@@ -90,6 +90,9 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "assert {m.unit for m in rec.metrics if m.name == 'paired_ddE.mean'} == {'kcal/mol'}; "
         "dock = a.read(runs['docking']); assert dock.seeds['docking'] == [7], dock.seeds; "
         "assert a.dumps(dock) == (runs['docking'] / 'attestation' / 'run.json').read_bytes()",
+        # Campaign jobs (smeltery.jobs) need this extra: the local backend is a JobBackend and opens its queue.
+        "import tempfile, attestation_schema as a; from smeltery import jobs; assert jobs.AVAILABLE; "
+        "assert isinstance(jobs.LocalJobBackend(tempfile.mkdtemp()), a.JobBackend)",
     ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",

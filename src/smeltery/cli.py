@@ -1636,6 +1636,10 @@ VIEWERS = {
     "record": "smeltery.core_record",
     "serve": "smeltery.services:serve_main",
     "worker": "smeltery.services:worker_main",
+    "submit": "smeltery.jobs:submit_main",
+    "status": "smeltery.jobs:status_main",
+    "cancel": "smeltery.jobs:cancel_main",
+    "result": "smeltery.jobs:result_main",
 }
 
 
@@ -1751,6 +1755,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
     sub.add_parser("serve", help="Bench, configured by SMELTERY_* env vars (smeltery serve --help)")
     sub.add_parser("worker", help="the worker for SMELTERY_BACKEND=local|temporal (smeltery worker --help)")
+    sub.add_parser("submit", help="submit `run CONFIG --out RUN_DIR` as a campaign job, return at once (docs/jobs.md)")
+    sub.add_parser("status", help="a campaign job's state (smeltery status RUN_DIR)")
+    sub.add_parser("cancel", help="cancel a campaign job (smeltery cancel RUN_DIR); idempotent")
+    sub.add_parser("result", help="a finished campaign job's core record (smeltery result RUN_DIR)")
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")

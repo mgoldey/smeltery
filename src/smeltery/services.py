@@ -6,7 +6,8 @@ serve   Bench, the repo's one server (FastAPI + the built UI), the same app as `
         submits its tasks to a Temporal cluster). `serve` takes every `smeltery bench` flag too (ROOT, --token,
         --demo, --allow-host, ...).
 worker  the process that executes work for the chosen backend. `local`: a supervisor loop over the same SQLite queue
-        (it reconciles dead supervisors and starts queued tasks, so queued work starts even when no server is up).
+        (it reconciles dead supervisors and starts queued tasks, so queued work starts even when no server is up, and
+        settles campaign jobs, `smeltery.jobs`, whose process ended).
         `temporal`: ONE process polling both queues, `smeltery-tasks` (Bench's shell tasks) and `smeltery-pipeline`
         (the SCF legs of `run --temporal`), over one client connection; `--workers` bounds the SCFs at once.
 """
@@ -79,15 +80,23 @@ def serve_main(argv: list[str] | None = None, env: Mapping[str, str] | None = No
 
 def local_worker(root: Path, max_runs: int, interval_s: float = 5.0, stop: Callable[[], bool] = lambda: False) -> int:
     """The local backend's worker: every `interval_s`, reconcile tasks whose supervisor died and start the queued
-    ones (`SubprocessTaskQueue.list` does both). The tasks run under their own detached supervisors, so stopping
-    this loop never kills work."""
+    ones (`SubprocessTaskQueue.list` does both), and settle campaign jobs (`smeltery submit`, `smeltery.jobs`) whose
+    process has ended: a cancelled, killed or crashed job gets its terminal state and core record here even when
+    nobody asks for its status. Campaign jobs are tasks on the same queue, so they share its run slots. The tasks run
+    under their own detached supervisors, so stopping this loop never kills work."""
+    from . import jobs
     from .bench.adapters.task_queue import SubprocessTaskQueue
 
-    q = SubprocessTaskQueue(Path(root) / ".smeltery" / "bench" / "tasks", max_concurrent_runs=max_runs)
+    q = SubprocessTaskQueue(Path(root) / jobs.TASKS_DIR, max_concurrent_runs=max_runs)
+    campaigns = jobs.LocalJobBackend(root, max_runs=max_runs) if jobs.AVAILABLE else None
     print(f"smeltery worker (local): supervising {q.db} every {interval_s:g}s (Ctrl+C stops)", flush=True)
+    if campaigns is None:
+        print(f"smeltery worker (local): {jobs.NOT_INSTALLED}; campaign jobs are not settled", flush=True)
     try:
         while not stop():
             q.list(limit=1)
+            if campaigns is not None:
+                campaigns.reconcile()
             time.sleep(interval_s)
     except KeyboardInterrupt:
         pass

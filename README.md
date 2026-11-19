@@ -231,6 +231,7 @@ Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 | Export runs as Parquet or Arrow | [docs/dataset-export.md](docs/dataset-export.md) |
 | Plug in structure, docking, scoring or potential providers | [docs/providers.md](docs/providers.md) |
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
+| Submit a run and come back for it (`smeltery submit/status/cancel/result`) | [docs/jobs.md](docs/jobs.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
 | Fix an error message | [docs/troubleshooting.md](docs/troubleshooting.md) |

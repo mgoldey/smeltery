@@ -2,7 +2,8 @@
 
 The same module serves the test process (`install()` puts it in `sys.modules`) and the score child processes the
 runner spawns (run as a script: it installs itself, then calls `smeltery.temporal_run.child_main`), so a plain run and
-a Temporal run compute the same numbers. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
+a Temporal run compute the same numbers. Run as `fake_ferric.py _job STORE JOB_ID` it is a local campaign job's
+runner (`smeltery.jobs.runner_main`) on this engine. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
 
     {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "false_unless:<kwarg>" | "hang" | "hang_once" | "crash"},
      "dir": "<scratch dir>",
@@ -119,6 +120,10 @@ def install() -> types.ModuleType:
 
 if __name__ == "__main__":
     install()
+    if sys.argv[1:2] == ["_job"]:  # a campaign job's runner (smeltery.jobs), its SCFs on this fake
+        from smeltery.jobs import runner_main
+
+        sys.exit(runner_main(sys.argv[2:]))
     from smeltery.temporal_run import child_main
 
     sys.exit(child_main(sys.argv[1:]))
