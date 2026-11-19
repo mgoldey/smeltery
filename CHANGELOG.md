@@ -8,6 +8,15 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- `smeltery export dataset RUN... -o DIR` (`smeltery.dataset_record`, docs/dataset-export.md): a dataset DIRECTORY
+  with an `attestation.dataset/1` record (draft schema) -- the table, its `--split`s, then `attestation/digests.json`
+  (whose sha256 is the content digest), then `attestation/dataset.json` naming each source run's core record by the
+  sha256 of its `run.json`. `--dataset-id`, `--version`, `--name`, `--license` (SPDX; null by default, never smeltery's
+  own code license). Every row's `ferric_git_sha` is checked against its run's core-record ferric `build_sha`. A
+  dataset directory is immutable: `smeltery export split KIND DIR -o NEWDIR` writes a new version with the split
+  added, and `ExportDataset`/`export split verify` accept a dataset directory (checked against its record first; a
+  split by name; `dataset_sha256=` pins the digest; `lineage_entries()` gives a training run's `data[]`). Needs
+  attestation-schema >= 0.2.0, not yet released; with 0.1.0 it refuses naming that version and its tests skip.
 - Target definition files are a documented format (`smeltery.target_file`, docs/targets.md): `schema_version = 1` plus
   only `[pocket]`/`[[pocket.site]]`, `[structure]`, `[docking]`, `[gates]`, each checked by `smeltery run`'s own
   validator; an unknown section or key, a missing or other version, or a missing pocket file is refused with the
@@ -98,6 +107,11 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   core record changed accordingly. Findings resolved at the freeze and v2 candidates: `docs/core-record.md`.
 
 ### Changed
+- `smeltery export` tables are `smeltery.schema_version` 2: new columns `family` and `core_record_sha256` (sha256 of
+  the run's core `attestation/run.json`, null without one), and `run_id` is the core record's run_id (a job's
+  `--run-id`), no longer always `input_digest[:12]`, which remains derivable from `input_digest`. A core record
+  that lists the legacy record with another sha256 is stale and refuses the export. CI's test job installs the
+  `dataset` extra, so the Parquet/Arrow tests no longer skip there.
 - Campaign jobs (`smeltery.jobs`) use `attestation_schema.state` for `state.json`, its lock, `settle` and the terminal
   record; smeltery's own copy is deleted. `read_state` returns a `StateFile` (`--json` prints its `to_dict()`), a
   malformed file raises `StateFormatError`, `IllegalTransition` is the schema's `IllegalTransitionError`, and ending a

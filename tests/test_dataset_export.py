@@ -190,12 +190,15 @@ def test_golden_parquet_file_has_the_columns_rows_provenance_and_metadata(tmp_pa
     assert set(col["ferric_provenance_level"]) == {"VERIFIED"}
     assert set(col["smeltery_version"]) == {rec["smeltery_version"]}
     assert set(col["record_sha256"]) == {None}  # this record predates the self-hash: null, not invented
+    # no core record beside it: no digest, and the identity a core record would state for a run given no name
+    assert set(col["core_record_sha256"]) == {None}
+    assert set(col["family"]) == {rec["campaign"]}
     assert col["tier"] == ["field_interaction"] * 3
     assert col["decision"] == ["reference", "pass", "drop"]
     nested = col["scores"][1]
     assert [s["quantity"] for s in nested] == ["dE_int", "ddE"]
     meta = {k.decode(): v.decode() for k, v in table.schema.metadata.items() if k.startswith(b"smeltery.")}
-    assert meta["smeltery.schema_version"] == str(D.SCHEMA_VERSION) == "1"
+    assert meta["smeltery.schema_version"] == str(D.SCHEMA_VERSION) == "2"
     assert json.loads(meta["smeltery.units"]) == {"dE_int": "kcal/mol", "ddE": "kcal/mol"}
     assert meta["smeltery.smiles_form"] == "rdkit-canonical"
     assert json.loads(meta["smeltery.runs"]) == [rec["input_digest"][:12]]
@@ -243,7 +246,7 @@ def test_arrow_ipc_carries_the_same_table_and_metadata(tmp_path, pa):
     with ipc.open_file(str(dest)) as f:
         table = f.read_all()
     assert table.schema.names == D.arrow_schema().names
-    assert table.schema.metadata[b"smeltery.schema_version"] == b"1"
+    assert table.schema.metadata[b"smeltery.schema_version"] == b"2"
     assert table.to_pylist() == D.to_table(D.export_rows([RHF])).to_pylist()
 
 
@@ -282,3 +285,39 @@ def test_without_pyarrow_the_error_names_the_extra(tmp_path, capsys, monkeypatch
     assert "smeltery[dataset]" in err
     assert not (tmp_path / "o.parquet").exists()
     assert len(D.export_rows([RHF])) == 3  # the row builder needs no pyarrow
+
+
+# ---- the core record's identity and digest (schema_version 2) -------------------------------------------------------
+
+
+def _with_core(tmp_path, run_dir=RHF, run_id=None):
+    """A copy of a prebuilt run with its core record written (`smeltery record core`), optionally as a job's run_id."""
+    core_record = pytest.importorskip("smeltery.core_record")
+    if not core_record.AVAILABLE:
+        pytest.skip(core_record.NOT_INSTALLED)
+    out = tmp_path / run_dir.parent.name
+    shutil.copytree(run_dir, out)
+    (legacy,) = out.glob("run-*.json")
+    core_record.write_core(legacy, run_id=run_id)
+    return out
+
+
+def test_run_id_family_and_core_digest_come_from_the_core_record(tmp_path):
+    import hashlib
+
+    out = _with_core(tmp_path, run_id="job-7")  # a job run: the submitter's run_id, not input_digest[:12]
+    rows = D.export_rows([out])
+    core = json.loads((out / "attestation" / "run.json").read_bytes())
+    want = hashlib.sha256((out / "attestation" / "run.json").read_bytes()).hexdigest()
+    assert {(r["run_id"], r["family"], r["core_record_sha256"]) for r in rows} == {("job-7", core["family"], want)}
+    rec = record_of(RHF)
+    assert {r["input_digest"][:12] for r in rows} == {rec["input_digest"][:12]}  # the old run_id stays derivable
+    assert {r["record_file"] for r in rows} == {f"run-{rec['input_digest'][:12]}.json"}
+
+
+def test_a_stale_core_record_is_refused_not_paired(tmp_path):
+    out = _with_core(tmp_path)
+    (legacy,) = out.glob("run-*.json")
+    legacy.write_bytes(legacy.read_bytes() + b"\n")  # the legacy record changed after its core record was written
+    with pytest.raises(D.ExportError, match="changed after its core record was written"):
+        D.export_rows([out])

@@ -24,6 +24,12 @@ table's SHA-256, and the identity of every row in each partition.
   scaffold and form one group.
 * **Deterministic.** The same table and seed give a byte-identical file: sorted keys, no timestamps, no paths.
 
+* **A dataset directory is immutable** (`smeltery export dataset`, smeltery.dataset_record). `write_split` refuses a
+  destination inside one, and `smeltery export split KIND DIR -o NEWDIR` makes a NEW version of the dataset with the
+  split added, leaving DIR as it was, so a run trained on DIR's content digest still resolves. `verify SPLIT DIR`
+  checks the directory against its record first, then the split (a path, or a split name the record lists) against
+  the table inside it.
+
 Computing a split needs pyarrow (to read the table) and, for scaffolds, RDKit; never torch.
 """
 
@@ -197,6 +203,15 @@ def dumps(split: dict) -> str:
 
 
 def write_split(split: dict, dest: str | Path) -> None:
+    """Write `split` to `dest`. Refused inside a dataset directory, which is immutable once its record exists."""
+    from .dataset_record import inside_dataset_dir
+
+    root = inside_dataset_dir(Path(dest).parent)
+    if root is not None:
+        raise SplitError(
+            f"{dest} is inside the dataset directory {root}, which is immutable; "
+            f"`smeltery export split KIND {root} -o NEWDIR` writes a new version with the split"
+        )
     Path(dest).write_text(dumps(split), encoding="utf-8")
 
 
@@ -246,9 +261,13 @@ def partition_indices(split: dict, table_path: str | Path) -> dict[str, list[int
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`smeltery export split KIND TABLE -o FILE [--seed N]`; `--verify FILE TABLE` checks an existing one."""
+    """`smeltery export split KIND TABLE -o FILE [--seed N]`; `verify FILE TABLE` checks an existing one. TABLE may be a
+    dataset directory: then KIND writes a new version of it into the directory `-o` (`--version` labels it), and
+    `verify` takes a split file or the name of a split the directory lists."""
     import argparse
     import sys
+
+    from . import dataset_record as DR
 
     ap = argparse.ArgumentParser(
         prog="smeltery export split",
@@ -257,7 +276,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("kind", choices=(*KINDS, "verify"), help="scaffold or target; `verify SPLIT TABLE` checks a file")
     ap.add_argument("table", help="the exported .parquet/.arrow (for `verify`: the split file, then the table)")
     ap.add_argument("extra", nargs="?", help=argparse.SUPPRESS)
-    ap.add_argument("-o", "--out", help="the split file to write")
+    ap.add_argument("-o", "--out", help="the split file to write; for a dataset directory, the new version's directory")
+    ap.add_argument("--version", help="dataset directory only: the new version's label (default: the old one + 1)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--fractions", help="e.g. train=0.8,valid=0.1,test=0.1 (the default)")
     ap.add_argument("--smiles-column", default="smiles")
@@ -267,21 +287,32 @@ def main(argv: list[str] | None = None) -> int:
         if args.kind == "verify":
             if args.extra is None:
                 ap.error("verify needs SPLIT and TABLE")
-            load_split(args.table, args.extra)
+            split_path, table = args.table, args.extra
+            if DR.is_dataset_dir(table):
+                opened = DR.open_dataset(table)
+                if not Path(split_path).is_file():
+                    split_path = opened.split(split_path)[1]
+                table = opened.table
+            load_split(split_path, table)
             print(f"{args.table} matches {args.extra}")
             return 0
         if not args.out:
             ap.error("-o/--out is required")
-        fr = None
-        if args.fractions:
-            fr = {k: float(v) for k, v in (kv.split("=", 1) for kv in args.fractions.split(","))}
+        fr = DR.parse_fractions(args.fractions)
+        if DR.is_dataset_dir(args.table):
+            spec = DR.SplitSpec(args.kind, args.seed, fr, args.generic, args.smiles_column)
+            out = DR.new_version(args.table, args.out, split=spec, version=args.version)
+            print(f"wrote {spec.name} into a new version of {args.table}: {out}")
+            return 0
+        if args.version is not None:
+            ap.error("--version applies to a dataset directory only")
         split = make_split(
             args.table, args.kind, seed=args.seed, fractions=fr, smiles_column=args.smiles_column, generic=args.generic
         )
-    except (SplitError, ValueError) as e:
+        write_split(split, args.out)
+    except (SplitError, ValueError) as e:  # DatasetError is an ExportError, a ValueError
         print(f"smeltery export split: {e}", file=sys.stderr)
         return 2
-    write_split(split, args.out)
     print(
         f"wrote {args.kind} split of {split['table']['rows']} rows to {args.out}: "
         + ", ".join(f"{k}={len(v)}" for k, v in split["partitions"].items())

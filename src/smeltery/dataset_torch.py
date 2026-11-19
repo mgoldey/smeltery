@@ -13,6 +13,11 @@ given, `y` the target column, both as float32 tensors (1-D and 0-D), then the ca
 * **Splits.** `split=<file>, partition="train"` loads the versioned split artifact (dataset_splits) and keeps that
   partition's rows; the split must have been made on this very table file, else `SplitError`. Each of `split` and
   `partition` without the other is refused: an unsplit dataset is built without either.
+* **A dataset directory** (`smeltery export dataset`, smeltery.dataset_record) is accepted as `table`: it is checked
+  against its record first (every file's sha256 and size, the content digest; `dataset_sha256=` additionally pins the
+  digest the caller expects), its table is read, and `split` may be a split NAME the record lists (or its path in the
+  directory). `lineage_entries()` then gives the `data[]` entries the training run's core record lists (the dataset
+  by content digest, the split file by its digest), which is what links the run to the dataset by digest.
 * **torch is optional and imported when the dataset is built** with `tensors=True`. `tensors=False` yields plain
   Python floats, which needs no torch (and which `DataLoader` also accepts, since a map-style dataset is only
   `__len__` + `__getitem__`). The class deliberately does not subclass `torch.utils.data.Dataset`: that would make
@@ -63,6 +68,7 @@ class ExportDataset:
         decisions: Sequence[str] | None = None,
         transform: Callable | None = None,
         tensors: bool = True,
+        dataset_sha256: str | None = None,
     ):
         if not features:
             raise ValueError("features must name at least one column")
@@ -72,6 +78,17 @@ class ExportDataset:
         if bad:
             raise ValueError(f"unknown decision(s) {bad}; known: {', '.join(DECISIONS)}")
         self._torch = _torch() if tensors else None
+        self.dataset = None  # the opened dataset directory (dataset_record.OpenedDataset), when `table` is one
+        self.split_name: str | None = None
+        from . import dataset_record
+
+        if dataset_record.is_dataset_dir(table):
+            self.dataset = dataset_record.open_dataset(table, expect_sha256=dataset_sha256)
+            table = self.dataset.table
+            if split is not None:
+                self.split_name, split = self.dataset.split(split)
+        elif dataset_sha256 is not None:
+            raise ValueError("dataset_sha256 applies to a dataset directory; this table is a bare file")
         tbl = read_table(table)
         for c in (*features, target):
             if c not in tbl.column_names:
@@ -109,6 +126,14 @@ class ExportDataset:
         else:
             sample = (list(self._x[i]), self._y[i])
         return self._transform(sample) if self._transform else sample
+
+    def lineage_entries(self, role: str = "train") -> list[dict]:
+        """`data[]` entries for the core record of a run trained on this dataset: the dataset by its content digest
+        and, when built from a split the record lists, the split file by its digest. Only for a dataset directory: a
+        bare table file has no record a resolver could link to."""
+        if self.dataset is None:
+            raise ValueError("lineage entries need a dataset directory (smeltery export dataset), not a bare table")
+        return self.dataset.lineage_entries(role=role, split=self.split_name)
 
     def identity(self, i: int) -> tuple[str, str, str, str]:
         """(run_id, ligand, target, tier) of sample `i`, to trace a prediction back to its row."""
