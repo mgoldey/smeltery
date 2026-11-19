@@ -88,7 +88,7 @@ guessing.
   `run_id` is the input digest, so it differs from the job's `run_id`; its `config` is smeltery's `inputs`.
 - **failed / cancelled**: a minimal record written by `smeltery.jobs`: the job's `run_id`, `family`, `arm` and
   `config` (the campaign config: a run that did not finish never computed `inputs`), `started_at` (when it began
-  running, null if it never did), `finished_at`, the manifest of whatever it left, no metrics, `seeds` and
+  running, null if it never did), `finished_at`, the manifest of whatever it left, no metrics, `history`, `seeds` and
   `dependencies` null (the writer did not observe the run's environment), and `ext["smeltery.job"]` (`backend`,
   `job_id`, `message`). `code` is smeltery's identity; when the backend wrote it rather than the run, it is at most
   `inferred` and `evidence` says so.

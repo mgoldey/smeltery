@@ -49,6 +49,14 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   omitted; docking's seed list is recorded; dependencies carry `source`; `history` is `[]`; timestamps go through
   `format_timestamp`; a run that mixed ferric builds records ferric as `unknown`. The `attestation` extra now installs
   on Python 3.11 too. The golden core record changed accordingly. Findings disposition: `docs/core-record.md`.
+- The core run record follows attestation-schema `f809522` (pin moved from `314e4ff`): `history` is `null` (the schema
+  moved curves to a digest-bound `attestation/history.jsonl` sidecar; smeltery has none); a run whose rows came from
+  more than one smeltery commit records `code` as `unknown` with `git_sha: null` and `evidence` naming each commit and
+  its row count (`danuglipron-halogen`); `dependencies[].source` uses the schema's closed vocabulary (Python and distro
+  installs are `system`, conda-family installs `conda`, a wheel from a URL `null`); rdkit and numpy unidentified by a
+  converted record carry `evidence` instead of being empty entries; `core_record.wire_value` is gone in favour of
+  `attestation_schema.spell_value`; a failed/cancelled job's record writes `history` and `dependencies` as `null`
+  unconditionally. The golden core record changed accordingly. Findings and open items: `docs/core-record.md`.
 
 ## [0.1.0] - 2026-11-09
 

@@ -10,10 +10,8 @@ Regenerate the golden file after a deliberate change with:
 from __future__ import annotations
 
 import json
-import math
 import os
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -111,6 +109,26 @@ def _legacy(run_dir: Path) -> Path:
             },
             ("inferred", None, "2025.03.1", None, "conda"),
         ),
+        (  # a distro package manager: the OS provided it
+            {
+                "version": "2024.1",
+                "source": "installed by debian",
+                "commit": None,
+                "dirty": None,
+                "provenance": "INFERRED: version 2024.1 as installed by debian (not an index release)",
+            },
+            ("inferred", None, "2024.1", None, "system"),
+        ),
+        (  # a wheel fetched from a URL: the closed vocabulary has no kind for it, so the source is not known
+            {
+                "version": "0.1.0",
+                "source": "https://example.org/w/ferric-0.1.0-cp312-linux.whl",
+                "commit": None,
+                "dirty": False,
+                "provenance": "INFERRED from the installed wheel ferric-0.1.0-cp312-linux.whl (sha256=ab)",
+            },
+            ("inferred", None, "0.1.0", False, None),
+        ),
     ],
 )
 def test_every_rung_of_the_identity_ladder_maps_to_the_core_enum_the_same_way(ident, want):
@@ -162,6 +180,23 @@ def test_a_run_written_by_two_ferric_builds_records_ferric_unknown_naming_the_mi
         assert "2 ferric builds" in ferric["evidence"] and "bbbbbbbbbbbb (dirty): 4 row(s)" in ferric["evidence"]
 
 
+def test_a_run_written_by_two_smeltery_commits_records_code_unknown_naming_each_commit_and_its_rows():
+    ident = {"commit": "c" * 40, "dirty": True, "version": "0.0.2", "git_remote": None,
+             "provenance": "INFERRED from the local source directory's current git state"}  # fmt: skip
+    one = {"identity": "recorded", "smeltery": {"commit": "a" * 40, "dirty": True}, "n_rows": 1}
+    assert core_record._code(ident, None, [one])["git_sha"] == "c" * 40  # one commit: not a mix
+    two = {"identity": "recorded", "smeltery": {"commit": "b" * 40, "dirty": False}, "n_rows": 111}
+    code = core_record._code(ident, None, [one, two, {"identity": "unrecorded", "n_rows": 46}])
+    assert code == {
+        "git_sha": None,
+        "dirty": None,
+        "repo": None,
+        "version": None,  # a build row records a commit, not a version: no shared version is known
+        "provenance": "unknown",
+        "evidence": f"mixed: {'a' * 40} (1 row), {'b' * 40} (111 rows)",
+    }
+
+
 def test_code_is_on_the_dependency_ladder_and_keeps_the_version_that_ran():
     ident = {
         "commit": "c" * 40,
@@ -184,6 +219,7 @@ def test_code_is_on_the_dependency_ladder_and_keeps_the_version_that_ran():
     assert (old["version"], old["provenance"], old["git_sha"], old["evidence"]) == ("0.0.1", "unknown", None, None)
 
 
+@needs_schema  # the wire spelling of NaN is the schema's (`attestation_schema.spell_value`)
 def test_metrics_label_what_they_are_about_and_write_undefined_values_as_nan():
     results = {
         "funnel": [
@@ -210,7 +246,6 @@ def test_metrics_label_what_they_are_about_and_write_undefined_values_as_nan():
         ("paired_ddE.sem", {"analogue": "a"}, "NaN", None, "kcal/mol"),  # one pose: computed, undefined
         ("paired_ddE.n", {"analogue": "a"}, 1, None, None),
     ]
-    assert [core_record.wire_value(v) for v in (math.inf, -math.inf, 2.5, 3)] == ["Infinity", "-Infinity", 2.5, 3]
     # no unit is invented: a record that does not say what dE_int is in gives null
     del results["units"]
     assert {m["unit"] for m in core_record.metrics(results)} == {None}
@@ -247,7 +282,16 @@ def test_every_prebuilt_run_converts_and_reads_back_canonically(tmp_path, name):
     assert rec.status == "complete" and rec.arm is None
     assert (rec.started_at, rec.finished_at) == (None, None)  # a conversion knows neither instant
     assert rec.ext["smeltery"]["input_digest"] == legacy["input_digest"]
+    assert rec.history is None  # smeltery logs no curves, so there is no sidecar
+    assert not (run_dir / "attestation" / "history.jsonl").exists()
     assert rec.dependencies[0].name == "ferric"
+    assert {d.source for d in rec.dependencies if d.name == "python"} == {"system"}
+    commits = {b["smeltery"]["commit"] for b in legacy["results"].get("builds", []) if "smeltery" in b}
+    if len(commits) > 1:  # danuglipron-halogen: rows from two smeltery commits, so no one commit ran it
+        assert (rec.code.provenance, rec.code.git_sha, rec.code.dirty) == ("unknown", None, None)
+        assert rec.code.evidence.startswith("mixed: ") and all(c in rec.code.evidence for c in commits)
+    else:
+        assert rec.code.git_sha == legacy["smeltery"]["commit"]
     ferrics = {json.dumps(b["ferric"]) for b in legacy["results"].get("builds", []) if "ferric" in b}
     if len(ferrics) > 1:  # danuglipron-halogen: SCFs from two ferric builds, so no one ferric ran it
         assert (rec.dependencies[0].provenance, rec.dependencies[0].build_sha) == ("unknown", None)
@@ -320,8 +364,10 @@ def test_a_live_run_writes_the_core_record_last_with_its_own_times_and_environme
     rec = a.read(out_dir)
     assert f"core record: {out_dir / 'attestation' / 'run.json'}" in printed
     assert rec.started_at and rec.finished_at
-    # parsed, not compared as text: the one spelling has no trailing fraction zeros, so ':37.5Z' sorts before ':37Z'
-    assert datetime.fromisoformat(rec.started_at[:-1]) <= datetime.fromisoformat(rec.finished_at[:-1])
+    # compared as text: the one spelling always has six fraction digits, so text order is time order
+    assert rec.started_at <= rec.finished_at
+    assert all(len(t) == len("2026-11-19T10:00:37.500000Z") for t in (rec.started_at, rec.finished_at))
+    assert rec.history is None
     assert rec.producer.name == "smeltery"
     names = [d.name for d in rec.dependencies]
     assert names[:4] == ["ferric", "python", "rdkit", "numpy"]

@@ -14,8 +14,9 @@ only new names (`attestation/`, `steps/`) are added to OUT.
 
 Mapping (docs/core-record.md): campaign -> family; arm -> null (smeltery has no arm); the legacy `inputs` -> config;
 staged inputs, the receptor and the decisions file -> data (role input), the legacy record (role output) and the
-manifest; funnel counts and the paired ddE -> metrics, what each is about (a stage, an analogue) in `labels`; tier seeds
-and seed lists -> seeds; smeltery's own identity -> code, on the same ladder as a dependency; ferric, Python and the
+manifest; funnel counts and the paired ddE -> metrics, what each is about (a stage, an analogue) in `labels`; no
+curves, so history -> null; tier seeds and seed lists -> seeds; smeltery's own identity -> code, on the same ladder as
+a dependency (`unknown`, naming each commit, when the run's rows came from more than one); ferric, Python and the
 other packages -> dependencies, through the same identity ladder (`record.package_identity`). Tiers and everything
 chemistry-shaped -> `ext.smeltery`. Where the draft schema has no honest slot for something smeltery knows, it is left
 out and listed in docs/core-record.md ("Schema findings"), never squeezed into a field that means something else.
@@ -29,7 +30,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import re
 import shutil
 import sys
@@ -110,12 +110,19 @@ def provenance_level(sentence: object) -> str:
     return "unknown"
 
 
+#: Installers whose INSTALLER file means a conda environment (the core `source` "conda"; the channel is not recorded).
+CONDA_INSTALLERS = frozenset({"conda", "mamba", "micromamba"})
+
+
 def source(ident: dict | None) -> str | None:
-    """Where an identity block says the package was installed from, as the core `source`: `index` (a package index;
-    which one is not recorded), `git+<url>` (a git install's direct_url.json), `file` (a local directory or wheel file:
-    the path names a machine, not a source, so it is not written), the installer for a conda/distro install, or the URL
-    of a wheel fetched from one. None when the block does not say -- a build stamp (`ferric.__build__`) names how the
-    build was identified, not where it was installed from, so a stamped build's source is unknown."""
+    """Where an identity block says the package was installed from, in the core record's closed vocabulary
+    (`index[:<name>]`, `git+<url>`, `file`, `conda[:<channel>]`, `system`): `index` for a package index (which one is
+    not recorded, so never `index:pypi`), `git+<url>` for a git install's direct_url.json (credentials stripped), `file`
+    for a local directory or wheel file (the path names a machine, not a source, so it is not written), `conda` for a
+    conda-family installer (the channel is not recorded), `system` for any other installer (a distro package manager).
+    None when the block does not say, and for a wheel fetched from a URL, which the vocabulary has no kind for
+    (docs/core-record.md, open findings). A build stamp (`ferric.__build__`) names how the build was identified, not
+    where it was installed from, so a stamped build's source is None."""
     ident = ident or {}
     src = ident.get("source")
     if not isinstance(src, str) or not src or src.endswith(".__build__"):
@@ -123,12 +130,12 @@ def source(ident: dict | None) -> str | None:
     if src == "package index":
         return "index"
     if src.startswith("installed by "):
-        return src.removeprefix("installed by ")
+        return "conda" if src.removeprefix("installed by ") in CONDA_INSTALLERS else "system"
     if src.startswith("file:"):
         return "file"
     if "git install" in str(ident.get("provenance")):
         return f"git+{strip_credentials(src)}"
-    return strip_credentials(src)
+    return None
 
 
 def dependency(name: str, ident: dict | None) -> dict:
@@ -158,12 +165,27 @@ def dependency(name: str, ident: dict | None) -> dict:
     }
 
 
-def _code(ident: dict | None, version: str | None) -> dict:
+def _code(ident: dict | None, version: str | None, builds: list[dict] | None = None) -> dict:
     """smeltery's own identity -> `code`, on the dependency ladder: `provenance` from the sentence (an editable
     install is INFERRED: the checkout's HEAD now, not what was imported), the sentence as `evidence`. `repo` is the
     checkout's remote (credentials already stripped), never the install's `file://` path, which names a machine rather
     than a repository. `version` is the identity's own, else the legacy `smeltery_version` (records from before the
-    identity block); never the converter's."""
+    identity block); never the converter's.
+
+    `builds` (the legacy `results.builds`): when the run's rows were written by more than one smeltery commit, the run
+    has no one code identity, so `code` is `unknown` with `git_sha` and `dirty` null and `evidence` naming each commit
+    and its row count (the spec's mixed-code rule). `version` is then null: a build row records a commit, not a
+    version, so smeltery cannot tell that every commit shared one. Rows with no smeltery recorded do not count."""
+    mixed = _mixed_code(builds or [])
+    if mixed is not None:
+        return {
+            "git_sha": None,
+            "dirty": None,
+            "repo": (ident or {}).get("git_remote"),
+            "version": None,
+            "provenance": "unknown",
+            "evidence": mixed,
+        }
     ident = ident or {}
     commit = ident.get("commit")
     level = provenance_level(ident.get("provenance"))
@@ -175,6 +197,18 @@ def _code(ident: dict | None, version: str | None) -> dict:
         "provenance": level,
         "evidence": None if level == "unknown" else str(ident["provenance"]),
     }
+
+
+def _mixed_code(builds: list[dict]) -> str | None:
+    """`mixed: <sha> (N rows), <sha> (M rows)` when `results.builds` names more than one smeltery commit, else None."""
+    rows: dict[str, int] = {}
+    for b in builds:
+        commit = (b.get("smeltery") or {}).get("commit") if isinstance(b.get("smeltery"), dict) else None
+        if isinstance(commit, str) and commit:
+            rows[commit] = rows.get(commit, 0) + int(b.get("n_rows") or 0)
+    if len(rows) <= 1:
+        return None
+    return "mixed: " + ", ".join(f"{c} ({n} {'row' if n == 1 else 'rows'})" for c, n in rows.items())
 
 
 def _tier_recorded(tiers: list[dict]) -> dict[str, dict]:
@@ -209,9 +243,15 @@ def _tier_recorded(tiers: list[dict]) -> dict[str, dict]:
 
 
 def _python(host: dict | None) -> dict:
+    """The interpreter, `source: "system"` (the interpreter provided it). A record with no `host.python` still ran on
+    Python: `unknown`, saying so, rather than left out (a list names what the run ran on)."""
     version = (host or {}).get("python")
     if not version:
-        return dependency("python", None)
+        return {
+            **dependency("python", None),
+            "evidence": "the run ran on a Python interpreter; the legacy record does not say which",
+            "source": "system",
+        }
     return {
         "name": "python",
         "version": version,
@@ -219,7 +259,7 @@ def _python(host: dict | None) -> dict:
         "dirty": None,
         "provenance": "verified",
         "evidence": "platform.python_version() of the interpreter that ran (legacy record host.python)",
-        "source": None,
+        "source": "system",
     }
 
 
@@ -244,14 +284,24 @@ def _ferric(legacy: dict) -> dict:
     }
 
 
+def _unrecorded_core(name: str, module: str) -> dict:
+    """A core package the legacy record does not identify: smeltery imports it on every funnel run, so the run ran on
+    it, but which build is unknown. Not a placeholder: the name is a fact about the code, the identity is unknown."""
+    return {
+        **dependency(name, None),
+        "evidence": f"smeltery imports {module} on every funnel run; the legacy record does not say which {name}",
+    }
+
+
 def recorded_dependencies(legacy: dict) -> list[dict]:
     """What a legacy record itself says the run ran on: ferric (its identity block), Python, and the versions tiers
-    recorded. smeltery's core packages it does not mention are listed `unknown`, never filled from today's
-    environment (a conversion runs later, maybe elsewhere)."""
+    recorded. smeltery's core packages it does not identify are listed `unknown` with `evidence` saying why (the run
+    did import them), never filled from today's environment (a conversion runs later, maybe elsewhere). Optional
+    packages a record does not name are left out: whether the run imported them is not known."""
     deps = [_ferric(legacy), _python(legacy.get("host"))]
     tiered = _tier_recorded(legacy.get("tiers") or [])
-    for name, _module in CORE_PACKAGES:
-        deps.append(tiered.pop(name, None) or dependency(name, None))
+    for name, module in CORE_PACKAGES:
+        deps.append(tiered.pop(name, None) or _unrecorded_core(name, module))
     deps += [tiered[n] for n in sorted(tiered)]
     return deps
 
@@ -276,20 +326,12 @@ def _number(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-def wire_value(value: float) -> float | str:
-    """A metric value as the core record's JSON spells it: a non-finite float is the string "NaN", "Infinity" or
-    "-Infinity" (JSON has no NaN; `attestation_schema.from_dict` takes JSON values and refuses a float NaN)."""
-    if isinstance(value, float) and not math.isfinite(value):
-        return "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
-    return value
-
-
 def _metric(
     name: str, value: float, direction: str | None, unit: str | None = None, labels: dict | None = None
 ) -> dict:
     return {
         "name": name,
-        "value": wire_value(value),
+        "value": _schema.spell_value(value) if _schema else value,
         "direction": direction,
         "step": None,
         "split": None,
@@ -310,7 +352,7 @@ def metrics(results: dict) -> list[dict]:
     mean, best group first, so smeltery genuinely knows lower is better -- and `paired_ddE.sem` and `paired_ddE.n` with
     none. mean and sem carry the unit of the quantity they pair (`results.units[DDE_QUANTITY]`); n is a count. A
     non-finite value (a one-pose analogue's sem is NaN) is written as such: computed and undefined, not missing. Values
-    are JSON (`wire_value`): NaN is the string "NaN"."""
+    are JSON (`attestation_schema.spell_value`): NaN is the string "NaN"."""
     out: list[dict] = []
     for row in results.get("funnel") or []:
         stage = {"stage": str(row.get("stage"))}
@@ -319,12 +361,12 @@ def metrics(results: dict) -> list[dict]:
             if _number(value):
                 out.append(_metric(f"stage.{name}", value, None, labels=stage))
             elif value is None and key == "candidates_out" and row.get("unranked") is True:
-                out.append(_metric(f"stage.{name}", math.nan, None, labels=stage))
+                out.append(_metric(f"stage.{name}", float("nan"), None, labels=stage))
     cut = results.get("cut") or {}
     if cut.get("survivors") is not None:
         out.append(_metric("cut.survivors", len(cut["survivors"]), None))
     elif cut.get("unranked") is True:
-        out.append(_metric("cut.survivors", math.nan, None))
+        out.append(_metric("cut.survivors", float("nan"), None))
     unit = (results.get("units") or {}).get(DDE_QUANTITY)
     paired = results.get("paired_ddE") or {}
     order = [c for c in results.get("candidate_order") or [] if c in paired]
@@ -424,11 +466,11 @@ def core_fields(
         "started_at": started_at,
         "finished_at": finished_at,
         "producer": producer,
-        "code": _code(legacy.get("smeltery"), legacy.get("smeltery_version")),
+        "code": _code(legacy.get("smeltery"), legacy.get("smeltery_version"), results.get("builds")),
         "config": legacy.get("inputs") or {},
         "data": [*data(legacy, legacy_name, legacy_sha256), manifest],
         "metrics": metrics(results),
-        "history": [],  # smeltery logs no curves: every value it records is final
+        "history": None,  # smeltery logs no curves: every value it records is final, so there is no sidecar
         "seeds": seeds(tiers),
         "dependencies": dependencies,
         "ext": {

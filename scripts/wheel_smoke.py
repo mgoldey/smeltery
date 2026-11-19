@@ -87,6 +87,7 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "[shutil.copytree(str(r.joinpath(n).joinpath('run')), d) for n, d in runs.items()]; "
         "assert [c.main(['core', str(d)]) for d in runs.values()] == [0, 0]; "
         "rec = a.read(runs['benzoic-rhf']); assert rec.family == 'mwe-benzoic-cli', rec.family; "
+        "assert rec.history is None and a.read_history(runs['benzoic-rhf'], rec) is None, rec.history; "
         "assert {m.unit for m in rec.metrics if m.name == 'paired_ddE.mean'} == {'kcal/mol'}; "
         "dock = a.read(runs['docking']); assert dock.seeds['docking'] == [7], dock.seeds; "
         "assert a.dumps(dock) == (runs['docking'] / 'attestation' / 'run.json').read_bytes()",
@@ -131,7 +132,7 @@ SKIP_EXTRAS = {"dev"}
 #: published.
 PREINSTALL = {
     "attestation": [
-        "attestation-schema @ git+https://github.com/mgoldey/attestation@314e4ff29737cf8cc2ab930b2708a8ca2f2cee46"
+        "attestation-schema @ git+https://github.com/mgoldey/attestation@f8095224da57acbd8de1bc7afd8e3d6c2f62f83c"
         "#subdirectory=packages/attestation-schema"
     ],
 }

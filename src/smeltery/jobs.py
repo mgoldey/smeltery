@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
-import importlib.util
 import io
 import json
 import os
@@ -85,9 +84,6 @@ TASKS_DIR = Path(".smeltery") / "bench" / "tasks"
 JOBS_DIR = Path(".smeltery") / "jobs"
 #: The runner's argv prefix; the backend appends STORE JOB_ID. Tests point it at a fake engine.
 RUNNER = [sys.executable, "-m", "smeltery.jobs", "_run"]
-#: The newer schema (attestation 314e4ff+, which adds `attestation_schema.history`) spells "no curve" and "environment
-#: not observed" as null; the one before it requires lists. A backend writing a failed record observed neither.
-_NULLABLE = importlib.util.find_spec("attestation_schema.history") is not None if AVAILABLE else False
 
 
 class IllegalTransition(JobError):
@@ -264,8 +260,9 @@ def terminal_record(
 ) -> Path:
     """Write the minimal `failed`/`cancelled` core record: the job's identity, its config (the campaign config it was
     given: a run that did not finish never computed smeltery's `inputs`), its times, and the manifest of whatever it
-    left in the run directory, with no metrics (nothing was measured to completion). Dependencies are null where the
-    schema allows it (the writer did not observe the run's environment). Refuses to replace a record."""
+    left in the run directory, with no metrics (nothing was measured to completion). `history` is null (no curve) and
+    `dependencies` null (the writer did not observe the run's environment; `[]` would claim it saw none). Refuses to
+    replace a record."""
     from . import core_record
 
     if status not in (JobState.FAILED, JobState.CANCELLED):
@@ -290,9 +287,9 @@ def terminal_record(
         "config": spec.config,
         "data": data,
         "metrics": [],
-        "history": None if _NULLABLE else [],
+        "history": None,  # no curves: a backend observes none
         "seeds": None,
-        "dependencies": None if _NULLABLE else [],
+        "dependencies": None,  # the backend did not observe the run's environment
         "ext": {EXT: ext},
     }
     return _schema.write(_schema.from_dict(fields), run_dir)
