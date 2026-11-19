@@ -43,8 +43,8 @@ services:
 
   # `smeltery worker` with SMELTERY_BACKEND=temporal: ONE process polling smeltery-tasks and smeltery-pipeline.
   # Built from the same Dockerfile with the `temporal` extra added. It shares /data with `bench`, because a
-  # submitted task's cwd and log paths are paths on the worker. ferric (the SCF engine) is NOT in this image: add it
-  # to a derived image before running `smeltery run --temporal` pipelines through it (docs/temporal-runs.md).
+  # submitted task's cwd and log paths are paths on the worker. ferric (the SCF engine) is installed as smeltery's
+  # core dependency from PyPI (docs/temporal-runs.md).
   worker:
     profiles: [temporal]
     build:

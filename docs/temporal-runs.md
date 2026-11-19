@@ -62,8 +62,9 @@ A bad value stops the command with exit code 2 and a message naming the variable
    The `temporal` profile in `compose.yaml` is opt-in (a plain `docker compose up` is unchanged): it starts
    `temporalio/temporal` as a dev server (frontend and UI on loopback, history in a volume) and a `worker` service
    running `smeltery worker` with `SMELTERY_BACKEND=temporal`; `docker compose --profile temporal up --build` starts
-   both. The worker image has no ferric (the SCF engine), so for `run --temporal` pipelines either run
-   `smeltery temporal-worker` on the host against `localhost:7233`, or extend the image. Without Compose:
+   both. ferric (the SCF engine) comes in as smeltery's core dependency, from PyPI; the image has not been
+   built and run against a live cluster yet, so if a pipeline leg fails there, run `smeltery temporal-worker`
+   on the host against `localhost:7233` instead. Without Compose:
 
    ```sh
    docker run -d --name temporal-dev -p 7233:7233 -p 8233:8233 temporalio/temporal:latest server start-dev --ip 0.0.0.0
