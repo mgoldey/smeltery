@@ -169,3 +169,23 @@ Not schema findings, but found on the way and left as they are: the legacy `star
 legacy record has no run-level failed state, so failed runs get no core record; a build-stamped dependency's
 `source` is `null` because `record.package_identity` stops at the stamp and does not also read where the package was
 installed from.
+
+### Stage-reuse schema findings (open items for the schema freeze)
+
+From resumability (`smeltery.reuse`, [jobs.md](jobs.md#resumability-resubmitting-reuses-completed-stages)); each is
+carried in `ext` rather than squeezed into a core field.
+
+1. **No slot for "this stage was reused from another run".** A resubmitted run takes a completed stage's output from
+   an earlier run instead of recomputing it. The core record has nowhere to say that, nor which run and which content
+   digest it came from, so smeltery writes it to `ext.smeltery.reuse` (per stage: `digest`, `upstream`,
+   `output_digest`, `reused`, `reused_from: {digest, run_id, run_dir, at}`) and to `steps/NN-<stage>/stage.json`
+   under `reuse`. The spec should say whether reuse is provenance the core names (a per-step `reused_from`
+   referencing another record's `(family, run_id, record_digest)`), or producer business.
+2. **A cancelled or failed record cannot list the steps that completed.** The steps layout is optional and written
+   only by a finished run; a backend's minimal record has no field for "these stages completed before the stop".
+   smeltery writes `ext["smeltery.job"].stages_completed` (null when the run left no stage log, as a Temporal job
+   does). A per-step status in the layout, or a record-level list, would let a reader tell a cancel before any work
+   from a cancel one stage short of done.
+3. **`started_at`/`finished_at` and wall-clock times of a reused stage.** A reused stage was not run by this record's
+   run, so its time is not this run's; smeltery leaves its funnel `seconds` null. The record has no per-step time to
+   say this with.

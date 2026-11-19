@@ -27,9 +27,12 @@ has no reader or writer for it yet: `read_state`, `init_state`, `transition` and
 
 **Terminal records.** A complete run's record is the one `smeltery run` writes (`core_record`, through
 `cli.emit_core_record`). A failed or cancelled job gets a minimal record written here (`terminal_record`): run_id,
-family, arm, config, times, the manifest of whatever the run left, no metrics. When a record already exists, the
-job's terminal state follows the record's status (a cancel that races completion ends `complete`), so state.json and
-run.json never disagree.
+family, arm, config, times, the manifest of whatever the run left, no metrics, and in `ext["smeltery.job"]`
+`stages_completed`: the stages the run logged as completed (OUT/stages.partial.jsonl, `smeltery.reuse`) with their
+digests and whether each was reused, or null when the run left no stage log. Completed stages are already in the
+workspace's stage store, so a resubmission reuses them; the stage that was interrupted is not. When a record already
+exists, the job's terminal state follows the record's status (a cancel that races completion ends `complete`), so
+state.json and run.json never disagree.
 """
 
 from __future__ import annotations
@@ -267,8 +270,12 @@ def terminal_record(
 
     if status not in (JobState.FAILED, JobState.CANCELLED):
         raise ValueError(f"a {status.value} record is the run's own: only failed/cancelled records are written here")
+    from .reuse import read_progress
+
     run_dir = Path(run_dir)
     ext: dict[str, Any] = {"backend": backend, "job_id": job_id, "message": message}
+    # the stages the run completed before it stopped, from its stage log (null: it left none, e.g. --temporal)
+    ext["stages_completed"] = read_progress(run_dir)
     try:
         m = _layout.write_manifest(run_dir)
         data = [{"name": m.name, "sha256": m.sha256, "role": m.role}]
@@ -606,7 +613,11 @@ def runner_main(argv: list[str]) -> int:
     tail = _Tail(sys.stderr)
     try:
         with contextlib.redirect_stderr(tail):
-            rc = smeltery_main(["run", str(run_dir / "config.toml"), "--out", str(run_dir)])
+            # the workspace's stage store (ROOT/.smeltery/stages, beside the job store): an identical resubmission
+            # reuses the stages an earlier job completed (smeltery.reuse)
+            stage_cache = store.parent / "stages"
+            argv = ["run", str(run_dir / "config.toml"), "--out", str(run_dir), "--stage-cache", str(stage_cache)]
+            rc = smeltery_main(argv)
     except Exception as e:  # noqa: BLE001 - any crash of the run is the job's failure, recorded, then re-raised
         settle(run_dir, spec, JobState.FAILED, f"smeltery run crashed: {type(e).__name__}: {e}"[:400], observer=False)
         raise
@@ -885,6 +896,10 @@ def _cli(command: str, argv: list[str] | None, env: Mapping[str, str] | None) ->
             print(json.dumps(read_state(h.run_dir), indent=2, sort_keys=True))
         else:
             print(f"{status.state.value} {status.updated_at}" + (f" {status.message}" if status.message else ""))
+            from .reuse import stage_lines
+
+            for line in stage_lines(h.run_dir):
+                print(line)
         return 0
     except (SettingsError, JobError, ValueError, OSError) as e:
         print(f"smeltery {command}: {e}", file=sys.stderr)

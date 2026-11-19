@@ -8,6 +8,16 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- Resumability and cancellation (`smeltery.reuse`, docs/jobs.md "Resumability"): every stage of a run gets a content
+  digest over its upstream output, its settings and the code identity (smeltery's source bytes, ferric's build), and
+  a resubmitted identical campaign reuses the measurement and any analysis an earlier run completed, from a
+  per-workspace content-addressed store (`ROOT/.smeltery/stages`, used by local campaign jobs and by
+  `smeltery run --stage-cache DIR` / `SMELTERY_STAGE_CACHE`). Never reused across ferric builds, nor from a dirty or
+  unverified one; a corrupted entry is detected by digest and recomputed; concurrent writers cannot corrupt the store.
+  A reused stage is recorded in `results.reuse` / `ext.smeltery.reuse` and `steps/NN-<stage>/stage.json` (which run,
+  which digest); the output is otherwise byte-identical. A run logs completed stages to `OUT/stages.partial.jsonl`,
+  so a cancelled or failed job's record lists them (`ext["smeltery.job"].stages_completed`) and a resubmission reuses
+  them; `smeltery status` and MCP's `run_status` / `screen_candidates` report reused stages.
 - `smeltery mcp`: an MCP server (official `mcp` SDK, the new optional `mcp` extra) with four intent-shaped tools for
   an agent with no quantum chemistry -- `screen_candidates` (plans and submits a screen through the campaign
   `JobBackend`, returning a handle at once; `dry_run=True` returns the plan and its cost without submitting),

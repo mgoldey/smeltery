@@ -1105,6 +1105,7 @@ def run_plan(
     skip_analyses: frozenset[str] = frozenset(),
     pose_index: dict[str, list[int]] | None = None,
     checkpoint=None,
+    stages=None,
 ) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
@@ -1119,11 +1120,20 @@ def run_plan(
 
     `checkpoint` (`smeltery.checkpoint.ScfCheckpoint`): the measurement tier reuses the SCFs it holds and appends the
     ones it runs (a plain run into OUT; analyses never see it).
+
+    `stages` (`smeltery.reuse.RunStages`): each stage is digested and logged as it completes; the measurement and
+    the analyses are taken from the stage store when an identical earlier run stored them, and stored otherwise.
     """
     _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
+    if stages is not None:
+        stages.run_id = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest[:12]
+        stages.plan_built(plan, funnel_counts(plan))
     if measure is None:
         ctx = {"field": plan.field} if checkpoint is None else {"field": plan.field, "checkpoint": checkpoint}
-        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
+        if stages is None:
+            _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
+        else:  # a reused measurement is never timed: its funnel row says seconds null, not "took 0 s"
+            stages.measure(plan, lambda: _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx)))
     else:
         _stage(plan.tier.name, lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
@@ -1147,6 +1157,8 @@ def run_plan(
             "stages": plan.stage_log,
             "funnel": funnel_counts(plan, res),
         }
+        if stages is not None:
+            stages.cut(plan, results)
     results["candidate_order"] = [c.name for c in plan.candidates]
     if pose_index:  # only after a pairwise drop, so ordinary records keep their shape
         results["pose_index"] = {k: list(v) for k, v in pose_index.items()}
@@ -1168,14 +1180,19 @@ def run_plan(
         for spec in active_hooks("analysis", plan.cfg):
             if spec.key in skip_analyses:
                 continue
-            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log})
+            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log}, stages)
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
 
 
-def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict) -> None:
-    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`."""
+def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict, stages=None) -> None:
+    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`.
+    `stages` (`smeltery.reuse.RunStages`): the stored dict of an identical earlier run, when there is one."""
     hook = cast(Analysis, spec.hook)
-    got = _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+
+    def run():
+        return _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+
+    got = run() if stages is None else stages.analysis(spec, plan, rec, run)
     if not isinstance(got, dict):
         raise StageError(
             f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}", stage=spec.key
@@ -1804,6 +1821,14 @@ def main(argv: list[str] | None = None) -> int:
         help="run into an OUT that already holds a run record; also discards an interrupted run's SCF checkpoint "
         "(OUT/calcs.partial.jsonl), which a rerun without --force resumes from",
     )
+    run.add_argument(
+        "--stage-cache",
+        dest="stage_cache",
+        type=Path,
+        default=None,
+        help="a stage store (smeltery.reuse): reuse the stages an identical earlier run completed, store this run's; "
+        "with --out only (env SMELTERY_STAGE_CACHE)",
+    )
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
         "--temporal",
@@ -2056,17 +2081,29 @@ def main(argv: list[str] | None = None) -> int:
             if explicit_out:
                 write_plan_preview(plan, digest, args.out, args.config)
             return 0
-        checkpoint = None
+        checkpoint = stages = None
         if config_info is not None:  # a run into an explicit OUT checkpoints its SCFs there (smeltery.checkpoint)
+            from .reuse import RunStages, store_for
+
             checkpoint = _open_checkpoint(plan, args.out, config_info["sha256"], args.force)
-        rec, out = run_plan(plan, checkpoint=checkpoint)
+            # every completed stage is logged in OUT; with a stage store, reused or stored (smeltery.reuse)
+            stages = RunStages(args.out, store_for(args.stage_cache))
+            if stages.why_not:
+                print(f"stage reuse off: {stages.why_not}")
+        rec, out = run_plan(plan, checkpoint=checkpoint, stages=stages)
         if config_info is not None:
             rec.results["config"] = config_info
+        reuse = stages.summary() if stages is not None else None
+        if reuse is not None:
+            rec.results["reuse"] = reuse
+            print(f"stages reused: {reuse['reused']} of {reuse['reusable']} reusable")
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
         if checkpoint is not None:  # the record is written: a finished OUT holds today's outputs only
             from .checkpoint import discard
+            from .reuse import discard_progress
 
             discard(args.out)
+            discard_progress(args.out)
         core = emit_core_record(path, started_at)  # last: the manifest covers what the run left in OUT
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)

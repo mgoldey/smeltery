@@ -217,7 +217,39 @@ def plan(
     keep: int | None = None,
 ) -> tuple[dict, Plan]:
     """Build the config, build the plan everything before the SCFs needs, and price it. Submits nothing."""
+    cfg, built, _reuse = _plan(
+        target,
+        ligand_set,
+        reference_ligand=reference_ligand,
+        target_class=target_class,
+        campaign=campaign,
+        keep=keep,
+    )
+    return cfg, built
+
+
+@dataclass
+class Reuse:
+    """How many of a screen's stages an identical earlier screen already computed, and will not be recomputed."""
+
+    reused: int
+    reusable: int
+    why_not: str | None
+
+
+def _plan(
+    target: str,
+    ligand_set: dict[str, str],
+    *,
+    reference_ligand: str | None = None,
+    target_class: str | None = None,
+    campaign: str | None = None,
+    keep: int | None = None,
+    store=None,
+) -> tuple[dict, Plan, Reuse]:
+    """`plan`, plus what the stage store (`smeltery.reuse`) already holds of this screen."""
     from ..cli import ConfigError, StageError, build_plan, memory_estimate
+    from ..reuse import predict
 
     cfg, cls = build_config(
         target,
@@ -234,6 +266,7 @@ def plan(
             raise Refusal(f"the screen cannot be planned: {e}") from e
         est = built.tier.estimate_cost(built.candidates)
         mem = memory_estimate(built)
+        reused, reusable, why_not = predict(built, store)  # last: it fills the plan's candidates from the store
     predicted = est.get("predicted")
     per_candidate = sorted({len(c.poses) for c in built.candidates})
     estimate = mem.get("estimate") or {}
@@ -248,19 +281,23 @@ def plan(
         memory_verdict=mem["verdict"],
         memory_basis=mem.get("basis") or (f"budget {estimate['budget_gb']:g} GB" if "budget_gb" in estimate else ""),
     )
-    return cfg, Plan(
-        campaign=cfg["campaign"],
-        target_class=cls.name,
-        tier=built.tier.name,
-        measures=_measures(built.tier.name),
-        reference_ligand=cfg["parent"],
-        keep=cfg["cut"]["keep"],
-        z=float(cfg["cut"]["z"]),
-        floor=float(cfg["cut"]["floor"]),
-        floor_note=FLOOR_NOTE,
-        cost=cost,
-        class_why=cls.why,
-        class_limits=cls.limits,
+    return (
+        cfg,
+        Plan(
+            campaign=cfg["campaign"],
+            target_class=cls.name,
+            tier=built.tier.name,
+            measures=_measures(built.tier.name),
+            reference_ligand=cfg["parent"],
+            keep=cfg["cut"]["keep"],
+            z=float(cfg["cut"]["z"]),
+            floor=float(cfg["cut"]["floor"]),
+            floor_note=FLOOR_NOTE,
+            cost=cost,
+            class_why=cls.why,
+            class_limits=cls.limits,
+        ),
+        Reuse(reused, reusable, why_not),
     )
 
 
@@ -323,6 +360,40 @@ class Screen:
     plan: Plan
     ceiling: Ceiling
     note: str
+    #: Of the stages that can be reused (the energy calculations, and any analysis that runs no outside program),
+    #: how many an identical earlier screen in this workspace already finished, so they will not be computed again.
+    reused_stages: int = 0
+    reusable_stages: int = 0
+
+
+def _stage_store(settings, root: str | None, backend):
+    """The workspace's stage store a local job reuses from; None for a backend that reuses nothing (Temporal)."""
+    from ..reuse import workspace_store
+
+    if backend is not None:
+        base = getattr(backend, "root", None)
+        return None if base is None else workspace_store(base)
+    if settings.backend != "local":
+        return None
+    base = root or settings.root
+    if base is None:
+        try:
+            from ..bench.app import default_root
+        except ImportError:
+            return None
+        base = default_root()
+    return workspace_store(Path(base).expanduser())
+
+
+def _reuse_note(reuse: Reuse) -> str:
+    if reuse.reused:
+        return (
+            f" Reused {reuse.reused} of {reuse.reusable} stages: an identical earlier screen in this workspace "
+            "already finished them, so they are taken from it, not computed again."
+        )
+    if reuse.why_not and reuse.reusable:
+        return f" Nothing is reused from earlier screens ({reuse.why_not})."
+    return ""
 
 
 def _backend(settings, *, root: str | None = None, name: str | None = None):
@@ -365,20 +436,22 @@ def screen(
     """Plan, check the ceiling, and (unless `dry_run`) submit. Returns as soon as the job is queued."""
     from .. import jobs
 
-    cfg, built = plan(
+    cfg, built, reuse = _plan(
         target,
         ligand_set,
         reference_ligand=reference_ligand,
         target_class=target_class,
         campaign=campaign,
         keep=keep,
+        store=_stage_store(settings, root, backend),
     )
     ceiling = check_ceiling(built.cost, settings)
+    counts = {"reused_stages": reuse.reused, "reusable_stages": reuse.reusable}
     if dry_run:
         note = "Nothing was submitted: this is the plan only."
         if ceiling.exceeded:
             note += f" It is over the configured ceiling ({'; '.join(ceiling.over)}). {HOW_TO_CONFIRM}"
-        return Screen(False, None, None, None, None, built, ceiling, note)
+        return Screen(False, None, None, None, None, built, ceiling, note + _reuse_note(reuse), **counts)
     if ceiling.exceeded and not confirm:
         raise Refusal(f"refusing to submit: {'; '.join(ceiling.over)}. {HOW_TO_CONFIRM}")
     run_dir = _run_dir(out_dir, built.campaign, settings, root)
@@ -405,7 +478,9 @@ def screen(
             f" The configured ceiling was overridden with confirm=True ({'; '.join(ceiling.over)})."
             if confirm and ceiling.exceeded
             else ""
-        ),
+        )
+        + _reuse_note(reuse),
+        **counts,
     )
 
 
@@ -485,23 +560,63 @@ def _scf_progress(run_dir: Path, state: str) -> TierProgress | None:
     )
 
 
+REUSED_NOTE = "taken from an identical earlier run (run {run}), not computed again"
+
+
+def _reused(entry: dict | None) -> str | None:
+    """The note for a stage that was reused, else None."""
+    if not entry or not entry.get("reused"):
+        return None
+    return REUSED_NOTE.format(run=(entry.get("reused_from") or {}).get("run_id"))
+
+
 def _finished_tiers(record: dict) -> list[TierProgress]:
-    rows = (record.get("results") or {}).get("funnel") or []
+    results = record.get("results") or {}
+    rows = results.get("funnel") or []
+    reuse = {e.get("stage"): e for e in (results.get("reuse") or {}).get("stages") or []}
     out = []
     for row in rows:
         n_in, n_out = row.get("candidates_in"), row.get("candidates_out")
         kept = "could not be ordered, so nothing was dropped" if n_out is None else f"{n_out} of {n_in} kept"
-        out.append(TierProgress(str(row.get("stage")), "done", None, None, "candidates", f"{row.get('kind')}: {kept}"))
+        note = f"{row.get('kind')}: {kept}"
+        reused = _reused(reuse.get(row.get("stage")))
+        state = "done" if reused is None else "reused"
+        out.append(
+            TierProgress(
+                str(row.get("stage")), state, None, None, "candidates", note + (f"; {reused}" if reused else "")
+            )
+        )
+    return out
+
+
+def _logged_tiers(run_dir: Path) -> list[TierProgress]:
+    """The stages a live or stopped run has completed, from its stage log (`smeltery.reuse`)."""
+    from ..reuse import read_progress
+
+    out = []
+    for e in read_progress(run_dir) or []:
+        reused = _reused(e)
+        out.append(
+            TierProgress(
+                str(e["stage"]),
+                "done" if reused is None else "reused",
+                None,
+                None,
+                "stage",
+                reused or "finished",
+            )
+        )
     return out
 
 
 def status(handle: str, *, settings, root: str | None = None, backend=None) -> Status:
     """A screen's state, plus progress per stage where it is knowable.
 
-    Before the run ends, only the measurement stage can be counted: the run writes its planned SCF count and
-    appends each finished one (`OUT/progress.json`, `OUT/calcs.partial.jsonl`). The stages before it leave no
-    counter, so they are reported as a state and nothing is invented. Once the record exists, every stage's
-    candidates in and out come from it."""
+    Before the run ends, the stages it has completed come from its stage log (`OUT/stages.partial.jsonl`), each
+    "done" or "reused" (taken from an identical earlier run), and the measurement in progress is counted: the run
+    writes its planned SCF count and appends each finished one (`OUT/progress.json`, `OUT/calcs.partial.jsonl`). A
+    cancelled or failed screen keeps the stages it completed. Once the record exists, every stage's candidates in and
+    out come from it."""
     from .. import jobs
 
     h, backend = _handle(handle, settings, root, backend)
@@ -519,9 +634,11 @@ def status(handle: str, *, settings, root: str | None = None, backend=None) -> S
         except (OSError, ValueError):
             tiers = []
     if not tiers:
-        running = _scf_progress(run_dir, "running" if st.state.value == "running" else st.state.value)
-        if running is not None:
-            tiers = [running]
+        logged = _logged_tiers(run_dir)
+        measured = any(t.stage in ("field_interaction", "field_dft_interaction") for t in logged)
+        running = None if measured else _scf_progress(run_dir, st.state.value)
+        if logged or running is not None:
+            tiers = logged + ([running] if running is not None else [])
         else:
             tiers = [
                 TierProgress(

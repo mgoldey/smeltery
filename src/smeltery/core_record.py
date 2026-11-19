@@ -457,6 +457,16 @@ def core_fields(
     if not isinstance(input_digest, str) or len(input_digest) < 12:
         raise ValueError("the record has no input_digest")
     tiers = legacy.get("tiers") or []
+    ext = {
+        "tiers": tiers,
+        "input_digest": input_digest,
+        "host": legacy.get("host"),
+        "started_utc": legacy.get("started_utc"),
+        "legacy_schema_version": legacy.get("schema_version"),
+        "cut_unranked": (results.get("cut") or {}).get("unranked"),
+    }
+    if "reuse" in results:  # stage reuse (smeltery.reuse): which stages were reused, from which run; no core slot
+        ext["reuse"] = results["reuse"]
     return {
         "schema": _schema.SCHEMA if _schema else "attestation.run/1",
         "run_id": input_digest[:12],
@@ -473,16 +483,7 @@ def core_fields(
         "history": None,  # smeltery logs no curves: every value it records is final, so there is no sidecar
         "seeds": seeds(tiers),
         "dependencies": dependencies,
-        "ext": {
-            "smeltery": {
-                "tiers": tiers,
-                "input_digest": input_digest,
-                "host": legacy.get("host"),
-                "started_utc": legacy.get("started_utc"),
-                "legacy_schema_version": legacy.get("schema_version"),
-                "cut_unranked": (results.get("cut") or {}).get("unranked"),
-            }
-        },
+        "ext": {"smeltery": ext},
     }
 
 
@@ -494,10 +495,13 @@ def _write_steps(run_dir: Path, results: dict) -> None:
     stage-log rows (summary, seconds), as recorded. smeltery's outputs (poses, SCF log) span stages and stay where the
     GUI contract puts them; this is what a stage produced on its own."""
     log = results.get("stages") or []
+    reuse = {r.get("stage"): r for r in (results.get("reuse") or {}).get("stages") or []}
     for i, row in enumerate(results.get("funnel") or []):
         d = _layout.step_dir(run_dir, i, str(row.get("stage")))
         d.mkdir(parents=True, exist_ok=True)
         body = {"funnel": row, "log": [r for r in log if r.get("stage") == row.get("stage")]}
+        if row.get("stage") in reuse:  # only a run with a stage store: digests, and reused_from when reused
+            body["reuse"] = reuse[row.get("stage")]
         (d / STEP_FILE).write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
 
 

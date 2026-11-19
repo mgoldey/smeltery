@@ -99,7 +99,9 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
             "(poses) of each molecule are tried, how strict the ranking is -- so that nobody has to pick a basis "
             f"set or a functional. The classes are: {classes}. Set dry_run=True to get the plan and its predicted "
             "cost without submitting anything. A screen over the configured ceiling is refused unless "
-            "confirm=True. Returns the handle, the plan, and what the ceiling said."
+            "confirm=True. Submitting the same screen again reuses the stages an identical earlier screen in this "
+            "workspace already finished, instead of computing them again; the answer says how many of its stages "
+            "that is (reused_stages of reusable_stages). Returns the handle, the plan, and what the ceiling said."
         ),
     )
     @_guard
@@ -137,7 +139,9 @@ def build_server(ctx: ToolContext | None = None) -> MCPServer:
             "reports progress per stage where the run leaves enough on disk to tell: while the energies are being "
             "computed, how many of the planned calculations have finished; once the screen is complete, how many "
             "molecules went into each stage and how many came out. A stage that leaves no counter is reported as a "
-            "state rather than as a made-up percentage."
+            "state rather than as a made-up percentage. A stage taken from an identical earlier screen instead of "
+            "being computed again is reported as reused, naming that screen's run. A cancelled or failed screen "
+            "still lists the stages it finished; submitting it again reuses those and redoes the rest."
         ),
     )
     @_guard
