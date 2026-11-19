@@ -19,6 +19,11 @@ it and exit 2.
 | SMELTERY_THREADS_PER_WORKER | 1 | RAYON_NUM_THREADS per SCF |
 | SMELTERY_TASK_CONCURRENCY | 2 | concurrent shell tasks per task worker (Temporal) |
 | SMELTERY_MAX_RUNS | 1 | launched runs at once (local backend) |
+| SMELTERY_MAX_CPU_HOURS | unset | ceiling on a screen's predicted CPU-hours (`smeltery mcp`); unset = none |
+| SMELTERY_MAX_CANDIDATES | unset | ceiling on a screen's candidate count (`smeltery mcp`); unset = none |
+
+The last two are CEILINGS, not sizes: unset means nothing is capped, and a screen above either one is refused
+unless the caller passes `confirm=True` (docs/mcp.md).
 """
 
 from __future__ import annotations
@@ -51,6 +56,11 @@ class Settings:
     threads_per_worker: int = 1
     task_concurrency: int = 2
     max_runs: int = 1
+    # Ceilings for the MCP screening surface (docs/mcp.md). None = no ceiling, which is why they are not
+    # numbers with a default: "unset" and "set to something large" are different answers to a caller asking
+    # whether a screen is over budget.
+    max_cpu_hours: float | None = None
+    max_candidates: int | None = None
 
 
 # field -> (environment variable, command-line flag shown in errors, kind)
@@ -67,6 +77,8 @@ _FIELDS: dict[str, tuple[str, str, str]] = {
     "threads_per_worker": ("SMELTERY_THREADS_PER_WORKER", "--threads-per-worker", "positive"),
     "task_concurrency": ("SMELTERY_TASK_CONCURRENCY", "--concurrency", "positive"),
     "max_runs": ("SMELTERY_MAX_RUNS", "--max-runs", "positive"),
+    "max_cpu_hours": ("SMELTERY_MAX_CPU_HOURS", "--max-cpu-hours", "positive_float"),
+    "max_candidates": ("SMELTERY_MAX_CANDIDATES", "--max-candidates", "positive"),
 }
 ENV_VARS = tuple(v[0] for v in _FIELDS.values())
 
@@ -77,6 +89,14 @@ def _coerce(kind: str, raw: object, label: str) -> object:
         if value not in BACKENDS:
             raise SettingsError(f"{label}={raw!r} is not a backend; use one of: {', '.join(BACKENDS)}")
         return value
+    if kind == "positive_float":
+        try:
+            x = float(str(raw).strip())
+        except ValueError:
+            raise SettingsError(f"{label}={raw!r} is not a number") from None
+        if not x > 0:
+            raise SettingsError(f"{label}={raw!r} must be greater than 0")
+        return x
     if kind in ("positive", "port"):
         try:
             n = int(str(raw).strip())

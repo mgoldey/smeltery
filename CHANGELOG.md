@@ -8,6 +8,18 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- `smeltery mcp`: an MCP server (official `mcp` SDK, the new optional `mcp` extra) with four intent-shaped tools for
+  an agent with no quantum chemistry -- `screen_candidates` (plans and submits a screen through the campaign
+  `JobBackend`, returning a handle at once; `dry_run=True` returns the plan and its cost without submitting),
+  `run_status` (state plus per-stage progress where the run leaves enough on disk to tell), `explain_drop` (which
+  stage dropped a molecule, on what number, against what threshold and systematic-error floor, read from the run's
+  own record) and `estimate_cost` (CPU-hours, candidates and memory from `smeltery.cost`, null with a reason when it
+  cannot price the settings). Defaults come per target class from a data table
+  (`src/smeltery/data/target_classes.toml`), each justified from this repository's own tier pages and cost
+  measurements, so no caller picks a basis set. Guardrails: `SMELTERY_MAX_CPU_HOURS` and `SMELTERY_MAX_CANDIDATES`
+  (via `smeltery.settings`) refuse a submission above the ceiling -- an unpriceable screen counts as over it -- and
+  the refusal says to pass `confirm=True`. Expected refusals reach the caller verbatim; anything else is logged and
+  answered generically. See `docs/mcp.md`.
 - Campaign jobs: `smeltery submit CONFIG --out RUN_DIR` returns at once, and `smeltery status / cancel / result
   RUN_DIR` follow the job (`smeltery.jobs`, the `attestation` extra). Two implementations of attestation-schema's
   `JobBackend` behind `SMELTERY_BACKEND`: `local` (default; a capped task on Bench's SQLite queue under its own

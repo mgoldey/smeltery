@@ -232,6 +232,7 @@ Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 | Plug in structure, docking, scoring or potential providers | [docs/providers.md](docs/providers.md) |
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
 | Submit a run and come back for it (`smeltery submit/status/cancel/result`) | [docs/jobs.md](docs/jobs.md) |
+| Drive a screen from an agent (MCP: `smeltery mcp`) | [docs/mcp.md](docs/mcp.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
 | Fix an error message | [docs/troubleshooting.md](docs/troubleshooting.md) |

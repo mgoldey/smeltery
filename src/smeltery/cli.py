@@ -1634,6 +1634,7 @@ VIEWERS = {
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
     "record": "smeltery.core_record",
+    "mcp": "smeltery.mcp:main",
     "serve": "smeltery.services:serve_main",
     "worker": "smeltery.services:worker_main",
     "submit": "smeltery.jobs:submit_main",
@@ -1754,6 +1755,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
     sub.add_parser("serve", help="Bench, configured by SMELTERY_* env vars (smeltery serve --help)")
+    sub.add_parser("mcp", help="serve the screening tools to an MCP client over stdio (docs/mcp.md; `mcp` extra)")
     sub.add_parser("worker", help="the worker for SMELTERY_BACKEND=local|temporal (smeltery worker --help)")
     sub.add_parser("submit", help="submit `run CONFIG --out RUN_DIR` as a campaign job, return at once (docs/jobs.md)")
     sub.add_parser("status", help="a campaign job's state (smeltery status RUN_DIR)")

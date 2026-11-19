@@ -95,6 +95,18 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "import tempfile, attestation_schema as a; from smeltery import jobs; assert jobs.AVAILABLE; "
         "assert isinstance(jobs.LocalJobBackend(tempfile.mkdtemp()), a.JobBackend)",
     ],
+    # The MCP surface: the SDK imports, the server builds with its four tools, and the target-class table the
+    # tool descriptions are generated from loads out of the installed package data (not the checkout).
+    "mcp": [
+        "import mcp; from mcp.server.mcpserver import MCPServer",
+        "import asyncio; from smeltery.mcp.server import build_server, ToolContext; "
+        "from smeltery.settings import resolve; "
+        "s = build_server(ToolContext(resolve({}))); "
+        "names = sorted(t.name for t in asyncio.run(s.list_tools())); "
+        "assert names == ['estimate_cost', 'explain_drop', 'run_status', 'screen_candidates'], names",
+        "from smeltery.mcp import targets; "
+        "assert targets.default_name() in targets.names() and len(targets.names()) >= 2, targets.names()",
+    ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",

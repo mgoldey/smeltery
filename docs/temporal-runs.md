@@ -49,6 +49,8 @@ SMELTERY_BACKEND=temporal smeltery serve --demo
 | `SMELTERY_THREADS_PER_WORKER` | `1` | `worker`, `temporal-worker` | `RAYON_NUM_THREADS` per SCF child. Flag: `--threads-per-worker`. |
 | `SMELTERY_TASK_CONCURRENCY` | `2` | `worker`, `task-worker` | Concurrent shell tasks per task worker. Flag: `--concurrency`. |
 | `SMELTERY_MAX_RUNS` | `1` | `serve`, `worker` (local) | Launched runs at once on the local backend. Flag: `--max-runs`. |
+| `SMELTERY_MAX_CPU_HOURS` | unset (no ceiling) | `mcp` | Ceiling on a screen's predicted CPU-hours; above it, submission needs `confirm=True`. A screen whose CPU time cannot be estimated counts as over it. See [mcp.md](mcp.md). Flag: `--max-cpu-hours`. |
+| `SMELTERY_MAX_CANDIDATES` | unset (no ceiling) | `mcp` | Ceiling on a screen's candidate count; above it, submission needs `confirm=True`. See [mcp.md](mcp.md). Flag: `--max-candidates`. |
 
 A bad value stops the command with exit code 2 and a message naming the variable (for example
 `SMELTERY_BACKEND='redis' is not a backend; use one of: local, temporal`). The other `SMELTERY_BENCH_*` variables
