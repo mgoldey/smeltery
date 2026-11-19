@@ -1,6 +1,7 @@
 """The core run record (`attestation.run/1`) written beside smeltery's own record (smeltery.core_record).
 
-Needs the `attestation` extra (attestation-schema, Python >= 3.12); skipped without it, except the notice test.
+Needs the `attestation` extra (attestation-schema); skipped without it, except the notice test. CI's 3.11 `test` job
+installs the extra, so these run there too.
 Regenerate the golden file after a deliberate change with:
 
     SMELTERY_REGEN_CORE_GOLDEN=1 .venv/bin/python -m pytest tests/test_core_record.py -q -k golden
@@ -9,8 +10,10 @@ Regenerate the golden file after a deliberate change with:
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -52,7 +55,7 @@ def _legacy(run_dir: Path) -> Path:
                 "dirty": False,
                 "provenance": "VERIFIED from ferric.__build__ (stamped at build time)",
             },
-            ("verified", "8e408dd82698b1c344272960bb62778d9a5d4d9a", "0.1.0rc12", False),
+            ("verified", "8e408dd82698b1c344272960bb62778d9a5d4d9a", "0.1.0rc12", False, None),
         ),
         (  # an index release: VERIFIED by its immutable version, no sha
             {
@@ -62,7 +65,7 @@ def _legacy(run_dir: Path) -> Path:
                 "dirty": False,
                 "provenance": "VERIFIED: index release 0.1.0rc10 (immutable)",
             },
-            ("verified", None, "0.1.0rc10", False),
+            ("verified", None, "0.1.0rc10", False, "index"),
         ),
         (  # a local checkout: INFERRED, its HEAD now
             {
@@ -72,7 +75,7 @@ def _legacy(run_dir: Path) -> Path:
                 "dirty": True,
                 "provenance": "INFERRED from the local source directory's current git state",
             },
-            ("inferred", "a" * 40, "0.1.0", True),
+            ("inferred", "a" * 40, "0.1.0", True, "file"),
         ),
         (  # an unstamped wheel: INFERRED, the pip hash only in the evidence
             {
@@ -82,18 +85,38 @@ def _legacy(run_dir: Path) -> Path:
                 "dirty": False,
                 "provenance": "INFERRED from the installed wheel ferric-0.1.0-cp312-linux.whl (sha256=ab)",
             },
-            ("inferred", None, "0.1.0", False),
+            ("inferred", None, "0.1.0", False, "file"),
         ),
         (  # nothing found
             {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"},
-            ("unknown", None, None, None),
+            ("unknown", None, None, None, None),
+        ),
+        (  # a git install: VERIFIED with the commit, the URL as the source (credentials stripped)
+            {
+                "version": "0.1.0",
+                "source": "https://user:tok@github.com/x/ferric.git",
+                "commit": "b" * 40,
+                "dirty": False,
+                "provenance": "VERIFIED from direct_url.json (git install)",
+            },
+            ("verified", "b" * 40, "0.1.0", False, "git+https://github.com/x/ferric.git"),
+        ),
+        (  # conda / a distro: INFERRED, the installer as the source
+            {
+                "version": "2025.03.1",
+                "source": "installed by conda",
+                "commit": None,
+                "dirty": None,
+                "provenance": "INFERRED: version 2025.03.1 as installed by conda (not an index release)",
+            },
+            ("inferred", None, "2025.03.1", None, "conda"),
         ),
     ],
 )
 def test_every_rung_of_the_identity_ladder_maps_to_the_core_enum_the_same_way(ident, want):
     dep = dependency("anything", ident)  # the name is not consulted: ferric gets no special case
-    assert (dep["provenance"], dep["build_sha"], dep["version"], dep["dirty"]) == want
-    assert set(dep) == {"name", "version", "build_sha", "dirty", "provenance", "evidence"}
+    assert (dep["provenance"], dep["build_sha"], dep["version"], dep["dirty"], dep["source"]) == want
+    assert set(dep) == {"name", "version", "build_sha", "dirty", "provenance", "evidence", "source"}
     assert dep["evidence"] == (None if want[0] == "unknown" else ident["provenance"])
 
 
@@ -105,37 +128,92 @@ def test_no_identity_at_all_is_unknown_with_every_field_null():
         "dirty": None,
         "provenance": "unknown",
         "evidence": None,
+        "source": None,
     }
     assert provenance_level("VERIFIED: x") == "verified" and provenance_level(None) == "unknown"
 
 
-def test_a_docking_seed_list_makes_seeds_unknown_rather_than_partial():
+def test_a_docking_seed_list_is_recorded_as_a_list_and_a_malformed_one_makes_seeds_unknown():
     assert core_record.seeds([{"name": "paired_poses", "seed": 1}]) == {"paired_poses": 1}
-    assert core_record.seeds([{"name": "docking", "seeds": [7]}, {"name": "paired_poses", "seed": 1}]) is None
+    both = [{"name": "docking", "seeds": [7]}, {"name": "paired_poses", "seed": 1}]
+    assert core_record.seeds(both) == {"docking": [7], "paired_poses": 1}
     assert core_record.seeds([{"name": "field_interaction"}]) is None
+    # never partial: a list the schema cannot hold, or one name with two seeds, is unknown rather than a guess
+    assert core_record.seeds([{"name": "docking", "seeds": []}, {"name": "paired_poses", "seed": 1}]) is None
+    assert core_record.seeds([{"name": "x", "seed": 1}, {"name": "x", "seed": 2}]) is None
 
 
-def test_metrics_carry_a_direction_only_for_the_ranked_quantity_and_skip_non_finite_values():
+def test_a_run_written_by_two_ferric_builds_records_ferric_unknown_naming_the_mix():
+    stamped = {"version": "0.1.0", "source": "ferric.__build__", "commit": "a" * 40, "dirty": False,
+               "provenance": "VERIFIED from ferric.__build__ (stamped at build time)"}  # fmt: skip
+    one = {"identity": "recorded", "ferric": {"git_sha": "a" * 40, "dirty": False}, "n_rows": 8}
+    legacy = {"ferric": stamped, "host": {"python": "3.11.15"}, "results": {"builds": [one]}}
+    assert core_record.recorded_dependencies(legacy)[0]["provenance"] == "verified"  # one build: not a mix
+    two = {"identity": "recorded", "ferric": {"git_sha": "b" * 40, "dirty": True}, "n_rows": 4}
+    legacy["results"]["builds"] = [one, two, {"identity": "unrecorded", "n_rows": 2}]
+    for deps in (core_record.recorded_dependencies(legacy), core_record.live_dependencies(legacy)):
+        ferric = deps[0]
+        assert (ferric["name"], ferric["provenance"], ferric["version"], ferric["build_sha"]) == (
+            "ferric",
+            "unknown",
+            None,
+            None,
+        )
+        assert "2 ferric builds" in ferric["evidence"] and "bbbbbbbbbbbb (dirty): 4 row(s)" in ferric["evidence"]
+
+
+def test_code_is_on_the_dependency_ladder_and_keeps_the_version_that_ran():
+    ident = {
+        "commit": "c" * 40,
+        "dirty": True,
+        "provenance": "INFERRED from the local source directory's current git state",
+        "source": "file:///somewhere/smeltery",
+        "version": "0.0.2.dev383",
+        "git_remote": "https://github.com/x/smeltery",
+    }
+    assert core_record._code(ident, "ignored") == {
+        "git_sha": "c" * 40,
+        "dirty": True,
+        "repo": "https://github.com/x/smeltery",
+        "version": "0.0.2.dev383",
+        "provenance": "inferred",
+        "evidence": ident["provenance"],
+    }
+    # a record from before the identity block: the version the run reported, provenance unknown
+    old = core_record._code(None, "0.0.1")
+    assert (old["version"], old["provenance"], old["git_sha"], old["evidence"]) == ("0.0.1", "unknown", None, None)
+
+
+def test_metrics_label_what_they_are_about_and_write_undefined_values_as_nan():
     results = {
         "funnel": [
+            {"stage": "structure", "candidates_in": None, "candidates_out": None},  # counts nothing: not reported
             {"stage": "poses", "candidates_in": 3, "candidates_out": 3},
-            {"stage": "cut", "candidates_in": 2, "candidates_out": None},  # an unranked cut keeps no count
+            {"stage": "cut", "candidates_in": 2, "candidates_out": None, "unranked": True},  # ran, no survivor set
         ],
-        "cut": {"survivors": None},
+        "cut": {"survivors": None, "unranked": True},
+        "units": {"dE_int": "kcal/mol"},
         "candidate_order": ["p", "b", "a"],
         "paired_ddE": {"a": {"mean": 1.0, "sem": float("nan"), "n": 1}, "b": {"mean": -1.0, "sem": 0.1, "n": 3}},
     }
-    got = [(m["name"], m["value"], m["direction"]) for m in core_record.metrics(results)]
+    got = [(m["name"], m["labels"], m["value"], m["direction"], m["unit"]) for m in core_record.metrics(results)]
     assert got == [
-        ("stage.poses.candidates_in", 3, None),
-        ("stage.poses.survivors", 3, None),
-        ("stage.cut.candidates_in", 2, None),
-        ("paired_ddE.b.mean", -1.0, "min"),  # config order, not dict order
-        ("paired_ddE.b.sem", 0.1, None),
-        ("paired_ddE.b.n", 3, None),
-        ("paired_ddE.a.mean", 1.0, "min"),
-        ("paired_ddE.a.n", 1, None),
+        ("stage.candidates_in", {"stage": "poses"}, 3, None, None),
+        ("stage.survivors", {"stage": "poses"}, 3, None, None),
+        ("stage.candidates_in", {"stage": "cut"}, 2, None, None),
+        ("stage.survivors", {"stage": "cut"}, "NaN", None, None),
+        ("cut.survivors", {}, "NaN", None, None),
+        ("paired_ddE.mean", {"analogue": "b"}, -1.0, "min", "kcal/mol"),  # config order, not dict order
+        ("paired_ddE.sem", {"analogue": "b"}, 0.1, None, "kcal/mol"),
+        ("paired_ddE.n", {"analogue": "b"}, 3, None, None),
+        ("paired_ddE.mean", {"analogue": "a"}, 1.0, "min", "kcal/mol"),
+        ("paired_ddE.sem", {"analogue": "a"}, "NaN", None, "kcal/mol"),  # one pose: computed, undefined
+        ("paired_ddE.n", {"analogue": "a"}, 1, None, None),
     ]
+    assert [core_record.wire_value(v) for v in (math.inf, -math.inf, 2.5, 3)] == ["Infinity", "-Infinity", 2.5, 3]
+    # no unit is invented: a record that does not say what dE_int is in gives null
+    del results["units"]
+    assert {m["unit"] for m in core_record.metrics(results)} == {None}
 
 
 # ---- real prebuilt runs through attestation-schema's writer ----------------------------------------------------
@@ -170,7 +248,11 @@ def test_every_prebuilt_run_converts_and_reads_back_canonically(tmp_path, name):
     assert (rec.started_at, rec.finished_at) == (None, None)  # a conversion knows neither instant
     assert rec.ext["smeltery"]["input_digest"] == legacy["input_digest"]
     assert rec.dependencies[0].name == "ferric"
-    assert rec.dependencies[0].build_sha == legacy["ferric"]["commit"]
+    ferrics = {json.dumps(b["ferric"]) for b in legacy["results"].get("builds", []) if "ferric" in b}
+    if len(ferrics) > 1:  # danuglipron-halogen: SCFs from two ferric builds, so no one ferric ran it
+        assert (rec.dependencies[0].provenance, rec.dependencies[0].build_sha) == ("unknown", None)
+    else:
+        assert rec.dependencies[0].build_sha == legacy["ferric"]["commit"]
     # the manifest binds every file the run left, the legacy record and the step files included
     manifest = json.loads((run_dir / "attestation" / "digests.json").read_bytes())
     assert manifest == build_manifest(run_dir)
@@ -188,9 +270,16 @@ def test_no_chemistry_in_the_core_fields_only_in_config_and_ext(tmp_path):
     core_record.write_core(_legacy(run_dir))
     rec = json.loads((run_dir / "attestation" / "run.json").read_bytes())
     core = json.dumps({k: v for k, v in rec.items() if k not in ("config", "ext")})
-    chemistry = [*legacy["inputs"]["candidates"].values(), "kcal", "sto-3g", "vina", "MMFF"]
+    chemistry = [*legacy["inputs"]["candidates"].values(), "sto-3g", "vina", "MMFF"]
     assert not [c for c in chemistry if c in core]
     assert rec["ext"]["smeltery"]["tiers"] == legacy["tiers"]
+    # a unit is not chemistry: it is the one chemistry-adjacent string the core carries, and only as `unit`
+    assert {m["unit"] for m in rec["metrics"]} == {None, legacy["results"]["units"]["dE_int"]}
+    # docking runs Vina once per seed: the list is recorded as such, beside the paired-pose seed
+    assert rec["seeds"] == {"docking": [7], "paired_poses": 20261005}
+    assert rec["ext"]["smeltery"]["cut_unranked"] is True
+    survivors = [m for m in rec["metrics"] if m["name"] == "cut.survivors"]
+    assert [m["value"] for m in survivors] == ["NaN"]  # on the wire: the cut ran and has no survivor set
 
 
 @needs_schema
@@ -230,7 +319,9 @@ def test_a_live_run_writes_the_core_record_last_with_its_own_times_and_environme
     printed = capsys.readouterr().out
     rec = a.read(out_dir)
     assert f"core record: {out_dir / 'attestation' / 'run.json'}" in printed
-    assert rec.started_at and rec.finished_at and rec.started_at <= rec.finished_at
+    assert rec.started_at and rec.finished_at
+    # parsed, not compared as text: the one spelling has no trailing fraction zeros, so ':37.5Z' sorts before ':37Z'
+    assert datetime.fromisoformat(rec.started_at[:-1]) <= datetime.fromisoformat(rec.finished_at[:-1])
     assert rec.producer.name == "smeltery"
     names = [d.name for d in rec.dependencies]
     assert names[:4] == ["ferric", "python", "rdkit", "numpy"]

@@ -111,7 +111,7 @@ wheels = [
 [[package]]
 name = "attestation-schema"
 version = "0.1.0.dev0"
-source = { git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=93bb5ab8ea0e401577c717ca5d951fb7d8475492#93bb5ab8ea0e401577c717ca5d951fb7d8475492" }
+source = { git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=314e4ff29737cf8cc2ab930b2708a8ca2f2cee46#314e4ff29737cf8cc2ab930b2708a8ca2f2cee46" }
 
 [[package]]
 name = "bottle"
@@ -2296,7 +2296,7 @@ aimnet2 = [
     { name = "torch" },
 ]
 attestation = [
-    { name = "attestation-schema", marker = "python_full_version >= '3.12'" },
+    { name = "attestation-schema" },
 ]
 bench = [
     { name = "fastapi" },
@@ -2381,7 +2381,7 @@ requires-dist = [
     { name = "aimnet", marker = "extra == 'aimnet2'", specifier = ">=0.2.0" },
     { name = "anywidget", marker = "extra == 'desktop'", specifier = ">=0.11" },
     { name = "anywidget", marker = "extra == 'gui'", specifier = ">=0.11" },
-    { name = "attestation-schema", marker = "python_full_version >= '3.12' and extra == 'attestation'", git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=93bb5ab8ea0e401577c717ca5d951fb7d8475492" },
+    { name = "attestation-schema", marker = "extra == 'attestation'", git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=314e4ff29737cf8cc2ab930b2708a8ca2f2cee46" },
     { name = "fastapi", marker = "extra == 'bench'", specifier = ">=0.120" },
     { name = "ferric", specifier = ">=0.1.0rc10" },
     { name = "gemmi", marker = "extra == 'docking'" },

@@ -1893,7 +1893,9 @@ def main(argv: list[str] | None = None) -> int:
         assert ts is not None
         return worker_cli(ts.temporal_address, ts.pipeline_queue, ts.workers, ts.threads_per_worker, ts.namespace)
     explicit_out = args.out is not None
-    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # the core record's started_at (a whole run)
+    from .core_record import utc_now
+
+    started_at = utc_now()  # the core record's started_at (a whole run); None without the `attestation` extra
     if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
         print(
             "config error: --temporal needs --out OUT, and runs the whole config (no --only-candidate/--combine)",

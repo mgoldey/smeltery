@@ -130,3 +130,16 @@ def test_a_preinstalled_requirement_is_exactly_the_uv_source_pin_of_an_extra_tha
             src = sources[name]
             want = f"{name} @ git+{src['git']}@{src['rev']}#subdirectory={src['subdirectory']}"
             assert req.split(" ;", 1)[0] == want, (req, want)
+
+
+def test_preinstall_prints_a_requirements_file_and_ci_installs_the_attestation_pin_through_it(capsys):
+    """CI's 3.11 `test` job installs attestation-schema through `wheel_smoke.py preinstall attestation`, so its pin
+    cannot drift from PREINSTALL (and so from [tool.uv.sources]); without it tests/test_core_record.py skips there."""
+    assert ws.main(["preinstall", "attestation"]) == 0
+    assert capsys.readouterr().out.splitlines() == ws.PREINSTALL["attestation"]
+    assert ws.main(["preinstall", "docking"]) == 0 and capsys.readouterr().out.strip() == ""
+    workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text()
+    assert "wheel_smoke.py preinstall attestation" in workflow
+    # the schema's floor is smeltery's (3.11), so neither the extra nor the pin carries a Python marker any more
+    extras = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]
+    assert not [r for r in extras["attestation"] + ws.PREINSTALL["attestation"] if ";" in r]

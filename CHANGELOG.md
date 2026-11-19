@@ -34,6 +34,12 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   unchanged `run-<digest12>.json`. `smeltery record core OUT` converts an existing run. Dependencies, ferric included,
   go through one identity ladder (`record.package_identity`); a conda/distro install is now INFERRED, not VERIFIED.
   Mapping and the schema findings: `docs/core-record.md`.
+- The core run record follows attestation-schema `314e4ff` (pin moved from `93bb5ab`): `code` carries `version`,
+  `provenance` and `evidence`; metrics carry `unit` and `labels` (`paired_ddE.mean|sem|n` labelled by analogue,
+  `stage.*` by stage, ddE in `kcal/mol`); an undefined value (a one-pose sem, an unranked cut's count) is `"NaN"`, not
+  omitted; docking's seed list is recorded; dependencies carry `source`; `history` is `[]`; timestamps go through
+  `format_timestamp`; a run that mixed ferric builds records ferric as `unknown`. The `attestation` extra now installs
+  on Python 3.11 too. The golden core record changed accordingly. Findings disposition: `docs/core-record.md`.
 
 ## [0.1.0] - 2026-11-09
 

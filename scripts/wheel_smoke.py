@@ -76,16 +76,20 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "ds = ExportDataset(d + '/o.parquet', features=['score_n'], target='score', split=d + '/s.json', "
         "partition='train'); x, y = ds[0]; assert isinstance(x, torch.Tensor) and len(ds) > 0",
     ],
-    # Convert a run the wheel ships into its core record and read it back with attestation-schema's own reader. On
-    # Python 3.11 the extra is empty (attestation-schema needs 3.12): then the converter must refuse with its notice.
+    # Convert a run the wheel ships into its core record and read it back with attestation-schema's own reader. The
+    # schema supports Python >= 3.11 (smeltery's floor), so the extra is never empty: this runs on CI's 3.11 too. The
+    # docking run is the one with a seed list and NaN (unranked cut) values, so it exercises the wire forms.
     "attestation": [
-        "import sys; from smeltery import core_record as c; "
-        "assert c.AVAILABLE == (sys.version_info >= (3, 12)), (c.AVAILABLE, sys.version_info)",
+        "import sys; from smeltery import core_record as c; assert c.AVAILABLE, sys.version_info",
         "import pathlib, shutil, tempfile; from importlib import resources; from smeltery import core_record as c; "
-        "src = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
-        "d = pathlib.Path(tempfile.mkdtemp()) / 'run'; shutil.copytree(str(src), d); "
-        "rc = c.main(['core', str(d)]); assert rc == (0 if c.AVAILABLE else 2), rc; "
-        "assert not c.AVAILABLE or __import__('attestation_schema').read(d).family == 'mwe-benzoic-cli'",
+        "import attestation_schema as a; r = resources.files('smeltery.prebuilt'); "
+        "runs = {n: pathlib.Path(tempfile.mkdtemp()) / n for n in ('benzoic-rhf', 'docking')}; "
+        "[shutil.copytree(str(r.joinpath(n).joinpath('run')), d) for n, d in runs.items()]; "
+        "assert [c.main(['core', str(d)]) for d in runs.values()] == [0, 0]; "
+        "rec = a.read(runs['benzoic-rhf']); assert rec.family == 'mwe-benzoic-cli', rec.family; "
+        "assert {m.unit for m in rec.metrics if m.name == 'paired_ddE.mean'} == {'kcal/mol'}; "
+        "dock = a.read(runs['docking']); assert dock.seeds['docking'] == [7], dock.seeds; "
+        "assert a.dumps(dock) == (runs['docking'] / 'attestation' / 'run.json').read_bytes()",
     ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",
@@ -124,8 +128,8 @@ SKIP_EXTRAS = {"dev"}
 #: published.
 PREINSTALL = {
     "attestation": [
-        "attestation-schema @ git+https://github.com/mgoldey/attestation@93bb5ab8ea0e401577c717ca5d951fb7d8475492"
-        '#subdirectory=packages/attestation-schema ; python_version >= "3.12"'
+        "attestation-schema @ git+https://github.com/mgoldey/attestation@314e4ff29737cf8cc2ab930b2708a8ca2f2cee46"
+        "#subdirectory=packages/attestation-schema"
     ],
 }
 
@@ -249,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     ls = sub.add_parser("list-extras", help="print the wheel's user-facing extras (plus 'none') as a JSON list")
     ls.add_argument("wheel", type=Path)
+    pre = sub.add_parser(
+        "preinstall", help="print an extra's PREINSTALL requirements, one per line (a requirements file)"
+    )
+    pre.add_argument("extra")
     ck = sub.add_parser("check", help="install the wheel with one extra in a fresh venv and smoke-test it")
     ck.add_argument("wheel", type=Path)
     ck.add_argument("--extra", required=True, help="an extra name, or 'none'")
@@ -259,6 +267,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "list-extras":
         print(json.dumps(["none", *wheel_extras(args.wheel)]))
+        return 0
+    if args.cmd == "preinstall":
+        print("\n".join(PREINSTALL.get(args.extra, [])))
         return 0
     return check(args.wheel, args.extra, args.resolve_only, args.example, args.config, args.full)
 
