@@ -215,15 +215,17 @@ def test_run_temporal_host_and_task_queue_flags(monkeypatch, tmp_path):
     monkeypatch.setenv("SMELTERY_TEMPORAL_NAMESPACE", "lab")
     monkeypatch.setenv("SMELTERY_WORKERS", "5")
     out = str(tmp_path / "o")
-    assert cli.main(["run", "c.toml", "--out", out, "--temporal", "--host", "h:1", "--task-queue", "q"]) == 0
+    cfg = tmp_path / "c.toml"
+    cfg.write_text("")  # run re-reads the file verbatim after load_config (stubbed), so it must exist
+    assert cli.main(["run", str(cfg), "--out", out, "--temporal", "--host", "h:1", "--task-queue", "q"]) == 0
     a, k = seen[-1]
     # (config, out, workers, host, queue, config_info): flags win, env fills the rest
-    assert a[2:5] == (5, "h:1", "q") and k == {"namespace": "lab"}
+    assert a[2:5] == (5, "h:1", "q") and k == {"namespace": "lab", "run_id": None}
     monkeypatch.delenv("SMELTERY_WORKERS")
     monkeypatch.delenv("SMELTERY_TEMPORAL_NAMESPACE")
-    cli.main(["run", "c.toml", "--out", out, "--temporal"])
+    assert cli.main(["run", str(cfg), "--out", out, "--temporal"]) == 0
     a, k = seen[-1]
-    assert a[2:5] == (2, "localhost:7233", "smeltery-pipeline") and k == {"namespace": "default"}
+    assert a[2:5] == (2, "localhost:7233", "smeltery-pipeline") and k == {"namespace": "default", "run_id": None}
 
 
 def test_task_worker_alias_runs_the_tasks_queue(monkeypatch):
@@ -238,6 +240,9 @@ def test_task_worker_alias_runs_the_tasks_queue(monkeypatch):
 
     monkeypatch.setattr(temporal_run, "connect", connect)
     monkeypatch.setattr(tasks, "run_task_worker", run_task_worker)
+    # the command refuses without temporalio before it connects; the connect and worker above are fakes, so the
+    # extra is not needed to test the alias (the `test` CI job does not install it)
+    monkeypatch.setattr(tasks, "TEMPORAL_AVAILABLE", True)
     monkeypatch.setenv("SMELTERY_TASK_CONCURRENCY", "7")
     assert cli.main(["task-worker", "--host", "h:9", "--namespace", "ns", "--task-queue", "tq"]) == 0
     assert seen == [("connect", "h:9", "ns"), ("worker", "tq", 7)]
