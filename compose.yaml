@@ -1,6 +1,11 @@
 # smeltery Bench in a container, serving the demo. `docker compose up --build`, then read the sign-in URL from
 # `docker compose logs bench`. Set SMELTERY_BENCH_TOKEN (shell or .env) to keep one token across restarts; unset,
 # the entrypoint generates a new one each start. See docs/bench.md ("Docker").
+#
+# Opt-in shared Temporal cluster: `docker compose --profile temporal up --build` also starts a Temporal dev server and
+# a smeltery worker polling both queues (smeltery-tasks, smeltery-pipeline). Without --profile nothing below changes.
+# Point a host-side `smeltery run --temporal` or `SMELTERY_BACKEND=temporal smeltery serve` at localhost:7233.
+# See docs/temporal-runs.md.
 services:
   bench:
     build: .
@@ -22,5 +27,50 @@ services:
     stop_grace_period: 15s
     restart: unless-stopped
 
+  # ---- profile `temporal` -------------------------------------------------------------------------------------------
+  # Temporal dev server (one process, SQLite file on a volume; a development server, not a production cluster). The
+  # image is pulled, never bundled. Frontend on 7233, web UI on 8233, both published on loopback only.
+  temporal:
+    profiles: [temporal]
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/var/lib/temporal/temporal.db"]
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    volumes:
+      - temporal-data:/var/lib/temporal
+    restart: unless-stopped
+
+  # `smeltery worker` with SMELTERY_BACKEND=temporal: ONE process polling smeltery-tasks and smeltery-pipeline.
+  # Built from the same Dockerfile with the `temporal` extra added. It shares /data with `bench`, because a
+  # submitted task's cwd and log paths are paths on the worker. ferric (the SCF engine) is installed as smeltery's
+  # core dependency from PyPI (docs/temporal-runs.md).
+  worker:
+    profiles: [temporal]
+    build:
+      context: .
+      args:
+        SMELTERY_EXTRAS: bench,temporal
+    image: smeltery-worker
+    entrypoint: ["smeltery", "worker"]
+    command: []
+    depends_on:
+      - temporal
+    volumes:
+      - bench-data:/data
+    environment:
+      SMELTERY_BACKEND: temporal
+      SMELTERY_TEMPORAL_ADDRESS: temporal:7233
+      SMELTERY_TEMPORAL_NAMESPACE: ${SMELTERY_TEMPORAL_NAMESPACE:-default}
+      SMELTERY_TASK_QUEUE: ${SMELTERY_TASK_QUEUE:-smeltery-tasks}
+      SMELTERY_PIPELINE_QUEUE: ${SMELTERY_PIPELINE_QUEUE:-smeltery-pipeline}
+      SMELTERY_WORKERS: ${SMELTERY_WORKERS:-2}
+      SMELTERY_THREADS_PER_WORKER: ${SMELTERY_THREADS_PER_WORKER:-1}
+      SMELTERY_TASK_CONCURRENCY: ${SMELTERY_TASK_CONCURRENCY:-2}
+    healthcheck:
+      disable: true # the image's HEALTHCHECK probes Bench's port; a worker serves none
+    restart: unless-stopped
+
 volumes:
   bench-data:
+  temporal-data:

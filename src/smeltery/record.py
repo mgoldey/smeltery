@@ -44,19 +44,28 @@ def strip_credentials(url: str | None) -> str | None:
     return url
 
 
-def _ferric_build() -> dict | None:
-    """The engine's own build stamp, `ferric.__build__`, if it exposes one.
+def _build_stamp(module: str) -> dict | None:
+    """A package's own build stamp, `<module>.__build__`, if it exposes one (ferric does; any package may).
 
-    Expected shape (proposed upstream): {"git_sha": str, "dirty": bool}. Anything
-    else (absent, wrong type, missing sha) counts as no stamp.
+    Expected shape (proposed upstream for ferric): {"git_sha": str, "dirty": bool}. Anything else (absent, wrong type,
+    missing sha) counts as no stamp.
     """
     try:
-        build = getattr(importlib.import_module("ferric"), "__build__", None)
+        build = getattr(importlib.import_module(module), "__build__", None)
     except ImportError:
         return None
     if isinstance(build, dict) and isinstance(build.get("git_sha"), str) and build["git_sha"]:
         return build
     return None
+
+
+def _ferric_build() -> dict | None:
+    """The engine's own build stamp, `ferric.__build__`, if it exposes one."""
+    return _build_stamp("ferric")
+
+
+#: PEP 610 `vcs_info.vcs` values: each is also a core-record `source` kind (`<vcs>+<url>`).
+VCS_KINDS = ("git", "hg", "svn", "bzr")
 
 
 def _distribution_identity(name: str, ident: dict) -> dict:
@@ -67,6 +76,17 @@ def _distribution_identity(name: str, ident: dict) -> dict:
         return ident
     ident["version"] = dist.version
     raw = dist.read_text("direct_url.json")
+    installer = (dist.read_text("INSTALLER") or "").strip()
+    if not raw and installer not in ("", "pip", "uv"):
+        # conda, a distro package manager, ...: a version string from another channel is not an immutable index
+        # release (conda rebuilds one version under several build strings), so it pins nothing on its own.
+        ident.update(
+            source=f"installed by {installer}",
+            commit=None,
+            dirty=None,
+            provenance=f"INFERRED: version {dist.version} as installed by {installer} (not an index release)",
+        )
+        return ident
     if not raw:
         # Installed from a package index. Index versions are immutable, so the
         # version string itself pins the exact build.
@@ -81,7 +101,9 @@ def _distribution_identity(name: str, ident: dict) -> dict:
     ident["source"] = du.get("url")
     vcs = du.get("vcs_info")
     if vcs and vcs.get("commit_id"):
-        ident.update(commit=vcs["commit_id"], dirty=False, provenance="VERIFIED from direct_url.json (git install)")
+        # PEP 610's vcs_info.vcs is git, hg, svn or bzr; the sentence names it (core_record.source reads it back)
+        kind = vcs.get("vcs") if vcs.get("vcs") in VCS_KINDS else "git"
+        ident.update(commit=vcs["commit_id"], dirty=False, provenance=f"VERIFIED from direct_url.json ({kind} install)")
     elif "dir_info" in du and ident["source"]:
         path = Path(unquote(urlparse(ident["source"]).path))
         ident["commit"] = _git(path, "rev-parse", "HEAD")
@@ -115,22 +137,30 @@ def smeltery_identity() -> dict:
     return ident
 
 
-def ferric_identity() -> dict:
+def package_identity(dist: str, module: str | None = None) -> dict:
+    """Which build of the installed distribution `dist` runs: its own build stamp (`<module>.__build__`, VERIFIED) if
+    it has one, else where it was installed from (`_distribution_identity`). The same ladder for every package; ferric
+    is the one that stamps itself today. `module` defaults to `dist` and is imported to read the stamp."""
     ident: dict = {"version": None, "source": None, "commit": None, "dirty": None, "provenance": "UNKNOWN"}
-    build = _ferric_build()
+    module = module or dist
+    build = _build_stamp(module)
     if build is not None:
         try:
-            ident["version"] = metadata.version("ferric")
+            ident["version"] = metadata.version(dist)
         except metadata.PackageNotFoundError:
             pass
         ident.update(
-            source="ferric.__build__",
+            source=f"{module}.__build__",
             commit=build["git_sha"],
             dirty=bool(build.get("dirty")),
-            provenance="VERIFIED from ferric.__build__ (stamped at build time)",
+            provenance=f"VERIFIED from {module}.__build__ (stamped at build time)",
         )
         return ident
-    return _distribution_identity("ferric", ident)
+    return _distribution_identity(dist, ident)
+
+
+def ferric_identity() -> dict:
+    return package_identity("ferric")
 
 
 def digest(obj) -> str:

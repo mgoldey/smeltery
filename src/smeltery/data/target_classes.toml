@@ -1,0 +1,110 @@
+# Target-class defaults for the MCP screening surface (docs/mcp.md).
+#
+# DATA, not code branches: `smeltery.mcp.targets` reads this file and maps an entry onto the campaign config
+# sections `smeltery run` already validates, so adding a class is an edit here, not a new `if`.
+#
+# HONESTY NOTE, and the reason the class names are not protein families: this repository has measured NOTHING
+# per protein family. There is no kinase/GPCR/protease calibration anywhere in docs/ or benchmarks/, so a class
+# called "kinase" would be an invented chemistry claim. The classes below differ only in settings the repository
+# has evidence for -- which measurement tier, which basis, how many poses, how much memory to allow -- and every
+# `why` field names the file that evidence is in.
+#
+# Shared facts behind every entry:
+#   * basis `sto-3g` is the ONLY basis either measurement tier has a cost model for; anything else makes
+#     `estimate_cost()` return `predicted: None` (docs/tiers/field_interaction.md, docs/tiers/field_dft_interaction.md).
+#   * `cut.floor` must be stated explicitly, because both tiers' `systematic_floor()` is None and `smeltery run`
+#     refuses to cut without a number (gate G4, docs/tiers/index.md). `floor = 0.0` claims NO systematic floor:
+#     it is "nothing is subtracted", not "the systematic error is zero". `floor_note` says so to the caller.
+#   * `cut.z = 2.0` is `smeltery run`'s own default for the cut (src/smeltery/cli.py, `run_plan`).
+#   * `relax_unmapped = true` relaxes only the substituent an analogue adds (MMFF94, the shared core held fixed).
+#     Without it the junction between the copied core and the new substituent is left unrelaxed, which the pose
+#     geometry gate rejects as "not this molecule"; the CLI's own config reference marks it as what a docked
+#     campaign needs to pass PoseBusters (src/smeltery/cli.py module docstring, src/smeltery/gates.py).
+
+#: The class used when the caller names none.
+default = "protein-pocket-rhf"
+
+[classes.protein-pocket-rhf]
+tier = "field_interaction"
+summary = "Hartree-Fock screening pass (fast, no electron correlation). The default."
+n_poses = 6
+relax_unmapped = true
+keep = 1
+z = 2.0
+floor = 0.0
+why = """
+field_interaction is RHF/STO-3G, the tier whose wall time is CALIBRATED: five molecules measured
+(ethanol 21 bf 0.765 s to ibuprofen 93 bf 91.6 s per pose), a fitted nbf^2.71 scaling, and two held-out
+checks (docs/tiers/field_interaction.md, src/smeltery/data/cost_measurements.json). That is why it is the
+default: it is the configuration whose cost this repository can predict before spending it.
+"""
+limits = """
+RHF has no electron correlation at all, and the field polarises a correlated density differently, so the
+error does not cancel out of dE_int (docs/tiers/field_dft_interaction.md). Use protein-pocket-dft when that
+matters more than wall time.
+"""
+
+[classes.protein-pocket-dft]
+tier = "field_dft_interaction"
+functional = "PBE"
+memory_budget_gb = 8.0
+summary = "Density-functional screening pass (slower, includes electron correlation)."
+n_poses = 6
+relax_unmapped = true
+keep = 1
+z = 2.0
+floor = 0.0
+why = """
+PBE/STO-3G is the only functional/basis pair field_dft_interaction has a measured reference for: 74 atoms,
+246 basis functions, 71.1 s vacuum and 80.7 s in a 624-charge field (docs/tiers/field_dft_interaction.md).
+memory_budget_gb 8.0 is the tier's own default and ferric's (src/smeltery/tiers.py); above it ferric spills
+the RI tensor to disk and re-reads it every SCF iteration, which is a cliff rather than a slowdown
+(src/smeltery/cost.py, `dft_memory_gb`).
+"""
+limits = """
+The time estimate assumes the measured reference's iteration count. One validation at these settings took
+21 and 24 iterations against the reference's 16 and 18, i.e. 1.26x the prediction, so the number is a LOWER
+BOUND for a chemistry that converges more slowly (docs/tiers/field_dft_interaction.md).
+"""
+
+[classes.large-ligand-dft]
+tier = "field_dft_interaction"
+functional = "PBE"
+memory_budget_gb = 8.0
+require_free_gb = 12.0
+summary = "Density-functional pass for big ligands: fewer poses, and it refuses to start on a loaded machine."
+n_poses = 4
+relax_unmapped = true
+keep = 1
+z = 2.0
+floor = 0.0
+why = """
+Same tier and basis as protein-pocket-dft, with two changes for size. require_free_gb 12.0 makes the run read
+MemAvailable and refuse rather than page the RI tensor off disk; memory_budget_gb alone cannot see a loaded box
+(docs/tiers/field_dft_interaction.md). Four poses instead of six because cost is linear in poses
+(two SCFs per pose, src/smeltery/checkpoint.py `planned_scfs`) while a long run was measured holding ~11 GB
+against a ~2 GB per-calculation prediction (src/smeltery/cost.py, `available_memory_gb`).
+"""
+limits = """
+Fewer poses means a larger standard error on every paired ddE, so more pairs end up unresolved and the cut
+reports a tie group instead of an order. That is the trade this class makes.
+"""
+
+[classes.fast-triage]
+tier = "field_interaction"
+summary = "Cheapest pass: Hartree-Fock on three poses, for sorting a long list before a real screen."
+n_poses = 3
+relax_unmapped = true
+keep = 1
+z = 2.0
+floor = 0.0
+why = """
+Same tier, basis and cost model as protein-pocket-rhf (docs/tiers/field_interaction.md); only the pose count
+differs, and cost is linear in poses (src/smeltery/checkpoint.py, `planned_scfs`).
+"""
+limits = """
+Three poses is the smallest ensemble that still has a standard error, and the pose-ensemble noise this
+repository has measured is large: 4.07 kcal/mol for an unpaired ddE at n = 100 poses on one campaign
+(smeltery.pocket.DDE_NOISE_FLOOR_KCAL_MOL, docs/tiers/field_interaction.md). Treat its ordering as a
+shortlist to re-measure, not as a result.
+"""

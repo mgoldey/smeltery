@@ -114,3 +114,21 @@ def test_a_heavy_extra_is_only_resolved_unless_full_is_asked_for():
     assert ws.resolves_only(heavy, True, True) is True  # an explicit --resolve-only always wins
     assert ws.resolves_only("docking", False, False) is False  # a light extra is always installed
     assert set(ws.HEAVY_EXTRAS) <= set(ws.EXTRA_CHECKS), "a heavy extra still needs its import checks for --full"
+
+
+def test_no_extra_requires_an_unpublished_or_direct_url_dependency():
+    """`pip install wheel[extra]` must resolve from an index alone: a direct-URL requirement (`name @ url`, git+, file:)
+    is refused by PyPI on upload, and nothing may be installed first to make an extra resolve. [tool.uv.sources] may
+    only carry the ferric guidance comments, never a live entry that the published metadata would not repeat."""
+    py = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    for extra, reqs in py["project"]["optional-dependencies"].items():
+        for req in reqs:
+            assert "@" not in req and "://" not in req and "git+" not in req, (extra, req)
+    assert not py["tool"]["uv"].get("sources"), "a uv source makes `uv sync --no-sources` resolve differently"
+    assert not hasattr(ws, "PREINSTALL")
+    assert "preinstall" not in (ROOT / ".github" / "workflows" / "test.yml").read_text()
+
+
+def test_the_attestation_extra_is_the_pypi_release_capped_below_the_next_pre_1_0_minor():
+    extras = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]
+    assert extras["attestation"] == ["attestation-schema>=0.1.0,<0.2"]

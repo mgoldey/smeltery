@@ -42,7 +42,11 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install (ferric from PyPI)
-        run: uv sync --extra dev --extra posebusters --extra experiments --extra bench --no-sources
+        run: uv sync --extra dev --extra posebusters --extra experiments --extra bench --extra attestation --no-sources
+      # attestation-schema 0.1.0 comes from PyPI through the `attestation` extra above, so the core run record tests
+      # run on 3.11 too; fail loudly if it did not install rather than letting tests/test_core_record.py skip.
+      - name: Check attestation-schema is installed
+        run: uv run --no-sync python -c "from smeltery import core_record as c; assert c.AVAILABLE, c.NOT_INSTALLED"
       # The danuglipron-halogen prebuilt reads a .pdb pocket, so planning it needs pdb2pqr30 to assign the
       # charges. 3.8.0 is the version the committed records were made with, which the digest guards expect.
       - name: Install pdb2pqr30 (a .pdb pocket's charges come from it)

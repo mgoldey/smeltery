@@ -1105,6 +1105,7 @@ def run_plan(
     skip_analyses: frozenset[str] = frozenset(),
     pose_index: dict[str, list[int]] | None = None,
     checkpoint=None,
+    stages=None,
 ) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
@@ -1119,11 +1120,20 @@ def run_plan(
 
     `checkpoint` (`smeltery.checkpoint.ScfCheckpoint`): the measurement tier reuses the SCFs it holds and appends the
     ones it runs (a plain run into OUT; analyses never see it).
+
+    `stages` (`smeltery.reuse.RunStages`): each stage is digested and logged as it completes; the measurement and
+    the analyses are taken from the stage store when an identical earlier run stored them, and stored otherwise.
     """
     _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
+    if stages is not None:
+        stages.run_id = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest[:12]
+        stages.plan_built(plan, funnel_counts(plan))
     if measure is None:
         ctx = {"field": plan.field} if checkpoint is None else {"field": plan.field, "checkpoint": checkpoint}
-        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
+        if stages is None:
+            _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
+        else:  # a reused measurement is never timed: its funnel row says seconds null, not "took 0 s"
+            stages.measure(plan, lambda: _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx)))
     else:
         _stage(plan.tier.name, lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
@@ -1147,6 +1157,8 @@ def run_plan(
             "stages": plan.stage_log,
             "funnel": funnel_counts(plan, res),
         }
+        if stages is not None:
+            stages.cut(plan, results)
     results["candidate_order"] = [c.name for c in plan.candidates]
     if pose_index:  # only after a pairwise drop, so ordinary records keep their shape
         results["pose_index"] = {k: list(v) for k, v in pose_index.items()}
@@ -1168,14 +1180,19 @@ def run_plan(
         for spec in active_hooks("analysis", plan.cfg):
             if spec.key in skip_analyses:
                 continue
-            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log})
+            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log}, stages)
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
 
 
-def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict) -> None:
-    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`."""
+def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict, stages=None) -> None:
+    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`.
+    `stages` (`smeltery.reuse.RunStages`): the stored dict of an identical earlier run, when there is one."""
     hook = cast(Analysis, spec.hook)
-    got = _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+
+    def run():
+        return _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+
+    got = run() if stages is None else stages.analysis(spec, plan, rec, run)
     if not isinstance(got, dict):
         raise StageError(
             f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}", stage=spec.key
@@ -1333,6 +1350,36 @@ def write_outputs(
     path = out_dir / f"run-{rec.input_digest[:12]}.json"
     path.write_text(rec.to_json())
     return path
+
+
+def emit_core_record(
+    record_path: Path, started_at: str | None, *, run_id: str | None = None, config: dict | None = None
+) -> Path | None:
+    """Write OUT/attestation/run.json (smeltery.core_record) beside the run record just written, replacing a core
+    record a previous run into this OUT left (the legacy record it described was just replaced too). Additive: without
+    the `attestation` extra it prints one notice, and a refusal is a warning, never the run's exit code -- the legacy
+    record is written and stays the source of truth (a campaign job whose run left no core record ends failed).
+
+    `run_id`: the core record's (`--run-id`, a campaign job's); None: the input digest's first 12 hex. `config`: the
+    campaign config the run read, for a run that did not stage one into OUT (`core_record.write_core`)."""
+    from . import core_record
+
+    if not core_record.AVAILABLE:
+        print(f"note: {core_record.NOT_INSTALLED}", file=sys.stderr)
+        return None
+    try:
+        return core_record.write_core(
+            record_path,
+            live=True,
+            started_at=started_at,
+            finished_at=core_record.utc_now(),
+            overwrite=True,
+            run_id=run_id,
+            config=config,
+        )
+    except (OSError, ValueError) as e:  # a schema RecordError is a ValueError naming the field it refused
+        print(f"warning: core record not written: {e}", file=sys.stderr)
+        return None
 
 
 def primary_model(field) -> str:
@@ -1607,12 +1654,22 @@ VIEWERS = {
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
+    "target": "smeltery.target_file",
     "verify-run": "smeltery.run_tools:verify_run",
     "inspect": "smeltery.run_tools:inspect_run",
     "diff-run": "smeltery.run_tools:diff_run",
     "export-sdf": "smeltery.sdf_export",
+    "export": "smeltery.dataset_export",
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
+    "record": "smeltery.core_record",
+    "mcp": "smeltery.mcp:main",
+    "serve": "smeltery.services:serve_main",
+    "worker": "smeltery.services:worker_main",
+    "submit": "smeltery.jobs:submit_main",
+    "status": "smeltery.jobs:status_main",
+    "cancel": "smeltery.jobs:cancel_main",
+    "result": "smeltery.jobs:result_main",
 }
 
 
@@ -1726,17 +1783,33 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
+    sub.add_parser("serve", help="Bench, configured by SMELTERY_* env vars (smeltery serve --help)")
+    sub.add_parser("mcp", help="serve the screening tools to an MCP client over stdio (docs/mcp.md; `mcp` extra)")
+    sub.add_parser("worker", help="the worker for SMELTERY_BACKEND=local|temporal (smeltery worker --help)")
+    sub.add_parser("submit", help="submit `run CONFIG --out RUN_DIR` as a campaign job, return at once (docs/jobs.md)")
+    sub.add_parser("status", help="a campaign job's state (smeltery status RUN_DIR)")
+    sub.add_parser("cancel", help="cancel a campaign job (smeltery cancel RUN_DIR); idempotent")
+    sub.add_parser("result", help="a finished campaign job's core record (smeltery result RUN_DIR)")
+    sub.add_parser("target", help="check a target definition .toml (smeltery target check FILE; docs/targets.md)")
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
+    sub.add_parser(
+        "export", help="runs as one Parquet or Arrow file (smeltery export parquet RUN... -o F; dataset extra)"
+    )
     sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
+    sub.add_parser("record", help="write a run's core record (smeltery record core RUN.json; attestation extra)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
-    tw.add_argument("--host", default="127.0.0.1:7233")
-    tw.add_argument("--namespace", default="default")
-    tw.add_argument("--task-queue", default="smeltery-tasks")
-    tw.add_argument("--concurrency", type=int, default=2, help="max concurrent activities")
+    # Alias of `smeltery worker --backend temporal` for the tasks queue alone. Defaults are None so that
+    # settings.resolve gives flag > SMELTERY_* env var > default (docs/temporal-runs.md).
+    tw.add_argument("--host", default=None, help="Temporal server (env SMELTERY_TEMPORAL_ADDRESS)")
+    tw.add_argument("--namespace", default=None, help="env SMELTERY_TEMPORAL_NAMESPACE")
+    tw.add_argument("--task-queue", default=None, help="env SMELTERY_TASK_QUEUE")
+    tw.add_argument(
+        "--concurrency", type=int, default=None, help="max concurrent activities (SMELTERY_TASK_CONCURRENCY)"
+    )
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
     run.add_argument(
@@ -1761,26 +1834,65 @@ def main(argv: list[str] | None = None) -> int:
         help="run into an OUT that already holds a run record; also discards an interrupted run's SCF checkpoint "
         "(OUT/calcs.partial.jsonl), which a rerun without --force resumes from",
     )
+    run.add_argument(
+        "--stage-cache",
+        dest="stage_cache",
+        type=Path,
+        default=None,
+        help="a stage store (smeltery.reuse): reuse the stages an identical earlier run completed, store this run's; "
+        "with --out only (env SMELTERY_STAGE_CACHE)",
+    )
+    run.add_argument(
+        "--run-id",
+        dest="run_id",
+        default=None,
+        help="the core record's run_id (default: the input digest's first 12 hex); a campaign job passes its own",
+    )
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
         "--temporal",
         action="store_true",
         help="run as a durable Temporal workflow (needs --out, a server and `smeltery temporal-worker`)",
     )
-    run.add_argument("--workers", type=int, default=2, help="with --temporal: scores run at once")
-    run.add_argument("--host", default="127.0.0.1:7233", help="with --temporal: the Temporal server")
-    run.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline", help="with --temporal")
+    run.add_argument("--workers", type=int, default=None, help="with --temporal: scores run at once (SMELTERY_WORKERS)")
+    run.add_argument("--host", default=None, help="with --temporal: the Temporal server (SMELTERY_TEMPORAL_ADDRESS)")
+    run.add_argument("--task-queue", dest="task_queue", default=None, help="with --temporal (SMELTERY_PIPELINE_QUEUE)")
+    run.add_argument("--namespace", default=None, help="with --temporal (SMELTERY_TEMPORAL_NAMESPACE)")
     me = sub.add_parser("methods", help="every method's config section, knobs and defaults, as TOML")
     me.add_argument("--out", help="write one <key>.toml per method plus index.toml into this directory")
     me.add_argument("--only", help="one method key, e.g. field_interaction")
     pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
-    pw.add_argument("--workers", type=int, default=2, help="SCFs at once, one child process each (memory-bound)")
     pw.add_argument(
-        "--threads-per-worker", dest="threads_per_worker", type=int, default=1, help="RAYON_NUM_THREADS per SCF"
+        "--workers", type=int, default=None, help="SCFs at once, one child process each (memory-bound; default 2)"
     )
-    pw.add_argument("--host", default="127.0.0.1:7233")
-    pw.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline")
+    pw.add_argument(
+        "--threads-per-worker", dest="threads_per_worker", type=int, default=None, help="RAYON_NUM_THREADS per SCF"
+    )
+    pw.add_argument("--host", default=None, help="Temporal server (env SMELTERY_TEMPORAL_ADDRESS)")
+    pw.add_argument("--namespace", default=None, help="env SMELTERY_TEMPORAL_NAMESPACE")
+    pw.add_argument("--task-queue", dest="task_queue", default=None, help="env SMELTERY_PIPELINE_QUEUE")
     args = ap.parse_args(argv)
+    temporal_settings = None
+    if args.command in ("task-worker", "temporal-worker") or (args.command == "run" and args.temporal):
+        from .settings import SettingsError, resolve
+
+        # one resolution for the Temporal flags of all three commands: flag > SMELTERY_* env var > default. The
+        # `--task-queue` flag means the tasks queue for task-worker and the pipeline queue for the other two.
+        is_tasks = args.command == "task-worker"
+        try:
+            temporal_settings = resolve(
+                os.environ,
+                temporal_address=args.host,
+                namespace=args.namespace,
+                task_queue=args.task_queue if is_tasks else None,
+                pipeline_queue=None if is_tasks else args.task_queue,
+                workers=getattr(args, "workers", None),
+                threads_per_worker=getattr(args, "threads_per_worker", None),
+                task_concurrency=getattr(args, "concurrency", None),
+            )
+        except SettingsError as e:
+            print(f"config error: {e}", file=sys.stderr)
+            return 2
     if getattr(args, "command", None) == "golden":
         from smeltery.golden import main as _golden_main
 
@@ -1803,43 +1915,41 @@ def main(argv: list[str] | None = None) -> int:
         print(all_methods_toml(), end="")
         return 0
     if getattr(args, "command", None) == "task-worker":
-        from smeltery.tasks import TEMPORAL_AVAILABLE, worker_activities, worker_workflows
+        import asyncio
 
+        from smeltery.tasks import TEMPORAL_AVAILABLE, run_task_worker
+
+        ts = temporal_settings
+        assert ts is not None
         if not TEMPORAL_AVAILABLE:
             print("temporalio is not installed", file=sys.stderr)
             return 2
 
-        async def _run_worker():
-            Client = __import__("temporalio.client", fromlist=["Client"]).Client  # noqa: E501
-            UnsandboxedWorkflowRunner = __import__(
-                "temporalio.worker", fromlist=["UnsandboxedWorkflowRunner"]
-            ).UnsandboxedWorkflowRunner  # noqa: E501
-            Worker = __import__("temporalio.worker", fromlist=["Worker"]).Worker
+        async def _run_worker() -> int:
+            from .temporal_run import connect, server_down_message
 
-            client = await Client.connect(args.host, namespace=args.namespace)
-            async with Worker(
-                client,
-                task_queue=args.task_queue,
-                workflows=worker_workflows(),
-                activities=worker_activities(),
-                workflow_runner=UnsandboxedWorkflowRunner(),
-                max_concurrent_activities=args.concurrency,
-            ):
-                print(f"smeltery task worker up on {args.task_queue} (Ctrl+C stops)", flush=True)
-                await asyncio.Future()
-
-        import asyncio
+            try:
+                client = await connect(ts.temporal_address, ts.namespace)
+            except Exception as e:  # noqa: BLE001 - any connect failure is "the server is down", reported, exit 2
+                print(server_down_message(ts.temporal_address, e), file=sys.stderr)
+                return 2
+            await run_task_worker(client, ts.task_queue, ts.task_concurrency)
+            return 0
 
         try:
-            asyncio.run(_run_worker())
+            return asyncio.run(_run_worker())
         except KeyboardInterrupt:
             return 0
-        return 0
     if args.command == "temporal-worker":
         from .temporal_run import worker_cli
 
-        return worker_cli(args.host, args.task_queue, args.workers, args.threads_per_worker)
+        ts = temporal_settings
+        assert ts is not None
+        return worker_cli(ts.temporal_address, ts.pipeline_queue, ts.workers, ts.threads_per_worker, ts.namespace)
     explicit_out = args.out is not None
+    from .core_record import utc_now
+
+    started_at = utc_now()  # the core record's started_at (a whole run); None without the `attestation` extra
     if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
         print(
             "config error: --temporal needs --out OUT, and runs the whole config (no --only-candidate/--combine)",
@@ -1864,6 +1974,7 @@ def main(argv: list[str] | None = None) -> int:
         elif explicit_out:  # a combine writes its record into OUT
             _guard_out(args.out, None)
         cfg = load_config(args.config)
+        given = tomllib.loads(Path(args.config).read_text())  # verbatim: load_config adds `_dir`, a machine path
         # --plan runs no SCF, so planning one candidate of such a config is fine
         if (args.only_candidate is not None and not args.plan) or args.combine:
             from .temporal_run import remeasuring_analyses
@@ -1877,7 +1988,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.temporal and not args.plan:
             from .temporal_run import run_cli
 
-            return run_cli(args.config, args.out, args.workers, args.host, args.task_queue, config_info)
+            ts = temporal_settings
+            assert ts is not None
+            return run_cli(
+                args.config,
+                args.out,
+                ts.workers,
+                ts.temporal_address,
+                ts.pipeline_queue,
+                config_info,
+                namespace=ts.namespace,
+                run_id=args.run_id,
+            )
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
                 print(f"config error: unknown candidate {args.only_candidate!r}", file=sys.stderr)
@@ -1967,8 +2089,12 @@ def main(argv: list[str] | None = None) -> int:
                 rec.results["config"] = partial_configs[0]
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
+            # a combine's start is its partials' starts: not one instant
+            core = emit_core_record(path, None, run_id=args.run_id)
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+            if core is not None:
+                print(f"core record: {core}")
             return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
         plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
@@ -1977,17 +2103,32 @@ def main(argv: list[str] | None = None) -> int:
             if explicit_out:
                 write_plan_preview(plan, digest, args.out, args.config)
             return 0
-        checkpoint = None
+        checkpoint = stages = None
         if config_info is not None:  # a run into an explicit OUT checkpoints its SCFs there (smeltery.checkpoint)
+            from .reuse import RunStages, store_for
+
             checkpoint = _open_checkpoint(plan, args.out, config_info["sha256"], args.force)
-        rec, out = run_plan(plan, checkpoint=checkpoint)
+            # every completed stage is logged in OUT; with a stage store, reused or stored (smeltery.reuse)
+            stages = RunStages(args.out, store_for(args.stage_cache))
+            if stages.why_not:
+                print(f"stage reuse off: {stages.why_not}")
+        rec, out = run_plan(plan, checkpoint=checkpoint, stages=stages)
         if config_info is not None:
             rec.results["config"] = config_info
+        reuse = stages.summary() if stages is not None else None
+        if reuse is not None:
+            rec.results["reuse"] = reuse
+            print(f"stages reused: {reuse['reused']} of {reuse['reusable']} reusable")
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
         if checkpoint is not None:  # the record is written: a finished OUT holds today's outputs only
             from .checkpoint import discard
+            from .reuse import discard_progress
 
             discard(args.out)
+            discard_progress(args.out)
+        # last: the manifest covers what the run left in OUT. Without --out nothing was staged, so the config the run
+        # read is handed over as it read it (with --out, write_core reads OUT/config.toml by its recorded digest)
+        core = emit_core_record(path, started_at, run_id=args.run_id, config=None if config_info is not None else given)
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan and not isinstance(e, OutGuardRefused):
@@ -2013,6 +2154,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+    if core is not None:
+        print(f"core record: {core}")
     return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
 
 
