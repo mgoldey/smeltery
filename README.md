@@ -228,6 +228,7 @@ Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 | Use the Bench web app | [docs/bench.md](docs/bench.md) |
 | See who Bench is for and the path each person takes | [docs/user-flows.md](docs/user-flows.md) |
 | Use the Marimo GUI | [docs/gui.md](docs/gui.md) |
+| Export runs as Parquet or Arrow | [docs/dataset-export.md](docs/dataset-export.md) |
 | Plug in structure, docking, scoring or potential providers | [docs/providers.md](docs/providers.md) |
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |

@@ -46,6 +46,17 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "from smeltery.docking import VinaProvider, Docking, Box",
     ],
     "experiments": ["import psutil, scipy"],
+    # Write a Parquet file from a run the wheel itself ships and read its metadata back; an Arrow IPC file too.
+    "dataset": [
+        "import pyarrow, pyarrow.parquet",
+        "import tempfile, pyarrow.parquet as pq; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; "
+        "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "n = write_dataset([str(run)], d + '/o.parquet'); "
+        "t = pq.read_table(d + '/o.parquet'); assert t.num_rows == n > 0, n; "
+        "assert t.schema.metadata[b'smeltery.schema_version'] == b'1'; "
+        "write_dataset([str(run)], d + '/o.arrow', 'arrow')",
+    ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",

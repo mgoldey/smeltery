@@ -99,6 +99,10 @@ temporal = ["temporalio>=1.35"]
 # atoms, which is why this is a separate tool and not a few lines. Nothing under src/smeltery imports it.
 pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
 
+# `smeltery export parquet|arrow` (smeltery.dataset_export, docs/dataset-export.md): runs as one columnar file. Only the
+# writers need pyarrow, imported inside the functions that write, so `export_rows` and core smeltery work without it.
+dataset = ["pyarrow>=15"]
+
 [tool.uv.sources]
 # ferric comes from its PyPI wheel (the floor above), so `uv sync` / `uv run` never compile Rust or libint2.
 # The run record still gets VERIFIED provenance: an index release is immutable (smeltery/record.py).

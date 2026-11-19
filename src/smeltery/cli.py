@@ -1611,6 +1611,7 @@ VIEWERS = {
     "inspect": "smeltery.run_tools:inspect_run",
     "diff-run": "smeltery.run_tools:diff_run",
     "export-sdf": "smeltery.sdf_export",
+    "export": "smeltery.dataset_export",
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
 }
@@ -1729,6 +1730,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
+    sub.add_parser(
+        "export", help="runs as one Parquet or Arrow file (smeltery export parquet RUN... -o F; dataset extra)"
+    )
     sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")

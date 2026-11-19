@@ -7,7 +7,12 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- `smeltery export parquet|arrow RUN... -o FILE`: finished runs as one columnar dataset, one row per (ligand, target,
+  tier), with scores and units and floors from the tiers' own declarations, the paired ddE, the funnel decision, and
+  provenance columns (run id, `record_sha256`, smeltery and ferric versions, ferric build commit, dirty flag and
+  provenance level). Units and the schema version are in the file's key-value metadata. pyarrow is the optional
+  `dataset` extra, with a wheel smoke check; see `docs/dataset-export.md`.
 
 ## [0.1.0] - 2026-11-09
 
