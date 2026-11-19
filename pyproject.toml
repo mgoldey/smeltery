@@ -102,6 +102,10 @@ pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
 # `smeltery export parquet|arrow` (smeltery.dataset_export, docs/dataset-export.md): runs as one columnar file. Only the
 # writers need pyarrow, imported inside the functions that write, so `export_rows` and core smeltery work without it.
 dataset = ["pyarrow>=15"]
+# smeltery.dataset_torch.ExportDataset: a DataLoader-ready view of that table. A separate extra from `dataset` so parquet
+# users do not pull torch, and it repeats pyarrow so `smeltery[torch]` alone is enough. Splits (smeltery.dataset_splits)
+# need only `dataset`; torch is imported when ExportDataset(tensors=True) is built.
+torch = ["torch>=2", "pyarrow>=15"]
 
 [tool.uv.sources]
 # ferric comes from its PyPI wheel (the floor above), so `uv sync` / `uv run` never compile Rust or libint2.

@@ -58,3 +58,55 @@ runs).
 - A candidate with no `results.per_pose` entry has no rows. A record that predates pose output cannot be exported.
 - A quantity two tiers both declare belongs to the later tier, as in the run itself.
 - A recorded quantity no recorded tier declares is exported under the tier name `unattributed` rather than dropped.
+
+## Splits and a PyTorch dataset
+
+A model needs the same train/valid/test rows every time. A split is a small JSON file beside the table; the table is
+never rewritten.
+
+```bash
+smeltery export split scaffold runs.parquet -o split-scaffold.json --seed 0     # RDKit Murcko scaffolds
+smeltery export split target runs.parquet -o split-target.json --seed 0 --fractions train=0.6,valid=0.2,test=0.2
+smeltery export split verify split-scaffold.json runs.parquet                    # exits 2 if the table changed
+```
+
+The file records `kind`, `algorithm_version` (the assignment rule; bumped when it changes), `schema_version`, `seed`,
+`parameters` (fractions, `generic`, `smiles_column`), `table.sha256` and the identity of every row in each partition.
+A row's identity is `[run_id, ligand, target, tier]`, the export's grain.
+
+- **Groups do not straddle partitions.** Every row of one scaffold (or one target) is in one partition. Groups are
+  shuffled by the seed and filled greedily to the row fractions (row counts, not group counts), so small tables give
+  uneven partitions; a partition that would be empty is refused. Acyclic molecules have the empty scaffold and are one
+  group. The prebuilt runs together have three scaffolds and three targets, hence the 50/25/25 fractions in the tests.
+- **The digest is the SHA-256 of the table file's bytes**, not of the row identities: identities alone would pair a
+  re-export with different scores to a split made on the old numbers. The cost is that the same content written by
+  another pyarrow version may differ in bytes; the split then refuses and is re-made. Loading against a table with a
+  different digest raises `SplitError`, as does a split whose partitions are not exactly the table's rows. The digest
+  catches a changed table, not an edited split that still covers the same rows; keep splits in version control.
+- **A scaffold split refuses without RDKit** (and on a SMILES RDKit cannot parse) instead of grouping some other way.
+- **Deterministic.** Same table and seed: a byte-identical file (sorted keys, no timestamps or paths). RDKit's scaffold
+  for a molecule could in principle change across RDKit releases; the recorded partitions, not a recomputation, are the
+  artifact.
+
+```python
+from smeltery.dataset_splits import make_split, write_split
+from smeltery.dataset_torch import ExportDataset
+
+write_split(make_split("runs.parquet", "scaffold", seed=0), "split-scaffold.json")
+train = ExportDataset(
+    "runs.parquet",
+    features=["score_n", "score_floor"],
+    target="score",
+    split="split-scaffold.json",
+    partition="train",
+    tiers=["docking"],
+    decisions=["pass", "drop"],
+)
+x, y = train[0]  # float32 tensors; train.identity(0) names the row
+```
+
+`ExportDataset` reads only the table. Features and target are numeric columns you name; a null feature is NaN, a row
+with a null target is dropped (`n_null_target`). `tiers=` and `decisions=` filter rows, `transform(sample)` post-processes
+`(x, y)`. It is a plain map-style class, not a `torch.utils.data.Dataset` subclass, so importing it never imports
+torch; `DataLoader` accepts it. torch is the separate `torch` extra (`pip install 'smeltery[torch]'`), imported when the
+dataset is built; `tensors=False` yields plain floats without it. Splits need only the `dataset` extra.

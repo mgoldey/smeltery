@@ -57,6 +57,20 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "assert t.schema.metadata[b'smeltery.schema_version'] == b'1'; "
         "write_dataset([str(run)], d + '/o.arrow', 'arrow')",
     ],
+    # A scaffold split and a target split of an exported table, loaded back through ExportDataset as tensors.
+    "torch": [
+        "import torch, pyarrow",
+        "import tempfile, torch; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; "
+        "from smeltery.dataset_splits import make_split, write_split; "
+        "from smeltery.dataset_torch import ExportDataset; "
+        "pre = resources.files('smeltery.prebuilt'); d = tempfile.mkdtemp(); "
+        "runs = [str(pre.joinpath(n).joinpath('run')) for n in ('benzoic-rhf', 'structure')]; "
+        "write_dataset(runs, d + '/o.parquet'); "
+        "write_split(make_split(d + '/o.parquet', 'target', fractions={'train': 0.5, 'test': 0.5}), d + '/s.json'); "
+        "ds = ExportDataset(d + '/o.parquet', features=['score_n'], target='score', split=d + '/s.json', "
+        "partition='train'); x, y = ds[0]; assert isinstance(x, torch.Tensor) and len(ds) > 0",
+    ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",

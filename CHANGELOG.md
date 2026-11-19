@@ -13,6 +13,12 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   provenance columns (run id, `record_sha256`, smeltery and ferric versions, ferric build commit, dirty flag and
   provenance level). Units and the schema version are in the file's key-value metadata. pyarrow is the optional
   `dataset` extra, with a wheel smoke check; see `docs/dataset-export.md`.
+- `smeltery export split scaffold|target|verify`: train/valid/test splits of an exported table as versioned JSON
+  artifacts (kind, algorithm version, seed, parameters, the table file's SHA-256, row identities per partition).
+  Byte-identical for the same table and seed; loading against a changed table raises. Scaffold splits use RDKit Murcko
+  scaffolds and refuse without RDKit. `smeltery.dataset_torch.ExportDataset` reads the table for a PyTorch
+  `DataLoader` (feature and target columns, tier/decision filters, split partition, transform hook); torch is the new
+  optional `torch` extra, with a wheel smoke check.
 
 ## [0.1.0] - 2026-11-09
 

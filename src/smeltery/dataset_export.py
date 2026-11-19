@@ -500,12 +500,21 @@ def write_dataset(paths: list[str | Path], dest: str | Path, fmt: str = "parquet
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["split"]:  # `smeltery export split ...`: versioned splits of an exported table
+        from .dataset_splits import main as split_main
+
+        return split_main(argv[1:])
     ap = argparse.ArgumentParser(
         prog="smeltery export",
         description="Write finished runs as one columnar dataset, one row per (ligand, target, tier), with units, "
         "uncertainty, decision and provenance columns. Needs the `dataset` extra (pyarrow).",
     )
-    ap.add_argument("format", choices=FORMATS, help="parquet, or arrow (the Arrow IPC file format)")
+    ap.add_argument(
+        "format",
+        choices=FORMATS,
+        help="parquet, or arrow (the Arrow IPC file format); `split` is `export split --help`",
+    )
     ap.add_argument("runs", nargs="+", help="run OUT directories or run-*.json files; several are concatenated")
     ap.add_argument("-o", "--out", required=True, help="the file to write")
     ap.add_argument(
