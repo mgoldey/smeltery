@@ -12,9 +12,9 @@ check, and the record of every finding and what became of it.
 ## Install, write, convert
 
 - `smeltery[attestation]` (`attestation-schema>=0.1.0`; Python >= 3.11, smeltery's own floor; CI's 3.11 `test` job
-  installs it, so the core record tests run there). attestation-schema is not on an index yet (publishing is decided,
-  not done): `uv sync --extra attestation` resolves it from the pinned git commit in `[tool.uv.sources]`; with pip,
-  install that pin first (`scripts/wheel_smoke.py` `PREINSTALL` has the exact requirement).
+  installs it, so the core record tests run there). attestation-schema 0.1.0 from PyPI (the extra is
+  `>=0.1.0,<0.2`: pre-1.0 minor releases may break the API): `uv sync --extra attestation` and `pip install
+  smeltery[attestation]` both resolve it from the index, with nothing to install first.
 - Every finished `smeltery run` (plain, `--combine`, `--temporal`) writes it last, into OUT. Without the extra the run
   prints one `note:` line and is otherwise unchanged; a schema refusal is a `warning:`, never the run's exit code (the
   legacy record is written and stays smeltery's own source of truth; a campaign job whose run wrote no core record ends
@@ -97,7 +97,7 @@ slot for. Status per finding:
 | 10 | One identity per dependency name; a `--temporal` run can mix ferric builds | Still deferred (per-scope identities), with a rule in the spec meanwhile: a mixed dependency is `unknown`, `evidence` naming the mix | Adopted the rule: a run whose `results.builds` lists more than one ferric is `unknown` with the builds and their row counts in `evidence`, instead of the finalizing process's ferric. The committed `danuglipron-halogen` run is one (two ferric builds: 1 and 111 rows). |
 | 11 | The layout assumes per-step outputs | Resolved by spec text (`steps/` and `logs/` optional; outputs anywhere under the run directory, covered by the manifest) | Unchanged layout: `steps/NN-<stage>/stage.json` kept, no `logs/`, outputs where the GUI contract puts them. |
 | 12 | `requires-python >= 3.12` without a 3.12 need | Resolved by schema change (floor 3.11, tested in the schema's CI) | The extra has no marker; CI's 3.11 `test` job installs it, the 3.11 wheel smoke converts two prebuilt runs instead of checking a refusal. |
-| 13 | Not on an index | Decided at the freeze (publish to PyPI as its own release line, `schema-v<X.Y.Z>`), not yet done | Unchanged until it is: `[tool.uv.sources]` git pin (now `9fb7eed`); `scripts/wheel_smoke.py` `PREINSTALL` (and `preinstall`, which CI's test job installs from) has the same pin. |
+| 13 | Not on an index | Decided at the freeze (publish to PyPI as its own release line, `schema-v<X.Y.Z>`) | Done: attestation-schema 0.1.0 from PyPI, content-identical to `9fb7eed`; the git pin, `PREINSTALL` and the `preinstall` subcommand are gone. |
 
 ## Second round (filed against `314e4ff`) and what became of it
 

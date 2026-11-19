@@ -141,16 +141,6 @@ HEAVY_EXTRAS = {
 }
 #: extras that exist only for development; never part of a user's install.
 SKIP_EXTRAS = {"dev"}
-#: Requirements an extra needs that no package index serves yet, installed into the fresh venv BEFORE `wheel[extra]`,
-#: so plain pip resolves the extra against them (a user does the same: see the extra's comment in pyproject.toml). Each
-#: must be the exact [tool.uv.sources] pin, which tests/test_wheel_smoke.py checks. Drop an entry once its package is
-#: published.
-PREINSTALL = {
-    "attestation": [
-        "attestation-schema @ git+https://github.com/mgoldey/attestation@9fb7eed4e37f24cc9e4d7d66688223879d41d98b"
-        "#subdirectory=packages/attestation-schema"
-    ],
-}
 
 
 def wheel_extras(wheel: Path) -> list[str]:
@@ -204,8 +194,6 @@ def check(
         _run([sys.executable, "-m", "venv", str(venv)])
         py, pip = venv / "bin" / "python", venv / "bin" / "pip"
         _run([str(pip), "install", "--quiet", "--upgrade", "pip"])
-        if PREINSTALL.get(extra):
-            _run([str(pip), "install", "--quiet", *PREINSTALL[extra]])
         if resolves_only(extra, resolve_only, full):
             _run([str(pip), "install", "--dry-run", "--quiet", spec])
             why = (
@@ -272,10 +260,6 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     ls = sub.add_parser("list-extras", help="print the wheel's user-facing extras (plus 'none') as a JSON list")
     ls.add_argument("wheel", type=Path)
-    pre = sub.add_parser(
-        "preinstall", help="print an extra's PREINSTALL requirements, one per line (a requirements file)"
-    )
-    pre.add_argument("extra")
     ck = sub.add_parser("check", help="install the wheel with one extra in a fresh venv and smoke-test it")
     ck.add_argument("wheel", type=Path)
     ck.add_argument("--extra", required=True, help="an extra name, or 'none'")
@@ -286,9 +270,6 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "list-extras":
         print(json.dumps(["none", *wheel_extras(args.wheel)]))
-        return 0
-    if args.cmd == "preinstall":
-        print("\n".join(PREINSTALL.get(args.extra, [])))
         return 0
     return check(args.wheel, args.extra, args.resolve_only, args.example, args.config, args.full)
 

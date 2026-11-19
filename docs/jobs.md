@@ -3,7 +3,7 @@
 A campaign job is one `smeltery run CONFIG --out RUN_DIR`, submitted and left to run. `submit` returns at once; the
 other three commands look at the job later, from any shell. It implements attestation-schema's job-backend contract
 (`attestation_schema.jobs.JobBackend`: `submit`, `status`, `cancel`, `result`) in `smeltery.jobs`, and needs the
-`attestation` extra.
+`attestation` extra (attestation-schema 0.1.0 from PyPI).
 
 ```sh
 smeltery submit pipeline.toml --out runs/r1      # stages the config into runs/r1, prints the job id, returns

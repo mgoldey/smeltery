@@ -111,7 +111,11 @@ wheels = [
 [[package]]
 name = "attestation-schema"
 version = "0.1.0"
-source = { git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=9fb7eed4e37f24cc9e4d7d66688223879d41d98b#9fb7eed4e37f24cc9e4d7d66688223879d41d98b" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/37/ce2a4ea2e62731b28c8dfb8ce066d189e5cf31f74b4da0386e8578775232/attestation_schema-0.1.0.tar.gz", hash = "sha256:4cb5818285ca9e956e87ba84104531908abe4847f3d8f4d26836d596e70436cd", size = 49615, upload-time = "2026-11-19T18:02:01.207Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/a8/3620191cc23e1d024524cab8f3b17d5a3324d2eb50a280080a6723bdfea2/attestation_schema-0.1.0-py3-none-any.whl", hash = "sha256:6e83a09c00b418fc065beee22efdde5a0e05c43c7e5379d81123ff5059f92de1", size = 37901, upload-time = "2026-11-19T18:01:59.41Z" },
+]
 
 [[package]]
 name = "attrs"
@@ -2617,7 +2621,7 @@ requires-dist = [
     { name = "aimnet", marker = "extra == 'aimnet2'", specifier = ">=0.2.0" },
     { name = "anywidget", marker = "extra == 'desktop'", specifier = ">=0.11" },
     { name = "anywidget", marker = "extra == 'gui'", specifier = ">=0.11" },
-    { name = "attestation-schema", marker = "extra == 'attestation'", git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=9fb7eed4e37f24cc9e4d7d66688223879d41d98b" },
+    { name = "attestation-schema", marker = "extra == 'attestation'", specifier = ">=0.1.0,<0.2" },
     { name = "fastapi", marker = "extra == 'bench'", specifier = ">=0.120" },
     { name = "ferric", specifier = ">=0.1.0rc10" },
     { name = "gemmi", marker = "extra == 'docking'" },

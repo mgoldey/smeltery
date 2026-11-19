@@ -70,7 +70,7 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   `DataLoader` (feature and target columns, tier/decision filters, split partition, transform hook); torch is the new
   optional `torch` extra, with a wheel smoke check.
 - The core run record (`attestation.run/1`, v1-DRAFT): with the new optional `attestation` extra (attestation-schema,
-  pinned by git commit until it is published; Python >= 3.12) every finished run also writes `OUT/attestation/run.json`
+  attestation-schema 0.1.0 from PyPI; Python >= 3.11) every finished run also writes `OUT/attestation/run.json`
   through the schema's own writer, with a manifest of OUT and one `steps/NN-<stage>/` per funnel stage, beside the
   unchanged `run-<digest12>.json`. `smeltery record core OUT` converts an existing run. Dependencies, ferric included,
   go through one identity ladder (`record.package_identity`); a conda/distro install is now INFERRED, not VERIFIED.
@@ -90,7 +90,7 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   `attestation_schema.spell_value`; a failed/cancelled job's record writes `history` and `dependencies` as `null`
   unconditionally. The golden core record changed accordingly. Findings and open items: `docs/core-record.md`.
 - The core run record follows the **frozen** `attestation.run/1` (attestation `9fb7eed`, attestation-schema 0.1.0; the
-  extra now requires `attestation-schema>=0.1.0`, still a git pin until it is published). `config` is the campaign
+  extra requires `attestation-schema>=0.1.0,<0.2`: attestation-schema 0.1.0 from PyPI, no git pin and no preinstall step in the wheel smoke or CI). `config` is the campaign
   config the run read (the staged `config.toml`, by its recorded digest), the same with and without a job; the derived
   `inputs` moved to `ext.smeltery.inputs`; a conversion that cannot observe the config writes `{}` and says why in
   `ext.smeltery.config_unobserved`. `smeltery run --run-id` names the run. `dependencies[].source` gains `url:<url>`

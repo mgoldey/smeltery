@@ -108,10 +108,11 @@ dataset = ["pyarrow>=15"]
 torch = ["torch>=2", "pyarrow>=15"]
 # The core run record (`attestation.run/1`, frozen at attestation 9fb7eed; smeltery.core_record, docs/core-record.md): a second record beside
 # OUT/run-<digest12>.json, written through attestation-schema's own writer. smeltery depends on the stdlib-only schema
-# distribution, never on `attestation` itself. Not on PyPI yet: [tool.uv.sources] pins the git commit, and a pip
-# install of this extra needs that requirement installed first (scripts/wheel_smoke.py PREINSTALL does exactly that).
+# distribution, never on `attestation` itself. attestation-schema 0.1.0 is published on PyPI (content-identical to
+# attestation 9fb7eed's packages/attestation-schema), so the extra resolves from the index with plain pip or uv. Capped
+# below 0.2 because pre-1.0 minor releases may break the API.
 # attestation-schema supports Python >= 3.11 (from attestation 314e4ff), smeltery's own floor, so no marker.
-attestation = ["attestation-schema>=0.1.0"]
+attestation = ["attestation-schema>=0.1.0,<0.2"]
 # `smeltery mcp` (smeltery.mcp, docs/mcp.md): the four screening tools over the official MCP Python SDK. The SDK's
 # server class is `mcp.server.mcpserver.MCPServer`, which is FastMCP renamed in 2.0, so the floor is >=2.3: on
 # mcp 1.x the import that module provides does not exist. It pulls pydantic/starlette/httpx, all pure Python, and
@@ -126,9 +127,6 @@ mcp = ["mcp>=2.3"]
 #   ferric = { path = "../ferric" }
 # or an exact commit (the record reports the SHA from direct_url.json):
 #   ferric = { git = "https://github.com/mgoldey/ferric", rev = "<sha>" }
-# attestation-schema is not on an index yet, so the `attestation` extra resolves from an exact commit of the attestation
-# repo (a stdlib-only hatchling package: re-locking builds nothing heavy). Move to an index pin once it is published.
-attestation-schema = { git = "https://github.com/mgoldey/attestation", rev = "9fb7eed4e37f24cc9e4d7d66688223879d41d98b", subdirectory = "packages/attestation-schema" }
 
 [build-system]
 requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]

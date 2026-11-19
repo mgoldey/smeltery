@@ -116,30 +116,19 @@ def test_a_heavy_extra_is_only_resolved_unless_full_is_asked_for():
     assert set(ws.HEAVY_EXTRAS) <= set(ws.EXTRA_CHECKS), "a heavy extra still needs its import checks for --full"
 
 
-def test_a_preinstalled_requirement_is_exactly_the_uv_source_pin_of_an_extra_that_needs_it():
-    """An extra whose package is on no index yet is smoked with its pin installed first; that pin and pyproject's
-    [tool.uv.sources] must name the same commit, or the smoke test proves a different package than `uv sync` locks."""
+def test_no_extra_requires_an_unpublished_or_direct_url_dependency():
+    """`pip install wheel[extra]` must resolve from an index alone: a direct-URL requirement (`name @ url`, git+, file:)
+    is refused by PyPI on upload, and nothing may be installed first to make an extra resolve. [tool.uv.sources] may
+    only carry the ferric guidance comments, never a live entry that the published metadata would not repeat."""
     py = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    extras = py["project"]["optional-dependencies"]
-    sources = py["tool"]["uv"]["sources"]
-    assert set(ws.PREINSTALL) <= set(extras)
-    for extra, reqs in ws.PREINSTALL.items():
+    for extra, reqs in py["project"]["optional-dependencies"].items():
         for req in reqs:
-            name = req.split("@", 1)[0].strip()
-            assert any(r.startswith(name) for r in extras[extra]), (extra, name)
-            src = sources[name]
-            want = f"{name} @ git+{src['git']}@{src['rev']}#subdirectory={src['subdirectory']}"
-            assert req.split(" ;", 1)[0] == want, (req, want)
+            assert "@" not in req and "://" not in req and "git+" not in req, (extra, req)
+    assert not py["tool"]["uv"].get("sources"), "a uv source makes `uv sync --no-sources` resolve differently"
+    assert not hasattr(ws, "PREINSTALL")
+    assert "preinstall" not in (ROOT / ".github" / "workflows" / "test.yml").read_text()
 
 
-def test_preinstall_prints_a_requirements_file_and_ci_installs_the_attestation_pin_through_it(capsys):
-    """CI's 3.11 `test` job installs attestation-schema through `wheel_smoke.py preinstall attestation`, so its pin
-    cannot drift from PREINSTALL (and so from [tool.uv.sources]); without it tests/test_core_record.py skips there."""
-    assert ws.main(["preinstall", "attestation"]) == 0
-    assert capsys.readouterr().out.splitlines() == ws.PREINSTALL["attestation"]
-    assert ws.main(["preinstall", "docking"]) == 0 and capsys.readouterr().out.strip() == ""
-    workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text()
-    assert "wheel_smoke.py preinstall attestation" in workflow
-    # the schema's floor is smeltery's (3.11), so neither the extra nor the pin carries a Python marker any more
+def test_the_attestation_extra_is_the_pypi_release_capped_below_the_next_pre_1_0_minor():
     extras = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]
-    assert not [r for r in extras["attestation"] + ws.PREINSTALL["attestation"] if ";" in r]
+    assert extras["attestation"] == ["attestation-schema>=0.1.0,<0.2"]
