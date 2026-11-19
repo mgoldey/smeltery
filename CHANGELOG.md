@@ -8,6 +8,15 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- `smeltery serve` (Bench, the repo's one server, with a backend choice) and `smeltery worker` (the worker for that
+  backend: a local supervisor loop, or one Temporal process polling both `smeltery-tasks` and `smeltery-pipeline`),
+  configured by `SMELTERY_BACKEND`, `SMELTERY_TEMPORAL_ADDRESS`, `SMELTERY_TEMPORAL_NAMESPACE`, `SMELTERY_TASK_QUEUE`,
+  `SMELTERY_PIPELINE_QUEUE`, `SMELTERY_HOST`, `SMELTERY_PORT`, `SMELTERY_ROOT`, `SMELTERY_WORKERS`,
+  `SMELTERY_THREADS_PER_WORKER`, `SMELTERY_TASK_CONCURRENCY` and `SMELTERY_MAX_RUNS` (flag, then variable, then default;
+  one pure resolver, `smeltery.settings`; a bad value exits 2 naming the variable). `task-worker`, `temporal-worker` and
+  `run --temporal --host/--task-queue` keep working and now read the same variables; `run` and `temporal-worker` gain
+  `--namespace`. `compose.yaml` gains an opt-in `temporal` profile (Temporal dev server plus a `smeltery worker`
+  service); the Dockerfile takes an `SMELTERY_EXTRAS` build argument. See `docs/temporal-runs.md`.
 - `smeltery export parquet|arrow RUN... -o FILE`: finished runs as one columnar dataset, one row per (ligand, target,
   tier), with scores and units and floors from the tiers' own declarations, the paired ddE, the funnel decision, and
   provenance columns (run id, `record_sha256`, smeltery and ferric versions, ferric build commit, dirty flag and

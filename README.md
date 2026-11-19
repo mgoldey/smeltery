@@ -274,13 +274,19 @@ For long work, Temporal is the system of record. smeltery keeps no process table
 store of its own, so a task's status, timings and exit code outlive the worker that ran it. A
 task runs at most once, because an arbitrary shell command isn't safe to re-run
 automatically. A task whose worker died is reported as failed, and resubmitting it is your
-decision. This needs the `temporal` extra and a reachable Temporal server (`--temporal-host`,
-default `127.0.0.1:7233`), for example `docker run temporalio/temporal:latest server start-dev`.
+decision. This needs the `temporal` extra and a reachable Temporal server (`SMELTERY_TEMPORAL_ADDRESS`, default
+`localhost:7233`; the dashboard's `--temporal-host`), for example `docker compose --profile temporal up -d temporal`
+(or `docker run temporalio/temporal:latest server start-dev`).
 
 ```bash
 uv run --extra temporal smeltery task-worker &             # executes submitted tasks
 uv run --extra temporal smeltery dashboard out/ --port 8123 # runs, task status, task submission
 ```
+
+Or configure a deployment by environment: `smeltery serve` is Bench and `smeltery worker` its worker, for
+`SMELTERY_BACKEND=local` (the default: SQLite and subprocesses, no server) or `temporal`. `docker compose --profile
+temporal up --build` starts a Temporal dev server and a worker beside Bench. Every `SMELTERY_*` variable is in the
+[table in docs/temporal-runs.md](docs/temporal-runs.md#environment-variables).
 
 If Temporal is down, the run list still works, and task operations return 503 or raise
 `TemporalUnavailable` rather than quietly falling back. More in

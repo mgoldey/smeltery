@@ -95,6 +95,7 @@ def server_down_message(host: str, err: object) -> str:
     return (
         f"cannot reach the Temporal server at {host}: {err}\n"
         f"start one with:\n  {DOCKER_COMMAND}\n"
+        "or the compose profile: docker compose --profile temporal up -d temporal\n"
         "(--temporal never falls back to an in-process run)"
     )
 
@@ -1160,6 +1161,7 @@ def run_cli(
     task_queue: str,
     config_info: dict | None,
     poll_s: float = 10.0,
+    namespace: str = "default",
 ) -> int:
     """`smeltery run --temporal`: 0 done, 2 the server is down (never a silent fallback), 3 the run failed."""
     if not TEMPORAL_AVAILABLE:
@@ -1170,7 +1172,7 @@ def run_cli(
 
     async def main() -> int:
         try:
-            client = await connect(host)
+            client = await connect(host, namespace)
         except Exception as e:
             print(server_down_message(host, e), file=sys.stderr)
             return 2
@@ -1204,7 +1206,9 @@ def run_cli(
     return asyncio.run(main())
 
 
-def worker_cli(host: str, task_queue: str, workers: int, threads_per_worker: int = 1) -> int:
+def worker_cli(
+    host: str, task_queue: str, workers: int, threads_per_worker: int = 1, namespace: str = "default"
+) -> int:
     """`smeltery temporal-worker`: 2 when the server is down."""
     if not TEMPORAL_AVAILABLE:
         print("temporalio is not installed", file=sys.stderr)
@@ -1212,7 +1216,7 @@ def worker_cli(host: str, task_queue: str, workers: int, threads_per_worker: int
 
     async def main() -> int:
         try:
-            client = await connect(host)
+            client = await connect(host, namespace)
         except Exception as e:
             print(server_down_message(host, e), file=sys.stderr)
             return 2

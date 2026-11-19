@@ -6,9 +6,64 @@ SCF: a log written as each SCF finishes, a timeout per SCF, and resume after a c
 `temporal` extra (`temporalio`) and applies to the RHF field-interaction tier only (any other tier is refused:
 run it without `--temporal`).
 
+## `smeltery serve` and `smeltery worker`
+
+Two subcommands run a deployment; both read `SMELTERY_*` environment variables, and a flag overrides its variable
+(flag, then variable, then default).
+
+- **`smeltery serve`** is Bench: the repo's one server (the FastAPI app and the built UI), the same app as
+  `smeltery bench`, and it accepts every `smeltery bench` flag (`ROOT`, `--token`, `--demo`, `--allow-host`...).
+  What it adds is the backend: with `SMELTERY_BACKEND=local` (the default) Bench queues tasks in SQLite and runs each
+  under a detached subprocess supervisor, and needs no server; with `SMELTERY_BACKEND=temporal` it submits them to
+  the Temporal cluster instead (`TemporalTaskQueue`, which does not enforce `timeout_s` or a memory limit).
+- **`smeltery worker`** starts the worker for the same backend. `local`: a supervisor loop over the workspace's
+  SQLite queue that fails tasks whose supervisor died and starts queued ones, so queued work starts even when no
+  server is up (tasks run under their own supervisors, so stopping the loop never kills one). `temporal`: ONE process
+  polling both queues, `smeltery-tasks` (Bench's shell tasks) and `smeltery-pipeline` (the SCF legs of
+  `run --temporal`), over one connection to the cluster. One process because both are the same deployment's work
+  and one container is simpler to run; the two kinds of work do not share slots (`SMELTERY_TASK_CONCURRENCY` bounds
+  shell tasks, `SMELTERY_WORKERS` bounds SCFs). To scale them apart, run `task-worker` and `temporal-worker`.
+
+```sh
+SMELTERY_BACKEND=temporal SMELTERY_WORKERS=6 smeltery worker
+SMELTERY_BACKEND=temporal smeltery serve --demo
+```
+
+### Environment variables
+
+| Variable | Default | Used by | Meaning |
+|---|---|---|---|
+| `SMELTERY_BACKEND` | `local` | `serve`, `worker` | `local` (SQLite + subprocess supervisors, no server) or `temporal`. Anything else is refused. |
+| `SMELTERY_TEMPORAL_ADDRESS` | `localhost:7233` | all Temporal commands | The Temporal frontend, `host:port`. Flag: `--host` (`task-worker`, `temporal-worker`, `run`), `--temporal-address` (`serve`, `worker`). |
+| `SMELTERY_TEMPORAL_NAMESPACE` | `default` | all Temporal commands | The Temporal namespace. Flag: `--namespace`. |
+| `SMELTERY_TASK_QUEUE` | `smeltery-tasks` | `serve`, `worker`, `task-worker` | Queue for Bench's shell tasks. Flag: `--task-queue`. |
+| `SMELTERY_PIPELINE_QUEUE` | `smeltery-pipeline` | `worker`, `temporal-worker`, `run --temporal` | Queue for the SCF legs of `run --temporal`. Flag: `--pipeline-queue` (`worker`), `--task-queue` (`temporal-worker`, `run`). |
+| `SMELTERY_HOST` | Bench's: `127.0.0.1` | `serve` | Address to bind. Unset, `SMELTERY_BENCH_HOST` applies. Bench still refuses a non-loopback bind without a token. |
+| `SMELTERY_PORT` | Bench's: `8765` | `serve` | Port, 1-65535. Unset, `SMELTERY_BENCH_PORT` applies. |
+| `SMELTERY_ROOT` | Bench's per-user data directory | `serve`, `worker` (local) | Workspace directory; a `ROOT` argument wins, and unset, `SMELTERY_BENCH_ROOT` applies. |
+| `SMELTERY_WORKERS` | `2` | `worker`, `temporal-worker`, `run --temporal` | SCFs run at once (memory-bound). Flag: `--workers`. |
+| `SMELTERY_THREADS_PER_WORKER` | `1` | `worker`, `temporal-worker` | `RAYON_NUM_THREADS` per SCF child. Flag: `--threads-per-worker`. |
+| `SMELTERY_TASK_CONCURRENCY` | `2` | `worker`, `task-worker` | Concurrent shell tasks per task worker. Flag: `--concurrency`. |
+| `SMELTERY_MAX_RUNS` | `1` | `serve`, `worker` (local) | Launched runs at once on the local backend. Flag: `--max-runs`. |
+
+A bad value stops the command with exit code 2 and a message naming the variable (for example
+`SMELTERY_BACKEND='redis' is not a backend; use one of: local, temporal`). The other `SMELTERY_BENCH_*` variables
+(token, logging, read-only) belong to Bench and are documented in [bench.md](bench.md). The old commands and flags
+(`task-worker`, `temporal-worker`, `run --temporal --host/--task-queue`) still work, and now also read these variables.
+
 ## Three things must be running
 
-1. **The Temporal dev server.** `--temporal` never falls back to an in-process run.
+1. **The Temporal dev server.** `--temporal` never falls back to an in-process run. With Docker Compose:
+
+   ```sh
+   docker compose --profile temporal up -d temporal
+   ```
+
+   The `temporal` profile in `compose.yaml` is opt-in (a plain `docker compose up` is unchanged): it starts
+   `temporalio/temporal` as a dev server (frontend and UI on loopback, history in a volume) and a `worker` service
+   running `smeltery worker` with `SMELTERY_BACKEND=temporal`; `docker compose --profile temporal up --build` starts
+   both. The worker image has no ferric (the SCF engine), so for `run --temporal` pipelines either run
+   `smeltery temporal-worker` on the host against `localhost:7233`, or extend the image. Without Compose:
 
    ```sh
    docker run -d --name temporal-dev -p 7233:7233 -p 8233:8233 temporalio/temporal:latest server start-dev --ip 0.0.0.0
@@ -23,7 +78,8 @@ run it without `--temporal`).
    `--workers` is how many SCFs run at once; each SCF leg is its own child process (its own process group), so a
    cancel or a timeout kills exactly that SCF. `--threads-per-worker` sets `RAYON_NUM_THREADS` for each child
    (default 1). Workers are memory-bound: check free memory before raising `--workers`. Defaults: `--workers 2`,
-   host `127.0.0.1:7233`, task queue `smeltery-pipeline`.
+   host `localhost:7233`, task queue `smeltery-pipeline`. (`smeltery worker` with `SMELTERY_BACKEND=temporal` does
+   this and the tasks worker in one process.)
 
 3. **The run itself**, which starts the workflow (or attaches to it) and waits:
 
@@ -31,8 +87,8 @@ run it without `--temporal`).
    smeltery run pipeline.toml --out OUT --temporal --workers 6
    ```
 
-   `--temporal` needs `--out`. `--workers` here is "scores run at once" for this workflow. `--host` and
-   `--task-queue` must match the worker's.
+   `--temporal` needs `--out`. `--workers` here is "scores run at once" for this workflow. `--host`, `--task-queue`
+   and `--namespace` must match the worker's.
 
 Watch it in the Temporal UI at <http://127.0.0.1:8233>.
 
@@ -40,8 +96,8 @@ Watch it in the Temporal UI at <http://127.0.0.1:8233>.
 
 | Worker | Command | Task queue | Runs |
 |---|---|---|---|
-| `task-worker` | `smeltery task-worker` | `smeltery-tasks` | Bench's shell tasks (a submitted command line) |
-| `temporal-worker` | `smeltery temporal-worker` | `smeltery-pipeline` | the SCF legs of one `run --temporal` |
+| `task-worker` | `smeltery task-worker` (or `smeltery worker`, which runs both) | `smeltery-tasks` | Bench's shell tasks (a submitted command line) |
+| `temporal-worker` | `smeltery temporal-worker` (or `smeltery worker`) | `smeltery-pipeline` | the SCF legs of one `run --temporal` |
 
 When Bench is configured with the Temporal task queue (`TemporalTaskQueue`), launching a pipeline submits
 `smeltery run ... --temporal` as a task. That needs both workers: `task-worker` to run the `smeltery run` command,
@@ -114,7 +170,7 @@ extra field model's failed score is `None` in what its analysis's `summarize` re
 | Code | Meaning |
 |---|---|
 | 0 | done; the record path and input digest are printed |
-| 2 | the Temporal server is unreachable (the message includes the docker command above; re-running the same command resumes), or `temporalio` is not installed, or a bad config |
+| 2 | the Temporal server is unreachable (the message includes the docker and compose commands above; re-running the same command resumes), or `temporalio` is not installed, or a bad config |
 | 3 | the workflow failed. Notably, finalize refuses while any leg has an infrastructure error or timed out: an error is not a measurement. For timeouts the remedy is to raise `[run] scf_timeout_s` (it does not change the digest) and run the same command again |
 
 ## Flags that do not combine with it

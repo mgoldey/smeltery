@@ -1634,6 +1634,8 @@ VIEWERS = {
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
     "record": "smeltery.core_record",
+    "serve": "smeltery.services:serve_main",
+    "worker": "smeltery.services:worker_main",
 }
 
 
@@ -1747,6 +1749,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
+    sub.add_parser("serve", help="Bench, configured by SMELTERY_* env vars (smeltery serve --help)")
+    sub.add_parser("worker", help="the worker for SMELTERY_BACKEND=local|temporal (smeltery worker --help)")
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
@@ -1758,10 +1762,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
     sub.add_parser("record", help="write a run's core record (smeltery record core RUN.json; attestation extra)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
-    tw.add_argument("--host", default="127.0.0.1:7233")
-    tw.add_argument("--namespace", default="default")
-    tw.add_argument("--task-queue", default="smeltery-tasks")
-    tw.add_argument("--concurrency", type=int, default=2, help="max concurrent activities")
+    # Alias of `smeltery worker --backend temporal` for the tasks queue alone. Defaults are None so that
+    # settings.resolve gives flag > SMELTERY_* env var > default (docs/temporal-runs.md).
+    tw.add_argument("--host", default=None, help="Temporal server (env SMELTERY_TEMPORAL_ADDRESS)")
+    tw.add_argument("--namespace", default=None, help="env SMELTERY_TEMPORAL_NAMESPACE")
+    tw.add_argument("--task-queue", default=None, help="env SMELTERY_TASK_QUEUE")
+    tw.add_argument(
+        "--concurrency", type=int, default=None, help="max concurrent activities (SMELTERY_TASK_CONCURRENCY)"
+    )
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
     run.add_argument(
@@ -1792,20 +1800,45 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run as a durable Temporal workflow (needs --out, a server and `smeltery temporal-worker`)",
     )
-    run.add_argument("--workers", type=int, default=2, help="with --temporal: scores run at once")
-    run.add_argument("--host", default="127.0.0.1:7233", help="with --temporal: the Temporal server")
-    run.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline", help="with --temporal")
+    run.add_argument("--workers", type=int, default=None, help="with --temporal: scores run at once (SMELTERY_WORKERS)")
+    run.add_argument("--host", default=None, help="with --temporal: the Temporal server (SMELTERY_TEMPORAL_ADDRESS)")
+    run.add_argument("--task-queue", dest="task_queue", default=None, help="with --temporal (SMELTERY_PIPELINE_QUEUE)")
+    run.add_argument("--namespace", default=None, help="with --temporal (SMELTERY_TEMPORAL_NAMESPACE)")
     me = sub.add_parser("methods", help="every method's config section, knobs and defaults, as TOML")
     me.add_argument("--out", help="write one <key>.toml per method plus index.toml into this directory")
     me.add_argument("--only", help="one method key, e.g. field_interaction")
     pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
-    pw.add_argument("--workers", type=int, default=2, help="SCFs at once, one child process each (memory-bound)")
     pw.add_argument(
-        "--threads-per-worker", dest="threads_per_worker", type=int, default=1, help="RAYON_NUM_THREADS per SCF"
+        "--workers", type=int, default=None, help="SCFs at once, one child process each (memory-bound; default 2)"
     )
-    pw.add_argument("--host", default="127.0.0.1:7233")
-    pw.add_argument("--task-queue", dest="task_queue", default="smeltery-pipeline")
+    pw.add_argument(
+        "--threads-per-worker", dest="threads_per_worker", type=int, default=None, help="RAYON_NUM_THREADS per SCF"
+    )
+    pw.add_argument("--host", default=None, help="Temporal server (env SMELTERY_TEMPORAL_ADDRESS)")
+    pw.add_argument("--namespace", default=None, help="env SMELTERY_TEMPORAL_NAMESPACE")
+    pw.add_argument("--task-queue", dest="task_queue", default=None, help="env SMELTERY_PIPELINE_QUEUE")
     args = ap.parse_args(argv)
+    temporal_settings = None
+    if args.command in ("task-worker", "temporal-worker") or (args.command == "run" and args.temporal):
+        from .settings import SettingsError, resolve
+
+        # one resolution for the Temporal flags of all three commands: flag > SMELTERY_* env var > default. The
+        # `--task-queue` flag means the tasks queue for task-worker and the pipeline queue for the other two.
+        is_tasks = args.command == "task-worker"
+        try:
+            temporal_settings = resolve(
+                os.environ,
+                temporal_address=args.host,
+                namespace=args.namespace,
+                task_queue=args.task_queue if is_tasks else None,
+                pipeline_queue=None if is_tasks else args.task_queue,
+                workers=getattr(args, "workers", None),
+                threads_per_worker=getattr(args, "threads_per_worker", None),
+                task_concurrency=getattr(args, "concurrency", None),
+            )
+        except SettingsError as e:
+            print(f"config error: {e}", file=sys.stderr)
+            return 2
     if getattr(args, "command", None) == "golden":
         from smeltery.golden import main as _golden_main
 
@@ -1828,42 +1861,37 @@ def main(argv: list[str] | None = None) -> int:
         print(all_methods_toml(), end="")
         return 0
     if getattr(args, "command", None) == "task-worker":
-        from smeltery.tasks import TEMPORAL_AVAILABLE, worker_activities, worker_workflows
+        import asyncio
 
+        from smeltery.tasks import TEMPORAL_AVAILABLE, run_task_worker
+
+        ts = temporal_settings
+        assert ts is not None
         if not TEMPORAL_AVAILABLE:
             print("temporalio is not installed", file=sys.stderr)
             return 2
 
-        async def _run_worker():
-            Client = __import__("temporalio.client", fromlist=["Client"]).Client  # noqa: E501
-            UnsandboxedWorkflowRunner = __import__(
-                "temporalio.worker", fromlist=["UnsandboxedWorkflowRunner"]
-            ).UnsandboxedWorkflowRunner  # noqa: E501
-            Worker = __import__("temporalio.worker", fromlist=["Worker"]).Worker
+        async def _run_worker() -> int:
+            from .temporal_run import connect, server_down_message
 
-            client = await Client.connect(args.host, namespace=args.namespace)
-            async with Worker(
-                client,
-                task_queue=args.task_queue,
-                workflows=worker_workflows(),
-                activities=worker_activities(),
-                workflow_runner=UnsandboxedWorkflowRunner(),
-                max_concurrent_activities=args.concurrency,
-            ):
-                print(f"smeltery task worker up on {args.task_queue} (Ctrl+C stops)", flush=True)
-                await asyncio.Future()
-
-        import asyncio
+            try:
+                client = await connect(ts.temporal_address, ts.namespace)
+            except Exception as e:  # noqa: BLE001 - any connect failure is "the server is down", reported, exit 2
+                print(server_down_message(ts.temporal_address, e), file=sys.stderr)
+                return 2
+            await run_task_worker(client, ts.task_queue, ts.task_concurrency)
+            return 0
 
         try:
-            asyncio.run(_run_worker())
+            return asyncio.run(_run_worker())
         except KeyboardInterrupt:
             return 0
-        return 0
     if args.command == "temporal-worker":
         from .temporal_run import worker_cli
 
-        return worker_cli(args.host, args.task_queue, args.workers, args.threads_per_worker)
+        ts = temporal_settings
+        assert ts is not None
+        return worker_cli(ts.temporal_address, ts.pipeline_queue, ts.workers, ts.threads_per_worker, ts.namespace)
     explicit_out = args.out is not None
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # the core record's started_at (a whole run)
     if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
@@ -1903,7 +1931,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.temporal and not args.plan:
             from .temporal_run import run_cli
 
-            return run_cli(args.config, args.out, args.workers, args.host, args.task_queue, config_info)
+            ts = temporal_settings
+            assert ts is not None
+            return run_cli(
+                args.config,
+                args.out,
+                ts.workers,
+                ts.temporal_address,
+                ts.pipeline_queue,
+                config_info,
+                namespace=ts.namespace,
+            )
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
                 print(f"config error: unknown candidate {args.only_candidate!r}", file=sys.stderr)

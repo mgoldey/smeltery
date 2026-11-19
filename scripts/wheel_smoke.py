@@ -35,7 +35,12 @@ EXTRA_CHECKS: dict[str, list[str]] = {
     "gemmi": ["import gemmi"],
     "rdkit": ["import rdkit"],
     "pocket-charges": ["import openmm"],
-    "temporal": ["import temporalio", "from temporalio import activity, workflow"],
+    "temporal": [
+        "import temporalio",
+        "from temporalio import activity, workflow",
+        "from smeltery.settings import resolve; assert resolve({'SMELTERY_BACKEND': 'temporal'}).backend == 'temporal'",
+        "from smeltery.services import serve_main, worker_main",
+    ],
     # pdbfixer repairs an unprepped crystal pocket (missing side-chain heavy atoms, a missing chain
     # terminal, absent hydrogens) before the force field types it; openmm.app.Modeller cannot add
     # missing HEAVY atoms, which is why the extra exists. Used by scripts/plb_pocket_charges.py --prep.

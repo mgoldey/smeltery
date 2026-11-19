@@ -176,6 +176,25 @@ def worker_workflows():
 # ---------- client manager ----------
 
 
+async def run_task_worker(client, task_queue: str = TASK_QUEUE, concurrency: int = 2, stop=None) -> None:
+    """A worker for Bench's shell tasks (`smeltery task-worker`, and half of `smeltery worker`): runs until `stop`
+    (an asyncio.Event) is set, or forever when it is None."""
+    import asyncio
+
+    from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+
+    async with Worker(
+        client,
+        task_queue=task_queue,
+        workflows=worker_workflows(),
+        activities=worker_activities(),
+        workflow_runner=UnsandboxedWorkflowRunner(),
+        max_concurrent_activities=concurrency,
+    ):
+        print(f"smeltery task worker up on {task_queue} (Ctrl+C stops)", flush=True)
+        await (stop.wait() if stop is not None else asyncio.Future())
+
+
 class TemporalTaskManager:
     def __init__(self, host: str = "127.0.0.1:7233", namespace: str = "default", task_queue: str = TASK_QUEUE):
         self.host = host
