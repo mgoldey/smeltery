@@ -1,4 +1,4 @@
-"""The core run record (`attestation.run/1`, v1-DRAFT) beside smeltery's own `run-<digest12>.json`.
+"""The core run record (`attestation.run/1`, frozen at attestation 9fb7eed) beside smeltery's own `run-<digest12>.json`.
 
 smeltery keeps writing `OUT/run-<digest12>.json` (the `RunRecord` the GUI contract reads); this module derives the
 core record from it and writes it with attestation-schema's own writer, laid out per `attestation_schema.layout`:
@@ -12,14 +12,17 @@ OUT is the run directory, not a sibling of it: the manifest then binds every fil
 staged inputs, the legacy record) to the core record through one digest, and the GUI contract is untouched because
 only new names (`attestation/`, `steps/`) are added to OUT.
 
-Mapping (docs/core-record.md): campaign -> family; arm -> null (smeltery has no arm); the legacy `inputs` -> config;
-staged inputs, the receptor and the decisions file -> data (role input), the legacy record (role output) and the
-manifest; funnel counts and the paired ddE -> metrics, what each is about (a stage, an analogue) in `labels`; no
-curves, so history -> null; tier seeds and seed lists -> seeds; smeltery's own identity -> code, on the same ladder as
-a dependency (`unknown`, naming each commit, when the run's rows came from more than one); ferric, Python and the
-other packages -> dependencies, through the same identity ladder (`record.package_identity`). Tiers and everything
-chemistry-shaped -> `ext.smeltery`. Where the draft schema has no honest slot for something smeltery knows, it is left
-out and listed in docs/core-record.md ("Schema findings"), never squeezed into a field that means something else.
+Mapping (docs/core-record.md): campaign -> family; arm -> null (smeltery has no arm); the campaign config the run read
+(OUT/config.toml, checked against the digest the run recorded) -> config, verbatim, the same with and without a job; the
+legacy `inputs` (derived from it once the plan is built) -> `ext.smeltery.inputs`; run_id -> the input digest's first 12
+hex, or the one the run was given (`smeltery run --run-id`, a campaign job's); staged inputs, the receptor and the
+decisions file -> data (role input), the legacy record (role output) and the manifest; funnel counts and the paired ddE
+-> metrics, what each is about (a stage, an analogue) in `labels`; no curves, so history -> null; tier seeds and seed
+lists -> seeds; smeltery's own identity -> code, on the same ladder as a dependency (`unknown`, naming each commit, when
+the run's rows came from more than one); ferric, Python and the other packages -> dependencies, through the same
+identity ladder (`record.package_identity`). Tiers and everything chemistry-shaped -> `ext.smeltery`. Where the frozen
+schema has no honest slot for something smeltery knows, it is left out and listed in docs/core-record.md ("Schema
+findings"), never squeezed into a field that means something else.
 
 Needs the optional `attestation` extra (attestation-schema). Without it `AVAILABLE` is False and the run path prints a
 one-line notice instead of writing.
@@ -33,9 +36,11 @@ import json
 import re
 import shutil
 import sys
+import tomllib
 from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     import attestation_schema as _schema
@@ -116,13 +121,15 @@ CONDA_INSTALLERS = frozenset({"conda", "mamba", "micromamba"})
 
 def source(ident: dict | None) -> str | None:
     """Where an identity block says the package was installed from, in the core record's closed vocabulary
-    (`index[:<name>]`, `git+<url>`, `file`, `conda[:<channel>]`, `system`): `index` for a package index (which one is
-    not recorded, so never `index:pypi`), `git+<url>` for a git install's direct_url.json (credentials stripped), `file`
-    for a local directory or wheel file (the path names a machine, not a source, so it is not written), `conda` for a
-    conda-family installer (the channel is not recorded), `system` for any other installer (a distro package manager).
-    None when the block does not say, and for a wheel fetched from a URL, which the vocabulary has no kind for
-    (docs/core-record.md, open findings). A build stamp (`ferric.__build__`) names how the build was identified, not
-    where it was installed from, so a stamped build's source is None."""
+    (`index[:<name>]`, `<git|hg|svn|bzr>+<url>`, `url:<url>`, `file`, `conda[:<channel>]`, `system`): `index` for a
+    package index (which one is not recorded, so never `index:pypi`); `<vcs>+<url>` for a VCS install's
+    direct_url.json, the VCS named by PEP 610's `vcs_info.vcs` (credentials stripped); `url:<url>` for an archive
+    (`archive_info`) fetched from a URL, with credentials and the query string stripped (a signed URL's query is its
+    credential) and only a `#sha256=` fragment kept (`archive_url`); `file` for a local directory, wheel or checkout
+    (the path names a machine, not a source, so it is not written); `conda` for a conda-family installer (the channel
+    is not recorded); `system` for any other installer (a distro package manager). None when the block does not say. A
+    build stamp (`ferric.__build__`) names how the build was identified, not where it was installed from, so a stamped
+    build's source is None."""
     ident = ident or {}
     src = ident.get("source")
     if not isinstance(src, str) or not src or src.endswith(".__build__"):
@@ -133,9 +140,33 @@ def source(ident: dict | None) -> str | None:
         return "conda" if src.removeprefix("installed by ") in CONDA_INSTALLERS else "system"
     if src.startswith("file:"):
         return "file"
-    if "git install" in str(ident.get("provenance")):
-        return f"git+{strip_credentials(src)}"
+    provenance = str(ident.get("provenance"))
+    vcs = _VCS_INSTALL.search(provenance)
+    if vcs:
+        url = strip_credentials(src) or src
+        return url if url.startswith(f"{vcs[1]}+") else f"{vcs[1]}+{url}"
+    if provenance.startswith(ARCHIVE_SENTENCE):
+        url = archive_url(src)
+        return f"url:{url}" if url else None
     return None
+
+
+#: The provenance sentence `record._distribution_identity` writes for a VCS install, naming the VCS.
+_VCS_INSTALL = re.compile(r"\((git|hg|svn|bzr) install\)")
+#: ... and the start of the one it writes for an archive (`archive_info`), a wheel or sdist from a path or URL.
+ARCHIVE_SENTENCE = "INFERRED from the installed wheel "
+
+
+def archive_url(url: str) -> str | None:
+    """A direct-URL archive's location as a `url:` source may carry it: userinfo and the query string stripped (a
+    signed URL carries its credential in the query), a `#sha256=` fragment kept (pip's own hash of the archive) and any
+    other fragment dropped. None for a URL without a scheme and host, which is not a location."""
+    parts = urlsplit(url)
+    if not re.fullmatch(r"[a-z][a-z0-9.-]*", parts.scheme or "") or not parts.hostname:
+        return None
+    netloc = parts.netloc.rpartition("@")[2]
+    fragment = parts.fragment if parts.fragment.startswith("sha256=") else ""
+    return urlunsplit((parts.scheme, netloc, parts.path, "", fragment))
 
 
 def dependency(name: str, ident: dict | None) -> dict:
@@ -443,12 +474,20 @@ def core_fields(
     dependencies: list[dict],
     started_at: str | None = None,
     finished_at: str | None = None,
+    run_id: str | None = None,
+    config: dict | None = None,
+    config_unobserved: str | None = None,
 ) -> dict:
     """The core record, as plain JSON, for one finished (not partial) legacy record. Pure: no clock, no environment.
 
     `started_at`/`finished_at` are the run's real start and end, known only to a live run. The legacy `started_utc`
     is neither (it is stamped when the record object is built, after the measurement tier), so a converted record
     says null and carries it in `ext.smeltery.started_utc` under its own name.
+
+    `run_id`: the run's name when it was given one (a campaign job's); else the input digest's first 12 hex.
+    `config`: the campaign config the run read (`staged_config`). None when it cannot be observed: `config` is then
+    `{}` -- the schema has no null for it -- and `ext.smeltery.config_unobserved` says why, so `{}` is never read as
+    "configured with nothing" (docs/core-record.md, "Post-freeze findings").
     """
     results = legacy.get("results") or {}
     if "cut" not in results or "funnel" not in results:
@@ -465,11 +504,14 @@ def core_fields(
         "legacy_schema_version": legacy.get("schema_version"),
         "cut_unranked": (results.get("cut") or {}).get("unranked"),
     }
+    ext["inputs"] = legacy.get("inputs") or {}  # derived from the config by the plan: smeltery's, not the config
     if "reuse" in results:  # stage reuse (smeltery.reuse): which stages were reused, from which run; no core slot
         ext["reuse"] = results["reuse"]
+    if config is None:
+        ext["config_unobserved"] = config_unobserved or "the campaign config the run read is not known"
     return {
         "schema": _schema.SCHEMA if _schema else "attestation.run/1",
-        "run_id": input_digest[:12],
+        "run_id": run_id if run_id is not None else input_digest[:12],
         "family": legacy.get("campaign"),
         "arm": None,
         "status": "complete",
@@ -477,7 +519,7 @@ def core_fields(
         "finished_at": finished_at,
         "producer": producer,
         "code": _code(legacy.get("smeltery"), legacy.get("smeltery_version"), results.get("builds")),
-        "config": legacy.get("inputs") or {},
+        "config": config if config is not None else {},
         "data": [*data(legacy, legacy_name, legacy_sha256), manifest],
         "metrics": metrics(results),
         "history": None,  # smeltery logs no curves: every value it records is final, so there is no sidecar
@@ -485,6 +527,33 @@ def core_fields(
         "dependencies": dependencies,
         "ext": {"smeltery": ext},
     }
+
+
+def staged_config(run_dir: Path, legacy: dict) -> tuple[dict | None, str | None]:
+    """The campaign config a run read, as `(config, None)`, or `(None, why)` when it cannot be observed.
+
+    A run into an explicit OUT stages its config there (`config.toml`, inputs under `inputs/`) and records the staged
+    file's name and sha256 in `results.config`; the config is that file, parsed, provided it still has that digest. A
+    run that staged nothing (no `--out`), a staged file since removed or edited, or one that no longer parses has no
+    observable config: a conversion runs later and cannot know what the run was given."""
+    entry = (legacy.get("results") or {}).get("config")
+    if (
+        not isinstance(entry, dict)
+        or not isinstance(entry.get("file"), str)
+        or not isinstance(entry.get("sha256"), str)
+    ):
+        return None, "the run staged no config into its run directory (no results.config), so what it read is unknown"
+    path = run_dir / entry["file"]
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, f"the staged config {entry['file']} the run recorded is missing from its run directory"
+    if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+        return None, f"the staged config {entry['file']} changed after the run (its sha256 is not the recorded one)"
+    try:
+        return tomllib.loads(raw.decode()), None
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
+        return None, f"the staged config {entry['file']} does not parse: {e}"
 
 
 # ---- writing -------------------------------------------------------------------------------------------------------
@@ -521,6 +590,8 @@ def write_core(
     finished_at: str | None = None,
     producer_info: dict | None = None,
     overwrite: bool = False,
+    run_id: str | None = None,
+    config: dict | None = None,
 ) -> Path:
     """Write the core record for the legacy record at `legacy_path` into its directory (the run directory): steps,
     then `attestation/digests.json`, then `attestation/run.json` through `attestation_schema.write`. Returns run.json.
@@ -528,6 +599,9 @@ def write_core(
     `live`: called by the run that just wrote the record, so dependencies are measured in this process
     (`live_dependencies`); otherwise only what the record says (`recorded_dependencies`). An existing core record is
     refused (FileExistsError) unless `overwrite`; then it, the manifest and `steps/` are replaced.
+
+    `run_id`: the record's run_id when the run was given one (`core_fields`). `config`: the campaign config, given by
+    a live run that staged none; otherwise it is read from the run directory (`staged_config`).
     """
     _require()
     legacy_path = Path(legacy_path)
@@ -543,6 +617,9 @@ def write_core(
     target.unlink(missing_ok=True)  # the manifest is refused while a record exists
     shutil.rmtree(run_dir / _layout.STEPS_DIR, ignore_errors=True)  # steps/ is this module's alone in OUT
     _write_steps(run_dir, results)
+    config_unobserved = None
+    if config is None:
+        config, config_unobserved = staged_config(run_dir, legacy)
     manifest = _layout.write_manifest(run_dir)
     fields = core_fields(
         legacy,
@@ -553,6 +630,9 @@ def write_core(
         dependencies=live_dependencies(legacy) if live else recorded_dependencies(legacy),
         started_at=started_at,
         finished_at=finished_at,
+        run_id=run_id,
+        config=config,
+        config_unobserved=config_unobserved,
     )
     return _schema.write(_schema.from_dict(fields), run_dir, overwrite=overwrite)
 

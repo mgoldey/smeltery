@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -119,7 +120,7 @@ def _legacy(run_dir: Path) -> Path:
             },
             ("inferred", None, "2024.1", None, "system"),
         ),
-        (  # a wheel fetched from a URL: the closed vocabulary has no kind for it, so the source is not known
+        (  # a wheel fetched from a URL: `url:<url>` (attestation 9fb7eed, Producer findings 5.A)
             {
                 "version": "0.1.0",
                 "source": "https://example.org/w/ferric-0.1.0-cp312-linux.whl",
@@ -127,7 +128,40 @@ def _legacy(run_dir: Path) -> Path:
                 "dirty": False,
                 "provenance": "INFERRED from the installed wheel ferric-0.1.0-cp312-linux.whl (sha256=ab)",
             },
-            ("inferred", None, "0.1.0", False, None),
+            ("inferred", None, "0.1.0", False, "url:https://example.org/w/ferric-0.1.0-cp312-linux.whl"),
+        ),
+        (  # a signed archive URL: credentials and the query (the signature) stripped, pip's #sha256= kept
+            {
+                "version": "0.1.0",
+                "source": "https://u:tok@bucket.example.org:8443/w/f-0.1.0.whl?X-Amz-Signature=s3cr3t#sha256=ab",
+                "commit": None,
+                "dirty": False,
+                "provenance": "INFERRED from the installed wheel f-0.1.0.whl (sha256=ab)",
+            },
+            ("inferred", None, "0.1.0", False, "url:https://bucket.example.org:8443/w/f-0.1.0.whl#sha256=ab"),
+        ),
+        (  # an archive fragment other than pip's hash is not a location: dropped
+            {
+                "version": "0.1.0",
+                "source": "https://example.org/f-0.1.0.tar.gz#egg=f",
+                "commit": None,
+                "dirty": False,
+                "provenance": "INFERRED from the installed wheel f-0.1.0.tar.gz (pip recorded no hash)",
+            },
+            ("inferred", None, "0.1.0", False, "url:https://example.org/f-0.1.0.tar.gz"),
+        ),
+        *(
+            (  # a non-git VCS install: its own kind, pip's `<vcs>+<url>` spelling
+                {
+                    "version": "0.1.0",
+                    "source": "https://hg.example.org/f",
+                    "commit": "c" * 40,
+                    "dirty": False,
+                    "provenance": f"VERIFIED from direct_url.json ({vcs} install)",
+                },
+                ("verified", "c" * 40, "0.1.0", False, f"{vcs}+https://hg.example.org/f"),
+            )
+            for vcs in ("hg", "svn", "bzr")
         ),
     ],
 )
@@ -136,6 +170,44 @@ def test_every_rung_of_the_identity_ladder_maps_to_the_core_enum_the_same_way(id
     assert (dep["provenance"], dep["build_sha"], dep["version"], dep["dirty"], dep["source"]) == want
     assert set(dep) == {"name", "version", "build_sha", "dirty", "provenance", "evidence", "source"}
     assert dep["evidence"] == (None if want[0] == "unknown" else ident["provenance"])
+
+
+@needs_schema
+def test_every_mapped_source_is_one_the_frozen_schema_accepts(tmp_path):
+    """Each `source` the mapping writes is in attestation.run/1's closed vocabulary (the reader is the judge)."""
+    import attestation_schema as a
+
+    run_dir = _copy_run(tmp_path, "benzoic-rhf")
+    core_record.write_core(_legacy(run_dir))
+    rec = json.loads((run_dir / "attestation" / "run.json").read_bytes())
+    for src in (
+        "url:https://bucket.example.org/w/f.whl#sha256=ab",
+        "hg+https://hg.example.org/f",
+        "svn+https://svn.example.org/f",
+        "bzr+https://bzr.example.org/f",
+    ):
+        rec["dependencies"][0]["source"] = src
+        assert a.from_dict(rec).dependencies[0].source == src
+
+
+@pytest.mark.parametrize("vcs", ["git", "hg", "svn", "bzr", None])
+def test_a_vcs_install_names_its_vcs_from_pep_610(monkeypatch, vcs):
+    """`record._distribution_identity` reads `vcs_info.vcs` (a missing one is git, as before)."""
+    from smeltery import record
+
+    info = {"commit_id": "d" * 40, **({"vcs": vcs} if vcs else {})}
+    files = {"direct_url.json": json.dumps({"url": "https://example.org/f", "vcs_info": info}), "INSTALLER": "pip"}
+
+    class Dist:
+        version = "1.0"
+
+        def read_text(self, name):
+            return files.get(name)
+
+    monkeypatch.setattr(record.metadata, "distribution", lambda name: Dist())
+    ident = record._distribution_identity("f", {"version": None, "source": None, "commit": None, "dirty": None})
+    assert ident["provenance"] == f"VERIFIED from direct_url.json ({vcs or 'git'} install)"
+    assert dependency("f", ident)["source"] == f"{vcs or 'git'}+https://example.org/f"
 
 
 def test_no_identity_at_all_is_unknown_with_every_field_null():
@@ -282,6 +354,9 @@ def test_every_prebuilt_run_converts_and_reads_back_canonically(tmp_path, name):
     assert rec.status == "complete" and rec.arm is None
     assert (rec.started_at, rec.finished_at) == (None, None)  # a conversion knows neither instant
     assert rec.ext["smeltery"]["input_digest"] == legacy["input_digest"]
+    # config is the campaign config the run read (its staged config.toml), verbatim; the plan's inputs are smeltery's
+    assert rec.config == tomllib.loads((run_dir / "config.toml").read_text()) and rec.config["campaign"] == rec.family
+    assert rec.ext["smeltery"]["inputs"] == legacy["inputs"] and "config_unobserved" not in rec.ext["smeltery"]
     assert rec.history is None  # smeltery logs no curves, so there is no sidecar
     assert not (run_dir / "attestation" / "history.jsonl").exists()
     assert rec.dependencies[0].name == "ferric"
@@ -324,6 +399,32 @@ def test_no_chemistry_in_the_core_fields_only_in_config_and_ext(tmp_path):
     assert rec["ext"]["smeltery"]["cut_unranked"] is True
     survivors = [m for m in rec["metrics"] if m["name"] == "cut.survivors"]
     assert [m["value"] for m in survivors] == ["NaN"]  # on the wire: the cut ran and has no survivor set
+
+
+@needs_schema
+@pytest.mark.parametrize("damage", ["removed", "edited", "never-staged"])
+def test_a_conversion_that_cannot_observe_the_config_writes_an_empty_one_and_says_why(tmp_path, damage):
+    """`config` has no null in attestation.run/1: when the staged config is gone, changed since the run (its digest is
+    not the recorded one) or was never staged, the record says `{}` and `ext.smeltery.config_unobserved` says why --
+    never the legacy `inputs` in its place, and never today's file."""
+    import attestation_schema as a
+
+    run_dir = _copy_run(tmp_path, "benzoic-pbe")
+    legacy_path = _legacy(run_dir)
+    if damage == "removed":
+        (run_dir / "config.toml").unlink()
+    elif damage == "edited":
+        (run_dir / "config.toml").write_text((run_dir / "config.toml").read_text() + "\n# edited later\n")
+    else:
+        d = json.loads(legacy_path.read_text())
+        del d["results"]["config"]
+        legacy_path.write_text(json.dumps(d))
+    core_record.write_core(legacy_path)
+    rec = a.read(run_dir)
+    assert rec.config == {}
+    why = rec.ext["smeltery"]["config_unobserved"]
+    assert {"removed": "missing", "edited": "changed after the run", "never-staged": "staged no config"}[damage] in why
+    assert rec.ext["smeltery"]["inputs"] == json.loads(legacy_path.read_text())["inputs"]
 
 
 @needs_schema
@@ -374,9 +475,31 @@ def test_a_live_run_writes_the_core_record_last_with_its_own_times_and_environme
     # the GUI contract's files are where they were, and the manifest covers them
     manifest = json.loads((out_dir / "attestation" / "digests.json").read_bytes())["files"]
     assert {"config.toml", "poses/benzoic.sdf", _legacy(out_dir).name} <= set(manifest)
+    assert rec.config == tomllib.loads((out_dir / "config.toml").read_text())  # the staged campaign config
+    assert rec.run_id == _legacy(out_dir).stem.removeprefix("run-")  # no --run-id: the input digest's head
     # --force reruns into the same OUT and replaces the core record rather than failing
     assert main(["run", str(p), "--out", str(out_dir), "--force"]) == 0
     assert a.read(out_dir).run_id == rec.run_id
+    # --run-id names the run (a campaign job passes its own); everything else is the same run's
+    assert main(["run", str(p), "--out", str(out_dir), "--force", "--run-id=-job-7"]) == 0
+    assert a.read(out_dir).run_id == "-job-7" and a.read(out_dir).ext["smeltery"]["input_digest"].startswith(rec.run_id)
+
+
+@needs_schema
+def test_a_live_run_without_out_records_the_config_it_read(tmp_path, monkeypatch, capsys):
+    """No --out: nothing is staged, so the run hands write_core the config as it read it."""
+    import attestation_schema as a
+    from test_run_outputs import CONFIG, _PlanLike, fill
+
+    from smeltery.cli import main
+    from smeltery.tiers import FieldInteraction
+
+    monkeypatch.setattr(FieldInteraction, "run", lambda self, cands, ctx: fill(_PlanLike(cands)))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "c.toml").write_text(CONFIG)
+    assert main(["run", "c.toml"]) == 0
+    rec = a.read(tmp_path / "out")
+    assert rec.config == tomllib.loads(CONFIG) and "config_unobserved" not in rec.ext["smeltery"]
 
 
 def test_without_the_extra_a_run_prints_one_notice_and_still_succeeds(tmp_path, monkeypatch, capsys):

@@ -110,8 +110,8 @@ wheels = [
 
 [[package]]
 name = "attestation-schema"
-version = "0.1.0.dev0"
-source = { git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=f8095224da57acbd8de1bc7afd8e3d6c2f62f83c#f8095224da57acbd8de1bc7afd8e3d6c2f62f83c" }
+version = "0.1.0"
+source = { git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=9fb7eed4e37f24cc9e4d7d66688223879d41d98b#9fb7eed4e37f24cc9e4d7d66688223879d41d98b" }
 
 [[package]]
 name = "attrs"
@@ -2617,7 +2617,7 @@ requires-dist = [
     { name = "aimnet", marker = "extra == 'aimnet2'", specifier = ">=0.2.0" },
     { name = "anywidget", marker = "extra == 'desktop'", specifier = ">=0.11" },
     { name = "anywidget", marker = "extra == 'gui'", specifier = ">=0.11" },
-    { name = "attestation-schema", marker = "extra == 'attestation'", git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=f8095224da57acbd8de1bc7afd8e3d6c2f62f83c" },
+    { name = "attestation-schema", marker = "extra == 'attestation'", git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=9fb7eed4e37f24cc9e4d7d66688223879d41d98b" },
     { name = "fastapi", marker = "extra == 'bench'", specifier = ">=0.120" },
     { name = "ferric", specifier = ">=0.1.0rc10" },
     { name = "gemmi", marker = "extra == 'docking'" },

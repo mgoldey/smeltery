@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ pytest.importorskip("attestation_schema", reason="campaign jobs need attestation
 
 import attestation_schema as schema  # noqa: E402
 import fake_ferric  # noqa: E402
+from attestation_schema import state as schema_state  # noqa: E402
 from attestation_schema.canonical import canonicalize  # noqa: E402
 
 from smeltery import jobs  # noqa: E402
@@ -274,6 +276,7 @@ def _finish(backend, handle, timeout: float = 120.0):
 
 
 def _state(handle) -> dict:
+    """state.json as the bytes on disk say it (not through the reader under test)."""
     return json.loads(jobs.state_path(handle.run_dir).read_bytes())
 
 
@@ -293,22 +296,47 @@ def _check_state_file(handle, spec, backend_name: str) -> dict:
     assert states[0] is S.SUBMITTED and states[-1] is S(st["state"])
     assert all(schema.can_transition(a, b) for a, b in zip(states, states[1:]))
     assert st["updated_at"] == st["history"][-1]["at"]
-    ats = [jobs._instant(h["at"]) for h in st["history"]]
-    assert ats == sorted(ats)
-    assert jobs.read_state(handle.run_dir) == st  # the reader accepts what the writer wrote
+    ats = [h["at"] for h in st["history"]]
+    assert ats == sorted(ats)  # fixed-width UTC: text order is time order
+    parsed = jobs.read_state(handle.run_dir)  # attestation_schema.state's reader accepts what the writer wrote
+    assert isinstance(parsed, schema_state.StateFile) and parsed.to_dict() == st
+    assert (parsed.state, parsed.backend, parsed.job_id, parsed.run_id) == (
+        S(st["state"]),
+        backend_name,
+        handle.job_id,
+        spec.run_id,
+    )
+    assert parsed.status == schema.JobStatus(parsed.state, st["updated_at"], st["message"])
+    assert parsed.started_at == next((h["at"] for h in st["history"] if h["state"] == "running"), None)
     return st
 
 
 def _check_terminal_record(handle, spec, state: str):
-    """Every terminal job has a core record whose status is its state; a failed or cancelled job's is the minimal
-    one, naming the job."""
+    """Every terminal job has a core record whose status is its state, whose run_id is the job's and whose config is
+    the campaign config the job was given, whoever wrote it (attestation-schema's job/record contract). A failed or
+    cancelled job's is the minimal one, naming the job in ext["smeltery.job"], ending when its state.json says."""
     rec = schema.read(handle.run_dir)
-    assert rec.status == state == _state(handle)["state"]
-    assert rec.family == spec.family == "tiny"
-    if state != "complete":
-        assert rec.run_id == spec.run_id and rec.metrics == [] and rec.config == spec.config
+    st = _state(handle)
+    assert rec.status == state == st["state"]
+    assert rec.family == spec.family == "tiny" and rec.arm is None
+    assert rec.run_id == spec.run_id == st["run_id"]
+    assert canonicalize(rec.config) == canonicalize(spec.config) and rec.config["campaign"] == "tiny"
+    assert schema_state.spec_conflicts(spec, rec) == []
+    assert rec.status is not None  # a job's record always says how it ended
+    if state == "complete":  # the run's own record: smeltery's plan inputs in ext, never in config
+        assert rec.producer.name == "smeltery" and "inputs" in rec.ext["smeltery"]
+        assert "candidates" in rec.ext["smeltery"]["inputs"] and jobs.EXT not in rec.ext
+        assert rec.finished_at <= st["history"][-1]["at"]  # the run ended, then the job was settled
+    else:
+        assert rec.producer.name == "smeltery jobs" and rec.metrics == []
         assert [d.role for d in rec.data] == ["manifest"]
-        assert rec.ext[jobs.EXT]["job_id"] == handle.job_id
+        assert set(rec.ext) == {jobs.EXT}
+        job = rec.ext[jobs.EXT]
+        assert set(job) == {"backend", "job_id", "stages_completed"}  # the message lives in state.json only
+        assert (job["backend"], job["job_id"]) == (st["backend"], handle.job_id)
+        assert job["stages_completed"] is None or isinstance(job["stages_completed"], list)
+        assert rec.finished_at == st["history"][-1]["at"] == st["updated_at"]  # one instant ends both
+        assert rec.started_at == next((h["at"] for h in st["history"] if h["state"] == "running"), None)
     return rec
 
 
@@ -342,7 +370,8 @@ def test_a_complete_job_moves_submitted_running_complete_and_returns_its_record(
     assert _history(h) == ["submitted", "running", "complete"] and status.updated_at == st["updated_at"]
     rec = harness.backend.result(h)
     assert rec == _check_terminal_record(h, spec, "complete")
-    assert rec.run_id != spec.run_id and len(rec.run_id) == 12  # smeltery's run_id is the input digest, not the job's
+    assert rec.run_id == spec.run_id  # the job's run_id, handed to `smeltery run --run-id`, not the input digest's
+    assert len(rec.ext["smeltery"]["input_digest"]) == 64
     assert list(Path(h.run_dir).glob("run-*.json"))  # the run's own record, beside the core one
 
 
@@ -472,20 +501,33 @@ def test_a_spec_smeltery_cannot_record_honestly_is_refused_before_anything_is_wr
 # ------------------------------------------------------------------------------------------------ state.json itself
 
 
+def _job_spec(run: Path, run_id: str = "r") -> schema.JobSpec:
+    return schema.JobSpec(run_id, "tiny", None, {"campaign": "tiny"}, str(run))
+
+
 def test_transitions_follow_the_state_machine_and_a_refused_one_writes_nothing(tmp_path):
     run = tmp_path / "run"
     jobs.init_state(run, run_id="r", backend="local", job_id="j")
+    assert jobs.IllegalTransition is schema_state.IllegalTransitionError
     with pytest.raises(jobs.IllegalTransition):  # nothing completes without running
         jobs.transition(run, S.COMPLETE)
     jobs.transition(run, S.RUNNING)
-    jobs.transition(run, S.FAILED, "boom")
+    with pytest.raises(jobs.IllegalTransition):  # ending a job is settle's, which also writes its record
+        jobs.transition(run, S.FAILED, "boom")
+    jobs.settle(run, _job_spec(run), S.FAILED, "boom", observer=True)
     for new in S:
         before = jobs.state_path(run).read_bytes()
         with pytest.raises(jobs.IllegalTransition):  # terminal: no exits
             jobs.transition(run, new)
         assert jobs.state_path(run).read_bytes() == before
     st = jobs.read_state(run)
-    assert [h["state"] for h in st["history"]] == ["submitted", "running", "failed"] and st["message"] == "boom"
+    assert [h.state for h in st.history] == [S.SUBMITTED, S.RUNNING, S.FAILED] and st.message == "boom"
+    rec = schema.read(run)
+    assert rec.finished_at == st.history[-1].at and rec.ext[jobs.EXT] == {
+        "backend": "local",
+        "job_id": "j",
+        "stages_completed": None,
+    }
     with pytest.raises(schema.JobExistsError):
         jobs.init_state(run, run_id="r", backend="local", job_id="j2")
 
@@ -504,24 +546,54 @@ def test_a_state_file_breaking_the_format_is_refused_not_guessed(tmp_path, edit)
     run = tmp_path / "run"
     jobs.init_state(run, run_id="r", backend="local", job_id="j")
     jobs.transition(run, S.RUNNING)
-    jobs.transition(run, S.COMPLETE)
+    jobs.settle(run, _job_spec(run), S.FAILED, "x", observer=True)
     st = json.loads(jobs.state_path(run).read_bytes())
     edit(st)
     jobs.state_path(run).write_text(json.dumps(st))
-    with pytest.raises(ValueError):
+    with pytest.raises(schema_state.StateFormatError) as err:
         jobs.read_state(run)
+    assert isinstance(err.value, ValueError)  # what callers catch
+
+
+def _foreign_record(run: Path, spec: schema.JobSpec, status, **change) -> None:
+    import dataclasses
+
+    rec = schema_state.terminal_record(
+        dataclasses.replace(spec, **change),
+        status,
+        producer=schema.Producer("elsewhere", None),
+        started_at=None,
+        finished_at=schema.format_timestamp(datetime.now(UTC)),
+        data=[],
+    )
+    schema.write(rec, run)
 
 
 def test_settle_follows_a_record_already_written_so_state_and_record_agree(tmp_path):
-    """A cancel racing completion: the run wrote its complete record first, so the job ends complete."""
+    """A cancel racing completion: the run wrote its record first, so the job ends as that record says."""
     run = tmp_path / "run"
-    spec = schema.JobSpec("r", "tiny", None, {"campaign": "tiny"}, str(run))
+    spec = _job_spec(run)
     jobs.init_state(run, run_id="r", backend="local", job_id="j")
     jobs.transition(run, S.RUNNING)
-    jobs.terminal_record(run, spec, S.FAILED, started=None, message="x", backend="local", job_id="j", observer=True)
+    _foreign_record(run, spec, S.FAILED)
     st = jobs.settle(run, spec, S.CANCELLED, "cancelled", observer=True)
-    assert st["state"] == "failed" and "its core record says failed" in st["message"]
+    assert st.state is S.FAILED and "its core record says failed" in st.message
     assert jobs.settle(run, spec, S.CANCELLED, "again", observer=True) == st  # terminal: settled once
+
+
+@pytest.mark.parametrize(
+    "change, why",
+    [({"run_id": "another"}, "run_id is 'another'"), ({"config": {"campaign": "tiny", "x": 1}}, "config is not")],
+)
+def test_a_record_that_is_not_the_jobs_ends_it_failed(tmp_path, change, why):
+    """A run that wrote its record under its own run_id (or another config) is not this job's record: failed."""
+    run = tmp_path / "run"
+    spec = _job_spec(run)
+    jobs.init_state(run, run_id="r", backend="local", job_id="j")
+    jobs.transition(run, S.RUNNING)
+    _foreign_record(run, spec, S.CANCELLED, **change)
+    st = jobs.settle(run, spec, S.COMPLETE, None, observer=False)
+    assert st.state is S.FAILED and "not this job's" in st.message and why in st.message
 
 
 # ------------------------------------------------------------------------------------------------ local only

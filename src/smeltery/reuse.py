@@ -47,9 +47,9 @@ reused. A reused stage's output is the stored output itself, so the run record, 
 byte-identical to the run that computed it, except this provenance and the run's timestamps and wall-clock times.
 
 **Progress and cancellation.** OUT/stages.partial.jsonl gets one line per stage as it completes (fsync'd): what a
-cancelled or failed job's record lists as completed (`smeltery.jobs.terminal_record`). A stage is stored only once
-it has completed, so a cancel that lands mid-tier leaves every completed stage reusable and the interrupted one not.
-The file is removed when the run record is written.
+cancelled or failed job's record lists as completed (`ext["smeltery.job"].stages_completed`, `smeltery.jobs.settle`).
+A stage is stored only once it has completed, so a cancel that lands mid-tier leaves every completed stage reusable
+and the interrupted one not. The file is removed when the run record is written.
 
 **With the per-SCF checkpoint** (`smeltery.checkpoint`, OUT/calcs.partial.jsonl): the two layers nest. The stage
 store is consulted first, across runs, for a whole completed stage; on a miss the measurement runs with the

@@ -89,10 +89,13 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "rec = a.read(runs['benzoic-rhf']); assert rec.family == 'mwe-benzoic-cli', rec.family; "
         "assert rec.history is None and a.read_history(runs['benzoic-rhf'], rec) is None, rec.history; "
         "assert {m.unit for m in rec.metrics if m.name == 'paired_ddE.mean'} == {'kcal/mol'}; "
+        "assert rec.config['campaign'] == rec.family and 'candidates' in rec.ext['smeltery']['inputs'], rec.config; "
         "dock = a.read(runs['docking']); assert dock.seeds['docking'] == [7], dock.seeds; "
         "assert a.dumps(dock) == (runs['docking'] / 'attestation' / 'run.json').read_bytes()",
-        # Campaign jobs (smeltery.jobs) need this extra: the local backend is a JobBackend and opens its queue.
-        "import tempfile, attestation_schema as a; from smeltery import jobs; assert jobs.AVAILABLE; "
+        # Campaign jobs (smeltery.jobs) need this extra: the local backend is a JobBackend and opens its queue, and
+        # job state is attestation-schema's own (`attestation_schema.state`, attestation 9fb7eed), not a copy.
+        "import tempfile, attestation_schema as a; from attestation_schema import state; from smeltery import jobs; "
+        "assert jobs.AVAILABLE and jobs.read_state is state.read_state and jobs.transition is state.transition; "
         "assert isinstance(jobs.LocalJobBackend(tempfile.mkdtemp()), a.JobBackend)",
     ],
     # The MCP surface: the SDK imports, the server builds with its four tools, and the target-class table the
@@ -144,7 +147,7 @@ SKIP_EXTRAS = {"dev"}
 #: published.
 PREINSTALL = {
     "attestation": [
-        "attestation-schema @ git+https://github.com/mgoldey/attestation@f8095224da57acbd8de1bc7afd8e3d6c2f62f83c"
+        "attestation-schema @ git+https://github.com/mgoldey/attestation@9fb7eed4e37f24cc9e4d7d66688223879d41d98b"
         "#subdirectory=packages/attestation-schema"
     ],
 }

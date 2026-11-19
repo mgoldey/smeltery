@@ -406,6 +406,11 @@ def test_a_cancel_mid_run_leaves_the_completed_stages_reusable_and_the_interrupt
         assert stages["field_interaction"]["reused"] is True
         assert stages["field_interaction"]["reused_from"]["run_dir"] == h.run_dir
         assert stages["recheck"]["reused"] is False
+        # the complete record is the job's (its run_id) and keeps the reuse provenance in ext.smeltery.reuse
+        rec2 = schema.read(h2.run_dir)
+        assert rec2.run_id == h2.run_id and rec2.status == "complete"
+        reused = {r["stage"]: r for r in rec2.ext["smeltery"]["reuse"]["stages"]}
+        assert reused["field_interaction"]["reused_from"]["run_dir"] == h.run_dir
     finally:
         backend.queue.stop_live("test teardown")
 

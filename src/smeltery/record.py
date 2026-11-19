@@ -64,6 +64,10 @@ def _ferric_build() -> dict | None:
     return _build_stamp("ferric")
 
 
+#: PEP 610 `vcs_info.vcs` values: each is also a core-record `source` kind (`<vcs>+<url>`).
+VCS_KINDS = ("git", "hg", "svn", "bzr")
+
+
 def _distribution_identity(name: str, ident: dict) -> dict:
     """Fill `ident` from the installed distribution `name`: index pin, git install, or local dir."""
     try:
@@ -97,7 +101,9 @@ def _distribution_identity(name: str, ident: dict) -> dict:
     ident["source"] = du.get("url")
     vcs = du.get("vcs_info")
     if vcs and vcs.get("commit_id"):
-        ident.update(commit=vcs["commit_id"], dirty=False, provenance="VERIFIED from direct_url.json (git install)")
+        # PEP 610's vcs_info.vcs is git, hg, svn or bzr; the sentence names it (core_record.source reads it back)
+        kind = vcs.get("vcs") if vcs.get("vcs") in VCS_KINDS else "git"
+        ident.update(commit=vcs["commit_id"], dirty=False, provenance=f"VERIFIED from direct_url.json ({kind} install)")
     elif "dir_info" in du and ident["source"]:
         path = Path(unquote(urlparse(ident["source"]).path))
         ident["commit"] = _git(path, "rev-parse", "HEAD")

@@ -14,7 +14,11 @@ smeltery result runs/r1                           # the record's status and path
 ```
 
 `status`, `cancel` and `result` take the run directory: its `attestation/state.json` names the backend and the job.
-`--json` prints state.json. A refusal (a run directory that already holds a run, a bad setting) exits 2.
+`--json` prints state.json (`StateFile.to_dict()`). A refusal (a run directory that already holds a run, a bad
+setting) exits 2.
+
+**POSIX only.** `state.json` is written under `flock`, which Windows does not have: there every state write (submit,
+transition, settle) is refused with `StateLockUnavailableError` and nothing is written; reading a `state.json` works.
 
 ## Backends
 
@@ -36,7 +40,10 @@ The local job's runner moves the job to `running`, runs `smeltery run RUN_DIR/co
 process, and settles it. What it cannot settle (a cancel, a kill, a supervisor that died) is settled by whoever looks
 next: `status`, `cancel`, `result`, or `smeltery worker` (local), which settles every job whose process ended every
 few seconds, so a crashed job gets its record even when nobody asks. A Temporal job is settled when it is looked at
-(`status`, `cancel`, `result`): the workflow does not write state.json (task 20 may add that).
+(`status`, `cancel`, `result`): the workflow does not write state.json, so it may lag the job and `run.json` is
+authoritative (the contract's own text since attestation `9fb7eed`). Settling passes the workflow's own times, when a
+worker first took it (`started_at`) and when it closed (`ended_at`), so the terminal entry and a backend-written
+record's `finished_at` are the workflow's end, not the time of the look.
 
 ## The run directory
 
@@ -50,13 +57,34 @@ RUN_DIR/attestation/digests.json    the manifest the record binds
 
 `submit` refuses (JobExistsError) a run directory holding `state.json` or `run.json`: resubmission is a new run
 directory. In Python, `smeltery.jobs.campaign_spec(config, run_dir)` stages a config and returns the `JobSpec`, whose
-`config` is the staged campaign config, `family` its `campaign`, `arm` None and `ext` empty (anything else is refused:
-smeltery's complete record is derived from the run, so a spec saying otherwise would be contradicted by it).
+`config` is the staged campaign config, `family` its `campaign`, `arm` None and `ext` empty (anything else is refused
+by `check_spec`: `smeltery run` has no way to carry a caller's `ext`, another family or an arm into the record it
+writes, and the contract says a backend that cannot hand them over refuses the spec).
+
+### run_id
+
+The submitter owns it (`--run-id` on `submit`, `JobSpec.run_id`; default a fresh 12-hex name): the handle,
+`state.json` and the core record in every terminal state carry the same one. The runner hands it to the run
+(`smeltery run --run-id=<id>`; on Temporal, `RunInput.run_id`, which the finalize activity uses), and `settle` ends a
+job `failed` if the record in its run directory names another run_id, family or config. The input digest is in the
+record's `ext.smeltery.input_digest`.
+
+The default is not `input_digest[:12]`, which would make two jobs of identical inputs share a run_id (re-executions,
+in the schema's terms). That digest covers the plan, not the config: the floor a tier measures, the point charges the
+pocket or a field builder yields, the docked poses' settings and every tier's `settings()` (tool versions the tiers
+probe, such as `xtb --version`). Computing it at submit means `build_plan` in the submitting process: structure
+preparation (a network fetch), docking, the pocket, the gates and those probes, i.e. most of a run's non-SCF work,
+done twice, and done on the submitting machine, whose tool versions may differ from the worker's, so the digest at
+submit could disagree with the one the run records. A caller that wants re-executions grouped passes the same
+`--run-id`.
 
 ### `state.json`
 
-The spec's `attestation.state/1`, JCS-serialized (RFC 8785, `attestation_schema.canonical`, no trailing newline),
-replaced atomically (temporary file, fsync, `os.replace`) under an exclusive `flock` on the `attestation/` directory:
+The spec's `attestation.state/1`, **owned by `attestation_schema.state` since attestation `9fb7eed`**: its reader
+(`read_state`, returning a frozen `StateFile`), writer (`init_state`, `transition`, `settle`), lock (`state_lock`) and
+the minimal terminal record (`terminal_record`) are the schema package's, and `smeltery.jobs` only calls them. The
+format did not change when they moved. JCS-serialized (RFC 8785, no trailing newline), replaced atomically (temporary
+file, fsync, `os.replace`) under an exclusive `flock` on the `attestation/` directory:
 
 ```json
 {
@@ -79,21 +107,29 @@ Exactly these keys. `history` starts at `submitted`, is append-only, every adjac
 (`attestation_schema.can_transition`; an illegal one is refused and writes nothing), its times never go backwards (a
 Temporal server's clock is clamped to the last entry), and its last entry is `state` at `updated_at`. `message` says
 why the job ended when it did not complete (the run's last error line, "supervisor lost: ...", "the workflow was
-terminated"). The file is kept after the run ends. `read_state` refuses a file that breaks any of this rather than
-guessing.
+terminated", or that the manifest was refused for a symlink); it lives here only, not in the record. The file is kept
+after the run ends. `read_state` refuses a file that breaks any of this (`StateFormatError`, a `ValueError`) rather
+than guessing; `transition` refuses an illegal or terminal move (`IllegalTransition`, the schema's
+`IllegalTransitionError`): ending a job is `settle`'s, which also guarantees its record.
 
 ### Terminal records
 
-- **complete**: the record `smeltery run` writes (`smeltery.core_record`; see [core-record.md](core-record.md)). Its
-  `run_id` is the input digest, so it differs from the job's `run_id`; its `config` is smeltery's `inputs`.
-- **failed / cancelled**: a minimal record written by `smeltery.jobs`: the job's `run_id`, `family`, `arm` and
-  `config` (the campaign config: a run that did not finish never computed `inputs`), `started_at` (when it began
-  running, null if it never did), `finished_at`, the manifest of whatever it left, no metrics, `history`, `seeds` and
-  `dependencies` null (the writer did not observe the run's environment), and `ext["smeltery.job"]` (`backend`,
-  `job_id`, `message`). `code` is smeltery's identity; when the backend wrote it rather than the run, it is at most
-  `inferred` and `evidence` says so.
+Every terminal record carries the job's `run_id`, `family`, `arm` (null) and `config` (the campaign config the job
+was given), whoever wrote it, and its `status` is never null.
+
+- **complete**: the record `smeltery run` writes (`smeltery.core_record`; see [core-record.md](core-record.md)), given
+  the job's run_id; smeltery's derived `inputs` and the input digest are in `ext.smeltery`, with the reuse provenance
+  (`ext.smeltery.reuse`) when stages were reused.
+- **failed / cancelled**: the schema's minimal record (`attestation_schema.state.terminal_record`, written by
+  `settle`): the job's identity and config, `started_at` (when it began running, null if it never did), `finished_at`
+  (the same instant as the terminal `state.json` entry), the manifest of whatever it left (none, if a symlink refused
+  it; the message says so), no metrics, `history`, `seeds` and `dependencies` null (the writer did not observe the
+  run's environment), and `ext["smeltery.job"]`: `backend`, `job_id`, `stages_completed`. Producer `smeltery jobs`;
+  `code` is smeltery's identity, and when the backend wrote it rather than the run, it is at most `inferred` and
+  `evidence` says so.
 - A record already in the run directory decides the terminal state: a cancel that races completion ends `complete`,
-  so `state.json` and `run.json` never disagree. A run that exited 0 without writing its record ends `failed`.
+  so `state.json` and `run.json` never disagree. A run that exited 0 without writing its record ends `failed`, and so
+  does one whose record is not the job's (another run_id, family or config).
 - `ext["smeltery.job"]["stages_completed"]`: the stages the run had completed when it stopped, in order, each with
   its digest and whether it was reused (read from `RUN_DIR/stages.partial.jsonl`, below), or null when the run left
   no stage log (a Temporal job: the workflow keeps none).
@@ -161,26 +197,22 @@ lists the completed ones (`stages_completed`). `smeltery status RUN_DIR` prints 
 "stages reused: N of M reusable"), and MCP's `run_status` reports each as done or reused; `screen_candidates` says
 how many stages of a resubmitted screen will be reused (`reused_stages` of `reusable_stages`).
 
-## What attestation-schema should own
+## What attestation-schema owns
 
-`smeltery.jobs` implements these because the schema package has no reader or writer for them yet; each is written to
-move there unchanged:
-
-- the `state.json` reader and writer: `read_state` (format and history checks), `init_state`, `transition`, and the
-  atomic JCS write;
-- the cross-process lock that serializes a read-modify-write of `state.json` (`state_lock`: `flock` on
-  `attestation/`), which any two writers of one run directory (a runner and a backend) need;
-- `settle`: "end exactly once; an existing record decides; record before state", the rule that makes "every terminal
-  job has a record" hold under races;
-- the minimal terminal-record builder (`terminal_record`, minus smeltery's `code`), which every backend needs
-  for a job that died.
+Since attestation `9fb7eed` (attestation-schema 0.1.0), `attestation_schema.state` owns everything every backend needs
+and `smeltery.jobs` once implemented itself: the `state.json` reader and writer, the cross-process lock, `settle`
+("end exactly once; an existing record decides; record before state"; it also checks the record is the job's) and the
+minimal terminal record. `smeltery.jobs` keeps what is smeltery's: the two backends, `check_spec`, the runner, and a
+`settle` wrapper supplying its producer, `code` and `ext["smeltery.job"]`.
 
 ## Tests
 
 `tests/test_job_backends.py` is one conformance suite run against both backends: state-machine legality, `submit`
 returning at once with `submitted` written, a complete job, a failing one, `result` before completion, idempotent
 cancel of a running job, cancel of one that never started, cancel of a finished one, a crashed worker, state.json's
-exact contents, and a record matching every terminal state. The campaign is a real `smeltery run` on the fake engine
+exact contents (read back as a `StateFile`), and a record matching every terminal state: the job's run_id and config,
+`ext["smeltery.job"]` exactly `{backend, job_id, stages_completed}`, and `finished_at` equal to the terminal history
+entry's `at`; a record that is not the job's ends it failed. The campaign is a real `smeltery run` on the fake engine
 (`tests/fake_ferric.py`), about a second per job. The temporal leg runs against the dev server at
 `SMELTERY_TEMPORAL_ADDRESS` (default `127.0.0.1:7233`), or with `SMELTERY_TEST_TEMPORAL_LOCAL=1` against
 `temporalio.testing.WorkflowEnvironment.start_local()` (which downloads the dev server on first use); otherwise it

@@ -1352,11 +1352,16 @@ def write_outputs(
     return path
 
 
-def emit_core_record(record_path: Path, started_at: str | None) -> Path | None:
+def emit_core_record(
+    record_path: Path, started_at: str | None, *, run_id: str | None = None, config: dict | None = None
+) -> Path | None:
     """Write OUT/attestation/run.json (smeltery.core_record) beside the run record just written, replacing a core
     record a previous run into this OUT left (the legacy record it described was just replaced too). Additive: without
     the `attestation` extra it prints one notice, and a refusal is a warning, never the run's exit code -- the legacy
-    record is written and stays the source of truth while the core schema is a draft."""
+    record is written and stays the source of truth (a campaign job whose run left no core record ends failed).
+
+    `run_id`: the core record's (`--run-id`, a campaign job's); None: the input digest's first 12 hex. `config`: the
+    campaign config the run read, for a run that did not stage one into OUT (`core_record.write_core`)."""
     from . import core_record
 
     if not core_record.AVAILABLE:
@@ -1364,7 +1369,13 @@ def emit_core_record(record_path: Path, started_at: str | None) -> Path | None:
         return None
     try:
         return core_record.write_core(
-            record_path, live=True, started_at=started_at, finished_at=core_record.utc_now(), overwrite=True
+            record_path,
+            live=True,
+            started_at=started_at,
+            finished_at=core_record.utc_now(),
+            overwrite=True,
+            run_id=run_id,
+            config=config,
         )
     except (OSError, ValueError) as e:  # a schema RecordError is a ValueError naming the field it refused
         print(f"warning: core record not written: {e}", file=sys.stderr)
@@ -1831,6 +1842,12 @@ def main(argv: list[str] | None = None) -> int:
         help="a stage store (smeltery.reuse): reuse the stages an identical earlier run completed, store this run's; "
         "with --out only (env SMELTERY_STAGE_CACHE)",
     )
+    run.add_argument(
+        "--run-id",
+        dest="run_id",
+        default=None,
+        help="the core record's run_id (default: the input digest's first 12 hex); a campaign job passes its own",
+    )
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
         "--temporal",
@@ -1957,6 +1974,7 @@ def main(argv: list[str] | None = None) -> int:
         elif explicit_out:  # a combine writes its record into OUT
             _guard_out(args.out, None)
         cfg = load_config(args.config)
+        given = tomllib.loads(Path(args.config).read_text())  # verbatim: load_config adds `_dir`, a machine path
         # --plan runs no SCF, so planning one candidate of such a config is fine
         if (args.only_candidate is not None and not args.plan) or args.combine:
             from .temporal_run import remeasuring_analyses
@@ -1980,6 +1998,7 @@ def main(argv: list[str] | None = None) -> int:
                 ts.pipeline_queue,
                 config_info,
                 namespace=ts.namespace,
+                run_id=args.run_id,
             )
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
@@ -2070,7 +2089,8 @@ def main(argv: list[str] | None = None) -> int:
                 rec.results["config"] = partial_configs[0]
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
-            core = emit_core_record(path, None)  # a combine's start is its partials' starts: not one instant
+            # a combine's start is its partials' starts: not one instant
+            core = emit_core_record(path, None, run_id=args.run_id)
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
             if core is not None:
@@ -2106,7 +2126,9 @@ def main(argv: list[str] | None = None) -> int:
 
             discard(args.out)
             discard_progress(args.out)
-        core = emit_core_record(path, started_at)  # last: the manifest covers what the run left in OUT
+        # last: the manifest covers what the run left in OUT. Without --out nothing was staged, so the config the run
+        # read is handed over as it read it (with --out, write_core reads OUT/config.toml by its recorded digest)
+        core = emit_core_record(path, started_at, run_id=args.run_id, config=None if config_info is not None else given)
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan and not isinstance(e, OutGuardRefused):

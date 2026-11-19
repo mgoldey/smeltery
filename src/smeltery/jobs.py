@@ -18,28 +18,30 @@ The run directory is the job's OUT, laid out per `attestation_schema.layout`:
     RUN_DIR/attestation/state.json        the job's state, owned by the backend (`attestation.state/1`, below)
     RUN_DIR/attestation/run.json          the core record, at every terminal state
 
-**state.json** is the spec's `{"schema", "run_id", "backend", "job_id", "state", "updated_at", "message",
-"history": [{"state", "at"}]}`, JCS-serialized (`attestation_schema.canonical`), rewritten atomically under an
-exclusive `flock` on the `attestation/` directory, so the runner and a backend in another process never interleave a
-read-modify-write. `history` is append-only and every adjacent pair is an allowed transition
-(`attestation_schema.can_transition`); an illegal one raises `IllegalTransition` and writes nothing. The schema package
-has no reader or writer for it yet: `read_state`, `init_state`, `transition` and `settle` are written to move there.
+**state.json** (`attestation.state/1`) is owned by attestation-schema since attestation 9fb7eed: its reader and writer,
+the `flock` on `attestation/`, `transition`, `settle` (end a job exactly once) and `terminal_record` are
+`attestation_schema.state`'s, and this module only calls them. `read_state` returns a frozen `StateFile`
+(`st.state`, `st.history`, `st.status`, `st.started_at`, `st.to_dict()`); a malformed file raises `StateFormatError`
+(a ValueError); an illegal transition raises `IllegalTransition` (`IllegalTransitionError`) and writes nothing. POSIX
+only: without `flock` (Windows) every state write is refused (`StateLockUnavailableError`).
 
 **Terminal records.** A complete run's record is the one `smeltery run` writes (`core_record`, through
-`cli.emit_core_record`). A failed or cancelled job gets a minimal record written here (`terminal_record`): run_id,
-family, arm, config, times, the manifest of whatever the run left, no metrics, and in `ext["smeltery.job"]`
+`cli.emit_core_record`), given the job's `run_id` (`smeltery run --run-id`, `RunInput.run_id` on Temporal) and with the
+campaign config as `config`, so `settle` finds it is this job's. A failed or cancelled job gets the schema's minimal
+record (`attestation_schema.state.terminal_record`, through `settle`): run_id, family, arm, config, times, the manifest
+of whatever the run left, no metrics, and in `ext["smeltery.job"]` the `backend`, the `job_id` and
 `stages_completed`: the stages the run logged as completed (OUT/stages.partial.jsonl, `smeltery.reuse`) with their
 digests and whether each was reused, or null when the run left no stage log. Completed stages are already in the
-workspace's stage store, so a resubmission reuses them; the stage that was interrupted is not. When a record already
-exists, the job's terminal state follows the record's status (a cancel that races completion ends `complete`), so
-state.json and run.json never disagree.
+workspace's stage store, so a resubmission reuses them; the stage that was interrupted is not. The job's message lives
+in state.json only; a manifest refused for a symlink is said in that message. When a record already exists, the job's
+terminal state follows the record's status (a cancel that races completion ends `complete`), so state.json and run.json
+never disagree; a record that is not the job's (another run_id, family or config) ends it `failed`.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
-import fcntl
 import io
 import json
 import os
@@ -48,16 +50,13 @@ import sys
 import tomllib
 import uuid
 from collections import deque
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 try:
     import attestation_schema as _schema
-    from attestation_schema import layout as _layout
-    from attestation_schema.canonical import canonicalize
     from attestation_schema.jobs import (
         TERMINAL,
         JobError,
@@ -68,8 +67,19 @@ try:
         JobSpec,
         JobState,
         JobStatus,
-        can_transition,
     )
+    from attestation_schema.record import CodeIdentity, Producer
+    from attestation_schema.state import (
+        IllegalTransitionError,
+        StateFile,
+        init_state,
+        read_state,
+        record_path,
+        state_path,
+        transition,
+    )
+    from attestation_schema.state import handle_in as _handle_in
+    from attestation_schema.state import settle as _schema_settle
 except ImportError:  # the `attestation` extra is not installed
     _schema = None
 
@@ -79,7 +89,6 @@ except ImportError:  # the `attestation` extra is not installed
 
 AVAILABLE = _schema is not None
 NOT_INSTALLED = "campaign jobs need attestation-schema (the `attestation` extra)"
-STATE_SCHEMA = "attestation.state/1"
 #: The `ext` namespace of a record this module writes (a failed or cancelled job's).
 EXT = "smeltery.job"
 #: Bench's task queue, shared: a campaign job is a launched run, and counts against the same slots.
@@ -89,8 +98,9 @@ JOBS_DIR = Path(".smeltery") / "jobs"
 RUNNER = [sys.executable, "-m", "smeltery.jobs", "_run"]
 
 
-class IllegalTransition(JobError):
-    """A state change the job state machine does not allow (from a terminal state, or submitted -> complete)."""
+if AVAILABLE:
+    #: The schema's error, under the name this module has always raised (an illegal transition writes nothing).
+    IllegalTransition = IllegalTransitionError
 
 
 class BackendUnavailable(JobError):
@@ -106,134 +116,16 @@ def now() -> str:
     return _schema.format_timestamp(datetime.now(UTC))
 
 
-def _instant(stamp: str) -> datetime:
-    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+# ---- state.json and settling (attestation_schema.state) --------------------------------------------------------
 
 
-# ---- state.json ----------------------------------------------------------------------------------------------------
+def _producer() -> Producer:
+    from . import core_record
+
+    return Producer("smeltery jobs", core_record.producer()["version"])
 
 
-def state_path(run_dir: str | os.PathLike[str]) -> Path:
-    return Path(run_dir) / "attestation" / "state.json"
-
-
-def record_path(run_dir: str | os.PathLike[str]) -> Path:
-    return Path(run_dir) / "attestation" / "run.json"
-
-
-@contextlib.contextmanager
-def state_lock(run_dir: str | os.PathLike[str]) -> Iterator[None]:
-    """Exclusive while held, across processes: `flock` on the `attestation/` directory itself, so no lock file is
-    added to a directory the schema owns. Released when the holder exits, however it exits."""
-    d = Path(run_dir) / "attestation"
-    d.mkdir(parents=True, exist_ok=True)
-    fd = os.open(d, os.O_RDONLY)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)  # closing the descriptor releases the lock
-
-
-def read_state(run_dir: str | os.PathLike[str]) -> dict | None:
-    """The job's state.json, checked against the format; None when there is none. A malformed file raises
-    ValueError: a backend must not guess what state a job is in."""
-    p = state_path(run_dir)
-    try:
-        raw = p.read_bytes()
-    except FileNotFoundError:
-        return None
-    st = json.loads(raw)
-    keys = {"schema", "run_id", "backend", "job_id", "state", "updated_at", "message", "history"}
-    if not isinstance(st, dict) or set(st) != keys or st["schema"] != STATE_SCHEMA:
-        raise ValueError(f"{p} is not an {STATE_SCHEMA} file")
-    hist = st["history"]
-    if not hist or not all(isinstance(h, dict) and set(h) == {"state", "at"} for h in hist):
-        raise ValueError(f"{p}: history must be a non-empty list of {{state, at}}")
-    states = [JobState(h["state"]) for h in hist]
-    if states[0] is not JobState.SUBMITTED or JobState(st["state"]) is not states[-1]:
-        raise ValueError(f"{p}: history must start at submitted and end at the current state")
-    if any(not can_transition(a, b) for a, b in zip(states, states[1:])):
-        raise ValueError(f"{p}: history holds a transition the job state machine does not allow")
-    return st
-
-
-def _write_state(run_dir: Path, st: dict) -> None:
-    target = state_path(run_dir)
-    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-    with open(tmp, "wb") as fh:
-        fh.write(canonicalize(st))
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, target)
-
-
-def init_state(run_dir: str | os.PathLike[str], *, run_id: str, backend: str, job_id: str) -> dict:
-    """Write a fresh state.json (`submitted`). Refuses (JobExistsError) a run directory holding state.json or
-    run.json: resubmission is a new run directory, never an overwrite."""
-    run_dir = Path(run_dir)
-    with state_lock(run_dir):
-        _refuse_existing(run_dir)
-        at = now()
-        st = {
-            "schema": STATE_SCHEMA,
-            "run_id": run_id,
-            "backend": backend,
-            "job_id": job_id,
-            "state": JobState.SUBMITTED.value,
-            "updated_at": at,
-            "message": None,
-            "history": [{"state": JobState.SUBMITTED.value, "at": at}],
-        }
-        _write_state(run_dir, st)
-    return st
-
-
-def _refuse_existing(run_dir: Path) -> None:
-    for p in (state_path(run_dir), record_path(run_dir)):
-        if p.exists():
-            raise JobExistsError(f"{p} exists: {run_dir} already holds a run; submit into a new run directory")
-
-
-def _append(st: dict, new: JobState, message: str | None, at: str | None = None) -> dict:
-    cur = JobState(st["state"])
-    if not can_transition(cur, new):
-        raise IllegalTransition(f"job {st['job_id']}: {cur.value} -> {new.value} is not an allowed transition")
-    at = at or now()
-    last = st["history"][-1]["at"]
-    if _instant(at) < _instant(last):  # another clock (a Temporal server) may lag ours: history never goes backwards
-        at = last
-    st["history"].append({"state": new.value, "at": at})
-    st.update(state=new.value, updated_at=at, message=message)
-    return st
-
-
-def transition(
-    run_dir: str | os.PathLike[str], new: JobState, message: str | None = None, at: str | None = None
-) -> dict:
-    """Move the job to `new` (IllegalTransition if not allowed, JobNotFoundError without a state.json)."""
-    run_dir = Path(run_dir)
-    with state_lock(run_dir):
-        st = read_state(run_dir)
-        if st is None:
-            raise JobNotFoundError(f"{state_path(run_dir)} does not exist")
-        _write_state(run_dir, _append(st, new, message, at))
-    return st
-
-
-def job_status(st: dict) -> JobStatus:
-    return JobStatus(JobState(st["state"]), st["updated_at"], st["message"])
-
-
-def started_at(st: dict) -> str | None:
-    """When the job started running, per its history; None if it never ran."""
-    return next((h["at"] for h in st["history"] if h["state"] == JobState.RUNNING.value), None)
-
-
-# ---- terminal records ----------------------------------------------------------------------------------------------
-
-
-def _code(observer: bool) -> dict:
+def _code(observer: bool) -> CodeIdentity:
     """`code` for a record this module writes: smeltery's identity on the dependency ladder (`core_record`'s own
     mapping). Written by a backend that only watched the run (`observer`), it is the backend's smeltery, so a
     VERIFIED identity is downgraded to inferred, and `evidence` says why."""
@@ -247,59 +139,7 @@ def _code(observer: bool) -> dict:
         )
         if code["provenance"] == "verified":
             code["provenance"] = "inferred"
-    return code
-
-
-def terminal_record(
-    run_dir: str | os.PathLike[str],
-    spec: JobSpec,
-    status: JobState,
-    *,
-    started: str | None,
-    message: str | None,
-    backend: str,
-    job_id: str,
-    observer: bool,
-) -> Path:
-    """Write the minimal `failed`/`cancelled` core record: the job's identity, its config (the campaign config it was
-    given: a run that did not finish never computed smeltery's `inputs`), its times, and the manifest of whatever it
-    left in the run directory, with no metrics (nothing was measured to completion). `history` is null (no curve) and
-    `dependencies` null (the writer did not observe the run's environment; `[]` would claim it saw none). Refuses to
-    replace a record."""
-    from . import core_record
-
-    if status not in (JobState.FAILED, JobState.CANCELLED):
-        raise ValueError(f"a {status.value} record is the run's own: only failed/cancelled records are written here")
-    from .reuse import read_progress
-
-    run_dir = Path(run_dir)
-    ext: dict[str, Any] = {"backend": backend, "job_id": job_id, "message": message}
-    # the stages the run completed before it stopped, from its stage log (null: it left none, e.g. --temporal)
-    ext["stages_completed"] = read_progress(run_dir)
-    try:
-        m = _layout.write_manifest(run_dir)
-        data = [{"name": m.name, "sha256": m.sha256, "role": m.role}]
-    except _layout.LayoutError as e:  # a symlink in the run directory: no manifest, and the record says why
-        data, ext["manifest_refused"] = [], str(e)
-    fields = {
-        "schema": _schema.SCHEMA,
-        "run_id": spec.run_id,
-        "family": spec.family,
-        "arm": spec.arm,
-        "status": status.value,
-        "started_at": started,
-        "finished_at": now(),
-        "producer": core_record.producer("smeltery jobs"),
-        "code": _code(observer),
-        "config": spec.config,
-        "data": data,
-        "metrics": [],
-        "history": None,  # no curves: a backend observes none
-        "seeds": None,
-        "dependencies": None,  # the backend did not observe the run's environment
-        "ext": {EXT: ext},
-    }
-    return _schema.write(_schema.from_dict(fields), run_dir)
+    return CodeIdentity(**code)
 
 
 def settle(
@@ -309,49 +149,44 @@ def settle(
     message: str | None,
     *,
     observer: bool,
-    started: str | None = None,
-) -> dict:
-    """End the job at `outcome` (complete, failed or cancelled), exactly once, and return its state.
+    started_at: str | None = None,
+    ended_at: str | None = None,
+) -> StateFile:
+    """End the job at `outcome`, exactly once (`attestation_schema.state.settle`), and return its state.
 
-    Already terminal: unchanged. A record already in the run directory decides the terminal state (its status), so a
-    record and state.json never disagree. Otherwise `complete` without a record is `failed` (a complete run writes
-    one; its absence is a failure to say so), and a failed or cancelled job gets `terminal_record`. The record is
-    written before the state: a crash in between leaves a record, which the next settle adopts. `started`: when the
-    job began running, if state.json does not say (a Temporal backend reads it from the workflow's history)."""
-    run_dir = Path(run_dir)
-    with state_lock(run_dir):
-        st = read_state(run_dir)
-        if st is None:
-            raise JobNotFoundError(f"{state_path(run_dir)} does not exist")
-        if JobState(st["state"]) in TERMINAL:
-            return st
-        if started and not started_at(st):
-            _append(st, JobState.RUNNING, None, started)
-        final, why = outcome, message
-        if record_path(run_dir).exists():
-            try:
-                final = JobState(_schema.read(run_dir).status)
-            except (ValueError, OSError) as e:  # a RecordError is a ValueError
-                final, why = JobState.FAILED, f"the run directory holds an unreadable core record: {e}"
-            if final is not outcome:
-                why = f"{why + '; ' if why else ''}its core record says {final.value}"
-        else:
-            if final is JobState.COMPLETE:
-                final, why = JobState.FAILED, "the run ended without writing its core record"
-            terminal_record(
-                run_dir,
-                spec,
-                final,
-                started=started_at(st),
-                message=why,
-                backend=st["backend"],
-                job_id=st["job_id"],
-                observer=observer,
-            )
-        if final is JobState.COMPLETE and not started_at(st):  # a record of a complete run: it ran
-            _append(st, JobState.RUNNING, None)
-        _write_state(run_dir, _append(st, final, why))
-        return st
+    What smeltery adds is what the schema cannot know: its producer and code identity, and `ext["smeltery.job"]` for
+    a record written here (`backend`, `job_id`, and `stages_completed` from the run's stage log). A record already in
+    the run directory decides the terminal state; otherwise `complete` without a record is `failed`. `started_at` /
+    `ended_at`: the scheduler's times, when it has them (the Temporal backend's workflow history)."""
+    from .reuse import read_progress
+
+    st = read_state(run_dir)
+    if st is None:
+        raise JobNotFoundError(f"{state_path(run_dir)} does not exist")
+    # the stages the run completed before it stopped, from its stage log (null: it left none, e.g. --temporal)
+    ext = {EXT: {"backend": st.backend, "job_id": st.job_id, "stages_completed": read_progress(run_dir)}}
+    return _schema_settle(
+        run_dir,
+        spec,
+        outcome,
+        message,
+        producer=_producer(),
+        code=_code(observer),
+        ext=ext,
+        started_at=started_at,
+        ended_at=ended_at,
+    )
+
+
+def handle_in(run_dir: str | os.PathLike[str]) -> JobHandle:
+    """The handle of the job in `run_dir`, from its state.json (the directory resolved, so a handle names one place)."""
+    return _handle_in(Path(run_dir).resolve())
+
+
+def _refuse_existing(run_dir: Path) -> None:
+    for p in (state_path(run_dir), record_path(run_dir)):
+        if p.exists():
+            raise JobExistsError(f"{p} exists: {run_dir} already holds a run; submit into a new run directory")
 
 
 # ---- specs ---------------------------------------------------------------------------------------------------------
@@ -390,7 +225,9 @@ def write_config(run_dir: Path, config: dict) -> Path:
 def campaign_spec(config: str | os.PathLike[str], run_dir: str | os.PathLike[str], run_id: str | None = None):
     """A JobSpec for `smeltery run CONFIG --out RUN_DIR`: the config is staged into RUN_DIR first (its input files
     copied under RUN_DIR/inputs/, as `smeltery run --out` does), so the spec's config is self-contained. `run_id`
-    defaults to a fresh 12-hex name: smeltery's own run_id is the input digest, which needs the plan built."""
+    names the run's records whoever writes them, and defaults to a fresh 12-hex name, not the input digest: that
+    digest covers the built plan (structure prep, docking, the pocket, the tiers' tool versions), which submit does
+    not build (docs/jobs.md, "run_id")."""
     _require()
     from .cli import _stage_config
 
@@ -497,13 +334,13 @@ class LocalJobBackend:
             con.execute("UPDATE jobs SET task_id=? WHERE job_id=?", (task_id, job_id))
         return handle
 
-    def _settle(self, job: _Job) -> dict:
+    def _settle(self, job: _Job) -> StateFile:
         from .bench.adapters._sqlite import open_db
 
         st = read_state(job.run_dir)
         if st is None:
             raise JobNotFoundError(f"{state_path(job.run_dir)} is missing: the run directory was moved or removed")
-        if JobState(st["state"]) not in TERMINAL and job.task_id is not None:
+        if st.state not in TERMINAL and job.task_id is not None:
             task = self.queue.get(job.task_id)  # fails a task whose supervisor died, and starts queued ones
             if task is None:
                 st = settle(
@@ -517,29 +354,29 @@ class LocalJobBackend:
                 if task.status == "failed" and not why:
                     why = f"the job's process exited {task.returncode}" + _last_line(task.log_path)
                 st = settle(job.run_dir, job.spec, outcome, why or None, observer=True)
-        if JobState(st["state"]) in TERMINAL:
+        if st.state in TERMINAL:
             with open_db(self.db) as con:
                 con.execute("UPDATE jobs SET settled=1 WHERE job_id=?", (job.job_id,))
         return st
 
     def status(self, handle: JobHandle) -> JobStatus:
-        return job_status(self._settle(self._job(handle)))
+        return self._settle(self._job(handle)).status
 
     def cancel(self, handle: JobHandle) -> JobStatus:
         job = self._job(handle)
         st = self._settle(job)
-        if JobState(st["state"]) in TERMINAL:
-            return job_status(st)
+        if st.state in TERMINAL:
+            return st.status
         if job.task_id is not None:
             # marks the task cancelled, then ends its process group (SIGTERM, SIGKILL after a grace) if it runs
             self.queue.cancel(job.task_id)
-        return job_status(self._settle(job))
+        return self._settle(job).status
 
     def result(self, handle: JobHandle):
         job = self._job(handle)
         st = self._settle(job)
-        if JobState(st["state"]) not in TERMINAL:
-            raise JobNotTerminalError(f"job {handle.job_id} is {st['state']}: it has no record yet")
+        if st.state not in TERMINAL:
+            raise JobNotTerminalError(f"job {handle.job_id} is {st.state.value}: it has no record yet")
         return _schema.read(job.run_dir)
 
     def reconcile(self) -> int:
@@ -551,7 +388,7 @@ class LocalJobBackend:
             except (JobError, ValueError, OSError) as e:  # a run directory removed or damaged: say so, keep going
                 print(f"smeltery worker: job {job.job_id}: {e}", file=sys.stderr)
                 continue
-            live += JobState(st["state"]) not in TERMINAL
+            live += st.state not in TERMINAL
         return live
 
     def task_of(self, handle: JobHandle) -> dict | None:
@@ -616,7 +453,11 @@ def runner_main(argv: list[str]) -> int:
             # the workspace's stage store (ROOT/.smeltery/stages, beside the job store): an identical resubmission
             # reuses the stages an earlier job completed (smeltery.reuse)
             stage_cache = store.parent / "stages"
-            argv = ["run", str(run_dir / "config.toml"), "--out", str(run_dir), "--stage-cache", str(stage_cache)]
+            # --run-id: the job's, so the run's complete record is this job's (settle fails one naming another)
+            argv = [
+                *("run", str(run_dir / "config.toml"), "--out", str(run_dir), "--stage-cache", str(stage_cache)),
+                f"--run-id={spec.run_id}",  # one token: a run_id may start with "-"
+            ]
             rc = smeltery_main(argv)
     except Exception as e:  # noqa: BLE001 - any crash of the run is the job's failure, recorded, then re-raised
         settle(run_dir, spec, JobState.FAILED, f"smeltery run crashed: {type(e).__name__}: {e}"[:400], observer=False)
@@ -691,6 +532,7 @@ class TemporalJobBackend:
             info,
             heartbeat_s=self.heartbeat_s,
             config_sha=tr.sha256_file(config),
+            run_id=spec.run_id,  # the finalize activity writes the complete record under the job's run_id
         )
         wid = tr.workflow_id(run_dir, config.read_text())
 
@@ -712,19 +554,19 @@ class TemporalJobBackend:
         init_state(run_dir, run_id=spec.run_id, backend=self.name, job_id=wid)
         return JobHandle(self.name, wid, spec.run_id, str(run_dir))
 
-    def _spec(self, handle: JobHandle, st: dict) -> JobSpec:
+    def _spec(self, handle: JobHandle, st: StateFile) -> JobSpec:
         cfg = tomllib.loads((Path(handle.run_dir) / "config.toml").read_text())
-        return JobSpec(st["run_id"], cfg.get("campaign"), None, cfg, handle.run_dir)
+        return JobSpec(st.run_id, cfg.get("campaign"), None, cfg, handle.run_dir)
 
-    def _state(self, handle: JobHandle) -> dict:
+    def _state(self, handle: JobHandle) -> StateFile:
         if handle.backend != self.name:
             raise JobNotFoundError(f"{handle.job_id} is a {handle.backend} job, not a {self.name} one")
         st = read_state(handle.run_dir)
-        if st is None or st["job_id"] != handle.job_id:
+        if st is None or st.job_id != handle.job_id:
             raise JobNotFoundError(f"no temporal job {handle.job_id} in {handle.run_dir}")
         return st
 
-    async def _observe(self, client, handle: JobHandle, st: dict) -> dict:
+    async def _observe(self, client, handle: JobHandle, st: StateFile) -> StateFile:
         """Mirror the workflow into state.json: running once a worker has taken it, terminal when it closed."""
         from temporalio.api.enums.v1 import EventType
         from temporalio.client import WorkflowExecutionStatus as S
@@ -745,9 +587,9 @@ class TemporalJobBackend:
                 began = _schema.format_timestamp(ev.event_time.ToDatetime(tzinfo=UTC))
                 break
         if desc.status == S.RUNNING:
-            if began and JobState(st["state"]) is JobState.SUBMITTED:
+            if began and st.state is JobState.SUBMITTED:
                 with contextlib.suppress(IllegalTransition):  # settled by another observer meanwhile
-                    st = transition(handle.run_dir, JobState.RUNNING, None, began)
+                    st = transition(handle.run_dir, JobState.RUNNING, None, at=began)
             return st
         if desc.status == S.COMPLETED:
             outcome, why = JobState.COMPLETE, None
@@ -764,8 +606,12 @@ class TemporalJobBackend:
                 why = f"{why}: {cause or e}"[:400]
             except Exception:  # noqa: BLE001 - the status is known; the message is a courtesy
                 pass
-        st = settle(handle.run_dir, self._spec(handle, st), outcome, why, observer=True, started=began)
-        if JobState(st["state"]) in TERMINAL:
+        # the scheduler's own times: when a worker first took the workflow, and when it closed (not this observation)
+        closed = _schema.format_timestamp(desc.close_time) if desc.close_time is not None else None
+        st = settle(
+            handle.run_dir, self._spec(handle, st), outcome, why, observer=True, started_at=began, ended_at=closed
+        )
+        if st.state in TERMINAL:
             from .temporal_run import clear_marker, sha256_file
 
             with contextlib.suppress(OSError):
@@ -774,14 +620,14 @@ class TemporalJobBackend:
 
     def status(self, handle: JobHandle) -> JobStatus:
         st = self._state(handle)
-        if JobState(st["state"]) in TERMINAL:
-            return job_status(st)
-        return job_status(self._call(lambda c: self._observe(c, handle, st)))
+        if st.state in TERMINAL:
+            return st.status
+        return self._call(lambda c: self._observe(c, handle, st)).status
 
     def cancel(self, handle: JobHandle) -> JobStatus:
         st = self._state(handle)
-        if JobState(st["state"]) in TERMINAL:
-            return job_status(st)
+        if st.state in TERMINAL:
+            return st.status
 
         async def go(client):
             from temporalio.service import RPCError
@@ -790,7 +636,7 @@ class TemporalJobBackend:
                 await client.get_workflow_handle(handle.job_id).terminate(reason="cancelled through smeltery jobs")
             return await self._observe(client, handle, st)
 
-        return job_status(self._call(go))
+        return self._call(go).status
 
     def result(self, handle: JobHandle):
         s = self.status(handle)
@@ -821,14 +667,6 @@ def backend_for(settings, root: str | os.PathLike[str] | None = None, name: str 
                 raise BackendUnavailable("give the workspace: --root ROOT or SMELTERY_ROOT") from e
             root = default_root()
     return LocalJobBackend(root, max_runs=settings.max_runs)
-
-
-def handle_in(run_dir: str | os.PathLike[str]) -> JobHandle:
-    """The handle of the job in `run_dir`, from its state.json."""
-    st = read_state(run_dir)
-    if st is None:
-        raise JobNotFoundError(f"{run_dir} holds no job (no attestation/state.json)")
-    return JobHandle(st["backend"], st["job_id"], st["run_id"], str(Path(run_dir).resolve()))
 
 
 def _parser(command: str, description: str) -> argparse.ArgumentParser:
@@ -893,7 +731,7 @@ def _cli(command: str, argv: list[str] | None, env: Mapping[str, str] | None) ->
             print(f"{rec.status}\n{record_path(h.run_dir)}")
             return 0 if rec.status == JobState.COMPLETE.value else 1
         if args.json:
-            print(json.dumps(read_state(h.run_dir), indent=2, sort_keys=True))
+            print(json.dumps(read_state(h.run_dir).to_dict(), indent=2, sort_keys=True))
         else:
             print(f"{status.state.value} {status.updated_at}" + (f" {status.message}" if status.message else ""))
             from .reuse import stage_lines

@@ -89,6 +89,22 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   converted record carry `evidence` instead of being empty entries; `core_record.wire_value` is gone in favour of
   `attestation_schema.spell_value`; a failed/cancelled job's record writes `history` and `dependencies` as `null`
   unconditionally. The golden core record changed accordingly. Findings and open items: `docs/core-record.md`.
+- The core run record follows the **frozen** `attestation.run/1` (attestation `9fb7eed`, attestation-schema 0.1.0; the
+  extra now requires `attestation-schema>=0.1.0`, still a git pin until it is published). `config` is the campaign
+  config the run read (the staged `config.toml`, by its recorded digest), the same with and without a job; the derived
+  `inputs` moved to `ext.smeltery.inputs`; a conversion that cannot observe the config writes `{}` and says why in
+  `ext.smeltery.config_unobserved`. `smeltery run --run-id` names the run. `dependencies[].source` gains `url:<url>`
+  (credentials and query stripped, `#sha256=` kept) and `hg+`/`svn+`/`bzr+` (from PEP 610's `vcs_info.vcs`). The golden
+  core record changed accordingly. Findings resolved at the freeze and v2 candidates: `docs/core-record.md`.
+
+### Changed
+- Campaign jobs (`smeltery.jobs`) use `attestation_schema.state` for `state.json`, its lock, `settle` and the terminal
+  record; smeltery's own copy is deleted. `read_state` returns a `StateFile` (`--json` prints its `to_dict()`), a
+  malformed file raises `StateFormatError`, `IllegalTransition` is the schema's `IllegalTransitionError`, and ending a
+  job is `settle`'s alone. The job's run_id now names its complete record too (the runner passes `--run-id`; Temporal
+  passes `RunInput.run_id`), and settle fails a job whose record is not its own. The Temporal backend passes the
+  workflow's start and close times to settle. `ext["smeltery.job"]` is `{backend, job_id, stages_completed}`: the
+  message lives in `state.json` only. Without `flock` (Windows) state writes are refused. Docs: `docs/jobs.md`.
 
 ## [0.1.0] - 2026-11-09
 
