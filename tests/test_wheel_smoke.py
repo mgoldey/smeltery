@@ -114,3 +114,19 @@ def test_a_heavy_extra_is_only_resolved_unless_full_is_asked_for():
     assert ws.resolves_only(heavy, True, True) is True  # an explicit --resolve-only always wins
     assert ws.resolves_only("docking", False, False) is False  # a light extra is always installed
     assert set(ws.HEAVY_EXTRAS) <= set(ws.EXTRA_CHECKS), "a heavy extra still needs its import checks for --full"
+
+
+def test_a_preinstalled_requirement_is_exactly_the_uv_source_pin_of_an_extra_that_needs_it():
+    """An extra whose package is on no index yet is smoked with its pin installed first; that pin and pyproject's
+    [tool.uv.sources] must name the same commit, or the smoke test proves a different package than `uv sync` locks."""
+    py = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    extras = py["project"]["optional-dependencies"]
+    sources = py["tool"]["uv"]["sources"]
+    assert set(ws.PREINSTALL) <= set(extras)
+    for extra, reqs in ws.PREINSTALL.items():
+        for req in reqs:
+            name = req.split("@", 1)[0].strip()
+            assert any(r.startswith(name) for r in extras[extra]), (extra, name)
+            src = sources[name]
+            want = f"{name} @ git+{src['git']}@{src['rev']}#subdirectory={src['subdirectory']}"
+            assert req.split(" ;", 1)[0] == want, (req, want)

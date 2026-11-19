@@ -109,6 +109,11 @@ wheels = [
 ]
 
 [[package]]
+name = "attestation-schema"
+version = "0.1.0.dev0"
+source = { git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=93bb5ab8ea0e401577c717ca5d951fb7d8475492#93bb5ab8ea0e401577c717ca5d951fb7d8475492" }
+
+[[package]]
 name = "bottle"
 version = "0.13.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2290,6 +2295,9 @@ aimnet2 = [
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "torch" },
 ]
+attestation = [
+    { name = "attestation-schema", marker = "python_full_version >= '3.12'" },
+]
 bench = [
     { name = "fastapi" },
     { name = "molviewspec" },
@@ -2373,6 +2381,7 @@ requires-dist = [
     { name = "aimnet", marker = "extra == 'aimnet2'", specifier = ">=0.2.0" },
     { name = "anywidget", marker = "extra == 'desktop'", specifier = ">=0.11" },
     { name = "anywidget", marker = "extra == 'gui'", specifier = ">=0.11" },
+    { name = "attestation-schema", marker = "python_full_version >= '3.12' and extra == 'attestation'", git = "https://github.com/mgoldey/attestation?subdirectory=packages%2Fattestation-schema&rev=93bb5ab8ea0e401577c717ca5d951fb7d8475492" },
     { name = "fastapi", marker = "extra == 'bench'", specifier = ">=0.120" },
     { name = "ferric", specifier = ">=0.1.0rc10" },
     { name = "gemmi", marker = "extra == 'docking'" },
@@ -2422,7 +2431,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'bench'", specifier = ">=0.38" },
     { name = "vina", marker = "extra == 'docking'", specifier = ">=1.2.7" },
 ]
-provides-extras = ["aimnet2", "bench", "dataset", "desktop", "dev", "docking", "experiments", "gemmi", "gui", "ml-potential", "pocket-charges", "pocket-prep", "posebusters", "rdkit", "temporal", "torch"]
+provides-extras = ["aimnet2", "attestation", "bench", "dataset", "desktop", "dev", "docking", "experiments", "gemmi", "gui", "ml-potential", "pocket-charges", "pocket-prep", "posebusters", "rdkit", "temporal", "torch"]
 
 [[package]]
 name = "stack-data"

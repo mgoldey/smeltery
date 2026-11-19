@@ -106,6 +106,12 @@ dataset = ["pyarrow>=15"]
 # users do not pull torch, and it repeats pyarrow so `smeltery[torch]` alone is enough. Splits (smeltery.dataset_splits)
 # need only `dataset`; torch is imported when ExportDataset(tensors=True) is built.
 torch = ["torch>=2", "pyarrow>=15"]
+# The core run record (`attestation.run/1`, v1-DRAFT; smeltery.core_record, docs/core-record.md): a second record beside
+# OUT/run-<digest12>.json, written through attestation-schema's own writer. smeltery depends on the stdlib-only schema
+# distribution, never on `attestation` itself. Not on PyPI yet: [tool.uv.sources] pins the git commit, and a pip
+# install of this extra needs that requirement installed first (scripts/wheel_smoke.py PREINSTALL does exactly that).
+# attestation-schema requires Python >= 3.12, so on 3.11 the extra is empty and a run prints a one-line notice instead.
+attestation = ["attestation-schema>=0.1.0.dev0; python_version >= '3.12'"]
 
 [tool.uv.sources]
 # ferric comes from its PyPI wheel (the floor above), so `uv sync` / `uv run` never compile Rust or libint2.
@@ -115,6 +121,9 @@ torch = ["torch>=2", "pyarrow>=15"]
 #   ferric = { path = "../ferric" }
 # or an exact commit (the record reports the SHA from direct_url.json):
 #   ferric = { git = "https://github.com/mgoldey/ferric", rev = "<sha>" }
+# attestation-schema is not on an index yet, so the `attestation` extra resolves from an exact commit of the attestation
+# repo (a stdlib-only hatchling package: re-locking builds nothing heavy). Move to an index pin once it is published.
+attestation-schema = { git = "https://github.com/mgoldey/attestation", rev = "93bb5ab8ea0e401577c717ca5d951fb7d8475492", subdirectory = "packages/attestation-schema" }
 
 [build-system]
 requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]

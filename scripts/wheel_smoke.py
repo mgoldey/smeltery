@@ -71,6 +71,17 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "ds = ExportDataset(d + '/o.parquet', features=['score_n'], target='score', split=d + '/s.json', "
         "partition='train'); x, y = ds[0]; assert isinstance(x, torch.Tensor) and len(ds) > 0",
     ],
+    # Convert a run the wheel ships into its core record and read it back with attestation-schema's own reader. On
+    # Python 3.11 the extra is empty (attestation-schema needs 3.12): then the converter must refuse with its notice.
+    "attestation": [
+        "import sys; from smeltery import core_record as c; "
+        "assert c.AVAILABLE == (sys.version_info >= (3, 12)), (c.AVAILABLE, sys.version_info)",
+        "import pathlib, shutil, tempfile; from importlib import resources; from smeltery import core_record as c; "
+        "src = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "d = pathlib.Path(tempfile.mkdtemp()) / 'run'; shutil.copytree(str(src), d); "
+        "rc = c.main(['core', str(d)]); assert rc == (0 if c.AVAILABLE else 2), rc; "
+        "assert not c.AVAILABLE or __import__('attestation_schema').read(d).family == 'mwe-benzoic-cli'",
+    ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",
@@ -102,6 +113,16 @@ HEAVY_EXTRAS = {
 }
 #: extras that exist only for development; never part of a user's install.
 SKIP_EXTRAS = {"dev"}
+#: Requirements an extra needs that no package index serves yet, installed into the fresh venv BEFORE `wheel[extra]`,
+#: so plain pip resolves the extra against them (a user does the same: see the extra's comment in pyproject.toml). Each
+#: must be the exact [tool.uv.sources] pin, which tests/test_wheel_smoke.py checks. Drop an entry once its package is
+#: published.
+PREINSTALL = {
+    "attestation": [
+        "attestation-schema @ git+https://github.com/mgoldey/attestation@93bb5ab8ea0e401577c717ca5d951fb7d8475492"
+        '#subdirectory=packages/attestation-schema ; python_version >= "3.12"'
+    ],
+}
 
 
 def wheel_extras(wheel: Path) -> list[str]:
@@ -155,6 +176,8 @@ def check(
         _run([sys.executable, "-m", "venv", str(venv)])
         py, pip = venv / "bin" / "python", venv / "bin" / "pip"
         _run([str(pip), "install", "--quiet", "--upgrade", "pip"])
+        if PREINSTALL.get(extra):
+            _run([str(pip), "install", "--quiet", *PREINSTALL[extra]])
         if resolves_only(extra, resolve_only, full):
             _run([str(pip), "install", "--dry-run", "--quiet", spec])
             why = (

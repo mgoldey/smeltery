@@ -19,6 +19,12 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   scaffolds and refuse without RDKit. `smeltery.dataset_torch.ExportDataset` reads the table for a PyTorch
   `DataLoader` (feature and target columns, tier/decision filters, split partition, transform hook); torch is the new
   optional `torch` extra, with a wheel smoke check.
+- The core run record (`attestation.run/1`, v1-DRAFT): with the new optional `attestation` extra (attestation-schema,
+  pinned by git commit until it is published; Python >= 3.12) every finished run also writes `OUT/attestation/run.json`
+  through the schema's own writer, with a manifest of OUT and one `steps/NN-<stage>/` per funnel stage, beside the
+  unchanged `run-<digest12>.json`. `smeltery record core OUT` converts an existing run. Dependencies, ferric included,
+  go through one identity ladder (`record.package_identity`); a conda/distro install is now INFERRED, not VERIFIED.
+  Mapping and the schema findings: `docs/core-record.md`.
 
 ## [0.1.0] - 2026-11-09
 

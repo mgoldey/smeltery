@@ -613,7 +613,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
     import numpy as np
 
-    from .cli import StageError, allow_mixed_builds, build_plan, load_config, run_plan, write_outputs
+    from .cli import StageError, allow_mixed_builds, build_plan, emit_core_record, load_config, run_plan, write_outputs
     from .model import HARTREE_TO_KCAL
 
     out = Path(inp.out)
@@ -742,6 +742,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     _stamp_runner(rec, rows, builds)
     path = write_outputs(plan, rec, out, calc_rows=rows)  # calcs.jsonl rewritten atomically, duplicates removed
     clear_marker(out, inp.config_sha)
+    emit_core_record(path, None)  # a durable run spans workers and resumes: no one start instant is recorded
     n_scfs = sum(1 for r in rows if "outcome" not in r)
     return RunSummary(str(path), rec.input_digest, n_scfs, n_resumed, len(dropped), n_dup, torn, dropped)
 

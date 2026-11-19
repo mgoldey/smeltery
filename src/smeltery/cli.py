@@ -1335,6 +1335,25 @@ def write_outputs(
     return path
 
 
+def emit_core_record(record_path: Path, started_at: str | None) -> Path | None:
+    """Write OUT/attestation/run.json (smeltery.core_record) beside the run record just written, replacing a core
+    record a previous run into this OUT left (the legacy record it described was just replaced too). Additive: without
+    the `attestation` extra it prints one notice, and a refusal is a warning, never the run's exit code -- the legacy
+    record is written and stays the source of truth while the core schema is a draft."""
+    from . import core_record
+
+    if not core_record.AVAILABLE:
+        print(f"note: {core_record.NOT_INSTALLED}", file=sys.stderr)
+        return None
+    try:
+        return core_record.write_core(
+            record_path, live=True, started_at=started_at, finished_at=core_record.utc_now(), overwrite=True
+        )
+    except (OSError, ValueError) as e:  # a schema RecordError is a ValueError naming the field it refused
+        print(f"warning: core record not written: {e}", file=sys.stderr)
+        return None
+
+
 def primary_model(field) -> str:
     """The name of the plan's own field model: the force field pdb2pqr charged it with, else "primary" (sites, a
     .pqr)."""
@@ -1614,6 +1633,7 @@ VIEWERS = {
     "export": "smeltery.dataset_export",
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
+    "record": "smeltery.core_record",
 }
 
 
@@ -1736,6 +1756,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
+    sub.add_parser("record", help="write a run's core record (smeltery record core RUN.json; attestation extra)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     tw.add_argument("--host", default="127.0.0.1:7233")
     tw.add_argument("--namespace", default="default")
@@ -1844,6 +1865,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return worker_cli(args.host, args.task_queue, args.workers, args.threads_per_worker)
     explicit_out = args.out is not None
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # the core record's started_at (a whole run)
     if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
         print(
             "config error: --temporal needs --out OUT, and runs the whole config (no --only-candidate/--combine)",
@@ -1971,8 +1993,11 @@ def main(argv: list[str] | None = None) -> int:
                 rec.results["config"] = partial_configs[0]
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
+            core = emit_core_record(path, None)  # a combine's start is its partials' starts: not one instant
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+            if core is not None:
+                print(f"core record: {core}")
             return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
         plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
@@ -1992,6 +2017,7 @@ def main(argv: list[str] | None = None) -> int:
             from .checkpoint import discard
 
             discard(args.out)
+        core = emit_core_record(path, started_at)  # last: the manifest covers what the run left in OUT
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan and not isinstance(e, OutGuardRefused):
@@ -2017,6 +2043,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+    if core is not None:
+        print(f"core record: {core}")
     return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
 
 
