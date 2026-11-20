@@ -201,7 +201,7 @@ def test_columns_come_from_arrow_schema_with_a_unit_only_where_one_holds(schema,
 
     assert record.rows == pq.read_table(exported / "runs.parquet").num_rows
     ext = record.ext["smeltery"]
-    assert ext["schema_version"] == D.SCHEMA_VERSION == 2 and ext["grain"] == D.GRAIN
+    assert ext["schema_version"] == D.SCHEMA_VERSION == 3 and ext["grain"] == D.GRAIN
     assert ext["table"] == {"path": "runs.parquet", "format": "parquet"}
     assert ext["splits"]["scaffold-seed0"]["parameters"]["fractions"] == TWO
     assert ext["splits"]["scaffold-seed0"]["algorithm_version"] == S.ALGORITHM_VERSIONS["scaffold"]
@@ -286,19 +286,108 @@ def test_a_run_without_a_core_record_is_named_but_not_digested(schema, tmp_path)
     assert [(i.kind, i.at) for i in lin.issues] == [("missing-source-run", "source_runs[0]")]
 
 
-def test_a_ferric_mismatch_between_table_and_core_record_is_refused_naming_row_and_run(schema, runs, tmp_path):
-    """The mixed-build prebuilt run: its legacy record names the finalizing ferric build (copied into
-    `ferric_git_sha`), while its core record states ferric `unknown` because the SCF rows came from two builds."""
+def _builds_shas(run_dir: Path) -> set[str]:
+    legacy = json.loads(next(run_dir.glob("run-*.json")).read_text())
+    return {b["ferric"]["git_sha"] for b in legacy["results"]["builds"] if "ferric" in b}
+
+
+def test_the_mixed_build_run_exports_with_its_rows_builds_unrecorded_and_reported(schema, runs, tmp_path):
+    """danuglipron-halogen: its core record says ferric `unknown` (b22183b wrote 111 rows, 81f411c 1, 46 carry no
+    stamp), and every candidate has unstamped SCFs, so no row can claim a build: null sha, UNKNOWN, `unrecorded` --
+    not the finalizing build the legacy block names. The export passes the cross-check and the conformance check."""
+    from attestation_schema import conformance
+
     core = schema.read(runs[MIXED])
     (ferric,) = [d for d in core.dependencies if d.name == "ferric"]
     assert ferric.build_sha is None and ferric.provenance == "unknown" and "mixed builds" in ferric.evidence
     dest = tmp_path / "ds"
+    DR.export_dataset_dir([runs[MIXED]], dest, dataset_id="x")
+    assert conformance.check_dataset_dir(dest).ok
+    import pyarrow.parquet as pq
+
+    cols = pq.read_table(dest / "runs.parquet").to_pydict()
+    assert len(cols["ligand"]) == 13
+    assert set(cols["ferric_git_sha"]) == {None} and set(cols["ferric_dirty"]) == {None}
+    assert set(cols["ferric_build_basis"]) == {"unrecorded"} and set(cols["ferric_provenance_level"]) == {"UNKNOWN"}
+    assert set(cols["ferric_version"]) == {None}
+    assert "4 of 12 SCF rows" in cols["ferric_provenance"][0] and "b22183b9dbed" in cols["ferric_provenance"][0]
+    rows = schema.read_dataset(dest).ext["smeltery"]["ferric_rows"]
+    assert rows == {"rows": 13, "by_build": {}, "unknown": 13, "mixed": 0}
+
+
+@pytest.fixture(scope="module")
+def stamped(schema, tmp_path_factory):
+    """The mixed-build run with every unstamped SCF row stamped as b22183b (so most candidates have ONE recorded
+    build), its core record written after: pyr-C28-Cl keeps its 81f411c row, so its own SCFs are from two builds."""
+    from smeltery import core_record
+
+    d = tmp_path_factory.mktemp("stamped") / MIXED
+    shutil.copytree(PREBUILT / MIXED / "run", d)
+    lines = [json.loads(x) for x in (d / "calcs.jsonl").read_text().splitlines()]
+    stamp = next(r["build"] for r in lines if "build" in r and r["build"]["ferric"]["git_sha"].startswith("b22183b"))
+    for r in lines:
+        r.setdefault("build", stamp)
+    (d / "calcs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines))
+    assert core_record.main(["core", str(d)]) == 0
+    return d
+
+
+def test_each_row_states_the_build_of_its_own_scfs_matching_results_builds(schema, stamped, tmp_path):
+    from attestation_schema import conformance
+
+    dest = tmp_path / "ds"
+    DR.export_dataset_dir([stamped], dest, dataset_id="x")
+    assert conformance.check_dataset_dir(dest).ok
+    import pyarrow.parquet as pq
+
+    cols = pq.read_table(dest / "runs.parquet").to_pydict()
+    named = _builds_shas(stamped)
+    assert named == {"81f411c94330f09a21a18b71a02544c518703dbd", "b22183b9dbed226e1d2acc5cb6e5194c973b023b"}
+    for lig, sha, dirty, basis, level in zip(
+        cols["ligand"],
+        cols["ferric_git_sha"],
+        cols["ferric_dirty"],
+        cols["ferric_build_basis"],
+        cols["ferric_provenance_level"],
+        strict=True,
+    ):
+        if lig == "pyr-C28-Cl":  # two builds measured this candidate: none can be claimed
+            assert (sha, dirty, basis, level) == (None, None, "mixed_scf_rows", "UNKNOWN")
+        else:
+            assert sha == "b22183b9dbed226e1d2acc5cb6e5194c973b023b" and dirty is False
+            assert (basis, level) == ("scf_rows", "VERIFIED") and sha in named
+    ext = schema.read_dataset(dest).ext["smeltery"]["ferric_rows"]
+    assert ext == {"rows": 13, "by_build": {"b22183b9dbed226e1d2acc5cb6e5194c973b023b": 12}, "unknown": 0, "mixed": 1}
+
+
+def test_a_row_claiming_a_build_the_run_never_used_is_refused_naming_row_and_run(schema, stamped):
+    rows = D.export_rows([stamped])
+    _, cores, listed = DR._source_runs([stamped])
+    assert DR.check_ferric(rows, cores, listed)["mixed"] == 1  # as exported: accepted
+    foreign = "f" * 40
+    bad = [dict(r) for r in rows]
+    bad[3]["ferric_git_sha"] = foreign
     with pytest.raises(DR.DatasetError) as e:
-        DR.export_dataset_dir([runs["benzoic-rhf"], runs[MIXED]], dest, dataset_id="x")
+        DR.check_ferric(bad, cores, listed)
     msg = str(e.value)
-    assert f"run {core.run_id}'s core record" in msg and "row 3 (" in msg and "build_sha None" in msg
-    assert "row 0 (" not in msg  # the consistent run's rows pass
-    assert not dest.exists()
+    assert "row 3 (" in msg and foreign in msg and "run " in msg and "results.builds" in msg
+    assert "row 0 (" not in msg
+
+
+def test_a_single_build_row_must_still_equal_the_core_records_ferric_exactly(schema, runs):
+    rows = D.export_rows([runs["benzoic-rhf"]])
+    _, cores, listed = DR._source_runs([runs["benzoic-rhf"]])
+    assert {r["ferric_build_basis"] for r in rows} == {"run_record"}
+    assert DR.check_ferric(rows, cores, listed) == {
+        "rows": 3,
+        "by_build": rows[0]["ferric_git_sha"] and {rows[0]["ferric_git_sha"]: 3},
+        "unknown": 0,
+        "mixed": 0,
+    }
+    for sha in (None, "f" * 40):  # a null does not excuse a run that states one build
+        bad = [{**r, "ferric_git_sha": sha} for r in rows]
+        with pytest.raises(DR.DatasetError, match="disagree on ferric"):
+            DR.check_ferric(bad, cores, listed)
 
 
 # ---- immutability and versions -------------------------------------------------------------------------------------

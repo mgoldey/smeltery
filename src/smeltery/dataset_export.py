@@ -31,6 +31,14 @@ values (`Measurement.from_samples`, the funnel's estimator), the paired ddE and 
   self-hash, null in records written before it existed; not re-verified here: `smeltery verify-run` does that; no core
   reader resolves it), smeltery and ferric versions, ferric's build commit and dirty flag, and
   `ferric_provenance_level` (VERIFIED / INFERRED / UNKNOWN, the first word of the record's provenance label).
+* **Ferric per row (`schema_version` 3).** A run whose SCF rows came from ONE ferric build (every run but a
+  `--temporal` run finalized with `allow_mixed_builds`) states it in the record's `ferric` block, and its rows copy
+  that (`ferric_build_basis` = `run_record`). A run whose `results.builds` lists more than one ferric build has no
+  one ferric, so each row states the build of ITS OWN SCFs, read from the `build` stamp of the candidate's rows in
+  the run's `calcs.jsonl` (`results.builds` itself carries only counts): one build -> its `git_sha` and `dirty`,
+  VERIFIED, basis `scf_rows`; several -> sha and dirty null, UNKNOWN, basis `mixed_scf_rows`; a row with no stamp, or
+  no calcs.jsonl beside the record -> null, UNKNOWN, basis `unrecorded`. Never the run-level stamp (it names the
+  process that finalized the run, not the one that measured), and no `ferric_version` (a build stamp has none).
 
 File-level key-value metadata (`smeltery.*`): `schema_version`, `units` (JSON quantity -> unit, a list when runs
 disagree), `smiles_form`, `runs`, `grain`, `generator`. pyarrow is the optional `dataset` extra; `export_rows` needs
@@ -56,7 +64,16 @@ from .record import digest
 
 #: Bump when a column is added, renamed, removed or changes type. Stored in the file's metadata.
 #: 2: `family` and `core_record_sha256` added; `run_id` is the core record's run_id (was always `input_digest[:12]`).
-SCHEMA_VERSION = 2
+#: 3: the `ferric_*` columns state the build of THIS ROW's SCFs, not one build per run: `ferric_git_sha` can be null
+#:    (build not recorded, or the row's SCFs came from several builds) and `ferric_build_basis` is added; a run whose
+#:    rows all came from one build is unchanged apart from that column.
+SCHEMA_VERSION = 3
+
+#: `ferric_build_basis`: what a row's ferric columns were read from.
+BASIS_RUN = "run_record"  # the run has one ferric build; the record's `ferric` block states it
+BASIS_SCF = "scf_rows"  # a mixed-build run: every SCF row of this candidate carries one and the same build stamp
+BASIS_MIXED = "mixed_scf_rows"  # a mixed-build run: this candidate's own SCF rows came from more than one build
+BASIS_UNRECORDED = "unrecorded"  # a mixed-build run: a row of this candidate carries no build (or no calcs.jsonl)
 
 #: Where a run directory keeps its core record (`attestation_schema.layout.RUN_JSON`), spelled here so the row builder
 #: needs no attestation-schema: it reads the file as JSON and hashes its bytes, nothing more.
@@ -190,6 +207,93 @@ def _decisions(run: R.Run) -> dict[str, tuple[str, str]]:
     return out
 
 
+def _ferric_columns(ferric: dict, basis: str) -> dict:
+    """The six `ferric_*` columns for the identity block `ferric` (the record's own, or a row-level one built by
+    `_per_row_ferric`), and the `ferric_build_basis` that says which."""
+    return {
+        "ferric_version": ferric.get("version"),
+        "ferric_git_sha": ferric.get("commit"),
+        "ferric_dirty": ferric.get("dirty"),
+        "ferric_provenance_level": _level(ferric.get("provenance")),
+        "ferric_provenance": ferric.get("provenance"),
+        "ferric_source": ferric.get("source"),
+        "ferric_build_basis": basis,
+    }
+
+
+def _is_mixed(rec: dict) -> bool:
+    """`results.builds` names more than one distinct ferric build (the rule `core_record._ferric` states ferric
+    `unknown` by); rows with no build recorded do not count as one."""
+    builds = [b["ferric"] for b in (rec["results"].get("builds") or []) if isinstance(b.get("ferric"), dict)]
+    return len({json.dumps(b, sort_keys=True) for b in builds}) > 1
+
+
+_NOT_STATED = {"version": None, "source": None}
+
+
+def _per_row_ferric(record_path: Path, rec: dict, parent: str):
+    """For a mixed-build run: candidate name -> (ferric identity block, basis), from the `build` stamps of the
+    candidate's SCF rows in the run's calcs.jsonl (beside the record). `results.builds` has counts, not row ids, so
+    this is the only place a row's build is recorded; a candidate with no rows, or any row without a stamp, is
+    `unrecorded`: never the run-level `ferric` block."""
+    calcs = (rec["results"].get("calcs") or {}).get("file") or "calcs.jsonl"
+    path = record_path.parent / calcs
+    digest = str(rec["input_digest"])[:12]
+    stamps: dict[str, list[dict | None]] = {}
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue  # a torn line: finalize skips it too
+            if not isinstance(r, dict) or "outcome" in r or r.get("digest", digest) != digest or "candidate" not in r:
+                continue
+            who = parent if r["candidate"] == "parent" else r["candidate"]
+            b = r.get("build")
+            stamps.setdefault(who, []).append(b.get("ferric") if isinstance(b, dict) else None)
+
+    def of(name: str):
+        got = stamps.get(name, [])
+        if not got or any(not isinstance(g, dict) for g in got):
+            if not got:
+                return {
+                    **_NOT_STATED,
+                    "provenance": f"UNKNOWN: no SCF row of this candidate in {calcs}",
+                }, BASIS_UNRECORDED
+            named = sorted({str(g.get("git_sha") or "unstamped")[:12] for g in got if isinstance(g, dict)})
+            n = sum(1 for g in got if not isinstance(g, dict))
+            seen = f"; the other {len(got) - n} name {', '.join(named)}" if named else ""
+            return {
+                **_NOT_STATED,
+                "provenance": f"UNKNOWN: {n} of {len(got)} SCF rows of this candidate carry no build stamp "
+                f"in {calcs}{seen}",
+            }, BASIS_UNRECORDED
+        distinct = {json.dumps(g, sort_keys=True): g for g in got}
+        if len(distinct) > 1:
+            shas = ", ".join(sorted(str(g.get("git_sha") or "unstamped")[:12] for g in distinct.values()))
+            return {
+                **_NOT_STATED,
+                "provenance": f"UNKNOWN: this candidate's SCF rows came from {len(distinct)} ferric builds ({shas})",
+            }, BASIS_MIXED
+        (g,) = distinct.values()
+        if not g.get("git_sha"):
+            return {
+                **_NOT_STATED,
+                "dirty": g.get("dirty"),
+                "provenance": f"UNKNOWN: the build stamp in {calcs} names no git sha",
+                "source": calcs,
+            }, BASIS_SCF
+        return {
+            "version": None,
+            "commit": g["git_sha"],
+            "dirty": g.get("dirty"),
+            "provenance": f"VERIFIED from the build stamp of every SCF row in {calcs} (ferric.__build__)",
+            "source": calcs,
+        }, BASIS_SCF
+
+    return of
+
+
 def _level(provenance: str | None) -> str:
     m = _PROVENANCE_LEVEL.match(provenance or "")
     return m.group(1) if m else "UNKNOWN"
@@ -272,6 +376,7 @@ def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
     decisions = _decisions(run)
     user = _user_decisions(run)
     ferric, smeltery = rec.get("ferric") or {}, rec.get("smeltery") or {}
+    row_builds = _per_row_ferric(p, rec, run.parent) if _is_mixed(rec) else None
     cut_floor = inputs["floor"]
 
     declared: dict[str, tuple[str, Declared]] = {}  # quantity -> (tier name, declaration); a later tier wins
@@ -303,12 +408,7 @@ def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
         "smeltery_version": rec.get("smeltery_version"),
         "smeltery_commit": smeltery.get("commit"),
         "smeltery_dirty": smeltery.get("dirty"),
-        "ferric_version": ferric.get("version"),
-        "ferric_git_sha": ferric.get("commit"),
-        "ferric_dirty": ferric.get("dirty"),
-        "ferric_provenance_level": _level(ferric.get("provenance")),
-        "ferric_provenance": ferric.get("provenance"),
-        "ferric_source": ferric.get("source"),
+        **_ferric_columns(ferric, BASIS_RUN),
     }
     rows = []
     for name, recorded in run.candidates.items():
@@ -316,6 +416,7 @@ def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
         if not values:
             continue
         smiles, form = _canonical(recorded, canonicalize)
+        ferric_cols = _ferric_columns(*row_builds(name)) if row_builds else {}
         dec, why = decisions[name]
         u_dec, u_why = user.get(name, (None, None))
         for tier_name, settings in order:
@@ -365,6 +466,7 @@ def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
             rows.append(
                 {
                     **base,
+                    **ferric_cols,
                     "ligand": name,
                     "is_parent": name == run.parent,
                     "smiles": smiles,
@@ -496,6 +598,7 @@ def arrow_schema(metadata_: dict[str, str] | None = None):
         ("ferric_provenance_level", s),
         ("ferric_provenance", s),
         ("ferric_source", s),
+        ("ferric_build_basis", s),
     ]
     meta = {k.encode(): v.encode() for k, v in (metadata_ or {}).items()}
     return pa.schema([pa.field(n, t) for n, t in fields], metadata=meta)

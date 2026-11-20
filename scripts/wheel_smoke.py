@@ -59,7 +59,7 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
         "n = write_dataset([str(run)], d + '/o.parquet'); "
         "t = pq.read_table(d + '/o.parquet'); assert t.num_rows == n > 0, n; "
-        "assert t.schema.metadata[b'smeltery.schema_version'] == b'2'; "
+        "assert t.schema.metadata[b'smeltery.schema_version'] == b'3'; "
         "write_dataset([str(run)], d + '/o.arrow', 'arrow')",
         # A dataset DIRECTORY also needs attestation-schema (the `attestation` extra), absent here: the module imports
         # and every entry point refuses naming the release it needs, rather than failing on an import.
