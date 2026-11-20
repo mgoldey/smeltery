@@ -45,6 +45,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sqlite3
 import sys
 import tomllib
@@ -192,20 +193,41 @@ def _refuse_existing(run_dir: Path) -> None:
 # ---- specs ---------------------------------------------------------------------------------------------------------
 
 
+#: An arm a submitter may name: a label, not a path or a sentence (it is a key readers group and compare runs by).
+ARM = re.compile(r"^[A-Za-z0-9_.:-]+$")
+
+
 def check_spec(spec: JobSpec) -> None:
     """What a smeltery campaign job can honestly be. The complete record is derived from the run by `core_record`,
-    which names the family after the config's `campaign`, has no arm, and has no slot for a caller's `ext`: a spec
-    saying otherwise would get one answer in a failed record and another in a complete one, so it is refused."""
+    which names the family after the config's `campaign`, so a spec naming another family is refused.
+
+    `arm` and `ext` ARE carried (the contract's 5.C.2/5.C.3: a backend that cannot hand them to its producer must
+    refuse the spec, and the local backend can -- it passes them to the run as `--arm` / `--ext-json`, so the arm and
+    the namespaces are in the record the FIRST time it is written, in every terminal state; the schema's own
+    `terminal_record` already carries the spec's arm into a failed or cancelled record). smeltery has no arm of its
+    own, so an arm is always the submitter's, and `ext` namespaces are the submitter's own: `smeltery` is the run's
+    and is refused. The Temporal backend carries neither and refuses such a spec at `submit`."""
     if not isinstance(spec.run_id, str) or not spec.run_id:
         raise ValueError("run_id must be a non-empty string")
     if not isinstance(spec.config, dict) or not isinstance(spec.config.get("campaign"), str):
         raise ValueError("config must be a campaign config (a table with `campaign`), as `smeltery run` reads it")
     if spec.family != spec.config["campaign"]:
         raise ValueError(f"family must be the config's campaign ({spec.config['campaign']!r}), got {spec.family!r}")
-    if spec.arm is not None:
-        raise ValueError("smeltery has no arm: a campaign job's arm is None")
+    if spec.arm is not None and not (isinstance(spec.arm, str) and ARM.match(spec.arm)):
+        raise ValueError(
+            f"arm must be None or a label matching {ARM.pattern} (a key runs are grouped by), got {spec.arm!r}"
+        )
     if spec.ext:
-        raise ValueError("a campaign job takes no ext: smeltery's complete record is derived from the run")
+        if not isinstance(spec.ext, dict):
+            raise ValueError("ext must be a mapping of ext namespaces (ext.<namespace>)")
+        for key, value in spec.ext.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError("an ext namespace must be a non-empty name")
+            if key == "smeltery":
+                raise ValueError("ext cannot set the `smeltery` namespace: it is the run's own")
+            if not isinstance(value, dict):
+                raise ValueError(f"ext namespace {key!r} must map to an object")
+        json.dumps(spec.ext)  # handed to the run as one JSON token: refused here, not at the end
     json.dumps(spec.config)  # stored and recorded as JSON: a TOML datetime is refused here, not at the end
 
 
@@ -222,12 +244,22 @@ def write_config(run_dir: Path, config: dict) -> Path:
     return dest
 
 
-def campaign_spec(config: str | os.PathLike[str], run_dir: str | os.PathLike[str], run_id: str | None = None):
+def campaign_spec(
+    config: str | os.PathLike[str],
+    run_dir: str | os.PathLike[str],
+    run_id: str | None = None,
+    *,
+    arm: str | None = None,
+    ext: dict | None = None,
+):
     """A JobSpec for `smeltery run CONFIG --out RUN_DIR`: the config is staged into RUN_DIR first (its input files
     copied under RUN_DIR/inputs/, as `smeltery run --out` does), so the spec's config is self-contained. `run_id`
     names the run's records whoever writes them, and defaults to a fresh 12-hex name, not the input digest: that
     digest covers the built plan (structure prep, docking, the pocket, the tiers' tool versions), which submit does
-    not build (docs/jobs.md, "run_id")."""
+    not build (docs/jobs.md, "run_id").
+
+    `arm` and `ext` are the submitter's: the local backend hands them to the run, so the record states them the first
+    time it is written (`check_spec`, docs/jobs.md "arm and ext")."""
     _require()
     from .run_inputs import stage_config
 
@@ -238,15 +270,23 @@ def campaign_spec(config: str | os.PathLike[str], run_dir: str | os.PathLike[str
     return JobSpec(
         run_id=run_id or uuid.uuid4().hex[:12],
         family=cfg.get("campaign"),
-        arm=None,
+        arm=arm,
         config=cfg,
         run_dir=str(run_dir),
+        ext=dict(ext or {}),
     )
 
 
 def _spec_from(row_spec: str, run_dir: str) -> JobSpec:
     d = json.loads(row_spec)
-    return JobSpec(run_id=d["run_id"], family=d["family"], arm=d["arm"], config=d["config"], run_dir=run_dir)
+    return JobSpec(
+        run_id=d["run_id"],
+        family=d["family"],
+        arm=d["arm"],
+        config=d["config"],
+        run_dir=run_dir,
+        ext=dict(d.get("ext") or {}),  # .get: a job stored before arms and ext were carried has no key
+    )
 
 
 # ---- the local backend ---------------------------------------------------------------------------------------------
@@ -312,7 +352,13 @@ class LocalJobBackend:
         _refuse_existing(run_dir)
         write_config(run_dir, spec.config)
         job_id = uuid.uuid4().hex[:12]
-        stored = {"run_id": spec.run_id, "family": spec.family, "arm": spec.arm, "config": spec.config}
+        stored = {
+            "run_id": spec.run_id,
+            "family": spec.family,
+            "arm": spec.arm,
+            "config": spec.config,
+            "ext": dict(spec.ext or {}),
+        }
         with open_db(self.db) as con:
             con.execute(
                 "INSERT INTO jobs (job_id, run_dir, spec, created_at) VALUES (?,?,?,?)",
@@ -458,6 +504,12 @@ def runner_main(argv: list[str]) -> int:
                 *("run", str(run_dir / "config.toml"), "--out", str(run_dir), "--stage-cache", str(stage_cache)),
                 f"--run-id={spec.run_id}",  # one token: a run_id may start with "-"
             ]
+            # --arm/--ext-json: the submitter's, so the complete record states them the FIRST time it is written;
+            # a finished core record is never rewritten (its bytes are what other readers hash)
+            if spec.arm is not None:
+                argv.append(f"--arm={spec.arm}")
+            if spec.ext:
+                argv.append(f"--ext-json={json.dumps(spec.ext, sort_keys=True)}")
             rc = smeltery_main(argv)
     except Exception as e:  # noqa: BLE001 - any crash of the run is the job's failure, recorded, then re-raised
         settle(run_dir, spec, JobState.FAILED, f"smeltery run crashed: {type(e).__name__}: {e}"[:400], observer=False)
@@ -522,6 +574,13 @@ class TemporalJobBackend:
         from .run_inputs import stage_config
 
         check_spec(spec)
+        if spec.arm is not None or spec.ext:
+            # 5.C.3: a backend that cannot hand `arm`/`ext` to its producer refuses the spec rather than dropping
+            # them. The workflow's finalize activity takes the run_id only, so this one cannot.
+            raise JobError(
+                "SMELTERY_BACKEND=temporal carries no arm or ext into the record the workflow writes; submit the "
+                "campaign on the local backend, which hands them to the run"
+            )
         run_dir = Path(spec.run_dir).resolve()
         _refuse_existing(run_dir)
         config, info = stage_config(write_config(run_dir, spec.config), run_dir, temporal=True)

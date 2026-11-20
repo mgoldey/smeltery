@@ -238,6 +238,28 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def parse_ext(text: str | None) -> dict | None:
+    """`--ext-json`: the submitter's own `ext` namespaces for the core record, as JSON. A namespace is a non-empty
+    name mapping to an object (`ext.<namespace>`, the schema's shape); `smeltery` itself is the run's own and is
+    refused. None without the flag."""
+    if text is None:
+        return None
+    try:
+        obj = json.loads(text)
+    except ValueError as e:
+        raise ConfigError(f"--ext-json is not valid JSON: {e}") from e
+    if not isinstance(obj, dict) or not obj:
+        raise ConfigError("--ext-json must be a non-empty object of ext namespaces")
+    for key, value in obj.items():
+        if not isinstance(key, str) or not key:
+            raise ConfigError("--ext-json namespaces must be non-empty names")
+        if key == "smeltery":
+            raise ConfigError("--ext-json cannot set the `smeltery` namespace: it is the run's own")
+        if not isinstance(value, dict):
+            raise ConfigError(f"--ext-json namespace {key!r} must map to an object")
+    return obj
+
+
 def format_table(plan: Plan, out: dict) -> str:
     res = out["cut"]
     lines = [f"{'candidate':12} {'formula':10} {'paired ddE (kcal/mol)':>26} {'unpaired SEM':>13}"]
@@ -383,6 +405,7 @@ VIEWERS = {
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
     "record": "smeltery.core_record",
+    "al": "smeltery.al:al_main",
     "mcp": "smeltery.mcp:main",
     "serve": "smeltery.services:serve_main",
     "worker": "smeltery.services:worker_main",
@@ -466,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
     sub.add_parser("record", help="write a run's core record (smeltery record core RUN.json; attestation extra)")
+    sub.add_parser("al", help="active-learning loop: propose, score, record each iteration (docs/active-learning.md)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     # Alias of `smeltery worker --backend temporal` for the tasks queue alone. Defaults are None so that
     # settings.resolve gives flag > SMELTERY_* env var > default (docs/temporal-runs.md).
@@ -512,6 +536,19 @@ def main(argv: list[str] | None = None) -> int:
         dest="run_id",
         default=None,
         help="the core record's run_id (default: the input digest's first 12 hex); a campaign job passes its own",
+    )
+    run.add_argument(
+        "--arm",
+        default=None,
+        help="the core record's arm (default none: smeltery has no arm of its own); a campaign job passes the arm its "
+        "submitter named, e.g. an active-learning iteration (docs/active-learning.md)",
+    )
+    run.add_argument(
+        "--ext-json",
+        dest="ext_json",
+        default=None,
+        help="the submitter's own ext namespaces for the core record, as JSON (ext.<namespace>: an object); the "
+        "`smeltery` namespace is the run's own and is refused",
     )
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
@@ -607,6 +644,10 @@ def main(argv: list[str] | None = None) -> int:
         args.out = Path("out")
     try:
         config_info = None
+        extra_ext = parse_ext(args.ext_json)  # a bad namespace is a config error, before any work
+        if args.temporal and (args.arm is not None or extra_ext is not None):
+            # the workflow's finalize activity takes the run_id only, so an arm or an ext would be silently dropped
+            raise ConfigError("--arm and --ext-json are not carried by --temporal; run the campaign in process")
         if explicit_out and not (
             args.plan or args.combine or args.only_candidate is not None or args.temporal or args.force
         ):
@@ -733,7 +774,7 @@ def main(argv: list[str] | None = None) -> int:
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
             # a combine's start is its partials' starts: not one instant
-            core = emit_core_record(path, None, run_id=args.run_id)
+            core = emit_core_record(path, None, run_id=args.run_id, arm=args.arm, extra_ext=extra_ext)
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
             if core is not None:
@@ -771,7 +812,14 @@ def main(argv: list[str] | None = None) -> int:
             discard_progress(args.out)
         # last: the manifest covers what the run left in OUT. Without --out nothing was staged, so the config the run
         # read is handed over as it read it (with --out, write_core reads OUT/config.toml by its recorded digest)
-        core = emit_core_record(path, started_at, run_id=args.run_id, config=None if config_info is not None else given)
+        core = emit_core_record(
+            path,
+            started_at,
+            run_id=args.run_id,
+            config=None if config_info is not None else given,
+            arm=args.arm,
+            extra_ext=extra_ext,
+        )
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan and not isinstance(e, OutGuardRefused):
