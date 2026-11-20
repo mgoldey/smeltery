@@ -198,7 +198,7 @@ def test_golden_parquet_file_has_the_columns_rows_provenance_and_metadata(tmp_pa
     nested = col["scores"][1]
     assert [s["quantity"] for s in nested] == ["dE_int", "ddE"]
     meta = {k.decode(): v.decode() for k, v in table.schema.metadata.items() if k.startswith(b"smeltery.")}
-    assert meta["smeltery.schema_version"] == str(D.SCHEMA_VERSION) == "2"
+    assert meta["smeltery.schema_version"] == str(D.SCHEMA_VERSION) == "3"
     assert json.loads(meta["smeltery.units"]) == {"dE_int": "kcal/mol", "ddE": "kcal/mol"}
     assert meta["smeltery.smiles_form"] == "rdkit-canonical"
     assert json.loads(meta["smeltery.runs"]) == [rec["input_digest"][:12]]
@@ -246,7 +246,7 @@ def test_arrow_ipc_carries_the_same_table_and_metadata(tmp_path, pa):
     with ipc.open_file(str(dest)) as f:
         table = f.read_all()
     assert table.schema.names == D.arrow_schema().names
-    assert table.schema.metadata[b"smeltery.schema_version"] == b"2"
+    assert table.schema.metadata[b"smeltery.schema_version"] == b"3"
     assert table.to_pylist() == D.to_table(D.export_rows([RHF])).to_pylist()
 
 

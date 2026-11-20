@@ -20,9 +20,12 @@ DIR's name.
   `family` and the sha256 of run.json's bytes, the digest `attestation_schema.lineage.resolve_lineage` links by. A run
   with no core record is listed with `record_sha256: null` (the resolver then reports it `undigested-source-run`),
   under the run_id and family a core record would have stated (`dataset_export.run_rows`).
-* **ferric cross-check.** Every row's `ferric_git_sha` (copied from the legacy record) must equal the `build_sha` of
-  the `ferric` dependency in its run's core record. A mismatch is refused, naming the row and the run: the table would
-  otherwise state one ferric build and the lineage another. A run with no core record has nothing to check against.
+* **ferric cross-check.** A row of a single-build run must carry exactly the `build_sha` of the `ferric` dependency in
+  its run's core record. A row of a mixed-build run states the build of its own SCFs (`dataset_export`, schema 3): its
+  sha must be one of the builds the run used (the core record's `build_sha`, or a `results.builds` sha), else the
+  export is refused, naming the row and the run. A row whose build is unknown (null sha) is accepted and COUNTED:
+  `ext.smeltery.ferric_rows` = rows, rows per build, `unknown`, `mixed`, and the CLI prints a line when any are not
+  stated. A run with no core record has nothing to check against.
 * **license** is an SPDX expression the caller states (`--license`), null by default -- never smeltery's own
   `MIT OR Apache-2.0`, which licenses the code, not the receptor's or ligand set's terms.
 * **columns** come from `dataset_export.arrow_schema()` (name, the pyarrow type's spelling), with a unit on the score
@@ -161,43 +164,75 @@ def _publish(stage: Path, dest: Path) -> None:
     stage.rename(dest)
 
 
-def check_ferric(rows: list[dict], cores: dict[str, tuple[Path, Any]]) -> None:
-    """Every row's `ferric_git_sha` equals the `build_sha` of the `ferric` dependency in its run's core record.
+def listed_ferric_shas(legacy: dict) -> set[str]:
+    """Every ferric `git_sha` a legacy record's `results.builds` names (none for a single-build run)."""
+    out = set()
+    for b in (legacy.get("results") or {}).get("builds") or []:
+        sha = (b.get("ferric") or {}).get("git_sha") if isinstance(b.get("ferric"), dict) else None
+        if isinstance(sha, str) and sha:
+            out.add(sha)
+    return out
 
-    `cores` maps a row's `input_digest` to (run.json path, the strictly read `attestation_schema.RunRecord`); a row
-    whose run has no core record is not checked (there is nothing to check against). Raises `DatasetError` listing
-    each mismatching row (its identity and its run) -- a mixed-build run, whose core record says `unknown` with no
-    build_sha while the legacy record names the finalizing build, is one."""
+
+def check_ferric(
+    rows: list[dict], cores: dict[str, tuple[Path, Any]], listed: dict[str, set[str]] | None = None
+) -> dict:
+    """Check every row's ferric columns against its run's core record; returns what the check could not decide.
+
+    `cores` maps a row's `input_digest` to (run.json path, the strictly read `attestation_schema.RunRecord`), `listed`
+    to the ferric shas the legacy record's `results.builds` names. A row whose run has no core record is not checked.
+
+    * a row of a single-build run (`ferric_build_basis` `run_record`) must equal the core record's ferric `build_sha`
+      exactly, null included;
+    * any other row's non-null sha must be one of the builds the run used: the core `build_sha`, or a sha in
+      `results.builds` (the core record's evidence names the same builds, it has no field for them). A sha the run
+      never used refuses the export, naming each row and run;
+    * a row whose build is unknown (null sha: `unrecorded`, or `mixed_scf_rows`, whose SCFs came from several builds)
+      passes, and is counted in the result: {"rows": N, "by_build": {sha: rows}, "unknown": n, "mixed": m}."""
+    listed = listed or {}
     bad = []
+    summary: dict = {"rows": len(rows), "by_build": {}, "unknown": 0, "mixed": 0}
     for i, row in enumerate(rows):
+        sha, basis = row["ferric_git_sha"], row["ferric_build_basis"]
+        if sha is None and basis != D.BASIS_RUN:
+            summary["mixed" if basis == D.BASIS_MIXED else "unknown"] += 1
+        elif sha is not None:
+            summary["by_build"][sha] = summary["by_build"].get(sha, 0) + 1
         found = cores.get(row["input_digest"])
         if found is None:
             continue
         path, rec = found
         ferric = [d for d in rec.dependencies or [] if d.name == "ferric"]
         want = ferric[0].build_sha if ferric else None
-        if row["ferric_git_sha"] != want:
-            ident = ", ".join(str(row[c]) for c in S.IDENTITY_COLUMNS)
+        if basis == D.BASIS_RUN:
+            ok = sha == want
             said = f"lists ferric build_sha {want}" if ferric else "lists no ferric dependency"
-            bad.append(
-                f"row {i} ({ident}): ferric_git_sha {row['ferric_git_sha']}, but run {rec.run_id}'s core record "
-                f"({path}) {said}"
-            )
+        else:
+            used = set(listed.get(row["input_digest"], ())) | ({want} if want else set())
+            ok = sha is None or sha in used
+            said = f"names ferric builds {sorted(used)} (core build_sha and results.builds)"
+        if not ok:
+            ident = ", ".join(str(row[c]) for c in S.IDENTITY_COLUMNS)
+            bad.append(f"row {i} ({ident}): ferric_git_sha {sha}, but run {rec.run_id}'s core record ({path}) {said}")
     if bad:
         more = f" (and {len(bad) - 5} more)" if len(bad) > 5 else ""
         raise DatasetError("the table and the source runs disagree on ferric:\n  " + "\n  ".join(bad[:5]) + more)
+    return summary
 
 
-def _source_runs(paths: list[str | Path]) -> tuple[list[dict], dict[str, tuple[Path, Any]]]:
-    """(`source_runs[]`, input_digest -> (core path, core record)) for every legacy record under `paths`, in order.
+def _source_runs(paths: list[str | Path]) -> tuple[list[dict], dict[str, tuple[Path, Any]], dict[str, set[str]]]:
+    """(`source_runs[]`, input_digest -> (core path, core record), input_digest -> `listed_ferric_shas`) for every
+    legacy record under `paths`, in order.
     A core record is read with attestation-schema's strict reader and must be canonical, so the sha256 of its bytes is
     its `record_digest` (what the lineage resolver matches)."""
     out: list[dict] = []
     cores: dict[str, tuple[Path, Any]] = {}
+    listed: dict[str, set[str]] = {}
     for arg in paths:
         for legacy in D.find_records(arg):
             ref = D.core_record_ref(legacy)
             legacy_rec = json.loads(legacy.read_bytes())
+            listed[legacy_rec["input_digest"]] = listed_ferric_shas(legacy_rec)
             if ref is None:
                 entry = {
                     "run_id": str(legacy_rec["input_digest"])[:12],
@@ -218,7 +253,7 @@ def _source_runs(paths: list[str | Path]) -> tuple[list[dict], dict[str, tuple[P
                 entry = {"run_id": rec.run_id, "family": rec.family, "record_sha256": ref.sha256}
             if entry not in out:
                 out.append(entry)
-    return out, cores
+    return out, cores, listed
 
 
 def _columns(rows: list[dict]) -> list[dict]:
@@ -328,8 +363,8 @@ def export_dataset_dir(
     rows = D.export_rows(paths, canonicalize=canonicalize)
     if not rows:
         raise DatasetError("no rows: none of the runs has a per-pose score to export")
-    source_runs, cores = _source_runs(paths)
-    check_ferric(rows, cores)
+    source_runs, cores, listed = _source_runs(paths)
+    ferric_rows = check_ferric(rows, cores, listed)
     if dataset_id is None:
         campaigns = sorted({r["campaign"] for r in rows})
         if len(campaigns) != 1:
@@ -375,6 +410,8 @@ def export_dataset_dir(
                         # has no slot for the exporter's environment, so it is stated here.
                         "writer": {"pyarrow": metadata.version("pyarrow")},
                         "splits": split_ext,
+                        # What the ferric cross-check could not decide: rows whose build is not recorded
+                        "ferric_rows": ferric_rows,
                     }
                 },
             },
@@ -597,4 +634,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(f"wrote dataset {record.dataset_id} ({record.rows} rows) to {out}")
     print(f"content sha256 {record.content_sha256}")
+    fr = (record.ext.get(EXT) or {}).get("ferric_rows") or {}
+    if fr.get("unknown") or fr.get("mixed"):
+        print(
+            f"ferric build not stated for {fr['unknown'] + fr['mixed']} of {fr['rows']} rows "
+            f"({fr['unknown']} unrecorded, {fr['mixed']} from several builds); see ext.smeltery.ferric_rows",
+            file=sys.stderr,
+        )
     return 0

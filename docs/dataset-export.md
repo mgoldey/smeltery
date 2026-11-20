@@ -39,13 +39,13 @@ unresolved, not as zero.
 | `input_digest`, `record_file`, `campaign`, `started_utc` | from the legacy record (`run-<digest12>.json`) |
 | `record_sha256` | the LEGACY record's self-hash as written (sha256 of its JSON minus this key), not the core record's digest: no core reader resolves it. Null for records that predate it (the committed prebuilt runs do). Not re-verified here: `smeltery verify-run` does that |
 | `smeltery_version`, `smeltery_commit`, `smeltery_dirty` | which smeltery ran |
-| `ferric_version`, `ferric_git_sha`, `ferric_dirty`, `ferric_provenance_level`, `ferric_provenance`, `ferric_source` | which ferric ran. `ferric_git_sha` and `ferric_dirty` are the record's ferric `commit` and `dirty` (from `ferric.__build__` when the build is stamped; null commit for an index release, whose version pins it). `ferric_provenance_level` is `VERIFIED`, `INFERRED` or `UNKNOWN`, the first word of the full `ferric_provenance` label |
+| `ferric_version`, `ferric_git_sha`, `ferric_dirty`, `ferric_provenance_level`, `ferric_provenance`, `ferric_source`, `ferric_build_basis` | which ferric ran, per ROW (see "Ferric per row" below). `ferric_git_sha` and `ferric_dirty` are the record's ferric `commit` and `dirty` (from `ferric.__build__` when the build is stamped; null commit for an index release, whose version pins it). `ferric_provenance_level` is `VERIFIED`, `INFERRED` or `UNKNOWN`, the first word of the full `ferric_provenance` label |
 
 Single-sample standard errors are null (they are NaN in memory).
 
 ## File metadata
 
-Key-value metadata on the Parquet file and the Arrow schema: `smeltery.schema_version` (`2`; bumped when a column is
+Key-value metadata on the Parquet file and the Arrow schema: `smeltery.schema_version` (`3`; bumped when a column is
 added, renamed, removed or retyped -- 2 added `family` and `core_record_sha256` and took `run_id` from the core record), `smeltery.units` (JSON `{quantity: unit}`, a list of units where runs disagree;
 includes `ddE`), `smeltery.smiles_form`, `smeltery.runs` (the run ids, in order), `smeltery.grain` and
 `smeltery.generator`. The schema is built once in `arrow_schema()` and is identical for every export, whatever the
@@ -149,10 +149,38 @@ Written in that order into a staging directory that is renamed onto `DIR` at the
 | `license` | `--license`, an SPDX expression; **null by default**, meaning not stated. Never smeltery's `MIT OR Apache-2.0`: that licenses the code, not a receptor's or ligand set's terms |
 | `ext.smeltery` | `schema_version` (the column layout), `grain`, `units`, `smiles_form`, `generator`, `table` (path, format), `writer` (the pyarrow that wrote the table: its bytes, hence the content digest, depend on it), `splits` (each split's `algorithm_version`, `schema_version`, `parameters`, kind, seed) and, for a later version, `derived_from` (the previous record's digest, content digest, version, and the files added) |
 
-- **ferric cross-check.** Every row's `ferric_git_sha` must equal the `build_sha` of the `ferric` dependency in its
-  run's core record; a mismatch refuses the export, naming each row and run. The committed `danuglipron-halogen`
-  prebuilt run is refused this way: its SCF rows came from two ferric builds, so its core record says ferric
-  `unknown` (no `build_sha`), while the legacy record -- and so the column -- names only the build that finalized it.
+- **ferric cross-check.** A row of a single-build run must equal the `build_sha` of the `ferric` dependency in its
+  run's core record (null included). A row of a mixed-build run is accepted when its sha is one of the builds the run
+  used (the core `build_sha`, or a sha `results.builds` lists) and refused, naming the row and run, when it is not
+  (a tampered or mis-joined row). A row with a null sha passes and is counted in `ext.smeltery.ferric_rows`
+  (`rows`, `by_build`, `unknown`, `mixed`); the CLI prints a stderr line when any row's build is not stated.
+
+### Ferric per row (`schema_version` 3)
+
+`schema_version` 2 copied the legacy record's one `ferric` block onto every row. For a `--temporal` run finalized with
+`allow_mixed_builds` that block names the process that finalized the run, not the ones that measured: the committed
+`danuglipron-halogen` run wrote 111 SCF rows under ferric `b22183b`, 1 under `81f411c`, and 46 with no stamp, its core
+record says ferric `unknown`, and the column said `81f411c` for all 13 candidates -- so the export refused it.
+
+Now a row states the build of ITS OWN SCFs, in `ferric_build_basis`:
+
+| basis | when | `ferric_git_sha` / `dirty` / level |
+|---|---|---|
+| `run_record` | `results.builds` names at most one ferric build (every run but a mixed one) | the record's `ferric` block, as before |
+| `scf_rows` | mixed run; every SCF row of the candidate in `calcs.jsonl` carries the same `build` stamp | that stamp's `git_sha`, `dirty`; `VERIFIED` |
+| `mixed_scf_rows` | mixed run; the candidate's own SCFs came from several builds | null, null, `UNKNOWN`; `ferric_provenance` lists the shas |
+| `unrecorded` | mixed run; any SCF row of the candidate has no stamp, or there is no `calcs.jsonl` beside the record | null, null, `UNKNOWN`; `ferric_provenance` counts the unstamped rows and names the builds the others carry |
+
+`results.builds` carries only counts per build, not which rows, so the per-row identity is read from `calcs.jsonl`
+(the log finalize wrote the record from; each row's `candidate` and `build`). A row is a mean over its candidate's
+poses and legs, so it has a build only when every one of those SCFs does. The mixed-run `ferric_version` is null (a
+stamp has none) and the run-level stamp is never used as a fallback. Today's prebuilt `danuglipron-halogen` therefore
+exports all 13 rows as `unrecorded` (every candidate has unstamped SCFs), reported, not refused.
+
+Why 3 and not a note on 2: `ferric_git_sha` may now be null where it never was, and a reader joining on it must not
+read a null as "an index release" (null also means that for a `run_record` row); `ferric_build_basis` is the column a
+reader checks. A column was added as well, which the rule already counts as a bump. Single-build runs have every
+old value unchanged.
 - **Immutable.** An existing non-empty `DIR` is refused; `write_split` refuses a file inside a dataset directory.
   `smeltery export split KIND DIR -o NEWDIR [--version V]` hard-links (or copies) every file of `DIR` into `NEWDIR`,
   adds the split, and writes a new manifest and record (`version` defaults to the old one plus one when it is a
@@ -202,7 +230,5 @@ record.
    detects the module by import, and the release that ships it must carry a new version (0.2.0) for a floor to mean
    anything.
 
-smeltery-side findings: the `ferric_git_sha` column states one ferric build for a mixed-build run (see the
-cross-check above; such a run cannot be exported as a dataset until the column says what the core record says), and the
-table's metadata includes smeltery's version (`smeltery.generator`), so the same rows exported by another smeltery
+smeltery-side findings: the table's metadata includes smeltery's version (`smeltery.generator`), so the same rows exported by another smeltery
 build have another content digest.
