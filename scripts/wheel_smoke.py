@@ -66,6 +66,14 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "import tempfile; from importlib import resources; from smeltery import dataset_record as r; "
         "assert not r.AVAILABLE; run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
         "assert r.main([str(run), '-o', tempfile.mkdtemp() + '/ds']) == 2",
+        # A Hugging Face folder (card + croissant.json) needs only pyarrow: no huggingface_hub, no datasets, no network.
+        "import json, sys, tempfile; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; from smeltery import hub_export as h; "
+        "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "write_dataset([str(run)], d + '/o.parquet'); out = h.export_hf(d + '/o.parquet', d + '/hf'); "
+        "assert h.verify_folder(out) == [] and 'huggingface_hub' not in sys.modules; "
+        "doc = json.loads((out / 'croissant.json').read_text()); assert 'license' not in doc; "
+        "assert doc['recordSet'][0]['field'][0]['name'] == 'run_id' and (out / 'README.md').is_file()",
     ],
     # A scaffold split and a target split of an exported table, loaded back through ExportDataset as tensors.
     "torch": [
@@ -80,6 +88,17 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "write_split(make_split(d + '/o.parquet', 'target', fractions={'train': 0.5, 'test': 0.5}), d + '/s.json'); "
         "ds = ExportDataset(d + '/o.parquet', features=['score_n'], target='score', split=d + '/s.json', "
         "partition='train'); x, y = ds[0]; assert isinstance(x, torch.Tensor) and len(ds) > 0",
+    ],
+    # `smeltery export hf --push`: the client imports, and a push of a folder written from a run the wheel ships is
+    # planned (a dry run: no token, no network); the folder is re-checked against croissant.json first.
+    "hub": [
+        "import huggingface_hub, pyarrow; from huggingface_hub import HfApi",
+        "import tempfile; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; from smeltery import hub_export as h; "
+        "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "write_dataset([str(run)], d + '/o.parquet'); "
+        "assert h.main([d + '/o.parquet', '-o', d + '/hf', '--license', 'CC0-1.0', '--push', 'owner/name']) == 0; "
+        "plan = h.plan_push(d + '/hf', 'owner/name'); assert plan.url.endswith('/datasets/owner/name'), plan",
     ],
     # Convert a run the wheel ships into its core record and read it back with attestation-schema's own reader. The
     # schema supports Python >= 3.11 (smeltery's floor), so the extra is never empty: this runs on CI's 3.11 too. The

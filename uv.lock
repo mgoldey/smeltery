@@ -2657,6 +2657,10 @@ gui = [
     { name = "plotly" },
     { name = "tomlkit" },
 ]
+hub = [
+    { name = "huggingface-hub" },
+    { name = "pyarrow" },
+]
 mcp = [
     { name = "mcp" },
 ]
@@ -2701,6 +2705,7 @@ requires-dist = [
     { name = "gemmi", marker = "extra == 'docking'" },
     { name = "gemmi", marker = "extra == 'gemmi'" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.13" },
+    { name = "huggingface-hub", marker = "extra == 'hub'", specifier = ">=0.24" },
     { name = "marimo", marker = "extra == 'desktop'", specifier = ">=0.25" },
     { name = "marimo", marker = "extra == 'gui'", specifier = ">=0.25" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3" },
@@ -2725,6 +2730,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4" },
     { name = "psutil", marker = "extra == 'experiments'", specifier = ">=5.9" },
     { name = "pyarrow", marker = "extra == 'dataset'", specifier = ">=15" },
+    { name = "pyarrow", marker = "extra == 'hub'", specifier = ">=15" },
     { name = "pyarrow", marker = "extra == 'torch'", specifier = ">=15" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7" },
@@ -2747,7 +2753,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'bench'", specifier = ">=0.38" },
     { name = "vina", marker = "extra == 'docking'", specifier = ">=1.2.7" },
 ]
-provides-extras = ["aimnet2", "attestation", "bench", "dataset", "desktop", "dev", "docking", "experiments", "gemmi", "gui", "mcp", "ml-potential", "pocket-charges", "pocket-prep", "posebusters", "rdkit", "temporal", "torch"]
+provides-extras = ["aimnet2", "attestation", "bench", "dataset", "desktop", "dev", "docking", "experiments", "gemmi", "gui", "hub", "mcp", "ml-potential", "pocket-charges", "pocket-prep", "posebusters", "rdkit", "temporal", "torch"]
 
 [[package]]
 name = "sse-starlette"
