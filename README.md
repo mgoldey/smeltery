@@ -257,6 +257,7 @@ smeltery and [attestation](https://github.com/mgoldey/attestation) together, so 
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
 | See which ferric versions work, or install a pinned ferric + smeltery + attestation set | [docs/compatibility.md](docs/compatibility.md) |
+| See how ferric, smeltery and attestation fit together | [docs/stack.md](docs/stack.md) |
 | Fix an error message | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Look up a term (ddE, floor, tie group, rung) | [docs/glossary.md](docs/glossary.md) |
 | Check tool and data licences | [docs/licensing.md](docs/licensing.md) |
