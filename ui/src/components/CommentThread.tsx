@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useCanWrite } from "../api/capabilities";
 import { api, unwrap } from "../api/client";
+import { stamp } from "./time";
+import { commentsQuery } from "../api/queries";
 
 /** Comments anchored to the run, a candidate (`candidate:<name>`) or a pose (`pose:<name>:<i>`). Text is text. */
 export function CommentThread({
@@ -15,15 +17,7 @@ export function CommentThread({
 }) {
   const qc = useQueryClient();
   const canWrite = useCanWrite();
-  const all = useQuery({
-    queryKey: ["comments", runId],
-    queryFn: () =>
-      unwrap(
-        api.GET("/api/runs/{run_id}/comments", {
-          params: { path: { run_id: runId } },
-        }),
-      ),
-  });
+  const all = useQuery(commentsQuery(runId));
   const [body, setBody] = useState("");
   const add = useMutation({
     mutationFn: () =>
@@ -48,7 +42,7 @@ export function CommentThread({
             <li key={c.id}>
               <span className="comment-author">{c.author}</span>{" "}
               <span className="lede">
-                {c.created_at.replace("T", " ").replace("Z", "")}
+                {stamp(c.created_at)}
               </span>
               <p>{c.body}</p>
             </li>

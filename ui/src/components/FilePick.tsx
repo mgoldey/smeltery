@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
+import { api, unwrap, type Schemas } from "../api/client";
 import { ApiError, reasonOf } from "../api/http";
 
 /** Upload one file into the pipeline folder; the server answers with the name to write into the config. */
@@ -10,7 +11,7 @@ export async function uploadToPipeline(pipeline: string, file: File): Promise<st
     body: file,
   });
   if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
-  return ((await res.json()) as { path: string }).path;
+  return ((await res.json()) as Schemas["AddedFile"]).path;
 }
 
 function fmtSize(n: number): string {
@@ -44,11 +45,7 @@ export function FilePick({
   const existing = useQuery({
     queryKey: ["pipeline-files", pipeline],
     staleTime: Infinity, // uploading invalidates it
-    queryFn: async () => {
-      const res = await fetch(`/api/pipelines/${encodeURIComponent(pipeline)}/files`);
-      if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
-      return (await res.json()) as { name: string; size: number; mtime: string; sha256: string }[];
-    },
+    queryFn: () => unwrap(api.GET("/api/pipelines/{name}/files", { params: { path: { name: pipeline } } })),
   });
   const here = (existing.data ?? []).filter((f) => exts.some((e) => f.name.toLowerCase().endsWith(e)));
 

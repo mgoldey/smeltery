@@ -1,7 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getJson } from "./workspace/views/PosesView";
-
-type CalcLines = { file: string | null; pose: number; lines: Record<string, unknown>[] };
+import { api, unwrap } from "../api/client";
 
 /**
  * "2 legs, 2 converged (3 SCF attempts)". /calcs has one line per remedy-ladder rung and outcome lines (an `outcome`
@@ -35,7 +33,12 @@ export function ScfLog({
 }) {
   const log = useQuery({
     queryKey: ["calcs", runId, candidate, position],
-    queryFn: () => getJson<CalcLines>(`/api/runs/${runId}/calcs?candidate=${encodeURIComponent(candidate)}&pose=${position}`),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/runs/{run_id}/calcs", {
+          params: { path: { run_id: runId }, query: { candidate, pose: position } },
+        }),
+      ),
   });
   if (log.isError) return <div className="banner" role="alert">{log.error.message}</div>;
   if (!log.data) return <p className="lede">Loading the SCF log.</p>;

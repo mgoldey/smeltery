@@ -133,9 +133,16 @@ export function latestRunOfPipeline(name: string, runs: RunSummary[] | undefined
   return dated.reduce((best, r) => (outName(r.path) > outName(best.path) ? r : best));
 }
 
+/** `/pipelines/<name>`, then `?run=<id>` and `step=<key>` in that order when given; every part encoded. */
+export function pipelineUrl(name: string, opts: { run?: string | null; step?: string | null } = {}): string {
+  const q: string[] = [];
+  if (opts.run) q.push(`run=${encodeURIComponent(opts.run)}`);
+  if (opts.step) q.push(`step=${encodeURIComponent(opts.step)}`);
+  const at = `/pipelines/${encodeURIComponent(name)}`;
+  return q.length ? `${at}?${q.join("&")}` : at;
+}
+
 /** `/pipelines/<name>`, with `?run=` when that pipeline has a run of its own to show its steps from. */
 export function pipelineHref(name: string, runs: RunSummary[] | undefined): string {
-  const run = latestRunOfPipeline(name, runs);
-  const at = `/pipelines/${encodeURIComponent(name)}`;
-  return run ? `${at}?run=${encodeURIComponent(run.id)}` : at;
+  return pipelineUrl(name, { run: latestRunOfPipeline(name, runs)?.id });
 }

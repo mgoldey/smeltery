@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrap } from "../../api/client";
 import { PoseExplorer } from "../../components/PoseExplorer";
 import { useRunId } from "./RunLayout";
+import { runQuery } from "../../api/queries";
 
 export function Poses() {
   const runId = useRunId();
-  const detail = useQuery({ queryKey: ["run", runId], queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })) });
+  const detail = useQuery(runQuery(runId));
   return (
     <div className="body">
       <main className="work">

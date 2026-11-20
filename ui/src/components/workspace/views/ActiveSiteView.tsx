@@ -1,32 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, reasonOf } from "../../../api/http";
-import type { Schemas } from "../../../api/client";
+import { api, unwrap, type Schemas } from "../../../api/client";
 import { MolstarViewer } from "../../MolstarViewer";
 import { receptorScene } from "../../scenes";
 import type { StepViewProps } from "./registry";
 import { FilePick } from "../../FilePick";
+import { StructureSummary } from "../../StructureSummary";
+import { parseVec3 } from "../../paramValue";
 
-/** Response types of the two routes this view calls; typed here until the API schema is regenerated. */
-type Preview = {
-  n_charges: number;
-  net_charge: number;
-  nearest_ang: number | null;
-  scene: Record<string, unknown> | null;
-  source: string;
-};
 type Opened = Schemas["StructureInfo"];
-type Choice = "structure" | "pocket_file" | "hand_placed";
-
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new ApiError(res.status, await reasonOf(res));
-  return (await res.json()) as T;
-}
+type Choice = Schemas["ActiveSiteChoice"]["choice"];
+/** One switch of the active site, as the route takes it less the draft (added when it is sent). */
+type Switch = Omit<Schemas["ActiveSiteChoice"], "toml" | "allow_network">;
 
 /** Which of the three ways the draft is written in. */
 export function chosen(toml: string): Choice {
@@ -35,14 +20,6 @@ export function chosen(toml: string): Choice {
   if (pocket && /^file\s*=/m.test(pocket[1] ?? "")) return "pocket_file";
   return "hand_placed";
 }
-
-const vec = (s: string): number[] | undefined => {
-  const v = s
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map(Number);
-  return v.length === 3 && v.every(Number.isFinite) ? v : undefined;
-};
 
 const WATER = new Set(["HOH", "WAT", "H2O", "DOD"]);
 
@@ -84,36 +61,6 @@ export function tomlValue(toml: string, table: string, key: string): string {
   return quoted ? (quoted[1] ?? "") : raw.replace(/\s*#.*$/, "").trim();
 }
 
-/** Compact validation summary of the opened PDB; anything worth a second look is flagged as a warning. */
-function StructureChecks({ info }: { info: Opened }) {
-  const chains = Object.entries(info.chains ?? {});
-  const flags = [
-    ...(info.warnings ?? []),
-    ...(info.missing_residues
-      ? [`${info.missing_residues} residue(s) listed missing in REMARK 465`]
-      : []),
-    ...((info.possible_gaps ?? []).length
-      ? [`possible numbering gaps: ${(info.possible_gaps ?? []).join("; ")}`]
-      : []),
-  ];
-  return (
-    <div data-testid="structure-checks">
-      <p className="lede">
-        Chains:{" "}
-        {chains.map(([c, n]) => `${c} (${n} residues)`).join(", ") || "none"} ·{" "}
-        {info.n_hetatm ?? 0} HETATM
-      </p>
-      {flags.length ? (
-        <ul role="alert" data-testid="structure-warnings">
-          {flags.map((w) => (
-            <li key={w}>Warning: {w}</li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
 export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   const current = chosen(toml);
   const [error, setError] = useState<string | null>(null);
@@ -151,24 +98,25 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   }, [toml]);
 
   const sites = (toml.match(/^\[\[pocket\.site\]\]/gm) ?? []).length;
-  const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
+  const [confirm, setConfirm] = useState<Switch | null>(null);
   const [way, setWay] = useState<Choice>(current);
   useEffect(() => setWay(current), [current]);
 
   /** A switch that would drop hand-placed charges waits for a yes, saying how many go. */
-  const ask = (body: Record<string, unknown>) => {
+  const ask = (body: Switch) => {
     if (sites > 0 && body.choice !== "hand_placed") setConfirm(body);
     else void write(body);
   };
 
-  const write = async (body: Record<string, unknown>) => {
+  const write = async (body: Switch) => {
     setConfirm(null);
     setBusy(true);
     try {
-      const r = await post<{ toml: string }>("/api/pipelines/active_site", {
-        toml,
-        ...body,
-      });
+      const r = await unwrap(
+        api.POST("/api/pipelines/active_site", {
+          body: { toml, allow_network: false, ...body },
+        }),
+      );
       setError(null);
       onToml(r.toml);
     } catch (e) {
@@ -182,11 +130,15 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
     const from = which ?? source;
     setBusy(true);
     try {
-      const r = await post<Opened>("/api/structure", {
-        source: from,
-        allow_network: false,
-        pipeline, // a relative spec is read from the pipeline folder, as the run reads it
-      });
+      const r = await unwrap(
+        api.POST("/api/structure", {
+          body: {
+            source: from,
+            allow_network: false,
+            pipeline, // a relative spec is read from the pipeline folder, as the run reads it
+          },
+        }),
+      );
       setInfo(r);
       setLigand(r.dropped.find((d) => !WATER.has(d)) ?? "");
       setError(null);
@@ -202,7 +154,7 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
   const preview = useQuery({
     queryKey: ["pocket_preview", pipeline, toml],
     queryFn: () =>
-      post<Preview>("/api/pipelines/pocket_preview", { toml, pipeline }),
+      unwrap(api.POST("/api/pipelines/pocket_preview", { body: { toml, pipeline } })),
     enabled: hasField,
     retry: false,
     staleTime: Infinity,
@@ -219,7 +171,7 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
       {label}
     </label>
   );
-  const center = vec(boxCenter);
+  const center = parseVec3(boxCenter);
   const structureReady =
     info !== null && ligand !== "" && Number.isFinite(Number(cutoff));
 
@@ -259,13 +211,7 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
           </button>
           {info ? (
             <div>
-              <p className="lede">
-                <span className="mono" data-testid="active-site-sha">
-                  {info.sha256.slice(0, 12)}
-                </span>{" "}
-                · {info.origin} · {info.n_atoms} atoms
-              </p>
-              <StructureChecks info={info} />
+              <StructureSummary info={info} compact />
               <MolstarViewer
                 state={receptorScene(info.file_url)}
                 label="active site structure"
@@ -335,14 +281,14 @@ export function ActiveSiteView({ pipeline, toml, onToml }: StepViewProps) {
           <Field label="Box size (Å)" value={boxSize} onChange={setBoxSize} />
           <button
             type="button"
-            disabled={busy || !file || !receptor || !center || !vec(boxSize)}
+            disabled={busy || !file || !receptor || !center || !parseVec3(boxSize)}
             onClick={() =>
               ask({
                 choice: "pocket_file",
                 file,
                 receptor,
                 box_center: center,
-                box_size: vec(boxSize),
+                box_size: parseVec3(boxSize),
               })
             }
           >

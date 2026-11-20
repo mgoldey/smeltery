@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { api, unwrap, type Schemas } from "../api/client";
+import type { Schemas } from "../api/client";
 import { MolstarViewer } from "./MolstarViewer";
+import { NoPoseOutput, PosePicker, useScene } from "./PosePicker";
 import { ScfLog } from "./ScfLog";
 
 /** A candidate's pose in the site, with selectors, the pairing stated, and an optional per-pose footer. */
@@ -21,55 +21,28 @@ export function PoseExplorer({
   const [showLog, setShowLog] = useState(false);
   const chosen = candidate ?? detail.analogues[0] ?? null;
   const nPoses = chosen ? (detail.n_poses[chosen] ?? 0) : 0;
-  const scene = useQuery({
-    queryKey: ["scene", runId, chosen, pose],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/scene", { params: { path: { run_id: runId }, query: { candidate: chosen ?? "", pose } } })),
-    enabled: Boolean(detail.has_pose_output && chosen),
-  });
-  if (!detail.has_pose_output) {
-    return (
-      <div className="banner" role="alert">
-        This run record predates pose output, so it has no poses to show. Re-run it with this version of smeltery to see
-        them.
-      </div>
-    );
-  }
+  const scene = useScene(runId, chosen ?? "", pose, { enabled: Boolean(detail.has_pose_output && chosen) });
+  if (!detail.has_pose_output) return <NoPoseOutput />;
   if (!chosen) return null;
   return (
     <>
-      <div className="controls">
-        <div>
-          <label htmlFor={`${label}-candidate`}>Candidate</label>
-          <select
-            id={`${label}-candidate`}
-            value={chosen}
-            onChange={(e) => {
-              setCandidate(e.target.value);
-              setPose(0);
-              setShowLog(false);
-            }}
-          >
-            {detail.analogues.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor={`${label}-pose`}>Pose</label>
-          <select id={`${label}-pose`} value={pose} onChange={(e) => {
-              setPose(Number(e.target.value));
-              setShowLog(false);
-            }}>
-            {Array.from({ length: nPoses }, (_, i) => (
-              <option key={i} value={i}>
-                {i}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      <PosePicker
+        candidates={detail.analogues}
+        candidate={chosen}
+        pose={pose}
+        nPoses={nPoses}
+        onCandidate={(c) => {
+          setCandidate(c);
+          setPose(0);
+          setShowLog(false);
+        }}
+        onPose={(p) => {
+          setPose(p);
+          setShowLog(false);
+        }}
+        candidateLabel="Candidate"
+        ids={{ candidate: `${label}-candidate`, pose: `${label}-pose` }}
+      />
       <p className="pairing" data-testid="pairing">
         Pose {pose} of {chosen} is paired to pose {pose} of {detail.parent}, shown muted. Charges are drawn as spheres:
         positive and negative by colour.

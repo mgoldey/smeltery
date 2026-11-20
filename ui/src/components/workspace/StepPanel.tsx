@@ -80,6 +80,14 @@ function offer(m: MethodInfo, step: Step): "add" | "choose" | null {
   return m.exclusive.some((o) => step.placed.includes(o)) ? "choose" : "add";
 }
 
+/** Without a run the user is configuring, so Method gets the room. With one, View shows what the step produced (a
+ * plot, a table, a 3D pose) and gets the largest share. A width the user dragged to still wins (`ResizableColumns`). */
+const CONFIGURING = [0.75, 1.5, 0.75];
+const READING = [0.6, 0.9, 1.5];
+export function stepColumnDefaults(sourceRun: string | null): number[] {
+  return sourceRun === null ? CONFIGURING : READING;
+}
+
 /**
  * One step edited in place: what flows in and out (Inputs), the method choice and every knob with its own help
  * (Method), and the step's output (View). Every edit goes to the API, which writes it into the TOML text.
@@ -122,7 +130,7 @@ export function StepPanel({
         </h2>
         <span className="say">{step.summary}</span>
       </div>
-      <ResizableColumns storageKey="step-cols" defaults={[0.75, 1.5, 0.75]} minPx={170} className="step-cols">
+      <ResizableColumns storageKey="step-cols" defaults={stepColumnDefaults(sourceRun)} minPx={170} className="step-cols">
         <section aria-label="Inputs">
           <h3>Inputs</h3>
           {step.key === "ligands" && ligands ? (

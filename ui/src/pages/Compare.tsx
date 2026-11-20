@@ -1,18 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, unwrap } from "../api/client";
+import { api, hasResult, unwrap, verdictLabel } from "../api/client";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { EmptyState } from "../components/EmptyState";
 import { useScheme } from "../styles/scheme";
 import { Shell } from "../components/Shell";
 import { runLabel } from "../components/runIdentity";
+import { runsQuery } from "../api/queries";
 
 const withSem = (v: number, sem: number | null) => (sem === null ? v.toFixed(2) : `${v.toFixed(2)} ± ${sem.toFixed(2)}`);
 
 /** Two runs as arms, differenced per key. Arms are chosen, never inferred: guessing is how a comparison becomes a
  * pooling of unlike things. */
 export function Compare() {
-  const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+  const runs = useQuery(runsQuery());
   // The arms live in the URL, not in component state. That is what lets a run link into a comparison already
   // holding it ("Compare with another run"), and what makes a comparison worth sending to a colleague.
   const [params, setParams] = useSearchParams();
@@ -32,7 +33,7 @@ export function Compare() {
     queryFn: () => unwrap(api.GET("/api/compare", { params: { query: { a: a!, b: b!, theme } } })),
     enabled: a !== null && b !== null,
   });
-  const usable = (runs.data ?? []).filter((r) => r.verdict && r.verdict.state !== "INCOMPLETE");
+  const usable = (runs.data ?? []).filter((r) => hasResult(r.verdict));
   const pick = (set: (v: string | null) => void) => (v: string) => set(v === "" ? null : v);
   return (
     <Shell>
@@ -60,7 +61,7 @@ export function Compare() {
                       directory names which round it is; the verdict stays, since an arm's state matters. */}
                   {usable.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {runLabel(r)} ({r.verdict?.state.toLowerCase()})
+                      {runLabel(r)} ({verdictLabel(r.verdict)})
                     </option>
                   ))}
                 </select>

@@ -8,6 +8,7 @@ import type { StepViewProps } from "./registry";
 import { DroppedPoses } from "../../DroppedPoses";
 import { ScfLog } from "../../ScfLog";
 import { CorePose, NotRun, useRunDetail } from "./PosesView";
+import { droppedPosesQuery, figureQuery, perPoseQuery } from "../../../api/queries";
 
 
 export type Sensitivity = components["schemas"]["ModelSensitivity"];
@@ -155,27 +156,14 @@ export function MeasureView({ sourceRun }: StepViewProps) {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [showLog, setShowLog] = useState(false);
   const detail = useRunDetail(sourceRun);
-  const figure = useQuery({
-    queryKey: ["figure", runId, "per_pose_values", theme],
-    queryFn: () =>
-      unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name: "per_pose_values" }, query: { theme } } })),
-    enabled: sourceRun !== null,
-  });
-  const rows = useQuery({
-    queryKey: ["per_pose", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/per_pose", { params: { path: { run_id: runId } } })),
-    enabled: sourceRun !== null,
-  });
+  const figure = useQuery({ ...figureQuery(runId, "per_pose_values", theme), enabled: sourceRun !== null });
+  const rows = useQuery({ ...perPoseQuery(runId), enabled: sourceRun !== null });
   const sensitivity = useQuery({
     queryKey: ["charge_sensitivity", runId],
     queryFn: () => unwrap(api.GET("/api/runs/{run_id}/charge_sensitivity", { params: { path: { run_id: runId } } })),
     enabled: sourceRun !== null,
   });
-  const drops = useQuery({
-    queryKey: ["dropped_poses", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/dropped_poses", { params: { path: { run_id: runId } } })),
-    enabled: sourceRun !== null,
-  });
+  const drops = useQuery({ ...droppedPosesQuery(runId), enabled: sourceRun !== null });
   useClicks(host, (p) => {
     setPicked(p);
     setShowLog(false);

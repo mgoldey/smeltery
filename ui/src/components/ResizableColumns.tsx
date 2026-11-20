@@ -5,6 +5,9 @@ import { Children, useCallback, useRef, useState, type KeyboardEvent, type Point
  * proportions when the window resizes; `minPx` stops a column being dragged shut. The weights are remembered per
  * `storageKey` in this browser only (a per-viewer convenience: they never reach the pipeline or the server).
  * Each divider is a focusable separator: arrow keys move it, double-click or Home puts the defaults back.
+ *
+ * A stored choice always wins over `defaults`. Until the user makes one, the columns follow `defaults` as it changes
+ * (a page may want different proportions for different content), and putting the defaults back forgets the choice.
  */
 export function ResizableColumns({
   storageKey,
@@ -21,12 +24,16 @@ export function ResizableColumns({
 }) {
   const cols = Children.toArray(children);
   const key = `smeltery.cols.${storageKey}`;
-  const [weights, setWeights] = useState<number[]>(() => load(key, defaults));
+  // `chosen`: the user's saved widths, null when they have made no choice. `dragging`: widths mid-gesture.
+  const [chosen, setChosen] = useState<number[] | null>(() => load(key, defaults.length));
+  const [dragging, setDragging] = useState<number[] | null>(null);
+  const weights = dragging ?? chosen ?? defaults;
   const host = useRef<HTMLDivElement>(null);
 
   const save = useCallback(
     (w: number[]) => {
-      setWeights(w);
+      setChosen(w);
+      setDragging(null);
       try {
         localStorage.setItem(key, JSON.stringify(w));
       } catch {
@@ -35,6 +42,16 @@ export function ResizableColumns({
     },
     [key],
   );
+
+  const reset = useCallback(() => {
+    setChosen(null);
+    setDragging(null);
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // storage blocked: nothing was remembered to forget
+    }
+  }, [key]);
 
   /** Move divider `i` (between column i and i+1) by `dx` pixels, keeping both columns at least `minPx` wide. */
   const shift = useCallback(
@@ -69,21 +86,28 @@ export function ResizableColumns({
     // taken over) cannot leave a stale handler that later saves a width from an old starting point.
     const stop = new AbortController();
     const { signal } = stop;
-    const move = (ev: globalThis.PointerEvent) => setWeights(shift(base, i, ev.clientX - start));
+    const move = (ev: globalThis.PointerEvent) => setDragging(shift(base, i, ev.clientX - start));
     const up = (ev: globalThis.PointerEvent) => {
       stop.abort();
       save(shift(base, i, ev.clientX - start));
     };
     target.addEventListener("pointermove", move, { signal });
     target.addEventListener("pointerup", up, { signal });
-    target.addEventListener("pointercancel", () => stop.abort(), { signal });
+    target.addEventListener(
+      "pointercancel",
+      () => {
+        stop.abort();
+        setDragging(null);
+      },
+      { signal },
+    );
   };
 
   const onKeyDown = (i: number) => (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.shiftKey ? 80 : 20;
     if (e.key === "ArrowLeft") save(shift(weights, i, -step));
     else if (e.key === "ArrowRight") save(shift(weights, i, step));
-    else if (e.key === "Home") save(defaults);
+    else if (e.key === "Home") reset();
     else return;
     e.preventDefault();
   };
@@ -99,7 +123,7 @@ export function ResizableColumns({
           now={Math.round((100 * weights.slice(0, i + 1).reduce((a, b) => a + b, 0)) / total)}
           onPointerDown={onPointerDown(i)}
           onKeyDown={onKeyDown(i)}
-          onReset={() => save(defaults)}
+          onReset={reset}
         >
           {c}
         </ColumnWithDivider>
@@ -151,14 +175,15 @@ function colsWidth(el: HTMLElement, n: number): number {
   return el.getBoundingClientRect().width - 7 * Math.max(n - 1, 0);
 }
 
-function load(key: string, defaults: number[]): number[] {
+/** The widths stored under `key`, or null when there are none (or they do not fit `n` columns). */
+function load(key: string, n: number): number[] | null {
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return defaults;
+    if (!raw) return null;
     const w = JSON.parse(raw);
-    if (Array.isArray(w) && w.length === defaults.length && w.every((x) => typeof x === "number" && x > 0)) return w;
+    if (Array.isArray(w) && w.length === n && w.every((x) => typeof x === "number" && x > 0)) return w;
   } catch {
     // unreadable or blocked storage: fall back to the defaults
   }
-  return defaults;
+  return null;
 }
