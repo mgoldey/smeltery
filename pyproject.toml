@@ -106,6 +106,11 @@ dataset = ["pyarrow>=15"]
 # users do not pull torch, and it repeats pyarrow so `smeltery[torch]` alone is enough. Splits (smeltery.dataset_splits)
 # need only `dataset`; torch is imported when ExportDataset(tensors=True) is built.
 torch = ["torch>=2", "pyarrow>=15"]
+# `smeltery export hf ... --push REPO_ID --confirm` (smeltery.hub_export, docs/dataset-export.md): upload the Hugging
+# Face folder. Writing the folder (card, croissant.json, partition Parquet files) needs only pyarrow, so `export hf`
+# works with the `dataset` extra alone; huggingface_hub is imported only by the upload. pyarrow is repeated so
+# `smeltery[hub]` alone is enough. 0.24 is the floor for HfApi.create_repo(exist_ok=...) + upload_folder as used.
+hub = ["huggingface_hub>=0.24", "pyarrow>=15"]
 # The core run record (`attestation.run/1`, frozen at attestation 9fb7eed; smeltery.core_record, docs/core-record.md): a second record beside
 # OUT/run-<digest12>.json, written through attestation-schema's own writer. smeltery depends on the stdlib-only schema
 # distribution, never on `attestation` itself. attestation-schema 0.1.0 is published on PyPI (content-identical to

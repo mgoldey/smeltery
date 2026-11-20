@@ -258,22 +258,8 @@ def _source_runs(paths: list[str | Path]) -> tuple[list[dict], dict[str, tuple[P
 
 def _columns(rows: list[dict]) -> list[dict]:
     """`columns[]` from `arrow_schema()`; a unit on the score and paired-ddE columns only when one holds for all."""
-    score_units = {r["score_unit"] for r in rows if r["score"] is not None}
-    paired_units = {r["score_unit"] for r in rows if r["paired_ddE"] is not None}
-    one = {
-        "score": score_units,
-        "score_sem": score_units,
-        "score_floor": score_units,
-        "paired_ddE": paired_units,
-        "paired_ddE_sem": paired_units,
-        "paired_ddE_floor": paired_units,
-    }
-    out = []
-    for field in D.arrow_schema():
-        units = one.get(field.name, set())
-        unit = next(iter(units)) if len(units) == 1 else None
-        out.append({"name": field.name, "type": str(field.type), "unit": unit})
-    return out
+    units = D.column_units(rows)
+    return [{"name": f.name, "type": str(f.type), "unit": units.get(f.name)} for f in D.arrow_schema()]
 
 
 def _split_ext(doc: dict) -> dict:

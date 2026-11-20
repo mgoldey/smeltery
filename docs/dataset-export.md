@@ -232,3 +232,76 @@ record.
 
 smeltery-side findings: the table's metadata includes smeltery's version (`smeltery.generator`), so the same rows exported by another smeltery
 build have another content digest.
+
+## Hugging Face Hub and Croissant (`export hf`)
+
+`export hf` turns an export into a folder the Hugging Face `datasets` library and the Hub read, with a dataset card and
+[Croissant 1.0](http://mlcommons.org/croissant/1.0) JSON-LD. It writes files only: pyarrow (the `dataset` extra) is
+all it needs -- no network, no `datasets`, no `huggingface_hub`. Uploading is a separate, opt-in step behind the `hub`
+extra.
+
+```bash
+smeltery export hf datasets/ddE/1 -o hf/ddE-1                       # a dataset directory (its record, splits, license)
+smeltery export hf runs.parquet -o hf/runs --split split-target.json --license CC-BY-4.0     # or a bare table
+pip install 'smeltery[hub]'                                          # huggingface_hub, for the upload only
+smeltery export hf datasets/ddE/1 -o hf/ddE-1 --push owner/ddE       # a dry run: lists what would be uploaded
+smeltery export hf push hf/ddE-1 owner/ddE --confirm                 # uploads (token: HF_TOKEN or `hf auth login`)
+```
+
+```
+OUT/dataset/runs.parquet                       the table, byte for byte (hard-linked or copied)
+OUT/dataset/splits/<name>.json                 each split file, byte for byte
+OUT/dataset/attestation/{digests,dataset}.json the dataset record, byte for byte (dataset-directory input only)
+OUT/data/<split>/<partition>.parquet           each split's partitions (train, valid, test) as Parquet
+OUT/croissant.json                             Croissant 1.0: every file with its sha256, one RecordSet, provenance
+OUT/README.md                                  the dataset card: YAML front matter, then generated sections
+```
+
+The source sits under `OUT/dataset/` unchanged, so a dataset directory is still a conformant one there
+(`attestation_schema.conformance.check_dataset_dir(OUT / "dataset")`): the check refuses files its manifest does not
+list, which the card and the partition files would be if they sat beside it.
+
+- **Generated, deterministic.** Card and croissant.json are built from the table, its schema metadata and the dataset
+  record; nothing is written by hand or by a model, and there is no timestamp or path in them. The same input writes
+  byte-identical files (`tests/test_hub_export.py`). The partition files are written by pyarrow and, like the table,
+  their bytes depend on its version.
+- **Card front matter**: `license` (only when one is stated), `pretty_name`, `tags`, `size_categories`, `configs` and
+  `dataset_info.features` (the `datasets` spelling of `arrow_schema()`, pinned to `Features.from_arrow_schema`). The
+  `default` config is the whole table as one split named `full` -- not `train`, since nothing was held out -- and each
+  smeltery split is a config of its own name whose splits are its partitions. Body: license, loading example,
+  configurations with row counts, every column with type, unit and meaning, the quantities' units, provenance, every
+  file with its sha256, and the limits above.
+- **croissant.json**: the spec's `@context` plus `prov` (W3C PROV); one `cr:RecordSet` `runs` whose `cr:Field`s are
+  exactly the Parquet columns (read with `extract.column`; `scores` is `repeated` with one `subField` per struct
+  member), `dataType` `sc:Text`/`sc:Float`/`sc:Integer`/`sc:Boolean`, and `unitText` on the score and paired-ddE
+  columns where ONE unit holds for every row (`dataset_export.column_units`, the rule the dataset record's
+  `columns[].unit` uses); `distribution` is one `cr:FileObject` per file with `sha256` and `contentSize`. mlcroissant
+  validates it with no errors and reads every row back (tested when mlcroissant is installed); it warns that
+  `citeAs` and `datePublished` are missing, which smeltery cannot know.
+- **Digests are the export's own.** A dataset directory is checked first (every file's sha256 and size against its
+  record; the full conformance check when attestation-schema >= 0.2.0 is installed) and croissant.json carries the
+  sha256 the record states -- `dataset/attestation/digests.json`'s is the content digest, also the document's
+  `identifier`. A bare table is hashed. Every copied file is re-hashed in the staging folder before it is published.
+- **License, never invented.** `--license` (SPDX) or the record's `license`; both given and different is refused.
+  Neither: the card says **Not stated**, the front matter has no `license` key, croissant.json has no `license`, and a
+  push refuses. A Hugging Face license id is used when the SPDX id is one (`CC-BY-4.0` -> `cc-by-4.0`); any other
+  expression is `license: other` plus `license_name`, with the exact expression in the card and in croissant.json
+  (a single id as its spdx.org URL).
+- **Provenance from the table**: per source run, `run_id`, `family`, the core record's sha256 (`core_record_sha256`;
+  none is invented for a run without one), and the ferric builds its rows state with their row counts; rows whose
+  build is not recorded are counted by `ferric_build_basis` (the prebuilt `danuglipron-halogen` run: `unrecorded`, 13
+  rows, no build claimed). In croissant.json each run is a `prov:Entity` in `prov:wasDerivedFrom`, generated by a
+  `prov:Activity` associated with each ferric build (`prov:SoftwareAgent`, `identifier` = the git sha).
+- **Push** (`--push OWNER/NAME` at export, or `export hf push FOLDER OWNER/NAME`). A dry run unless `--confirm`. The
+  repository id must be given in full (nothing is pushed to a default namespace) and must be the one the folder was
+  written for (it is croissant.json's `url` and the card's loading example). Before uploading, every file is
+  re-checked against croissant.json (a changed or undescribed file refuses), and a folder with no stated license
+  refuses. The token is huggingface_hub's own resolution (`HF_TOKEN`, or the cached `hf auth login`), never an
+  argument. `create_repo(repo_type="dataset", exist_ok=True)` then `upload_folder`; `--private` creates it private.
+  Tests drive it with a fake client, never the network.
+- **Parquet only.** An Arrow table (`--format arrow`) is refused: the layout's configs and croissant.json read Parquet.
+
+Gaps: the split partitions are separate Parquet files listed in croissant.json's `distribution`, but its RecordSet
+describes the whole table only (no `cr:Split` record set); each partition file carries the full table's
+`smeltery.runs` metadata, not only the runs in that partition; `scores` elements carry their own unit, so `unitText`
+on `scores/value` is set only when every element of every row shares one.

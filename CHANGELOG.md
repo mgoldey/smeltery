@@ -8,6 +8,15 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- `smeltery export hf SRC -o OUT` (`smeltery.hub_export`, docs/dataset-export.md): a Hugging Face–loadable folder from a
+  dataset directory or a Parquet export -- the source byte for byte under `OUT/dataset/`, each split's partitions as
+  Parquet, a generated dataset card (`README.md`: license when stated, `configs`, `dataset_info.features`, columns with
+  units, provenance) and `croissant.json` (Croissant 1.0: a FileObject per file with the export's own sha256, a
+  RecordSet whose fields are the Parquet columns, W3C PROV naming each source run, its core-record sha256 and the
+  ferric builds its rows state). Needs pyarrow only; the license is never invented (`--license`, else the record's,
+  else "not stated"). `--push OWNER/NAME` (new `hub` extra, huggingface_hub) is a dry run unless `--confirm`, re-checks
+  every file against croissant.json and refuses a folder with no stated license; `export hf push FOLDER OWNER/NAME`
+  uploads one written earlier.
 - `smeltery export dataset RUN... -o DIR` (`smeltery.dataset_record`, docs/dataset-export.md): a dataset DIRECTORY
   with an `attestation.dataset/1` record (draft schema) -- the table, its `--split`s, then `attestation/digests.json`
   (whose sha256 is the content digest), then `attestation/dataset.json` naming each source run's core record by the

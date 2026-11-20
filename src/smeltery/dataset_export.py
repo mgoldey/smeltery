@@ -626,6 +626,23 @@ def file_metadata(rows: list[dict]) -> dict[str, str]:
     }
 
 
+def column_units(rows: list[dict]) -> dict[str, str | None]:
+    """Column -> unit for the score and paired-ddE value columns (value, sem, floor): the unit when ONE holds for every
+    row that has a value, else None (the row's own `score_unit` states it). Every other column has no unit. The one
+    rule behind a dataset record's `columns[].unit` and the Hugging Face card / Croissant fields."""
+    score_units = {r["score_unit"] for r in rows if r["score"] is not None}
+    paired_units = {r["score_unit"] for r in rows if r["paired_ddE"] is not None}
+    one = {
+        "score": score_units,
+        "score_sem": score_units,
+        "score_floor": score_units,
+        "paired_ddE": paired_units,
+        "paired_ddE_sem": paired_units,
+        "paired_ddE_floor": paired_units,
+    }
+    return {c: next(iter(u)) if len(u) == 1 else None for c, u in one.items()}
+
+
 def to_table(rows: list[dict]):
     """A pyarrow Table of `rows` under `arrow_schema()`, with the file metadata attached."""
     pa = _pyarrow()
@@ -672,6 +689,10 @@ def main(argv: list[str] | None = None) -> int:
         from .dataset_splits import main as split_main
 
         return split_main(argv[1:])
+    if argv[:1] == ["hf"]:  # `smeltery export hf ...`: a Hugging Face folder with its card and croissant.json
+        from .hub_export import main as hf_main
+
+        return hf_main(argv[1:])
     if argv[:1] == ["dataset"]:  # `smeltery export dataset ...`: a dataset directory with its attestation.dataset/1
         from .dataset_record import main as dataset_main
 
@@ -685,7 +706,7 @@ def main(argv: list[str] | None = None) -> int:
         "format",
         choices=FORMATS,
         help="parquet, or arrow (the Arrow IPC file format); `split` is `export split --help`, a dataset directory "
-        "with its record is `export dataset --help`",
+        "with its record is `export dataset --help`, a Hugging Face folder is `export hf --help`",
     )
     ap.add_argument("runs", nargs="+", help="run OUT directories or run-*.json files; several are concatenated")
     ap.add_argument("-o", "--out", required=True, help="the file to write")
