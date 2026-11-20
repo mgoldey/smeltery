@@ -164,20 +164,6 @@ class Issue(BaseModel):
     message: str
 
 
-class PipelineState(BaseModel):
-    toml: str
-    ok: bool
-    issues: list[Issue]
-    stages: list[dict[str, Any]] = Field(description="Pipeline.view(): stages as smeltery run executes them")
-    placed: list[str] = Field(description="the stages the user placed, in their order")
-    params: dict[str, dict[str, Any]] = Field(description="knobs the user set, per placed stage")
-    addable: list[str]
-    campaign: str
-    parent: str
-    candidates: dict[str, str]
-    notes: list[str] = []
-
-
 class PipelineDoc(BaseModel):
     """A workspace pipeline: its config text as saved, the hash a save must quote, and what `check()` finds."""
 
@@ -219,10 +205,6 @@ class PipelineCreate(BaseModel):
     from_prebuilt: str | None = None
     blank: BlankPipeline | None = None
     next_round: NextRoundIn | None = None
-
-
-class PipelineFromRun(BaseModel):
-    run: str
 
 
 class Provisional(BaseModel):

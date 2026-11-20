@@ -1,24 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
+import { api, unwrap } from "../../../api/client";
+import type { Schemas } from "../../../api/client";
 import type { StepViewProps } from "./registry";
-import { getJson, NotRun } from "./PosesView";
+import { NotRun } from "./PosesView";
 
-type GateRow = {
-  candidate: string;
-  pose: number;
-  posebusters: boolean | null;
-  failed_checks: string[];
-  strain_kcal: number | null;
-  over_strain: boolean | null;
-  checked: boolean;
-  ok: boolean;
-};
-type Gates = { ran: string[]; max_strain_kcal: number | null; rows: GateRow[] };
+type GateRow = Schemas["GateRow"];
+
+/** A pose whose MMFF strain was recorded but that no limit judged (`over_strain` is null without a limit). */
+export function strainNotJudged(r: GateRow): boolean {
+  return r.strain_kcal !== null && r.over_strain === null;
+}
 
 /** Step 4: the gates that ran before any SCF, one row per pose, with what failed. */
 export function ChecksView({ sourceRun }: StepViewProps) {
   const gates = useQuery({
     queryKey: ["gates", sourceRun],
-    queryFn: () => getJson<Gates>(`/api/runs/${sourceRun}/gates`),
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/gates", { params: { path: { run_id: sourceRun ?? "" } } })),
     enabled: sourceRun !== null,
   });
   if (sourceRun === null) return <NotRun step="checks" shows="each pose with pass or fail, the PoseBusters checks it failed and its MMFF strain" />;
@@ -35,13 +32,24 @@ export function ChecksView({ sourceRun }: StepViewProps) {
   }
   const failing = g.rows.filter((r) => !r.ok).length;
   const unchecked = g.rows.filter((r) => !r.checked).length;
+  // Strain was measured but nothing judged it: no limit set, so `over_strain` is null for a pose that has a strain.
+  const strainUnjudged = g.rows.some(strainNotJudged);
+  const allPass = failing === 0 && unchecked === 0;
   return (
     <div data-view="checks">
       <p className="lede" data-testid="checks-summary">
-        {failing === 0 && unchecked === 0 ? `All ${g.rows.length} poses pass.` : `${failing} of ${g.rows.length} poses fail.`}
+        {!allPass
+          ? `${failing} of ${g.rows.length} poses fail.`
+          : strainUnjudged
+            ? `All ${g.rows.length} poses pass PoseBusters · strain not judged (no limit set).`
+            : `All ${g.rows.length} poses pass.`}
         {unchecked > 0 ? ` ${unchecked} not checked: strain is recorded but no limit judges it.` : ""} Gates that ran:{" "}
         {g.ran.join(", ")}.
-        {g.max_strain_kcal === null ? " Strain is recorded, with no limit set." : ` Strain limit ${g.max_strain_kcal} kcal/mol.`}
+        {g.max_strain_kcal !== null
+          ? ` Strain limit ${g.max_strain_kcal} kcal/mol.`
+          : allPass && strainUnjudged
+            ? ""
+            : " Strain is recorded, with no limit set."}
       </p>
       <table className="grid" aria-label="Gate results">
         <thead>
@@ -49,8 +57,8 @@ export function ChecksView({ sourceRun }: StepViewProps) {
             <th>Ligand</th>
             <th className="num">Pose</th>
             <th>Result</th>
-            <th>Failed checks</th>
             <th className="num">Strain (kcal/mol)</th>
+            <th>Failed checks</th>
           </tr>
         </thead>
         <tbody>
@@ -63,11 +71,21 @@ export function ChecksView({ sourceRun }: StepViewProps) {
                   {!r.checked ? "not checked" : r.ok ? "pass" : "fail"}
                 </span>
               </td>
-              <td>
+              <td className="num strain" data-judged={strainNotJudged(r) ? "false" : undefined}>
+                {r.strain_kcal === null ? "" : r.strain_kcal.toFixed(2)}
+                {strainNotJudged(r) ? (
+                  <>
+                    {" "}
+                    <span className="status" data-state="cancelled" data-testid="strain-not-judged">
+                      not judged
+                    </span>
+                  </>
+                ) : null}
+              </td>
+              <td className="failed-checks">
                 {r.failed_checks.join(", ") || ""}
                 {r.over_strain ? `${r.failed_checks.length ? "; " : ""}strain over the limit` : ""}
               </td>
-              <td className="num">{r.strain_kcal === null ? "" : r.strain_kcal.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>

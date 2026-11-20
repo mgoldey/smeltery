@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, unwrap, type Schemas } from "../../api/client";
+import { api, unwrap, type RunSummary, type Schemas } from "../../api/client";
 import { inOut, taskOut } from "../runIdentity";
+import { runsQuery } from "../../api/queries";
 
 /**
  * Run the KEPT pipeline. Only Run is blocked by errors (a draft with errors is still kept): the button is disabled,
@@ -84,7 +85,7 @@ export function Launch({ name, errors, dirty }: { name: string; errors: Schemas[
  * the task inspector now find the same run from the same `--out` (`runIdentity.runOfTask`), so leaving this page
  * no longer loses the result.
  */
-type RunRow = { path: string; id: string };
+type RunRow = Pick<RunSummary, "path" | "id">;
 
 function OpenResult({ command }: { command: string[] }) {
   const qc = useQueryClient();
@@ -92,13 +93,12 @@ function OpenResult({ command }: { command: string[] }) {
   // Runs that already existed when this launch started. An out directory the user typed may already hold a
   // record (another run's, or an earlier attempt's), and linking to that one would show the wrong numbers
   // under the word "result". Only a run that appears after the launch is this launch's.
-  const [before] = useState(() => new Set((qc.getQueryData(["runs"]) as RunRow[] | undefined)?.map((r) => r.path)));
+  const [before] = useState(() => new Set((qc.getQueryData(runsQuery().queryKey) as RunRow[] | undefined)?.map((r) => r.path)));
   const [until] = useState(() => Date.now() + 60 * 60 * 1000);
   const isMine = (r: RunRow) => inOut(r.path, out) && !before.has(r.path);
   // Polls while the run is being written; stops as soon as the run store lists it.
   const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => unwrap(api.GET("/api/runs")),
+    ...runsQuery(),
     enabled: out !== undefined,
     // A run that fails never writes a record, so "poll until it appears" would poll for as long as the page
     // is open. Stop after a window long enough for an ordinary run; the Work panel is where a failure is read.

@@ -16,13 +16,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from smeltery.project import NotebookEntry
+from smeltery.project import NotebookEntry, make_entry_id
 from smeltery.study.cache import Cache
 from smeltery.study.step import Study
 
 from . import models as M
-from .common import ports, row, utc_iso
-from .pipelines import MAX_UPLOAD
+from .common import MAX_UPLOAD, ports, read_capped_body, row, utc_iso
 
 router = APIRouter(prefix="/api", tags=["notebook"])
 
@@ -114,7 +113,7 @@ def add_entry(request: Request, campaign_id: str, body: M.EntryIn) -> M.EntryOut
     st = ports(request)
     if body.supersedes is not None and body.supersedes not in {e.id for e in _entries(request, campaign_id)}:
         raise HTTPException(status_code=400, detail=f"cannot supersede unknown entry {body.supersedes}")
-    artefacts = [st.artifact_store.put(Path(row(request, rid)["path"])) for rid in body.runs]
+    artefacts = [st.artifact_store.put(Path(row(request, rid)["path"]).read_bytes()) for rid in body.runs]
     files = []
     for f in body.files:
         try:
@@ -126,15 +125,19 @@ def add_entry(request: Request, campaign_id: str, body: M.EntryIn) -> M.EntryOut
         name = _safe_name(f.filename)
         files.append({"digest": f.digest, "filename": name, "media_type": _media_type(name), "kind": "file"})
     try:
+        created_at = utc_iso(st.clock.now())
         e = st.project_store.add_entry(
-            campaign_id,
-            title=body.title,
-            body=body.body,
-            author=st.identity.current(),
-            artefacts=artefacts,
-            files=files,
-            supersedes=body.supersedes,
-            created_at=utc_iso(st.clock.now()),
+            NotebookEntry(
+                id=make_entry_id(campaign_id, body.title, created_at),
+                campaign_id=campaign_id,
+                title=body.title,
+                body=body.body,
+                author=st.identity.current(),
+                created_at=created_at,
+                artefacts=tuple(artefacts),
+                supersedes=body.supersedes,
+                files=tuple(files),
+            )
         )
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
@@ -178,13 +181,7 @@ async def upload_notebook_file(request: Request, filename: str) -> M.FileRef:
     # text/plain and friends are CORS "simple" requests (no preflight), so any website could write here
     if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/octet-stream":
         raise HTTPException(status_code=415, detail="upload the file's bytes as Content-Type: application/octet-stream")
-    too_big = f"{name}: larger than {MAX_UPLOAD // (1024 * 1024)} MB"
-    declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD:
-        raise HTTPException(status_code=413, detail=too_big)
-    data = await request.body()
-    if len(data) > MAX_UPLOAD:
-        raise HTTPException(status_code=413, detail=too_big)
+    data = await read_capped_body(request, name, MAX_UPLOAD)
     if not data:
         raise HTTPException(status_code=400, detail=f"{name}: the file is empty")
     return M.FileRef(digest=ports(request).artifact_store.put(data), filename=name, media_type=_media_type(name))

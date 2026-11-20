@@ -76,7 +76,7 @@ def test_the_steps_mark_the_settings_that_name_an_input_file(client_for):
 
 def test_an_upload_over_the_limit_is_refused_on_its_declared_length(client_for):
     # Refused from Content-Length, before the body is buffered into memory.
-    from smeltery.bench.api.pipelines import MAX_UPLOAD
+    from smeltery.bench.api.common import MAX_UPLOAD
 
     c, _ = client_for()
     name = _made(c)

@@ -1,44 +1,10 @@
 import { useState, type KeyboardEvent } from "react";
 import type { Schemas } from "../../api/client";
 import { FilePick } from "../FilePick";
+import { paramText, parseParam } from "../paramValue";
 
 export type Param = Schemas["StepParam"];
 type Value = unknown;
-
-/** Text for an input from a stored value. */
-export function asText(v: Value): string {
-  if (v === undefined || v === null) return "";
-  if (Array.isArray(v)) return v.join(", ");
-  return String(v);
-}
-
-/** Parse what was typed into the knob's kind. Empty means unset (back to the method's default). Throws on nonsense. */
-export function parse(kind: string, text: string): Value {
-  const t = text.trim();
-  if (t === "") return null;
-  const num = (s: string, int: boolean) => {
-    const n = Number(s);
-    if (!Number.isFinite(n) || (int && !Number.isInteger(n))) throw new Error(`${s} is not ${int ? "an integer" : "a number"}`);
-    return n;
-  };
-  switch (kind) {
-    case "int":
-      return num(t, true);
-    case "float":
-      return num(t, false);
-    case "vec3": {
-      const parts = t.split(/[,\s]+/).filter(Boolean);
-      if (parts.length !== 3) throw new Error("three numbers, x y z, in Angstrom");
-      return parts.map((p) => num(p, false));
-    }
-    case "int_list":
-      return t.split(/[,\s]+/).filter(Boolean).map((p) => num(p, true));
-    case "str_list":
-      return t.split(",").map((p) => p.trim()).filter(Boolean);
-    default:
-      return t;
-  }
-}
 
 const same = (a: Value, b: Value) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -67,12 +33,12 @@ export function ParamRow({
   pipeline?: string;
 }) {
   const id = `param-${p.method}-${p.name}`;
-  const [text, setText] = useState(asText(p.value));
+  const [text, setText] = useState(paramText(p.value));
   const [bad, setBad] = useState<string | null>(null);
   const changed = p.changed_from !== null && p.changed_from !== undefined;
   const commit = () => {
     try {
-      const v = parse(p.kind, text);
+      const v = parseParam(p.kind, text);
       setBad(null);
       if (!same(v, p.value) && !(v === null && same(p.value, p.default))) onSet(v);
     } catch (e) {
@@ -112,7 +78,7 @@ export function ParamRow({
         className={p.kind === "path" || p.kind === "str" ? "mono" : "num"}
         value={text}
         disabled={disabled}
-        placeholder={p.default === null || p.default === undefined ? "" : asText(p.default)}
+        placeholder={p.default === null || p.default === undefined ? "" : paramText(p.default)}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={onKey}
@@ -145,7 +111,7 @@ export function ParamRow({
         {bad ? <span className="field-error">{bad}</span> : p.help}
         {changed ? (
           <span className="was" data-testid="was">
-            was {asText(p.changed_from)} ·{" "}
+            was {paramText(p.changed_from)} ·{" "}
             <button type="button" className="link" disabled={disabled} onClick={reset} aria-label={`Reset ${p.name}`}>
               reset
             </button>
@@ -153,7 +119,7 @@ export function ParamRow({
         ) : null}
         {wsDiffers ? (
           <span className="ws-default" data-testid="workspace-default">
-            workspace default {asText(p.workspace_default)}
+            workspace default {paramText(p.workspace_default)}
           </span>
         ) : null}
       </span>

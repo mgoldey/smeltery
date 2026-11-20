@@ -195,3 +195,10 @@ def test_counting_a_large_checkpoint_is_incremental_and_cheap(tmp_path):
     assert rp.lines(p) == 5001
     p.write_text("{}\n")  # replaced by a shorter file (--force): counted afresh
     assert rp.lines(p) == 1
+
+
+def test_each_app_counts_progress_with_its_own_cache(client_for):
+    """The progress cache is per app (`app.state.run_progress`), so two apps in one process never share counts."""
+    a, _ = client_for()
+    b, _ = client_for()
+    assert a.app.state.run_progress is not b.app.state.run_progress

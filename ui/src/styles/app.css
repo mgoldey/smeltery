@@ -50,6 +50,9 @@ table.grid tr[data-differs] td { background: var(--changed); }
 table.grid th.num, table.grid td.num { text-align: right; }
 table.grid tbody tr:hover { background: var(--sunken); }
 table.grid tr.selected { background: var(--sunken); }
+/* Pose checks: the strain number never wraps or is pushed off the edge; long check names wrap instead. */
+[data-view="checks"] td.strain { white-space: nowrap; }
+[data-view="checks"] td.failed-checks { overflow-wrap: anywhere; }
 .num { font-variant-numeric: tabular-nums; }
 
 .status { font-weight: 500; }
@@ -81,6 +84,9 @@ label { display: block; font-size: 12px; color: var(--ink-muted); margin: 10px 0
 .verdict[data-state="UNRANKED"] .verdict-headline { color: var(--pending); }
 .verdict[data-state="INCOMPLETE"] .verdict-headline { color: var(--bad); }
 .verdict-detail { margin: 0; max-width: 78ch; color: var(--ink-muted); }
+/* The caveats a headline must not be read without: smaller than it, louder than the detail. */
+.verdict-caveat { margin: 0 0 6px; max-width: 78ch; font-weight: 600; color: var(--pending); }
+.verdict-floor { margin: 0 0 6px; max-width: 78ch; }
 .figure { width: 100%; min-height: 280px; margin: 8px 0 12px; }
 .viewer { position: relative; border: 1px solid var(--hairline); background: var(--panel); margin: 12px 0; }
 .viewer-host { position: absolute; inset: 0; }

@@ -9,12 +9,12 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
+from .record import TIME_FORMAT, utc_now
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+_utc_now = utc_now
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class NotebookEntry:
             out.append("author is required")
         try:
             # accept the project's UTC format
-            datetime.strptime(self.created_at, "%Y-%m-%dT%H:%M:%SZ")
+            datetime.strptime(self.created_at, TIME_FORMAT)
         except ValueError:
             out.append(f"created_at {self.created_at!r} is not UTC YYYY-MM-DDTHH:MM:SSZ")
         for a in self.artefacts:
@@ -176,12 +176,12 @@ class Proposal:
             out.append(f"status {self.status!r} is not one of {list(self.STATUSES)}")
         if self.time:
             try:
-                datetime.strptime(self.time, "%Y-%m-%dT%H:%M:%SZ")
+                datetime.strptime(self.time, TIME_FORMAT)
             except ValueError:
                 out.append(f"time {self.time!r} is not UTC YYYY-MM-DDTHH:MM:SSZ")
         if self.created_at:
             try:
-                datetime.strptime(self.created_at, "%Y-%m-%dT%H:%M:%SZ")
+                datetime.strptime(self.created_at, TIME_FORMAT)
             except ValueError:
                 out.append(f"created_at {self.created_at!r} is not UTC YYYY-MM-DDTHH:MM:SSZ")
         return out
@@ -202,7 +202,3 @@ class Proposal:
 
 def make_entry_id(campaign_id: str, title: str, when: str) -> str:
     return hashlib.sha256(f"{campaign_id}|{title}|{when}".encode()).hexdigest()[:12]
-
-
-def utc_now() -> str:
-    return _utc_now()

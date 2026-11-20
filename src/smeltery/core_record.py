@@ -88,7 +88,7 @@ _SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 STEP_FILE = "stage.json"
 
 
-#: The quantity whose paired difference is `paired_ddE` (cli.QUANTITY); its unit is the record's `results.units` entry.
+#: The quantity whose paired difference is `paired_ddE` (`run_view.QUANTITY`); its unit is in `results.units`.
 DDE_QUANTITY = "dE_int"
 
 
@@ -674,6 +674,44 @@ def write_core(
         extra_ext=extra_ext,
     )
     return _schema.write(_schema.from_dict(fields), run_dir, overwrite=overwrite)
+
+
+def emit_core_record(
+    record_path: Path,
+    started_at: str | None,
+    *,
+    run_id: str | None = None,
+    config: dict | None = None,
+    arm: str | None = None,
+    extra_ext: dict | None = None,
+) -> Path | None:
+    """Write OUT/attestation/run.json beside the run record just written, replacing a core record a previous run into
+    this OUT left (the legacy record it described was just replaced too). Additive: without the `attestation` extra it
+    prints one notice, and a refusal is a warning, never the run's exit code -- the legacy record is written and stays
+    the source of truth (a campaign job whose run left no core record ends failed).
+
+    `run_id`: the core record's (`--run-id`, a campaign job's); None: the input digest's first 12 hex. `config`: the
+    campaign config the run read, for a run that did not stage one into OUT (`write_core`). `arm` / `extra_ext`
+    (`--arm`, `--ext-json`): the submitter's arm and own `ext` namespaces, which a campaign job hands the run so its
+    record states them the first time it is written."""
+    if not AVAILABLE:
+        print(f"note: {NOT_INSTALLED}", file=sys.stderr)
+        return None
+    try:
+        return write_core(
+            record_path,
+            live=True,
+            started_at=started_at,
+            finished_at=utc_now(),
+            overwrite=True,
+            run_id=run_id,
+            config=config,
+            arm=arm,
+            extra_ext=extra_ext,
+        )
+    except (OSError, ValueError) as e:  # a schema RecordError is a ValueError naming the field it refused
+        print(f"warning: core record not written: {e}", file=sys.stderr)
+        return None
 
 
 def _legacy_in(path: Path) -> Path:

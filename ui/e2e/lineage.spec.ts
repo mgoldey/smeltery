@@ -1,5 +1,4 @@
-import type { Page } from "@playwright/test";
-import { expect, id, IDX, test } from "./bench";
+import { apiGet, expect, id, IDX, test } from "./bench";
 
 type Lineage = {
   candidate: string;
@@ -10,14 +9,10 @@ type Lineage = {
   digest: string;
 };
 
-async function get<T>(page: Page, path: string): Promise<T> {
-  return (await (await page.request.get(path)).json()) as T;
-}
-
 test("tracing a candidate shows the API's per-pose values and what made them", async ({ page }) => {
-  const table = await get<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+  const table = await apiGet<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
   const name = table.rows[0]!.candidate;
-  const want = await get<Lineage>(page, `/api/runs/${IDX.a_resolved}/lineage?candidate=${encodeURIComponent(name)}`);
+  const want = await apiGet<Lineage>(page, `/api/runs/${IDX.a_resolved}/lineage?candidate=${encodeURIComponent(name)}`);
   expect(want.poses.length).toBeGreaterThan(0);
 
   await page.goto(`/run/${IDX.a_resolved}/results`);
@@ -47,7 +42,7 @@ test("tracing a candidate shows the API's per-pose values and what made them", a
 });
 
 test("tracing another candidate switches the panel to it", async ({ page }) => {
-  const table = await get<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+  const table = await apiGet<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
   const name = table.rows[1]!.candidate;
   await page.goto(`/run/${IDX.a_resolved}/results`);
   await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
@@ -55,7 +50,7 @@ test("tracing another candidate switches the panel to it", async ({ page }) => {
 });
 
 test("the lineage opens the pipeline that made the number, and 'change a setting' opens its ΔE_int step", async ({ page }) => {
-  const table = await get<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
+  const table = await apiGet<{ rows: { candidate: string }[] }>(page, `/api/runs/${IDX.a_resolved}/ddE`);
   const name = table.rows[0]!.candidate;
   await page.goto(`/run/${IDX.a_resolved}/results`);
   await page.getByRole("button", { name: `Trace ${name}`, exact: true }).click();
@@ -64,8 +59,8 @@ test("the lineage opens the pipeline that made the number, and 'change a setting
   await expect(page).toHaveURL(new RegExp(`/pipelines/[a-z0-9_-]+\\?run=${id("a_resolved")}$`));
   const pipeline = new URL(page.url()).pathname.split("/").pop()!;
   // Data source: the pipeline the API now holds was made from this run (its campaign and candidates).
-  const doc = await get<{ toml: string }>(page, `/api/pipelines/${pipeline}`);
-  const run = await get<{ campaign: string }>(page, `/api/runs/${IDX.a_resolved}`);
+  const doc = await apiGet<{ toml: string }>(page, `/api/pipelines/${pipeline}`);
+  const run = await apiGet<{ campaign: string }>(page, `/api/runs/${IDX.a_resolved}`);
   expect(doc.toml).toContain(`campaign = "${run.campaign}"`);
   expect(doc.toml).toContain(name);
 

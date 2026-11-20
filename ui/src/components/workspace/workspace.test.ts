@@ -1,24 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { visible } from "./ConfigDiff";
 import { pipelineName } from "./openFromRun";
-import { parse } from "./ParamRow";
-
-describe("ParamRow.parse", () => {
-  it("reads each knob kind, and empty is unset", () => {
-    expect(parse("int", " 8 ")).toBe(8);
-    expect(parse("float", "1e-10")).toBe(1e-10);
-    expect(parse("vec3", "1, 2 3")).toEqual([1, 2, 3]);
-    expect(parse("int_list", "1 2,3")).toEqual([1, 2, 3]);
-    expect(parse("str_list", "A, B")).toEqual(["A", "B"]);
-    expect(parse("str", "pbe")).toBe("pbe");
-    expect(parse("int", "")).toBeNull();
-  });
-  it("refuses what is not of the kind", () => {
-    expect(() => parse("int", "8.5")).toThrow("not an integer");
-    expect(() => parse("float", "lots")).toThrow("not a number");
-    expect(() => parse("vec3", "1 2")).toThrow("three numbers");
-  });
-});
 
 describe("ConfigDiff.visible", () => {
   const ctx = (line: string) => ({ sign: " ", line });

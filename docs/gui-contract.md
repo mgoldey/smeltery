@@ -72,6 +72,9 @@ importer derives for a key the original lacks is never written in place: it is
 
 ## 2. Data layer: `smeltery.gui.results` and `smeltery.gui.scenes`
 
+`smeltery.gui.results` now re-exports `smeltery.run_view`, where the code lives (outside the `gui` package, so the
+CLI and exporters read runs without it); both paths name the same objects.
+
 No GUI library is imported. RDKit and numpy are allowed. All tables are `list[dict]`.
 
 ```python

@@ -1,26 +1,26 @@
 """Today's methods as registrations: the stages `smeltery run` executes, and the library tiers it does not yet.
 
 Registration order is the catalog's hierarchy order (by rung, then execution); `order` is where `smeltery run`
-executes each one. The builtins carry no `hook`: their code paths stay in `smeltery.cli` (docking, the pocket, the
+executes each one. The builtins carry no `hook`: their code paths stay in `smeltery.planning` (docking, the pocket, the
 two field-interaction tiers), and their registration is what the catalog, the steps, the CLI's validation and
-input staging read. Their config rules beyond "a table of these keys" are the `smeltery.cli` validators named in
-`validate`, imported only when a config is validated.
+input staging read. Their config rules beyond "a table of these keys" are the `smeltery.config` validators named in
+`validate`, looked up when a config is validated.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
+from .. import config
 from . import MethodSpec, register
+from .catalog import Param, params_from_dataclass
 
 
-def _cli_check(name: str) -> Callable[[dict], None]:
-    """A config validator from `smeltery.cli`, looked up when called (the CLI imports RDKit; the GUI need not)."""
+def _config_check(name: str) -> Callable[[dict], None]:
+    """A config validator from `smeltery.config`, looked up by name when called, so a patched one is the one run."""
 
     def check(cfg: dict) -> None:
-        from .. import cli
-
-        getattr(cli, name)(cfg)
+        getattr(config, name)(cfg)
 
     check.__name__ = name
     return check
@@ -87,7 +87,6 @@ def _memory_dft() -> str:
 
 
 def builtin_specs() -> list[MethodSpec]:
-    from ..gui.catalog import Param, params_from_dataclass
     from ..tiers import FieldDftInteraction, FieldInteraction, PairedPoses
 
     return [
@@ -103,7 +102,7 @@ def builtin_specs() -> list[MethodSpec]:
             provides=("receptor", "field"),
             exclusive=("pocket",),
             extras=("docking",),
-            validate=_cli_check("_validate_structure"),
+            validate=_config_check("_validate_structure"),
             summary="A .pdb, PDB id or AFDB accession, prepared into a receptor and a point-charge field.",
             params=(
                 Param("spec", "str", required=True, help="a .pdb path, a PDB id or (afdb) a UniProt accession"),
@@ -128,7 +127,7 @@ def builtin_specs() -> list[MethodSpec]:
             needs=("poses",),
             provides=("field",),
             exclusive=("structure",),
-            validate=_cli_check("_validate_pocket"),
+            validate=_config_check("_validate_pocket"),
             summary="Point charges: a .pdb/.pqr file in the receptor's frame, or sites placed on the parent's pose 0.",
             params=(
                 Param("file", "path", optional=True, help="a .pdb (via pdb2pqr30) or .pqr; or site"),
@@ -150,7 +149,7 @@ def builtin_specs() -> list[MethodSpec]:
             provides=("parent_poses",),
             extras=("docking",),
             quantity="docking_score",
-            validate=_cli_check("_validate_docking"),
+            validate=_config_check("_validate_docking"),
             cost_model=lambda: (
                 "cannot say: no Vina timing is recorded in smeltery, so estimate_cost gives no prediction"
             ),
@@ -283,7 +282,7 @@ def builtin_specs() -> list[MethodSpec]:
             needs=("poses", "field"),
             provides=("dE_int",),
             quantity="dE_int",
-            validate=_cli_check("_validate_measurement"),
+            validate=_config_check("_validate_measurement"),
             cost_model=_cost_rhf,
             summary="dE_int = E(in field) - E(vacuum) per pose: a difference, so it compares across formulas.",
             params=params_from_dataclass(FieldInteraction, {"basis": "ferric basis set name", **_SCF_HELP}),
@@ -304,7 +303,7 @@ def builtin_specs() -> list[MethodSpec]:
             needs=("poses", "field"),
             provides=("dE_int",),
             quantity="dE_int",
-            validate=_cli_check("_validate_measurement"),
+            validate=_config_check("_validate_measurement"),
             cost_model=_cost_dft,
             memory_model=_memory_dft,
             params=params_from_dataclass(
@@ -380,7 +379,7 @@ def builtin_specs() -> list[MethodSpec]:
             order=200,
             needs=("dE_int",),
             provides=("survivors",),
-            validate=_cli_check("_validate_cut"),
+            validate=_config_check("_validate_cut"),
             summary="Ranks paired ddE against the parent; never orders what the uncertainty cannot separate.",
             params=(
                 Param("keep", "int", required=True, help="analogues to keep (1..number of analogues)"),

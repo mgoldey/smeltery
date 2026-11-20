@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "../api/client";
 import { Writable } from "./ReadOnly";
 import { useOpenRunPipeline } from "./workspace/openFromRun";
+import { stamp } from "./time";
 
 type Lineage = Schemas["Lineage"];
 const ABSENT = "not recorded for this run";
@@ -73,7 +74,7 @@ function MadeBy({ l }: { l: Lineage }) {
           </tr>
           <tr data-testid="made-ran">
             <td>Ran at</td>
-            <td>{l.started_utc ?? <Absent />}</td>
+            <td>{l.started_utc ? stamp(l.started_utc) : <Absent />}</td>
           </tr>
         </tbody>
       </table>

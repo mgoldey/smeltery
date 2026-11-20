@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, unwrap, type Schemas } from "../../api/client";
 import { ApiError } from "../../api/http";
 import { Shell } from "../../components/Shell";
+import { downloadText } from "../../components/download";
 import { TomlEditor } from "../../components/TomlEditor";
 import { ConfigDiff } from "../../components/workspace/ConfigDiff";
 import { ImpactStrip } from "../../components/workspace/ImpactStrip";
@@ -12,6 +13,7 @@ import { useOpenRunPipeline } from "../../components/workspace/openFromRun";
 import { PipelineDrawing } from "../../components/workspace/PipelineDrawing";
 import { StepPanel, type EditExtra, type EditOp } from "../../components/workspace/StepPanel";
 import { useRunId } from "./RunLayout";
+import { pipelineUrl } from "../../components/runIdentity";
 
 type StepsOut = Schemas["StepsOut"];
 
@@ -343,27 +345,14 @@ function ConfigToolbar({
       );
       setLifecycleError(null);
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
-      navigate(`/pipelines/${made.name}`);
+      navigate(pipelineUrl(made.name));
     } catch (e) {
       setLifecycleError(e instanceof Error ? e.message : String(e));
     }
   };
-  const download = () => {
-    // The anchor goes into the document and the blob URL is revoked in a later task: Firefox starts the download
-    // after the click handler returns, and revoking in the same task leaves it empty or never started. This is the
-    // only way the config leaves the page now that the text is folded away, so it has to work outside Chromium.
-    const url = URL.createObjectURL(new Blob([text], { type: "application/toml" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${name}.config.toml`;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      a.remove();
-      URL.revokeObjectURL(url);
-    }, 0);
-  };
+  // This is the only way the config leaves the page now that the text is folded away, so it has to work outside
+  // Chromium; downloadText handles Firefox's deferred start.
+  const download = () => downloadText(`${name}.config.toml`, text, "application/toml");
   return (
     <div className="config-toolbar">
       <div className="config-toolbar-row">

@@ -28,7 +28,7 @@ pytest.importorskip("temporalio", reason="temporalio (the `temporal` extra) is n
 import fake_ferric  # noqa: E402
 import temporal_server  # noqa: E402
 
-from smeltery import cli, temporal_run  # noqa: E402
+from smeltery import cli, planning, temporal_run  # noqa: E402
 
 FAKE_CHILD = [sys.executable, str(Path(fake_ferric.__file__).resolve())]
 
@@ -383,8 +383,9 @@ def test_a_transient_failure_retries_its_stage_alone_reusing_every_finished_one(
     """An analysis stage fails once with an OSError (a shared filesystem hiccup): Temporal retries that stage only.
     The plan is not rebuilt, no SCF runs again, the cut is not redone: the retry starts from the cut's checkpoint."""
     builds = []
-    real_build, real_analysis = cli.build_plan, temporal_run.analysis_sync
-    monkeypatch.setattr(cli, "build_plan", lambda *a, **k: builds.append(1) or real_build(*a, **k))
+    real_build, real_analysis = planning.build_plan, temporal_run.analysis_sync
+    # where the plan stage reads it (`temporal_run._prepare`: `from .planning import build_plan`)
+    monkeypatch.setattr(planning, "build_plan", lambda *a, **k: builds.append(1) or real_build(*a, **k))
     failed = []
 
     def flaky(done, key):

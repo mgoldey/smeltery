@@ -1,17 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RunSummary } from "../api/client";
-import {
-  inOut,
-  latestRunOfPipeline,
-  outDir,
-  outName,
-  pipelineHref,
-  pipelineOfRun,
-  runDate,
-  runLabel,
-  runOfTask,
-  taskOut,
-} from "./runIdentity";
+import { inOut, latestRunOfPipeline, outDir, outName, pipelineHref, pipelineOfRun, pipelineUrl, runDate, runLabel, runOfTask, taskOut } from "./runIdentity";
 
 /** A run row with only the fields `/api/runs` actually returns. */
 const row = (path: string, extra: Partial<RunSummary> = {}): RunSummary =>
@@ -126,5 +115,18 @@ describe("latestRunOfPipeline / pipelineHref", () => {
   });
   it("escapes a name that would otherwise change the URL", () => {
     expect(pipelineHref("a b", [])).toBe("/pipelines/a%20b");
+  });
+});
+
+describe("pipelineUrl", () => {
+  it("puts run before step and leaves out what is not given", () => {
+    expect(pipelineUrl("p1")).toBe("/pipelines/p1");
+    expect(pipelineUrl("p1", { run: "abc-123" })).toBe("/pipelines/p1?run=abc-123");
+    expect(pipelineUrl("p1", { step: "ligands" })).toBe("/pipelines/p1?step=ligands");
+    expect(pipelineUrl("p1", { run: "abc-123", step: "measure" })).toBe("/pipelines/p1?run=abc-123&step=measure");
+    expect(pipelineUrl("p1", { run: null, step: "measure" })).toBe("/pipelines/p1?step=measure");
+  });
+  it("encodes every part", () => {
+    expect(pipelineUrl("a b", { run: "x&y" })).toBe("/pipelines/a%20b?run=x%26y");
   });
 });

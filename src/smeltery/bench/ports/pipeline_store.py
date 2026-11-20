@@ -8,7 +8,28 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+#: A pipeline's name, which is also its folder's name under ROOT/pipelines/.
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+
+#: The file in a pipeline's folder that holds its config; an upload may not take this name.
+CONFIG = "config.toml"
+# An uploaded input's name: one path component, no leading dot, so it can neither leave the folder nor hide in it.
+# Spaces and parentheses are allowed because that is what a browser hands over ("7lcj (1).pdb"); what is excluded is
+# the separators and the characters a shell or TOML would have to be escaped for. A bundle's entries are held to it
+# one path component at a time.
+FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()+._-]{0,127}")
+
+
+def check_pipeline_name(name: str) -> None:
+    """Raise `ValueError` unless `name` is an acceptable pipeline name (`NAME`)."""
+    if not isinstance(name, str) or not NAME.fullmatch(name):
+        raise ValueError(f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}")
+
+
+def check_file_name(name: str) -> None:
+    """Raise `ValueError` unless `name` is an acceptable uploaded input's file name (`FILENAME`, not `CONFIG`)."""
+    if not FILENAME.fullmatch(name or "") or name == CONFIG:
+        raise ValueError(f"invalid file name {name!r}: a plain name such as receptor.pdb")
 
 
 class StaleWrite(Exception):

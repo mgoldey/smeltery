@@ -31,13 +31,19 @@ class Comment:
 class CommentStore(Protocol):
     def add(
         self,
-        anchor_type: str,
-        anchor_id: str,
+        *,
+        run: str,
         author: str,
         body: str,
-        *,
+        anchor: str | None = None,
         parent_id: str | None = None,
-    ) -> Comment: ...
+    ) -> Comment:
+        """Add a comment to `run`. `anchor` is free text (e.g. `candidate:4-F`); it defaults to `run:<run>`."""
+        ...
+
+    def for_run(self, run: str) -> List[Comment]:
+        """The comments on `run`, oldest first; empty for an unknown run."""
+        ...
 
     def list(
         self,

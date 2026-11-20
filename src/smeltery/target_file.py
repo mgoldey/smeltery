@@ -10,7 +10,7 @@ measurement from the target class (`smeltery.mcp.targets`); a target file holds 
     [gates]                   which pose checks to run before any calculation
 
 Each section is the campaign config's own section, with the same keys and rules, checked by the same validator
-`smeltery run` uses (`cli.validate_config`): an unknown section, an unknown key in a section, or a bad value is
+`smeltery run` uses (`config.validate_config`): an unknown section, an unknown key in a section, or a bad value is
 refused with the reason, naming the file. Relative file paths inside the file resolve against the file, so a
 target can be used from anywhere.
 
@@ -38,7 +38,7 @@ class TargetFileError(ValueError):
 
 def parse(cfg: dict, where: str = "the target definition") -> dict:
     """Check a parsed target definition and return its sections (without `schema_version`)."""
-    from .cli import ConfigError, validate_config
+    from .config import ConfigError, validate_config
 
     if not isinstance(cfg, dict):
         raise TargetFileError(f"{where} must be a TOML table")

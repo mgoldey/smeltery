@@ -2,18 +2,15 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCanWrite } from "../api/capabilities";
-import { api, unwrap, type RunSummary } from "../api/client";
+import { api, unwrap, type RunSummary, type Schemas } from "../api/client";
 import { ApiError, reasonOf } from "../api/http";
 import { EmptyState } from "../components/EmptyState";
 import { Markdown } from "../components/Markdown";
 import { Shell } from "../components/Shell";
+import { stamp } from "../components/time";
+import { runsQuery } from "../api/queries";
 
-type FileRef = {
-  digest: string;
-  filename: string;
-  media_type: string;
-  kind: "file";
-};
+type FileRef = Schemas["FileRef"];
 const INLINE_IMAGES = new Set([
   "image/png",
   "image/jpeg",
@@ -145,10 +142,7 @@ export function Notebook() {
         }),
       ),
   });
-  const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => unwrap(api.GET("/api/runs")),
-  });
+  const runs = useQuery(runsQuery());
   const titleRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -226,7 +220,7 @@ export function Notebook() {
                   ) : null}
                 </h3>
                 <p className="lede">
-                  {e.author}, {e.created_at.replace("T", " ").replace("Z", "")}
+                  {e.author}, {stamp(e.created_at)}
                   {e.supersedes
                     ? `, correcting “${titleOf.get(e.supersedes) ?? e.supersedes}”`
                     : ""}

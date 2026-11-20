@@ -7,14 +7,14 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from smeltery.gui import results as R
+from smeltery import run_view as R
 
 from . import models as M
 from .common import run
 
 router = APIRouter(prefix="/api", tags=["lineage"])
 
-QUANTITY = "dE_int"
+QUANTITY = R.QUANTITY
 
 
 def stage_tier() -> dict[str, str]:

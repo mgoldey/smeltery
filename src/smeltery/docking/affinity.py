@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import math
 
-KB_KCAL = 0.0019872041  # kcal/(mol K)
+from ..model import R_KCAL_MOL_K, ROOM_TEMPERATURE_K
 
 
-def ensemble_score(scores: list[float], temperature: float = 298.15) -> float:
+def ensemble_score(scores: list[float], temperature: float = ROOM_TEMPERATURE_K) -> float:
     """Boltzmann-pooled score (log-sum-exp), same unit as `scores`. Lower is better.
 
     Not normalised by the pose count: adding a genuinely distinct good pose should
@@ -32,6 +32,6 @@ def ensemble_score(scores: list[float], temperature: float = 298.15) -> float:
         raise ValueError("NaN score: refusing to pool an unmeasured pose")
     if temperature <= 0:
         raise ValueError("temperature must be positive")
-    kt = KB_KCAL * temperature
+    kt = R_KCAL_MOL_K * temperature
     m = min(scores)
     return m - kt * math.log(sum(math.exp(-(s - m) / kt) for s in scores))

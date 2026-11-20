@@ -166,7 +166,7 @@ def test_a_relative_pocket_file_resolves_against_the_saved_pipeline_folder(clien
 @pytest.mark.parametrize("site", ["file", "structure"])
 def test_a_pdb2pqr_that_is_found_but_cannot_run_is_409_not_500(client_for, monkeypatch, site):
     # A broken shim (pyenv's, for one) passes the "is it there" check and fails only when the loader runs it.
-    from smeltery.bench.api import active_site
+    from smeltery.bench.use_cases import pocket_preview as active_site
     from smeltery.pocket.loader import Pdb2PqrUnavailableError
 
     def broken(*a, **k):

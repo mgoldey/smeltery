@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { runByRef } from "./client";
-import type { RunSummary } from "./client";
+import { hasResult, runByRef, verdictLabel } from "./client";
+import type { RunSummary, Verdict } from "./client";
 
 const runs = [
   { id: "aaaaaaaaaaaa-111111", path: "/root/a/run-aaaaaaaaaaaa.json" },
@@ -25,5 +25,22 @@ describe("runByRef", () => {
     expect(runByRef(runs, "7")).toBeUndefined();
     expect(runByRef(undefined, "0")).toBeUndefined();
     expect(runByRef(runs, undefined)).toBeUndefined();
+  });
+});
+
+describe("verdict vocabulary", () => {
+  const v = (state: Verdict["state"]): Verdict => ({ state, floor: null, missing: [], winner: null });
+  it("names each state in one set of words, and a missing verdict as unreadable", () => {
+    expect(verdictLabel(v("RESOLVED"))).toBe("resolved");
+    expect(verdictLabel(v("UNRANKED"))).toBe("does not resolve");
+    expect(verdictLabel(v("INCOMPLETE"))).toBe("incomplete");
+    expect(verdictLabel(null)).toBe("unreadable");
+    expect(verdictLabel(undefined)).toBe("unreadable");
+  });
+  it("has a result once the run reached its cut", () => {
+    expect(hasResult(v("RESOLVED"))).toBe(true);
+    expect(hasResult(v("UNRANKED"))).toBe(true);
+    expect(hasResult(v("INCOMPLETE"))).toBe(false);
+    expect(hasResult(undefined)).toBe(false);
   });
 });

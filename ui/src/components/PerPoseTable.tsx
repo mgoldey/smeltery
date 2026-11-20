@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Schemas } from "../api/client";
+import { downloadText } from "./download";
 
 export type PerPoseRow = Schemas["PerPoseRow"];
 type Key = keyof PerPoseRow;
@@ -25,15 +26,6 @@ export function perPoseCsv(rows: PerPoseRow[], unit: string): string {
   return [head.join(","), ...body].join("\r\n") + "\r\n";
 }
 
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 /** Every (ligand, pose) value the paired ΔΔE is built from, sortable by any column, exportable as CSV. */
 export function PerPoseTable({ rows, unit, fileName }: { rows: PerPoseRow[]; unit: string; fileName: string }) {
   const [sort, setSort] = useState<{ key: Key; dir: 1 | -1 } | null>(null);
@@ -47,7 +39,7 @@ export function PerPoseTable({ rows, unit, fileName }: { rows: PerPoseRow[]; uni
   return (
     <>
       <p>
-        <button type="button" onClick={() => download(fileName, perPoseCsv(shown, unit))}>
+        <button type="button" onClick={() => downloadText(fileName, perPoseCsv(shown, unit), "text/csv;charset=utf-8")}>
           Export CSV
         </button>
       </p>

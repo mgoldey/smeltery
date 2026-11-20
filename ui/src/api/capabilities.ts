@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrap } from "./client";
+import { whoamiQuery } from "./queries";
 
 /**
  * What this server allows, from `/api/whoami` (the same query the shell uses).
@@ -11,10 +11,7 @@ import { api, unwrap } from "./client";
  * unless writing is known to be allowed (`!readOnly && known`); say "read-only" in the UI only when `readOnly`.
  */
 export function useCapabilities(): { readOnly: boolean; known: boolean } {
-  const q = useQuery({
-    queryKey: ["whoami"],
-    queryFn: () => unwrap(api.GET("/api/whoami")),
-  });
+  const q = useQuery(whoamiQuery());
   return { readOnly: q.data?.read_only === true, known: q.isSuccess };
 }
 

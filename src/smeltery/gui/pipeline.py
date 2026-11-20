@@ -16,11 +16,12 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 
-from .catalog import Method, catalog, method
+from smeltery.methods.catalog import Method, catalog, method
+from smeltery.run_view import QUANTITY  # the measured quantity the cut ranks
 
 
 def execution_order() -> tuple[str, ...]:
-    """The order `smeltery run` executes stages in (`smeltery.cli.build_plan` then `run_plan`), from each
+    """The order `smeltery run` executes stages in (`smeltery.planning.build_plan` then `run_plan`), from each
     registration's `order` (`smeltery.methods.execution_order`)."""
     from ..methods import execution_order as _order
 
@@ -31,10 +32,6 @@ def __getattr__(name: str):
     if name == "EXECUTION_ORDER":  # derived on every read, so a registration made later is in it
         return execution_order()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-#: Measured quantity the cut ranks (`smeltery.cli.QUANTITY`).
-QUANTITY = "dE_int"
 
 
 def _alternative_placed(m: Method, placed: list[str]) -> bool:
@@ -84,12 +81,13 @@ class Pipeline:
     # ------------------------------------------------------------------ building
 
     @classmethod
-    def minimal(cls, campaign: str, parent: str, candidates: dict[str, str]) -> Pipeline:
+    def minimal(cls, campaign: str, parent: str, candidates: dict[str, str], defaults: dict | None = None) -> Pipeline:
         """The shortest pipeline `smeltery run` can execute: paired poses, a pocket, the RHF tier, the cut.
-        The pocket and the cut still need their knobs (sites or a file; `keep`)."""
+        The pocket and the cut still need their knobs (sites or a file; `keep`). `defaults` is passed to each `add`,
+        so a blank pipeline gets the workspace defaults copied in exactly as a method added by hand does."""
         p = cls(campaign, parent, dict(candidates))
         for key in ("paired_poses", "pocket", "field_interaction", "cut"):
-            p.add(key)
+            p.add(key, defaults=defaults)
         return p
 
     def keys(self) -> list[str]:
@@ -183,8 +181,19 @@ class Pipeline:
         issues += self._params(known)
         issues += self._advice(known)
         if any(i.level == "error" for i in issues):
-            return issues  # the config validator would only repeat the first of these
+            return issues + self._unrepeated_validator(issues, known)
         return issues + self._validator()
+
+    def _unrepeated_validator(self, issues: list[Issue], known: list[str]) -> list[Issue]:
+        """The config validator's refusal on a pipeline that already has errors, only when it is news: about a placed
+        stage none of `issues` is an error on. The validator stops at its first problem, so it usually repeats one
+        of these; but an empty `[pocket]` behind an unfinished cut was said nowhere, and its step read "ready"."""
+        flagged = {i.stage for i in issues if i.level == "error"}
+        try:
+            found = self._validator()
+        except Exception:  # noqa: BLE001 - a pipeline with errors may not translate to a config; they say why
+            return []
+        return [i for i in found if i.stage in known and i.stage not in flagged]
 
     def _dataflow(self, known: list[str]) -> list[Issue]:
         issues, provided, providers = [], set(), {}
@@ -254,7 +263,7 @@ class Pipeline:
 
     def _tier_floor(self) -> float | None:
         """The systematic floor of whichever tier this pipeline measures dE_int with: the placed method of the
-        `measure` slot, else the required one (what `smeltery.cli.measurement_tier` picks)."""
+        `measure` slot, else the required one (what `smeltery.planning.measurement_tier` picks)."""
         from ..methods import by_slot
         from ..tier_registry import registered_tiers
 
@@ -270,7 +279,7 @@ class Pipeline:
         return tier.systematic_floor(QUANTITY)
 
     def _validator(self) -> list[Issue]:
-        from ..cli import ConfigError, validate_config
+        from smeltery.config import ConfigError, validate_config
 
         try:
             validate_config(self.to_config())
@@ -317,7 +326,7 @@ class Pipeline:
         return self.to_config()
 
     def to_toml(self) -> str:
-        from ._toml import dumps
+        from smeltery.toml_write import dumps
 
         return dumps(self.compile())
 
@@ -346,6 +355,15 @@ class Pipeline:
                 p.add("forcefield")
             p.set("forcefield", max_strain_kcal=gates.pop("max_strain_kcal"))
         return p
+
+    @classmethod
+    def try_from_config(cls, cfg: dict) -> Pipeline | None:
+        """`from_config`, or None when `cfg` cannot be read as a pipeline at all (a missing or mistyped table): the
+        one place that decides which errors mean "this is not a pipeline config"."""
+        try:
+            return cls.from_config(cfg)
+        except (KeyError, ValueError, TypeError):
+            return None
 
     @classmethod
     def from_toml(cls, text: str) -> Pipeline:
@@ -394,7 +412,7 @@ def _exec_rank(key: str) -> int:
 
 
 def _artefact(a: str) -> str:
-    from .catalog import ARTEFACTS
+    from smeltery.methods.catalog import ARTEFACTS
 
     return ARTEFACTS[a]
 

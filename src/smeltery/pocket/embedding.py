@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from ..model import PointCharge
+from ..structure import parse_xyz
 from ._ferric import ferric
 from .loader import PocketField
 
@@ -43,16 +44,9 @@ class EmbeddedLigand:
 
 
 def read_xyz(path: str | Path) -> tuple[list[str], list[tuple[float, float, float]]]:
-    lines = Path(path).read_text().splitlines()
-    n = int(lines[0].strip())
-    symbols, coords = [], []
-    for line in lines[2 : 2 + n]:
-        parts = line.split()
-        symbols.append(parts[0])
-        coords.append((float(parts[1]), float(parts[2]), float(parts[3])))
-    if len(symbols) != n:
-        raise ValueError(f"{path}: header says {n} atoms but {len(symbols)} rows were read")
-    return symbols, coords
+    """Symbols and Angstrom coordinates of an XYZ file; `ValueError` (`StructureError`) on a short or malformed file."""
+    s = parse_xyz(path)
+    return list(s.symbols), list(s.coords)
 
 
 def _filter_overlap(pocket, ligand_coords_angstrom, overlap_cutoff_angstrom):

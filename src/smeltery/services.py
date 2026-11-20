@@ -151,7 +151,7 @@ def worker_main(argv: list[str] | None = None, env: Mapping[str, str] | None = N
             return asyncio.run(temporal_worker(s))
         except KeyboardInterrupt:
             return 0
-    from .bench.app import default_root
+    from .bench.adapters.workspace_root import default_root  # not .bench.app: the worker needs no FastAPI
 
     root = Path(s.root).expanduser() if s.root else default_root()
     return local_worker(root, s.max_runs)

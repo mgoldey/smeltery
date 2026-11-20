@@ -1,100 +1,15 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ApiError, describeReason } from "../../../api/http";
-import { rdkit } from "../../../chem/rdkit";
+import { api, unwrap, type Schemas } from "../../../api/client";
+import { Structure2D } from "../../Structure2D";
 import type { StepViewProps } from "./registry";
 
-/** `POST /api/pipelines/ligands` rows. Typed here until `npm run gen:api` picks up the new models. */
-export type LigandCheck = {
-  name: string;
-  smiles: string;
-  is_parent: boolean;
-  smiles_ok: boolean;
-  formal_charge: number | null;
-  electrons: number | null;
-  electrons_even: boolean | null;
-  sto3g_ok: boolean | null;
-  sto3g_missing: string[];
-  core_atoms: number[];
-  problems: string[];
-};
-type LigandsOut = { parent: string; candidates: LigandCheck[]; problems: string[] };
-type Op = { op: "add" | "remove" | "rename" | "set_smiles" | "set_parent"; name: string; smiles?: string; new_name?: string };
+export type LigandCheck = Schemas["LigandCheck"];
+/** One edit of the list, as the edit route takes it less the draft (added when it is sent). */
+type Op = Omit<Schemas["LigandsEdit"], "toml">;
 
 /** The edit route's only caller wiring: the workspace hands the view a way to replace the draft text. */
 export type LigandsViewProps = StepViewProps;
-
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const j = (await r.json().catch(() => ({}))) as { detail?: unknown };
-  if (!r.ok) throw new ApiError(r.status, describeReason(r.status, r.statusText, j));
-  return j as T;
-}
-
-/** A token colour as RDKit wants it: [r, g, b] in 0..1, read from the page's own CSS variable (so night mode follows). */
-function token(name: string): [number, number, number] {
-  const hex = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const m = /^#([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return [0.2, 0.6, 0.2];
-  const n = parseInt(m[1]!, 16);
-  return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
-}
-
-/**
- * The candidate drawn by RDKit.js with its core highlighted. `core` indexes the SMILES with explicit hydrogens;
- * AddHs appends hydrogens after the heavy atoms, so the heavy atoms keep their index and the hydrogens (not drawn)
- * are simply not highlightable.
- */
-function CoreStructure({ smiles, core }: { smiles: string; core: number[] }) {
-  const [svg, setSvg] = useState<string | null>(null);
-  const key = core.join(",");
-  useEffect(() => {
-    let live = true;
-    void rdkit().then((RDKit) => {
-      const mol = RDKit.get_mol(smiles);
-      if (!mol) return;
-      const n = mol.get_num_atoms();
-      const atoms = core.filter((i) => i < n);
-      const inCore = new Set(atoms);
-      const bonds: number[] = [];
-      const json = JSON.parse(mol.get_json()) as { molecules: { bonds?: { atoms: [number, number] }[] }[] };
-      (json.molecules[0]?.bonds ?? []).forEach((b, i) => {
-        if (inCore.has(b.atoms[0]) && inCore.has(b.atoms[1])) bonds.push(i);
-      });
-      const colour = token("--accent");
-      const out = mol.get_svg_with_highlights(
-        JSON.stringify({
-          width: 170,
-          height: 120,
-          backgroundColour: [1, 1, 1, 0],
-          bondLineWidth: 1.4,
-          atoms,
-          bonds,
-          highlightColour: colour,
-          highlightRadius: 0.3,
-        }),
-      );
-      mol.delete();
-      if (live) setSvg(out);
-    });
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smiles, key]);
-  return (
-    <span
-      className="structure2d"
-      role="img"
-      aria-label={`structure ${smiles}`}
-      data-smiles={smiles}
-      data-core={key}
-      style={{ width: 170, height: 120 }}
-      // RDKit's own SVG, generated locally from the SMILES.
-      dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
-    />
-  );
-}
 
 const Mark = ({ ok, children }: { ok: boolean | null; children: React.ReactNode }) => (
   <span style={{ color: ok === null ? "var(--ink-muted)" : ok ? "var(--ok)" : "var(--bad)" }}>{children}</span>
@@ -122,7 +37,7 @@ function Row({
   return (
     <tr data-candidate={c.name} data-parent={c.is_parent}>
       <td>
-        <CoreStructure smiles={c.smiles} core={c.core_atoms} />
+        <Structure2D smiles={c.smiles} width={170} height={120} highlightAtoms={c.core_atoms} />
       </td>
       <td>
         <input
@@ -188,14 +103,14 @@ export function LigandsView({ pipeline, toml: live, onToml }: LigandsViewProps) 
   }, [live]);
   const q = useQuery({
     queryKey: ["ligands", toml],
-    queryFn: () => post<LigandsOut>("/api/pipelines/ligands", { toml }),
+    queryFn: () => unwrap(api.POST("/api/pipelines/ligands", { body: { toml } })),
     placeholderData: keepPreviousData,
     retry: false,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState({ name: "", smiles: "" });
-  const [rejected, setRejected] = useState<{ row: number; input: string; reason: string }[] | null>(null);
+  const [rejected, setRejected] = useState<Schemas["RejectedRow"][] | null>(null);
   const data = q.data;
   const canEdit = onToml !== undefined;
 
@@ -206,7 +121,7 @@ export function LigandsView({ pipeline, toml: live, onToml }: LigandsViewProps) 
     setRejected(null); // a later edit makes the last import's report stale
     setBusy(true);
     try {
-      const r = await post<{ toml: string }>("/api/pipelines/ligands/edit", { toml: live, ...op });
+      const r = await unwrap(api.POST("/api/pipelines/ligands/edit", { body: { toml: live, ...op } }));
       setError(null);
       onToml(r.toml);
       return true;
@@ -223,9 +138,8 @@ export function LigandsView({ pipeline, toml: live, onToml }: LigandsViewProps) 
     if (!onToml) return;
     setBusy(true);
     try {
-      const r = await post<{ toml: string; accepted: string[]; rejected: { row: number; input: string; reason: string }[] }>(
-        "/api/pipelines/ligands/import",
-        { toml: live, filename: file.name, content: await file.text() },
+      const r = await unwrap(
+        api.POST("/api/pipelines/ligands/import", { body: { toml: live, filename: file.name, content: await file.text() } }),
       );
       setError(null);
       setRejected(r.rejected);

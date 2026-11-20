@@ -2,13 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCanWrite } from "../../api/capabilities";
-import { api, runByRef, unwrap } from "../../api/client";
 import { CommentThread } from "../../components/CommentThread";
 import { EmptyState } from "../../components/EmptyState";
 import { Writable } from "../../components/ReadOnly";
 import { Structure2D } from "../../components/Structure2D";
 import { useStartNextRound } from "../../components/workspace/openFromRun";
 import { useRunId } from "./RunLayout";
+import { day } from "../../components/time";
+import { proposalsQuery, useRunDigest } from "../../api/queries";
 
 /** The computational chemist's review queue: what bench chemists proposed after reading this run's report. */
 export function Proposals() {
@@ -17,13 +18,8 @@ export function Proposals() {
   // and that button is hidden on a read-only server. A box the reader can tick that can never be submitted is an
   // instruction to do something impossible, so on a read-only Bench the queue is a table and nothing more.
   const canWrite = useCanWrite();
-  const verdict = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
-  const digest = runByRef(verdict.data, runId)?.digest ?? undefined;
-  const proposals = useQuery({
-    queryKey: ["proposals", digest],
-    queryFn: () => unwrap(api.GET("/api/proposals", { params: { query: { run: digest ?? "" } } })),
-    enabled: digest !== undefined,
-  });
+  const { digest, runs } = useRunDigest(runId);
+  const proposals = useQuery({ ...proposalsQuery(digest), enabled: digest !== undefined });
   // Unchecked by default: taking a molecule into a round is a judgement, and a pre-ticked box would make it by
   // default for anyone who only came to read the queue.
   const [picked, setPicked] = useState<string[]>([]);
@@ -52,9 +48,9 @@ export function Proposals() {
         </p>
         {/* "Nothing proposed yet" and "the queue could not be read" are different facts, and the EmptyState below
             states the first one. A failure must not borrow it. */}
-        {verdict.isError ? (
+        {runs.isError ? (
           <div className="banner" role="alert">
-            The run listing could not be read: {verdict.error.message}. Without it this run's proposals cannot be
+            The run listing could not be read: {runs.error.message}. Without it this run's proposals cannot be
             looked up; reload to try again.
           </div>
         ) : null}
@@ -117,7 +113,7 @@ export function Proposals() {
                     <td>{p.author}</td>
                     {/* Not p.status: proposals have no lifecycle (the store only adds and lists), so it reads
                         "pending" forever. A date is a fact; a status that never moves is a broken promise. */}
-                    <td>{p.created_at ? new Date(p.created_at).toLocaleDateString() : ""}</td>
+                    <td>{p.created_at ? day(p.created_at) : ""}</td>
                   </tr>
                 ))}
               </tbody>

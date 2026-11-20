@@ -12,8 +12,8 @@ import copy
 import re
 from pathlib import Path
 
-#: Mol* release the page loads (molviewspec's own default is "latest", which would make the view drift).
-MOLSTAR_VERSION = "5.13.1"
+from ..report import MOLSTAR_VERSION  # the release the page loads (molviewspec's own default, "latest", would drift)
+
 _REMOTE = re.compile(r"^(https?:|data:)", re.IGNORECASE)
 
 

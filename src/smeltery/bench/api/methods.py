@@ -12,13 +12,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from smeltery.gui.catalog import Method, catalog, cost_model, floor_status, measured_floor, memory_model
-from smeltery.gui.config_text import ConfigTextError
+from smeltery.config_text import ConfigTextError
 from smeltery.gui.limits import load_limits
 from smeltery.gui.pipeline import Pipeline
+from smeltery.methods.catalog import Method, catalog, cost_model, floor_status, measured_floor, memory_model
 
 from . import models as M
-from .common import ports
+from .common import ports, workspace_defaults
 
 router = APIRouter(prefix="/api", tags=["methods"])
 
@@ -27,25 +27,16 @@ def _defaults(request: Request) -> Any:
     return ports(request).method_defaults
 
 
-def workspace_defaults(request: Request) -> dict[str, dict[str, Any]]:
-    """The workspace's `{method_key: {param: value}}`. A methods.toml that was hand-broken is a 409 naming the file
-    and line, not a 500."""
-    try:
-        return _defaults(request).all()
-    except ConfigTextError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-
-
 def _used_by(request: Request) -> dict[str, list[str]]:
     """{method key: pipelines placing it}. A pipeline that does not read as a pipeline is skipped, not fatal."""
     store = ports(request).pipeline_store
     used: dict[str, list[str]] = {}
     for name in store.list():
         try:
-            keys = Pipeline.from_config(tomllib.loads(store.get(name).text)).keys()
+            p = Pipeline.try_from_config(tomllib.loads(store.get(name).text))
         except (KeyError, ValueError, TypeError, tomllib.TOMLDecodeError):
             continue
-        for k in keys:
+        for k in p.keys() if p is not None else []:
             used.setdefault(k, []).append(name)
     return used
 

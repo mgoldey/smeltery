@@ -69,8 +69,9 @@ import os
 import platform
 import sys
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
+
+from .record import utc_now
 
 SCHEMA = "smeltery.stage/1"
 REUSE_SCHEMA = "smeltery.reuse/1"
@@ -96,8 +97,7 @@ def sha(obj) -> str:
     return hashlib.sha256(canonical(obj)).hexdigest()
 
 
-def now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+now = utc_now  # `smeltery.record.utc_now`: TIME_FORMAT in UTC
 
 
 # ---- identity --------------------------------------------------------------------------------------------------
@@ -569,8 +569,8 @@ def predict(plan, store: StageStore | None) -> tuple[int, int, str | None]:
     """(stages an identical earlier run already stored, stages that can be reused, why reuse is off or None), found
     by walking the run's stages against the store without computing any: the chain stops at the first miss. `plan` is
     used up (its candidates take the stored values)."""
-    from .cli import run_plan
     from .methods import active_hooks
+    from .planning import run_plan
 
     stages = RunStages(None, store, lookup_only=True)
     cacheable = int(plan.tier.name in CACHEABLE_TIERS) + sum(

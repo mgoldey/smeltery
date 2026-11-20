@@ -7,13 +7,9 @@ only Run is blocked by them.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import re
 import tempfile
-import tomllib
-import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -24,24 +20,32 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from smeltery import __version__ as smeltery_version
-from smeltery.bench.ports.pipeline_store import NAME, PipelineFile, StaleWrite
-from smeltery.bench.provisional import place_site
-from smeltery.decisions import DecisionSet
+from smeltery.bench.ports.pipeline_store import NAME, PipelineFile, StaleWrite, check_pipeline_name
+from smeltery.config_text import ConfigTextError, diff_lines
 from smeltery.gui import steps as step_model
-from smeltery.gui._toml import dumps
-from smeltery.gui.catalog import method
-from smeltery.gui.config_text import ConfigTextError, apply, diff_lines
-from smeltery.gui.pipeline import Pipeline
-from smeltery.run_inputs import input_paths
+from smeltery.methods.catalog import method
 
-from ..use_cases import bundle_import, next_round
+from ..use_cases import bundle_export, bundle_import, next_round
+from ..use_cases import create_pipeline as new_pipeline
+from ..use_cases import edit_pipeline as editing
 from ..use_cases.impact import SourceRun, as_dict, impact
 from ..use_cases.launch_run import LaunchRun, LiveRunRefused, smeltery_command
 from . import models as M
-from . import prebuilt as prebuilt_api
-from .common import confined_out, ports, record, row, run
-from .work import pipeline_from_run, pipeline_issues
+from .common import (
+    MAX_UPLOAD,
+    EditedText,
+    apply_edit,
+    confined_out,
+    parse_or_400,
+    ports,
+    read_capped_body,
+    record,
+    row,
+    run,
+    saved_pipeline,
+    submitted_task,
+    workspace_defaults,
+)
 
 router = APIRouter(prefix="/api", tags=["pipelines"])
 
@@ -157,10 +161,6 @@ class StepEdit(BaseModel):
     baseline_toml: str | None = None  # `revert`: the kept text the step goes back to
 
 
-class EditedText(BaseModel):
-    toml: str
-
-
 class PipelineLaunch(BaseModel):
     out: str | None = None
     timeout_s: float | None = Field(
@@ -168,28 +168,29 @@ class PipelineLaunch(BaseModel):
     )
 
 
-def _validate(text: str) -> Pipeline | None:
-    """The pipeline `text` describes. Text that is not TOML is a `ConfigTextError` carrying its line; TOML that
-    `Pipeline` cannot read as a pipeline is None (reported as an issue, never a refusal)."""
+def _check_name(name: str) -> None:
+    """A pipeline name the store would not accept (`check_pipeline_name`) is a 400 saying why."""
     try:
-        cfg = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        m = re.search(r"line (\d+)", str(e))
-        raise ConfigTextError(str(e), int(m.group(1)) if m else 1) from e
+        check_pipeline_name(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _unique_name(taken: Any, base: str) -> str:
     try:
-        return Pipeline.from_config(cfg)
-    except (KeyError, ValueError, TypeError):
-        return None
+        return new_pipeline.unique_name(taken, base)
+    except new_pipeline.NoFreeName as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 def _issues(text: str) -> list[M.Issue]:
     try:
-        p = _validate(text)
+        p = editing.parse(text)
     except ConfigTextError as e:
         return [M.Issue(level="error", stage=None, message=str(e))]
     if p is None:
         return [M.Issue(level="error", stage=None, message="this TOML is not a pipeline config")]
-    return pipeline_issues(p)
+    return [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
 
 
 def _doc(f: PipelineFile, notes: list[str] | None = None) -> M.PipelineDoc:
@@ -212,12 +213,7 @@ def _store(request: Request) -> Any:
 
 
 def _get(request: Request, name: str) -> PipelineFile:
-    try:
-        return _store(request).get(name)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=f"no pipeline {name}") from e
+    return saved_pipeline(request, name)
 
 
 @router.get("/pipelines", response_model=list[str])
@@ -234,7 +230,7 @@ def get_pipeline(request: Request, name: str) -> M.PipelineDoc:
 def put_pipeline(request: Request, name: str, body: M.PipelinePut) -> Any:
     _get(request, name)
     try:
-        _validate(body.toml)
+        editing.parse(body.toml)
     except ConfigTextError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     try:
@@ -242,10 +238,6 @@ def put_pipeline(request: Request, name: str, body: M.PipelinePut) -> Any:
     except StaleWrite as e:
         return JSONResponse(status_code=409, content={"reason": str(e)})
     return _doc(saved)
-
-
-#: An uploaded input larger than this is refused before it is written (a whole-cell cryo-EM map is not an input).
-MAX_UPLOAD = 64 * 1024 * 1024
 
 
 class AddedFile(BaseModel):
@@ -262,15 +254,7 @@ async def add_pipeline_file(request: Request, name: str, filename: str) -> Added
     `smeltery run` and the preview resolve the config's relative paths. The body is the file's bytes. A different
     file of the same name is kept, and the new one gets its own name: the response says which name to use."""
     _get(request, name)
-    too_big = f"{filename}: larger than {MAX_UPLOAD // (1024 * 1024)} MB"
-    # Content-Length first: `request.body()` buffers the whole upload in memory, so refusing after reading it would
-    # protect the disk and not the process. The length is still checked after reading, for a chunked body that has none.
-    declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD:
-        raise HTTPException(status_code=413, detail=too_big)
-    data = await request.body()
-    if len(data) > MAX_UPLOAD:
-        raise HTTPException(status_code=413, detail=too_big)
+    data = await read_capped_body(request, filename, MAX_UPLOAD)
     try:
         return AddedFile(path=_store(request).add_file(name, filename, data))
     except ValueError as e:
@@ -305,56 +289,9 @@ def pipeline_bundle(request: Request, name: str) -> FileResponse:
     (sha256 and size of each) as one zip under `<name>/`. Inputs keep their path relative to the pipeline folder;
     an absolute path is stored as `inputs/<basename>` and its original path recorded in the manifest."""
     pf = _get(request, name)
-    sources: dict[str, Path] = {f.name: pf.folder / f.name for f in _store(request).files(name)}
-    originals: dict[str, str] = {}
-    missing: list[str] = []
-    try:
-        cfg = tomllib.loads(pf.text)
-    except tomllib.TOMLDecodeError:
-        cfg = {}
-    for table, key in input_paths():
-        value = (cfg.get(table) or {}).get(key) if isinstance(cfg.get(table), dict) else None
-        if not isinstance(value, str) or not value:
-            continue
-        path = Path(value)
-        if path.is_absolute():
-            rel, src = f"inputs/{path.name}", path
-        else:
-            rel, src = path.as_posix(), (pf.folder / path)
-            if ".." in path.parts:
-                missing.append(value)
-                continue
-        if not src.is_file():
-            # a value such as a PDB id for structure.spec is not a file reference at all
-            if path.is_absolute() or "/" in value or "." in path.name:
-                missing.append(value)
-            continue
-        if path.is_absolute():
-            # two different absolute files may share a basename: the later one gets a name of its own
-            n = 1
-            while rel in sources and sources[rel] != src:
-                n += 1
-                rel = f"inputs/{n}-{path.name}"
-            originals[rel] = value
-        sources.setdefault(rel, src)
     tmp = tempfile.NamedTemporaryFile(prefix="bundle-", suffix=".zip", delete=False)
     tmp.close()
-    files: dict[str, Any] = {}
-    config_bytes = pf.text.encode()
-    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{name}/config.toml", config_bytes)
-        files["config.toml"] = {"sha256": hashlib.sha256(config_bytes).hexdigest(), "size": len(config_bytes)}
-        for rel, src in sources.items():
-            h = hashlib.sha256()
-            with src.open("rb") as r, z.open(f"{name}/{rel}", "w", force_zip64=True) as w:
-                while chunk := r.read(1 << 20):
-                    h.update(chunk)
-                    w.write(chunk)
-            files[rel] = {"sha256": h.hexdigest(), "size": src.stat().st_size}
-            if rel in originals:
-                files[rel]["original_path"] = originals[rel]
-        manifest = {"pipeline": name, "smeltery": smeltery_version, "files": files, "missing": missing}
-        z.writestr(f"{name}/manifest.json", json.dumps(manifest, indent=2))
+    bundle_export.write_bundle(name, pf.text, pf.folder, [f.name for f in _store(request).files(name)], Path(tmp.name))
     return FileResponse(
         tmp.name,
         media_type="application/zip",
@@ -366,74 +303,38 @@ def pipeline_bundle(request: Request, name: str) -> FileResponse:
 def _from_run(request: Request, run_id: str) -> tuple[str, dict[str, Path], list[str]]:
     """(config text, {relative path: file to copy}, notes) for a new pipeline built from run `run_id`."""
     r = row(request, run_id)
-    out_dir = Path(r["path"]).parent
-    cfg = record(request, run_id).get("results", {}).get("config")
-    cfg_file = out_dir / cfg["file"] if isinstance(cfg, dict) and cfg.get("file") else None
-    if cfg_file is None or not cfg_file.is_file():
-        state = pipeline_from_run(request, M.PipelineFromRun(run=run_id))
-        return state.toml, {}, state.notes
-    files: dict[str, Path] = {}
-    for dotted, info in (cfg.get("inputs") or {}).items():
-        copy = info.get("copy") if isinstance(info, dict) else None
-        if not copy:
-            continue
-        src = out_dir / copy
-        if not src.is_file():
-            raise _Conflict(f"run records input {dotted} as {copy}, but {src} is not there")
-        files[copy] = src
-    return cfg_file.read_text(), files, []
-
-
-def _with_defaults(p: Pipeline, request: Request) -> Pipeline:
-    """A blank pipeline ADDS its methods, so each gets the workspace defaults copied in, exactly as
-    `Pipeline.add(..., defaults=)` does. (`from_run` copies an existing config and gets none.)"""
-    defaults = _workspace_defaults(request)
-    for st in p.stages:
-        known = {x.name for x in st.info.params}
-        copied = {k: v for k, v in (defaults.get(st.method) or {}).items() if k in known}
-        st.params = {**copied, **st.params}
-    return p
-
-
-class _Conflict(Exception):
-    pass
+    start = next_round.from_run(Path(r["path"]).parent, record(request, run_id), lambda: run(request, run_id))
+    return start.toml, start.files, start.notes
 
 
 def _next_round(request: Request, spec: M.NextRoundIn, staging: Path) -> tuple[str, dict[str, Path], list[str]]:
     """The next round of run `spec.run`: its recorded config with the decisions and accepted proposals carried in.
 
-    Everything that decides the round lives in `use_cases.next_round`; this only gathers what the run holds (its
-    config and inputs, its decisions file, the proposals it names) and turns a refusal into a 400.
+    Everything that decides the round lives in `use_cases.next_round`; this only names the run and turns a refusal
+    into a 400.
     """
     text, files, notes = _from_run(request, spec.run)
     r = run(request, spec.run)
     digest = r.record["input_digest"]
-    dpath = Path(r.out_dir) / f"decisions-{digest[:12]}.json"
-    decisions = None
-    if dpath.is_file():
-        try:
-            decisions = DecisionSet.load(dpath)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-    by_id = {p.id: p for p in ports(request).project_store.list_proposals(digest)}
-    proposed: list[next_round.Proposed] = []
-    for pid in spec.add_proposals:
-        p = by_id.get(pid)
-        if p is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"proposal {pid!r} does not belong to run {spec.run} (digest {digest[:12]})",
-            )
-        proposed.append(next_round.Proposed(id=p.id, candidate=p.candidate, smiles=p.smiles))
+    try:
+        got = next_round.gather(
+            out_dir=Path(r.out_dir),
+            digest=digest,
+            run_ref=spec.run,
+            projects=ports(request).project_store,
+            proposal_ids=list(spec.add_proposals),
+        )
+    except ValueError as e:  # an unloadable decisions file, or a proposal of another run
+        raise HTTPException(status_code=400, detail=str(e)) from e
     try:
         made = next_round.plan(
             text=text,
             candidates=dict(r.candidates),
             parent=r.parent,
-            decisions=decisions,
-            decisions_name=dpath.name if decisions is not None else None,
+            decisions=got.decisions,
+            decisions_name=got.decisions_name,
             carry_decisions=spec.carry_decisions,
-            proposals=proposed,
+            proposals=got.proposals,
             drop=list(spec.drop),
             staging=staging,
         )
@@ -460,35 +361,32 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
     staging: tempfile.TemporaryDirectory[str] | None = None
     name = body.name
     if body.next_round is not None:
-        if not NAME.fullmatch(name):
-            raise HTTPException(
-                status_code=400, detail=f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}"
-            )
+        _check_name(name)
         staging = tempfile.TemporaryDirectory(prefix="smeltery-next-round-")
         try:
             text, files, notes = _next_round(request, body.next_round, Path(staging.name))
             # a second next round from the same run is the normal case, not a mistake the user can act on
-            name = _unique_name(store, name)
-        except _Conflict as e:
+            name = _unique_name(store.list(), name)
+        except next_round.InputsMissing as e:
             staging.cleanup()
             return JSONResponse(status_code=409, content={"reason": str(e)})
         except BaseException:
             staging.cleanup()
             raise
     elif body.from_prebuilt is not None:
-        if prebuilt_api.folder(body.from_prebuilt) is None:
+        prebuilts = ports(request).prebuilt_source
+        if body.from_prebuilt not in prebuilts.names():
             raise HTTPException(status_code=400, detail=f"unknown prebuilt pipeline {body.from_prebuilt!r}")
         # R15: the config is copied EXACTLY, no workspace defaults. The example run goes in as run/, so the run store
         # (which scans the Bench root) lists it and the UI can open the workspace with ?run=<its index>.
-        text = prebuilt_api.config_text(body.from_prebuilt)
+        text = prebuilts.config_text(body.from_prebuilt)
         staging = tempfile.TemporaryDirectory(prefix="smeltery-prebuilt-")
-        files = prebuilt_api.materialise(prebuilt_api.copy_plan(body.from_prebuilt), Path(staging.name))
+        files = prebuilts.stage(body.from_prebuilt, Path(staging.name))
     elif body.blank is not None:
         b = body.blank
+        defaults = workspace_defaults(request, label="methods.toml")
         try:
-            text = dumps(
-                _with_defaults(Pipeline.minimal(b.campaign, b.parent, dict(b.candidates)), request).to_config()
-            )
+            text = new_pipeline.blank_text(b.campaign, b.parent, dict(b.candidates), defaults)
         except (KeyError, ValueError, TypeError) as e:
             raise HTTPException(
                 status_code=400, detail=f"cannot build a blank pipeline: {str(e).strip(chr(39))}"
@@ -497,7 +395,7 @@ def create_pipeline(request: Request, body: M.PipelineCreate) -> Any:
         assert body.from_run is not None
         try:
             text, files, notes = _from_run(request, body.from_run)
-        except _Conflict as e:
+        except next_round.InputsMissing as e:
             return JSONResponse(status_code=409, content={"reason": str(e)})
     try:
         made = store.create(name, text, files)
@@ -530,10 +428,7 @@ def _busy_with(request: Request, folder: Path, name: str) -> list[str]:
 
 def _lifecycle(request: Request, name: str, new_name: str, op: Literal["rename", "clone"]) -> Any:
     f = _get(request, name)
-    if not NAME.fullmatch(new_name):
-        raise HTTPException(
-            status_code=400, detail=f"invalid pipeline name {new_name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}"
-        )
+    _check_name(new_name)
     if new_name == name:
         raise HTTPException(status_code=400, detail="the new name is the same as the old one")
     if op == "rename":
@@ -598,17 +493,6 @@ class ImportRefused(M.Problem):
     notes: list[str] = []
 
 
-def _unique_name(store: Any, base: str) -> str:
-    taken = set(store.list())
-    if base not in taken:
-        return base
-    for i in range(2, 1000):
-        cand = f"{base[: 64 - len(str(i)) - 1]}-{i}"
-        if cand not in taken:
-            return cand
-    raise HTTPException(status_code=409, detail=f"no free name starting with {base}")
-
-
 @router.post(
     "/pipelines/import",
     response_model=ImportResult,
@@ -627,8 +511,8 @@ async def import_pipeline(request: Request, name: str | None = None) -> Any:
     each one. An input exported from an absolute path is rewritten to its imported `inputs/<basename>`; any other
     absolute or `..` input path is refused, so a hostile config cannot point a run at a file outside the pipeline."""
     store = _store(request)
-    if name is not None and not NAME.fullmatch(name):
-        raise HTTPException(status_code=400, detail=f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}")
+    if name is not None:
+        _check_name(name)
     if name is not None and name in store.list():
         return JSONResponse(status_code=409, content={"reason": f"pipeline {name} already exists"})
     with tempfile.TemporaryDirectory(prefix="smeltery-import-") as tmp:
@@ -643,46 +527,26 @@ async def import_pipeline(request: Request, name: str | None = None) -> Any:
         return await run_in_threadpool(_import_bundle, store, zpath, Path(tmp) / "staged", name)
 
 
-def _escapes(value: str) -> bool:
-    p = Path(value)
-    return p.is_absolute() or ".." in p.parts or value.startswith("~") or bool(re.match(r"^[A-Za-z]:", value))
-
-
 def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> Any:
     """The blocking half of an import: unpack, verify, rewrite, create."""
-    from smeltery.gui.config_text import set_value
-
     staging.mkdir()
     try:
         u = bundle_import.unpack(zpath, staging)
     except bundle_import.BundleRefused as e:
-        raise HTTPException(status_code=e.status, detail=str(e)) from e
+        raise HTTPException(status_code=413 if e.too_large else 400, detail=str(e)) from e
     errors = list(u.errors)
     text = u.config
     notes: list[str] = []
     if not errors:
         try:
-            _validate(text)
+            editing.parse(text)
         except ConfigTextError as e:
             errors.append(("config.toml", str(e)))
     if not errors:
-        cfg = tomllib.loads(text)
-        by_original = {orig: rel for rel, orig in u.originals.items()}
-        used: set[str] = set()
-        for table, key in input_paths():
-            value = (cfg.get(table) or {}).get(key) if isinstance(cfg.get(table), dict) else None
-            if not isinstance(value, str):
-                continue
-            if value in by_original:
-                text = set_value(text, f"{table}.{key}", by_original[value])
-                notes.append(f"{table}.{key}: {value} -> {by_original[value]}")
-                used.add(value)
-            elif _escapes(value):
-                errors.append((f"{table}.{key}", f"{value!r} points outside the bundle and was not exported with it"))
-        errors += [(rel, f"the config does not name {orig}") for orig, rel in by_original.items() if orig not in used]
+        text, notes, errors = bundle_import.rewrite_inputs(text, u.originals)
     if not errors:
         try:
-            _validate(text)
+            editing.parse(text)
         except ConfigTextError as e:
             errors.append(("config.toml", f"after rewriting input paths: {e}"))
     if errors:
@@ -700,7 +564,7 @@ def _import_bundle(store: Any, zpath: Path, staging: Path, name: str | None) -> 
         base = re.sub(r"[^a-z0-9_-]+", "-", (u.pipeline or u.top).lower()).strip("-_")[:64]
         if not NAME.fullmatch(base):
             raise HTTPException(status_code=400, detail="the bundle's name is not usable: give one with ?name=")
-        target = _unique_name(store, base)
+        target = _unique_name(store.list(), base)
     try:
         made = store.create(target, text, u.files)
     except FileExistsError:
@@ -737,7 +601,7 @@ def pipeline_impact(request: Request, body: ImpactRequest) -> Any:
     run's poses when nothing upstream of them changed, or "cannot say"."""
     for text in (body.toml, body.baseline_toml):
         try:
-            _validate(text)
+            editing.parse(text)
         except ConfigTextError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     base = Path(ports(request).settings.root)
@@ -765,30 +629,15 @@ def _issue(x: Any) -> M.Issue:
     return M.Issue(level=x.level, stage=x.stage, message=x.message)
 
 
-def _parse_or_400(text: str) -> Pipeline | None:
-    try:
-        return _validate(text)
-    except ConfigTextError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-def _workspace_defaults(request: Request) -> dict[str, dict[str, Any]]:
-    """The Methods tab's `{method_key: {param: value}}`; a hand-broken methods.toml is a 409 naming its line."""
-    try:
-        return ports(request).method_defaults.all()
-    except ConfigTextError as e:
-        raise HTTPException(status_code=409, detail=f"methods.toml: {e}") from e
-
-
 @router.post("/pipelines/steps", response_model=StepsOut, responses={400: {"model": M.Problem}})
 def pipeline_steps(request: Request, body: StepsRequest) -> StepsOut:
     """The draft drawn as its six steps, each with its knobs, its state against the kept text, and its issues."""
-    p = _parse_or_400(body.toml)
-    base = _parse_or_400(body.baseline_toml) if body.baseline_toml is not None else None
+    p = parse_or_400(body.toml)
+    base = parse_or_400(body.baseline_toml) if body.baseline_toml is not None else None
     diff = [DiffLine(sign=s, line=ln) for s, ln in diff_lines(body.baseline_toml or body.toml, body.toml)]
     if p is None:
         return StepsOut(steps=[], ligands=None, pipeline_issues=_issues(body.toml), diff=diff)
-    views = step_model.steps(p, base, _workspace_defaults(request))
+    views = step_model.steps(p, base, workspace_defaults(request, label="methods.toml"))
     out = [
         StepOut(
             key=v.key,
@@ -820,95 +669,22 @@ def pipeline_steps(request: Request, body: StepsRequest) -> StepsOut:
     )
 
 
-def _patch(target: dict, before: dict, after: dict) -> None:
-    """Carry what changed from `before` to `after` (two `Pipeline.to_config()`s) into `target` (the user's config as
-    parsed), so the edit touches only the keys it changed and nothing the Pipeline would normalise."""
-    for k in [k for k in before if k not in after]:
-        target.pop(k, None)
-    for k, v in after.items():
-        old = before.get(k)
-        if isinstance(v, dict) and isinstance(old, dict) and isinstance(target.get(k), dict):
-            _patch(target[k], old, v)
-        elif k not in before or old != v or type(old) is not type(v):
-            target[k] = v
-
-
-def _revert(p: Pipeline, step: str, kept: Pipeline) -> None:
-    """Put step `step` of `p` back as it is in `kept`: the methods it places and their knobs (or, for Ligands, the
-    campaign, parent, candidates and decisions). Every other step keeps its draft edits."""
-    offered = {k: methods for k, _, methods in step_model.step_table()}
-    if step not in offered:
-        raise ValueError(f"no step {step!r}; steps: {list(offered)}")
-    methods = offered[step]
-    if not methods:
-        p.campaign, p.parent, p.candidates, p.decisions = (
-            kept.campaign,
-            kept.parent,
-            dict(kept.candidates),
-            kept.decisions,
-        )
-        return
-    for m in methods:
-        if m in p.keys() and m not in kept.keys():
-            p.remove(m)
-    for m in methods:
-        if m in kept.keys():
-            if m not in p.keys():
-                p.add(m)
-            p.stage(m).params = dict(kept.stage(m).params)
-
-
-def _edit(p: Pipeline, body: StepEdit, defaults: dict[str, dict[str, Any]]) -> None:
-    if body.op == "revert":
-        kept = _parse_or_400(body.baseline_toml) if body.baseline_toml is not None else None
-        if kept is None:
-            raise ValueError("a revert needs baseline_toml, the kept pipeline")
-        _revert(p, body.key, kept)
-        return
-    if body.op == "add":
-        p.add(body.key, body.params or None, defaults=defaults)
-    elif body.op == "remove":
-        p.remove(body.key)
-    elif body.op == "set":
-        p.set(body.key, **(body.params or {}))
-    elif body.op == "choose":  # the other method of a step: drop the ones it excludes, then place it
-        for other in method(body.key).exclusive:
-            if other in p.keys():
-                p.remove(other)
-        if body.key not in p.keys():
-            p.add(body.key, body.params or None, defaults=defaults)
-    else:
-        if body.site is None:
-            raise ValueError("a site edit needs the site: atom, from_atom, q, distance")
-        s = body.site
-        place_site(p, s.atom, s.from_atom, q=s.q, distance=s.distance)
-
-
 @router.post("/pipelines/edit", response_model=EditedText, responses={400: {"model": M.Problem}})
 def pipeline_edit(request: Request, body: StepEdit) -> EditedText:
     """One step edit applied to the user's text: only the lines the edit changes are written, comments and layout
     stay (`config_text.apply`). Workspace defaults are copied into a method when it is added."""
-    p = _parse_or_400(body.toml)
-    if p is None:
-        raise HTTPException(status_code=400, detail="this TOML is not a pipeline config; fix it in the TOML pane")
-    defaults = _workspace_defaults(request) if body.op in ("add", "choose") else {}
-    before = p.to_config()
-    try:
-        _edit(p, body, defaults)
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e).strip("'\"")) from e
-    after = p.to_config()
-    if body.op == "remove" and body.key in Pipeline.from_config(after).keys():
-        others = ", ".join(repr(o) for o in method(body.key).exclusive) or "nothing"
-        raise HTTPException(
-            status_code=400, detail=f"every pipeline needs {body.key!r}; choose its alternative instead: {others}"
+    site = editing.Site(**body.site.model_dump()) if body.site is not None else None
+    return apply_edit(
+        lambda: editing.apply_step_edit(
+            body.toml,
+            body.op,
+            body.key,
+            params=body.params,
+            site=site,
+            baseline_toml=body.baseline_toml,
+            defaults=lambda: workspace_defaults(request, label="methods.toml"),
         )
-    target = tomllib.loads(body.toml)
-    _patch(target, before, after)
-    try:
-        return EditedText(toml=apply(body.toml, target))
-    except ConfigTextError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    )
 
 
 @router.post(
@@ -923,7 +699,7 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
     f = _get(request, name)
     issues = _issues(f.text)
     errors = [i.message for i in issues if i.level == "error"]
-    p = _validate(f.text) if not errors else None
+    p = editing.parse(f.text) if not errors else None
     if errors or p is None:
         n = len(errors)
         return JSONResponse(
@@ -942,10 +718,7 @@ def pipeline_launch(request: Request, name: str, body: PipelineLaunch) -> Any:
         )
     except LiveRunRefused as e:  # OUT holds a live Temporal run: nothing was written
         raise HTTPException(status_code=409, detail=str(e)) from None
-    t = st.task_queue.get(tid)
-    if t is None:
-        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
-    return M.Task(**(t.to_dict() if hasattr(t, "to_dict") else t))
+    return submitted_task(request, tid)
 
 
 @router.post("/pipelines/{name}/preview", response_model=PreviewStarted, status_code=201)

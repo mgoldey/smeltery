@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
-from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from smeltery.gates import mol_with_h
 from smeltery.gui.pipeline import Pipeline
 
 
 def provisional_pose(smiles: str, *, seed: int = 0xF00D) -> tuple[tuple[str, ...], np.ndarray]:
-    mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    mol = mol_with_h(smiles)
     params = AllChem.ETKDGv3()  # ty: ignore[unresolved-attribute]
     params.randomSeed = seed
     AllChem.EmbedMolecule(mol, params)  # ty: ignore[unresolved-attribute]

@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 from rdkit import Chem
@@ -42,8 +42,8 @@ from .cost import (
     sto3g_basis_functions,
     sto3g_basis_functions_strict,
 )
-from .gates import require_passing_poses
-from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, PointCharge, Pose
+from .gates import AtomOrderError, mol_for_pose, mol_with_h, require_passing_poses
+from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, KJ_PER_KCAL, NM_TO_ANGSTROM, Candidate, PointCharge, Pose
 
 
 class NoCommonCoreError(RuntimeError):
@@ -99,11 +99,7 @@ def _unknown_quantity(tier: Tier, quantity: str) -> KeyError:
     return KeyError(f"tier {tier.name!r} does not produce {quantity!r}; produces {sorted(tier.produces())}")
 
 
-def _mol_with_h(smiles: str) -> Chem.Mol:
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        raise ValueError(f"unparseable SMILES: {smiles!r}")
-    return Chem.AddHs(mol)
+_mol_with_h = mol_with_h  # `smeltery.gates.mol_with_h`, under the name this module's importers use
 
 
 def _pose_from_conf(mol: Chem.Mol, conf_id: int) -> Pose:
@@ -556,6 +552,50 @@ def _calc_entry(candidate: str, pose: int, leg: str, result, energy: float, seco
     }
 
 
+calc_entry = _calc_entry  # the public name, for the Temporal activity that logs an SCF the same way
+
+
+def pose_label(candidate: str, pose: int) -> str:
+    """The xyz comment line of one pose's molecule: what the engine (and a fake engine's rules) see."""
+    return f"{candidate} pose {pose}"
+
+
+def ferric_molecule(ferric, pose: Pose, label: str, charge: int):
+    """The engine's molecule of one pose at the SMILES' net charge."""
+    return ferric.Molecule.from_xyz_string(pose.to_xyz(label), charge=charge)
+
+
+def ferric_charges(field) -> list:
+    """The field's point charges as the engine takes them (Bohr: `PointCharge.as_ferric_bohr`)."""
+    return [c.as_ferric_bohr() for c in field]
+
+
+def _field_context(tier, ferric, ctx: dict) -> tuple[list, Any, Any]:
+    """A field tier's per-run setup: record the field's provenance on `tier`, and return (the engine's point
+    charges, the engine's basis set, the plain run's SCF checkpoint or None)."""
+    field: list[PointCharge] = ctx["field"]
+    tier.field_provenance = getattr(field, "provenance", None)
+    return ferric_charges(field), ferric.BasisSet.bundled(tier.basis), ctx.get("checkpoint")
+
+
+def interaction_kcal(vac_hartree: float, fld_hartree: float) -> float:
+    """dE_int of one pose, kcal/mol: the field leg's energy minus the vacuum leg's (Hartree), converted."""
+    return (fld_hartree - vac_hartree) * HARTREE_TO_KCAL
+
+
+def _scf_kwargs(energy_conv: float, density_conv: float, max_iter: int | None) -> dict:
+    """The SCF keyword arguments every field tier passes: the thresholds, and `max_iter` only when set."""
+    kw: dict = {"energy_conv": energy_conv, "density_conv": density_conv}
+    if max_iter is not None:
+        kw["max_iter"] = max_iter
+    return kw
+
+
+def _unmeasured_cost(why: str) -> dict:
+    """`estimate_cost` when there is no measured model for the case: wall time, predicted None, and why."""
+    return {"quantity": "wall_time", "unit": "s", "predicted": None, "basis": f"unmeasured: {why}"}
+
+
 #: How far (Hartree) a rung's "converged" energy may sit above the lowest energy an earlier rung of the same leg
 #: reached before the convergence is refused. Every SCF iterate is the energy of a real determinant, so the RHF
 #: minimum cannot lie above one already reached; a rung that stops there has settled on a wrong state (ferric before
@@ -685,21 +725,17 @@ class FieldInteraction:
     def estimate_cost(self, candidates: list[Candidate]) -> dict:
         """Measured reference time scaled by nbf^p (see `smeltery.cost`); None outside what was measured."""
         quantity, unit = "wall_time", "s"
-
-        def none(why: str) -> dict:
-            return {"quantity": quantity, "unit": unit, "predicted": None, "basis": f"unmeasured: {why}"}
-
         cal = rhf_calibration()
         if self.basis != cal.basis:
-            return none(f"calibrated for {cal.basis} only, tier is {self.basis}")
+            return _unmeasured_cost(f"calibrated for {cal.basis} only, tier is {self.basis}")
         if not candidates or any(not c.poses for c in candidates):
-            return none("poses not built yet, so the SCF count is unknown")
+            return _unmeasured_cost("poses not built yet, so the SCF count is unknown")
         total, max_nbf = 0.0, 0
         for c in candidates:
             for pose in c.poses:
                 nbf = sto3g_basis_functions_strict(list(pose.symbols))
                 if nbf is None:
-                    return none(f"{c.name}: element outside the STO-3G table")
+                    return _unmeasured_cost(f"{c.name}: element outside the STO-3G table")
                 total += cal.predicted_seconds_per_pose(nbf)
                 max_nbf = max(max_nbf, nbf)
         n = sum(len(c.poses) for c in candidates)
@@ -722,9 +758,7 @@ class FieldInteraction:
         """The `run_rhf` keyword arguments of `rung`: the base settings, then remedy `rung` on top."""
         if not 0 <= rung < self.n_rungs:
             raise ValueError(f"rung {rung} outside the ladder 0..{self.n_rungs - 1}")
-        kw: dict = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
-        if self.max_iter is not None:
-            kw["max_iter"] = self.max_iter
+        kw = _scf_kwargs(self.energy_conv, self.density_conv, self.max_iter)
         if rung:
             kw.update(self.remedies[rung - 1])
         return kw
@@ -762,22 +796,18 @@ class FieldInteraction:
             require_passing_poses(cand, ctx)
         import ferric
 
-        field: list[PointCharge] = ctx["field"]
-        checkpoint = ctx.get("checkpoint")  # a plain run's SCF checkpoint (smeltery.checkpoint), or None
-        self.field_provenance = getattr(field, "provenance", None)
-        charges = [c.as_ferric_bohr() for c in field]
-        bs = ferric.BasisSet.bundled(self.basis)
+        charges, bs, checkpoint = _field_context(self, ferric, ctx)  # checkpoint: smeltery.checkpoint, or None
         self.calc_log = []
         for cand in candidates:
             vals, rungs = [], []
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
-                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
+                mol = ferric_molecule(ferric, pose, pose_label(cand.name, i), charge)
                 vac, vr = self._climb(ferric, mol, bs, None, cand.name, i, "vacuum", checkpoint)
                 fld, fr = self._climb(ferric, mol, bs, charges, cand.name, i, "field", checkpoint)
                 if not (vac.converged and fld.converged):
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
-                vals.append((fld.energy - vac.energy) * HARTREE_TO_KCAL)
+                vals.append(interaction_kcal(vac.energy, fld.energy))
                 rungs.append(float(max(vr, fr)))
             cand.per_pose["dE_int"] = vals
             if self.remedies:
@@ -916,25 +946,22 @@ class FieldDftInteraction:
         """Measured PBE reference scaled by `xc_fock_work` (see `smeltery.cost`); None outside it."""
         quantity, unit = "wall_time", "s"
 
-        def none(why: str) -> dict:
-            return {"quantity": quantity, "unit": unit, "predicted": None, "basis": f"unmeasured: {why}"}
-
         # Basis and functional are checked FIRST, and return None rather than raising: an estimator
         # that throws cannot be used to decide whether a run is affordable, which is its whole job.
         # `_size` raises for a non-STO-3G basis, so reaching it with one would turn this into an error.
         if self.functional != "PBE":
-            return none(f"the reference is PBE, tier is {self.functional}")
+            return _unmeasured_cost(f"the reference is PBE, tier is {self.functional}")
         if self.basis != "sto-3g":
-            return none(f"the reference is sto-3g, tier is {self.basis}")
+            return _unmeasured_cost(f"the reference is sto-3g, tier is {self.basis}")
         if not candidates or any(not c.poses for c in candidates):
-            return none("poses not built yet, so the SCF count is unknown")
+            return _unmeasured_cost("poses not built yet, so the SCF count is unknown")
         total = 0.0
         for c in candidates:
             # Unlike the RHF tier there is no element gate here: the XC grid depends on ATOM COUNT, and
             # STO-3G, def2-SVP and D3(BJ) all cover every element in this set (P, S and Cl included) --
             # which is exactly what FieldInteraction.estimate_cost refuses the whole batch over.
             if sto3g_basis_functions_strict(list(c.poses[0].symbols)) is None:
-                return none(f"{c.name}: element outside the STO-3G table, so nbf cannot be counted")
+                return _unmeasured_cost(f"{c.name}: element outside the STO-3G table, so nbf cannot be counted")
             total += sum(pbe_seconds_per_pose(self._size(p)) for p in c.poses)
         n = sum(len(c.poses) for c in candidates)
         return {
@@ -1016,21 +1043,15 @@ class FieldDftInteraction:
                         "lower require_free_gb (set it to None to disable this check)."
                     )
 
-        field: list[PointCharge] = ctx["field"]
-        checkpoint = ctx.get("checkpoint")  # a plain run's SCF checkpoint (smeltery.checkpoint), or None
-        self.field_provenance = getattr(field, "provenance", None)
-        charges = [c.as_ferric_bohr() for c in field]
-        bs = ferric.BasisSet.bundled(self.basis)
+        charges, bs, checkpoint = _field_context(self, ferric, ctx)  # checkpoint: smeltery.checkpoint, or None
         self.calc_log = []
         for cand in candidates:
             vals: list[float] = []
             d3s: list[float] = []
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
-                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
-                kw = {"energy_conv": self.energy_conv, "density_conv": self.density_conv}
-                if self.max_iter is not None:
-                    kw["max_iter"] = self.max_iter
+                mol = ferric_molecule(ferric, pose, pose_label(cand.name, i), charge)
+                kw = _scf_kwargs(self.energy_conv, self.density_conv, self.max_iter)
                 if self.k_builder is not None:
                     kw["k_builder"] = self.k_builder
                 legs: dict[str, dict] = {}
@@ -1053,7 +1074,7 @@ class FieldDftInteraction:
                         f"{cand.name} pose {i}: SCF did not converge "
                         f"(vacuum={vac['converged']}, field={fld['converged']})"
                     )
-                vals.append((fld["energy_hartree"] - vac["energy_hartree"]) * HARTREE_TO_KCAL)
+                vals.append(interaction_kcal(vac["energy_hartree"], fld["energy_hartree"]))
                 # Geometry-only, so it is the same for both legs and cancels in dE_int above. Computed
                 # once per pose and reported separately, never folded into dE_int.
                 d3s.append(ferric.d3bj_energy(mol, functional=self.functional) * HARTREE_TO_KCAL)
@@ -1159,7 +1180,7 @@ class SurfaceEsp:
             lo, hi, buried = [], [], []
             charge = _net_charge(cand.smiles)
             for i, pose in enumerate(cand.poses):
-                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{cand.name} pose {i}"), charge=charge)
+                mol = ferric_molecule(ferric, pose, pose_label(cand.name, i), charge)
                 res = ferric.run_rhf(mol, bs, energy_conv=self.energy_conv, density_conv=self.density_conv)
                 if not res.converged:
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
@@ -1266,6 +1287,20 @@ def _net_charge(smiles: str) -> int:
     return sum(a.GetFormalCharge() for a in mol.GetAtoms())
 
 
+net_charge = _net_charge  # the public name: the SMILES' net formal charge, as every tier scores it
+
+
+def parity_problem(name: str, electrons: int, charge: int) -> str | None:
+    """Why the closed-shell field tiers cannot score `name` (`electrons` electrons at net `charge`), or None when the
+    count is even. The message is the tail every caller states it with; the caller names the stage."""
+    if electrons % 2:
+        return (
+            f"{name} has {electrons} electrons at charge {charge:+d}; the field-interaction tier is closed-shell "
+            "RHF and is undefined for an odd electron count"
+        )
+    return None
+
+
 @dataclass
 class Gfn2:
     """GFN2-xTB total energy per pose, in the pocket's point-charge field. A GATE, not a RANKER.
@@ -1311,7 +1346,7 @@ class Gfn2:
             require_passing_poses(cand, ctx)
         field = ctx.get("field", [])
         self.field_provenance = getattr(field, "provenance", None)
-        charges = [c.as_ferric_bohr() for c in field]  # Bohr
+        charges = ferric_charges(field)  # Bohr
         for cand in candidates:
             q = _net_charge(cand.smiles)
             cand.per_pose["E_gfn2"] = [
@@ -1484,7 +1519,6 @@ class ForceFieldBackendMissing(ImportError):
     """The OpenMM path needs packages pip alone cannot install; the message says how to get them."""
 
 
-KJ_PER_KCAL = 4.184  # thermochemical calorie (exact by definition); OpenMM reports kJ/mol
 OPENMM_ENVIRONMENT_HINT = (
     "the force-field path 'openmm' needs openmm, openmmforcefields and openff-toolkit, and "
     "openff-toolkit (with AmberTools for AM1-BCC charges) is not installable from PyPI "
@@ -1593,10 +1627,11 @@ class ForceField:
 
     @staticmethod
     def _check_atom_order(cand: Candidate, pose: Pose, i: int) -> Chem.Mol:
-        mol = _mol_with_h(cand.smiles)
-        if tuple(a.GetSymbol() for a in mol.GetAtoms()) != tuple(pose.symbols):
-            raise ValueError(f"{cand.name} pose {i}: atom order does not match the SMILES (with H added)")
-        return mol
+        """The candidate's mol with the pose as its one conformer (a private copy: `pose.coords_ang` is only read)."""
+        try:
+            return mol_for_pose(cand.smiles, pose)
+        except AtomOrderError:
+            raise ValueError(f"{cand.name} pose {i}: atom order does not match the SMILES (with H added)") from None
 
     def _energies(self, cand: Candidate, pose: Pose, i: int) -> tuple[float, float]:
         mol = self._check_atom_order(cand, pose, i)
@@ -1604,11 +1639,6 @@ class ForceField:
             return self._energies_openmm(cand, pose, i)
         from rdkit.Chem import rdForceFieldHelpers as ffh
 
-        conf = Chem.Conformer(mol.GetNumAtoms())
-        for k, xyz in enumerate(pose.coords_ang):
-            conf.SetAtomPosition(k, [float(v) for v in xyz])
-        mol.RemoveAllConformers()
-        mol.AddConformer(conf)  # a private copy: `pose.coords_ang` is only read
         props = ffh.MMFFGetMoleculeProperties(mol, mmffVariant=self.variant)
         if props is None:
             raise ForceFieldTypingError(f"{cand.name} pose {i}: {self.variant} cannot type this molecule")
@@ -1651,7 +1681,7 @@ class ForceField:
         integrator = openmm.VerletIntegrator(0.001)  # never stepped: a Context needs one
         context = openmm.Context(system, integrator, openmm.Platform.getPlatformByName("Reference"))
         # a fresh array in nm: `pose.coords_ang` is only read
-        context.setPositions(np.array(pose.coords_ang, dtype=float) * 0.1)
+        context.setPositions(np.array(pose.coords_ang, dtype=float) * (1.0 / NM_TO_ANGSTROM))
 
         def kcal() -> float:
             kj = context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)

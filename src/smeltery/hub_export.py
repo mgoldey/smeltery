@@ -43,7 +43,6 @@ never a command-line argument.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -55,6 +54,7 @@ from pathlib import Path
 
 from . import dataset_export as D
 from . import dataset_splits as S
+from .record import file_sha256
 
 CARD = "README.md"
 CROISSANT = "croissant.json"
@@ -205,12 +205,7 @@ _NO_LICENSE = (
 # ---- reading the source ----------------------------------------------------------------------------------------------
 
 
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+sha256_file = file_sha256  # the one file hash, `smeltery.record.file_sha256`
 
 
 @dataclass

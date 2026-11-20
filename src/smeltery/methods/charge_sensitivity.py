@@ -42,7 +42,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..config import ConfigError, _check_keys
+from ..run_view import QUANTITY
 from . import MethodSpec, register
+from .catalog import Param
 
 #: The failures building an extra field that are outcomes, not bugs: pdb2pqr exiting non-zero (CalledProcessError),
 #: pdb2pqr missing or broken (Pdb2PqrUnavailableError, a RuntimeError), the pocket file unreadable or gone (OSError),
@@ -53,7 +56,6 @@ FIELD_FAILURES: tuple[type[BaseException], ...] = (subprocess.CalledProcessError
 #: (and its subclasses for a refused pose or a memory refusal). Anything else propagates.
 POSE_FAILURES: tuple[type[BaseException], ...] = (RuntimeError,)
 
-QUANTITY = "dE_int"
 #: The force fields `pdb2pqr --ff` accepts (pdb2pqr 3.x).
 PDB2PQR_FORCE_FIELDS = ("AMBER", "CHARMM", "PARSE", "TYL06", "PEOEPB", "SWANSON")
 
@@ -76,8 +78,6 @@ def validate(cfg: dict) -> None:
     itself runs only after the whole measurement."""
     if "charge_sensitivity" not in cfg:
         return
-    from ..cli import ConfigError, _check_keys
-
     s = cfg["charge_sensitivity"]
     if not isinstance(s, dict):
         raise ConfigError("[charge_sensitivity] must be a table")
@@ -333,8 +333,6 @@ HOOK = ChargeSensitivity()
 
 
 def register_methods() -> None:
-    from ..gui.catalog import Param
-
     register(
         MethodSpec(
             "charge_sensitivity",
