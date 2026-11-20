@@ -417,9 +417,10 @@ def test_a_cancel_mid_run_leaves_the_completed_stages_reusable_and_the_interrupt
 
 def test_a_temporal_cancel_lists_its_completed_stages():
     pytest.skip(
-        "needs a Temporal server: a Temporal job is cancelled by terminating its workflow, which is "
-        "tests/test_job_backends.py's temporal leg; the workflow keeps no stage log, so its cancelled record says "
-        "stages_completed null, and it neither reads nor writes the stage store"
+        "needs a Temporal server: tests/test_temporal_campaign.py::"
+        "test_a_cancel_reaches_the_running_tier_and_the_workflow_ends_cancelled checks a cancelled Temporal job's "
+        "stages_completed (its workflow logs its stages like a local job); the Temporal backend neither reads nor "
+        "writes the stage store"
     )
 
 

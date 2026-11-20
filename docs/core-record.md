@@ -166,7 +166,10 @@ applied each decision. None is open.
    authoritative, every `status`/`cancel`/`result` settles a job found to have ended, and `settle` takes the
    scheduler's `started_at`/`ended_at` when it has them. *Applied:* the Temporal backend passes `started_at` (the first
    `WORKFLOW_TASK_STARTED` event) and `ended_at` (the workflow's close time), so a backend-written record's
-   `finished_at` and the terminal history entry are the workflow's end, not the time of the look.
+   `finished_at` and the terminal history entry are the workflow's end, not the time of the look. Since roadmap task
+   20 the workflow (`CampaignRunWorkflow`) also pushes: its first activity moves `state.json` to running and its last
+   settles the job, so the outcome is on disk without a look; the observer remains the fallback (a terminated
+   workflow), and settle is exactly-once.
 5. **`state.json`, its lock, `settle` and `terminal_record` belonged in attestation-schema.** *Done (5.D):* they are
    `attestation_schema.state` (format unchanged, evidenced by two `state.json` files smeltery's own code wrote).
    *Applied:* `smeltery.jobs`' own implementation is deleted (state_path, record_path, state_lock and its `fcntl`
@@ -208,7 +211,7 @@ carried in `ext` rather than squeezed into a core field.
 2. **A cancelled or failed record cannot list the steps that completed.** The steps layout is optional and written
    only by a finished run; a backend's minimal record has no field for "these stages completed before the stop".
    smeltery writes `ext["smeltery.job"].stages_completed` (null when the run left no stage log, as a Temporal job
-   does). A per-step status in the layout, or a record-level list, would let a reader tell a cancel before any work
+   of the old `PipelineRunWorkflow` type does; `CampaignRunWorkflow` logs its stages like a local job). A per-step status in the layout, or a record-level list, would let a reader tell a cancel before any work
    from a cancel one stage short of done.
 3. **`started_at`/`finished_at` and wall-clock times of a reused stage.** A reused stage was not run by this record's
    run, so its time is not this run's; smeltery leaves its funnel `seconds` null. The record has no per-step time to
