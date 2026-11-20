@@ -8,6 +8,17 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- A pinned compatible set and a ferric compatibility matrix (roadmap 46, docs/compatibility.md,
+  docs/superpowers/specs/2026-11-20-compat-matrix-design.md). `compat/stack.toml` pins ferric, attestation-schema and
+  mcp for smeltery's environment (equal to uv.lock's, enforced by tests/test_compat_stack.py) and attestation by full
+  commit in its OWN environment -- one environment cannot hold both today (attestation-schema `<0.2` vs
+  `>=0.2.0`; both sides already use mcp 2.3.0); `compat/constraints.txt` is its generated constraints file, for
+  `uv pip install -c`. A new `stack` CI job installs exactly that pair and runs the cross-server transcript against
+  it. `scripts/compat_matrix.py` tests one smeltery against one ferric per fresh venv (every other dependency pinned to
+  that smeltery's uv.lock, ferric as an override), running the engine-calling tests and the example, and renders
+  docs/compatibility.md from the cells; the new `compat` workflow runs it weekly, on demand and on every tag for each
+  ferric release the floor admits plus ferric main's nightly wheel, and uploads the regenerated page as an artifact
+  (it never commits).
 - Cross-server agent transcript (roadmap 27, docs/cross-server.md): `tests/cross_server/test_agent_transcript.py`
   drives smeltery's MCP server (on the fake engine) and attestation's `attest-mcp` over stdio as an agent does. It
   submits two screens of one campaign, polls them to completion, then asks attestation for what is in flight, the

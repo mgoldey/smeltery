@@ -499,3 +499,43 @@ jobs:
           name: cross-server-transcript
           path: cross-server/
           if-no-files-found: warn
+
+  # Roadmap 46: the pinned compatible set (compat/stack.toml, docs/compatibility.md#the-pinned-stack) installed the way
+  # a user installs it -- smeltery with compat/constraints.txt into a fresh venv (NOT `uv sync`, which would read
+  # uv.lock instead), attestation at the stack's pinned commit in its own tool environment -- and the cross-server
+  # transcript run against exactly that pair. The `cross-server` job above tracks attestation main; this one proves
+  # the pin. tests/test_compat_stack.py keeps the smeltery-environment pins equal to uv.lock's.
+  stack:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SMELTERY_REQUIRE_CROSS_SERVER: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+      - name: compat/constraints.txt is generated from compat/stack.toml
+        run: uv run --no-project --with packaging python scripts/compat_matrix.py constraints --check
+      - name: smeltery with the pinned constraints, in a fresh venv
+        run: |
+          uv venv /tmp/stack --python 3.12
+          uv pip install --python /tmp/stack/bin/python -c compat/constraints.txt ".[mcp,attestation]" pytest
+          /tmp/stack/bin/python - <<'PY'
+          import tomllib, importlib.metadata as m
+          pins = tomllib.load(open("compat/stack.toml", "rb"))["smeltery-env"]["pins"]
+          got = {n: m.version(n) for n in pins}
+          assert got == {n: p["version"] for n, p in pins.items()}, got
+          print(got)
+          PY
+      - name: attestation at the pinned commit, in its own tool environment
+        run: |
+          rev="$(python3 -c "import tomllib; print(tomllib.load(open('compat/stack.toml','rb'))['attestation-env']['attestation']['rev'])")"
+          uv tool install --python 3.12 "git+https://github.com/mgoldey/attestation@${rev}"
+          command -v attest-mcp
+      - name: Cross-server transcript against the pinned pair
+        run: |
+          mkdir /tmp/run && cp -r tests /tmp/run/tests && cd /tmp/run
+          PATH="/tmp/stack/bin:$PATH" /tmp/stack/bin/python -m pytest -q -rs -p no:cacheprovider tests/cross_server

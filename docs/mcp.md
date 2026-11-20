@@ -39,6 +39,12 @@ pipx run --python python3.12 --spec 'smeltery[mcp,attestation] @ git+https://git
 Both print the four tool names and exit. Once a release with the `mcp` extra is on PyPI, replace the requirement with
 `smeltery[mcp,attestation]`.
 
+To install versions known to work together instead of the newest of each, use the pinned set: smeltery with
+`compat/constraints.txt` read from the same ref, and attestation, in its own environment, at the commit
+`compat/stack.toml` pins (the two cannot share one environment today: their attestation-schema requirements
+conflict). [compatibility.md](compatibility.md#the-pinned-stack) has the commands, and the table of
+which ferric versions each smeltery was tested against.
+
 **Claude Code.** Name first, `--` before the command (`-e` takes several values, so a name written after it is read as
 another `KEY=value`):
 
