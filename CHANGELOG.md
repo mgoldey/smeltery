@@ -8,6 +8,12 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- Cross-server agent transcript (roadmap 27, docs/cross-server.md): `tests/cross_server/test_agent_transcript.py`
+  drives smeltery's MCP server (on the fake engine) and attestation's `attest-mcp` over stdio as an agent does. It
+  submits two screens of one campaign, polls them to completion, then asks attestation for what is in flight, the
+  scan, the family's ranking, each run's provenance (a dirty ferric build stamp becomes `dependencies dirty: ferric`)
+  and a claim check. It writes a JSON-lines transcript. A new CI job, `cross-server`, installs attestation from git
+  into its own `uv tool` environment, never smeltery's, requires the test to run, and uploads the transcript.
 - `smeltery export hf SRC -o OUT` (`smeltery.hub_export`, docs/dataset-export.md): a Hugging Face–loadable folder from a
   dataset directory or a Parquet export -- the source byte for byte under `OUT/dataset/`, each split's partitions as
   Parquet, a generated dataset card (`README.md`: license when stated, `configs`, `dataset_info.features`, columns with
