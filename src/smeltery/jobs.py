@@ -9,8 +9,9 @@ local     (default) Bench's SQLite task queue and its detached per-task supervis
           task running `python -m smeltery.jobs _run STORE JOB_ID`, so it shares Bench's launched-run slots
           (SMELTERY_MAX_RUNS) and shows in its task panel. No server; `smeltery worker` keeps the queue moving and
           settles jobs whose process died. Job metadata: ROOT/.smeltery/jobs/jobs.sqlite.
-temporal  the existing `temporal_run.PipelineRunWorkflow` (the `temporal` extra), started without waiting; the job id
-          is the workflow id. A `smeltery worker` with SMELTERY_BACKEND=temporal runs its SCF legs.
+temporal  `temporal_run.CampaignRunWorkflow` (the `temporal` extra; what `smeltery run --temporal` runs), started
+          without waiting; the job id is the workflow id. One activity per stage; the workflow itself moves state.json
+          to running and settles it. A `smeltery worker` with SMELTERY_BACKEND=temporal runs it.
 
 The run directory is the job's OUT, laid out per `attestation_schema.layout`:
 
@@ -41,6 +42,7 @@ never disagree; a record that is not the job's (another run_id, family or config
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import io
 import json
@@ -48,6 +50,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import tomllib
 import uuid
 from collections import deque
@@ -202,11 +205,11 @@ def check_spec(spec: JobSpec) -> None:
     which names the family after the config's `campaign`, so a spec naming another family is refused.
 
     `arm` and `ext` ARE carried (the contract's 5.C.2/5.C.3: a backend that cannot hand them to its producer must
-    refuse the spec, and the local backend can -- it passes them to the run as `--arm` / `--ext-json`, so the arm and
-    the namespaces are in the record the FIRST time it is written, in every terminal state; the schema's own
-    `terminal_record` already carries the spec's arm into a failed or cancelled record). smeltery has no arm of its
-    own, so an arm is always the submitter's, and `ext` namespaces are the submitter's own: `smeltery` is the run's
-    and is refused. The Temporal backend carries neither and refuses such a spec at `submit`."""
+    refuse the spec, and both backends can: the local one passes them to the run as `--arm` / `--ext-json`, the
+    Temporal one in the workflow's input (`RunInput.arm` / `.ext`) to its record stage, so the arm and the namespaces
+    are in the record the FIRST time it is written, in every terminal state; the schema's own `terminal_record`
+    already carries the spec's arm into a failed or cancelled record). smeltery has no arm of its own, so an arm is
+    always the submitter's, and `ext` namespaces are the submitter's own: `smeltery` is the run's and is refused."""
     if not isinstance(spec.run_id, str) or not spec.run_id:
         raise ValueError("run_id must be a non-empty string")
     if not isinstance(spec.config, dict) or not isinstance(spec.config.get("campaign"), str):
@@ -258,8 +261,8 @@ def campaign_spec(
     digest covers the built plan (structure prep, docking, the pocket, the tiers' tool versions), which submit does
     not build (docs/jobs.md, "run_id").
 
-    `arm` and `ext` are the submitter's: the local backend hands them to the run, so the record states them the first
-    time it is written (`check_spec`, docs/jobs.md "arm and ext")."""
+    `arm` and `ext` are the submitter's: both backends hand them to the run, so the record states them the first time
+    it is written (`check_spec`, docs/jobs.md "arm and ext")."""
     _require()
     from .cli import _stage_config
 
@@ -528,14 +531,17 @@ def runner_main(argv: list[str]) -> int:
 
 
 class TemporalJobBackend:
-    """Campaign jobs as `PipelineRunWorkflow` executions (the `temporal` extra), started without waiting.
+    """Campaign jobs as `CampaignRunWorkflow` executions (the `temporal` extra), started without waiting.
 
-    The workflow is the one `smeltery run --temporal` runs, unchanged: it writes the run's files and, on success, the
-    core record (its finalize activity calls `cli.emit_core_record`). It does not write state.json: this class mirrors
-    the workflow's status into it when asked (`status`, `cancel`, `result`), reading the time a worker first took the
-    workflow from its history, and writes the failed or cancelled record then. `cancel` terminates the workflow (no
-    worker is needed to stop it; running SCF children are killed when their heartbeat is refused). A crashed worker
-    does not fail a job here: Temporal retries its activities on the next worker."""
+    The workflow is the one `smeltery run --temporal` runs: one activity per stage, the core record written by its
+    record stage with the job's run_id, arm and ext. It writes the job's state itself (`campaign_begin` moves
+    state.json to running, `campaign_settle` ends it and writes a failed or cancelled record), so the outcome is on
+    disk without anyone asking. This class still mirrors the workflow into state.json when asked (`status`,
+    `cancel`, `result`): the fallback for a terminated workflow or one of the old type (settle is exactly-once, so
+    the two never disagree). `cancel` asks a running workflow to cancel -- the cancel reaches the running tier, whose
+    SCF child is killed, and the workflow settles the job cancelled -- and terminates it only if it has not stopped
+    within `cancel_grace_s` (or never started). A crashed worker does not fail a job here: Temporal retries its
+    activities on the next worker."""
 
     name = "temporal"
 
@@ -554,10 +560,12 @@ class TemporalJobBackend:
             raise BackendUnavailable("SMELTERY_BACKEND=temporal needs temporalio (the `temporal` extra)")
         self.address, self.namespace, self.task_queue = address, namespace, task_queue
         self.workers, self.heartbeat_s = workers, heartbeat_s
+        #: How long `cancel` waits for a running workflow to stop its tier and settle before terminating it: the
+        #: cancel reaches an activity at its next heartbeat (the SDK sends one at most every 0.8 x the timeout, and
+        #: at least once a minute), plus a margin for the settle.
+        self.cancel_grace_s = min(heartbeat_s, 60.0) + 10.0
 
     def _call(self, fn):
-        import asyncio
-
         from .temporal_run import connect
 
         async def go():
@@ -574,13 +582,6 @@ class TemporalJobBackend:
         from .cli import _stage_config
 
         check_spec(spec)
-        if spec.arm is not None or spec.ext:
-            # 5.C.3: a backend that cannot hand `arm`/`ext` to its producer refuses the spec rather than dropping
-            # them. The workflow's finalize activity takes the run_id only, so this one cannot.
-            raise JobError(
-                "SMELTERY_BACKEND=temporal carries no arm or ext into the record the workflow writes; submit the "
-                "campaign on the local backend, which hands them to the run"
-            )
         run_dir = Path(spec.run_dir).resolve()
         _refuse_existing(run_dir)
         config, info = _stage_config(write_config(run_dir, spec.config), run_dir, temporal=True)
@@ -591,15 +592,20 @@ class TemporalJobBackend:
             info,
             heartbeat_s=self.heartbeat_s,
             config_sha=tr.sha256_file(config),
-            run_id=spec.run_id,  # the finalize activity writes the complete record under the job's run_id
+            run_id=spec.run_id,  # the record stage writes the complete record under the job's run_id ...
+            arm=spec.arm,  # ... and the submitter's arm and ext, at its first write (as the local backend's run does)
+            ext=dict(spec.ext) or None,
         )
         wid = tr.workflow_id(run_dir, config.read_text())
+        # on disk, beside the config: whoever settles the job later (the workflow, or this class observing it)
+        # rebuilds the job's spec with its arm and ext
+        tr.write_job_file(run_dir, spec.arm, spec.ext)
 
         async def start(client):
             from temporalio.exceptions import WorkflowAlreadyStartedError
 
             try:
-                await client.start_workflow(tr.PipelineRunWorkflow.run, inp, id=wid, task_queue=self.task_queue)
+                await client.start_workflow(tr.CampaignRunWorkflow.run, inp, id=wid, task_queue=self.task_queue)
             except WorkflowAlreadyStartedError as e:
                 raise JobExistsError(f"workflow {wid} is already running in {run_dir}") from e
             return tr._host_of(client)
@@ -614,8 +620,11 @@ class TemporalJobBackend:
         return JobHandle(self.name, wid, spec.run_id, str(run_dir))
 
     def _spec(self, handle: JobHandle, st: StateFile) -> JobSpec:
+        from .temporal_run import read_job_file
+
         cfg = tomllib.loads((Path(handle.run_dir) / "config.toml").read_text())
-        return JobSpec(st.run_id, cfg.get("campaign"), None, cfg, handle.run_dir)
+        arm, ext = read_job_file(handle.run_dir)
+        return JobSpec(st.run_id, cfg.get("campaign"), arm, cfg, handle.run_dir, ext=ext)
 
     def _state(self, handle: JobHandle) -> StateFile:
         if handle.backend != self.name:
@@ -689,10 +698,27 @@ class TemporalJobBackend:
             return st.status
 
         async def go(client):
+            from temporalio.client import WorkflowExecutionStatus
             from temporalio.service import RPCError
 
+            wf = client.get_workflow_handle(handle.job_id)
+            now = read_state(handle.run_dir) or st
+            if now.state is JobState.RUNNING:
+                # a worker runs it: ask the workflow to cancel, so the cancel reaches the running tier (its SCF
+                # child is killed before the activity reports cancelled) and the workflow settles the job itself
+                with contextlib.suppress(RPCError):
+                    await wf.cancel()
+                deadline = time.monotonic() + self.cancel_grace_s
+                while time.monotonic() < deadline:
+                    try:
+                        if (await wf.describe()).status != WorkflowExecutionStatus.RUNNING:
+                            break
+                    except RPCError:
+                        break
+                    await asyncio.sleep(0.25)
+            # never started (nothing to propagate to), or it did not stop within the grace: end it here
             with contextlib.suppress(RPCError):  # already closed: the observation below says how it ended
-                await client.get_workflow_handle(handle.job_id).terminate(reason="cancelled through smeltery jobs")
+                await wf.terminate(reason="cancelled through smeltery jobs")
             return await self._observe(client, handle, st)
 
         return self._call(go).status

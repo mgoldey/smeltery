@@ -112,7 +112,8 @@ is deliberately not offered: the only wired ranker has an unmeasured floor, so a
 floor, and totals are never compared across formulas.
 
 Durable runs (`smeltery.temporal_run`): `smeltery run CONFIG --out OUT --temporal [--workers N]` runs the same plan as
-a Temporal workflow, one activity per (candidate, pose, field model), and `smeltery temporal-worker` executes it. The
+a Temporal workflow, one activity per stage and per SCF leg (candidate, pose, field model), and `smeltery
+temporal-worker` executes it. The
 same OUT and staged config resume the same workflow; finished SCFs are read back from OUT/calcs.jsonl. With the server
 down it exits 2 naming the docker command; it never falls back to an in-process run.
 
@@ -1125,7 +1126,7 @@ def run_plan(
     the analyses are taken from the stage store when an identical earlier run stored them, and stored otherwise.
     """
     _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
-    if stages is not None:
+    if stages is not None and stages.plan_digest is None:  # the Temporal runner logs its plan stages when it builds it
         stages.run_id = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest[:12]
         stages.plan_built(plan, funnel_counts(plan))
     if measure is None:
@@ -1134,8 +1135,10 @@ def run_plan(
             _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
         else:  # a reused measurement is never timed: its funnel row says seconds null, not "took 0 s"
             stages.measure(plan, lambda: _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx)))
-    else:
+    elif stages is None:
         _stage(plan.tier.name, lambda: measure(plan))
+    else:  # the Temporal runner's measurement, from its log: logged as a completed stage like any other
+        stages.measure(plan, lambda: _stage(plan.tier.name, lambda: measure(plan)))
     analogues = [c for c in plan.candidates if c is not plan.parent]
     if partial:
         paired = {}
@@ -2010,9 +2013,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config_info = None
         extra_ext = parse_ext(args.ext_json)  # a bad namespace is a config error, before any work
-        if args.temporal and (args.arm is not None or extra_ext is not None):
-            # the workflow's finalize activity takes the run_id only, so an arm or an ext would be silently dropped
-            raise ConfigError("--arm and --ext-json are not carried by --temporal; run the campaign in process")
         if explicit_out and not (
             args.plan or args.combine or args.only_candidate is not None or args.temporal or args.force
         ):
@@ -2050,6 +2050,8 @@ def main(argv: list[str] | None = None) -> int:
                 config_info,
                 namespace=ts.namespace,
                 run_id=args.run_id,
+                arm=args.arm,  # the workflow's record stage writes them into the core record at its first write
+                ext=extra_ext,
             )
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:

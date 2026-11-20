@@ -12,18 +12,30 @@ same pairing, cut and record (`cli.run_plan`, `cli.write_outputs`). What it adds
   `RAYON_NUM_THREADS=threads_per_worker`): ferric's thread pool is process-wide, so threads in one process would
   share it. A cancel or a timeout kills the child's process group; only the activity writes the log line, after the
   child has returned, so a killed child leaves no row.
-* **Timeouts and heartbeats**: a leg ends after `[run] scf_timeout_s` (default 4 h); the activity heartbeats while its
-  child runs, so a dead worker is noticed within the heartbeat timeout.
-* **Retries for transient faults only**: `RetryPolicy(maximum_attempts=3)` with `ScfNotConverged`, `ClashRefused`
-  and `ConfigChanged` non-retryable: chemistry is not retried, it is recorded.
+* **One workflow per campaign, one activity per stage** (`CampaignRunWorkflow`): begin, plan (the tiers before the
+  measurement, built once), the measurement's SCF legs, the cut, each analysis, the record, settle. Each stage after
+  the plan starts from the previous one's content-addressed checkpoint (OUT/temporal/stages/<sha256>.pkl), whose
+  digest the workflow history records, so a retried stage never rebuilds the plan or redoes a finished stage. The
+  old single-finalize `PipelineRunWorkflow` stays registered, unchanged in shape, for executions already open.
+* **Timeouts and heartbeats**: a leg ends after `[run] scf_timeout_s` (default 4 h); every long activity heartbeats
+  what it runs (stage, leg, rung, attempt, elapsed seconds), so a dead worker is noticed within the heartbeat timeout
+  and `temporal workflow describe` says what is running.
+* **Retries for transient faults only**: scores `RetryPolicy(maximum_attempts=3)` with `ScfNotConverged`,
+  `ClashRefused` and `ConfigChanged` non-retryable: chemistry is not retried, it is recorded. A stage retries an
+  OSError that can pass (a fetch, a shared filesystem) and nothing else (`_stage_error`).
+* **Cancellation reaches the running tier**: activities wait for their cancellation to complete (a score kills its
+  child first), then the workflow settles a campaign job cancelled; the record stage writes under the job's state
+  lock and never over a settled job.
+* **The record on disk is the outcome**: for a campaign job the workflow moves state.json to running and settles it
+  (complete, failed naming the stage, cancelled) itself, through activities; Temporal holds the scheduling.
 * **The remedy ladder** (`[field_interaction] remedies`): a leg whose SCF did not converge (`result.converged`) is
   scheduled again on the next rung; each leg climbs on its own; each SCF line carries its rung.
 * **Every SCF is appended to OUT/calcs.jsonl as it completes** (fsync'd), with its field model, rung and the run's
   input digest; a leg that fails every rung (chemistry) or fails for another reason (infrastructure) gets an
   `outcome` line too.
-* **Resume**: `prepare` reads the log back. A converged leg, or one that failed every rung, is not rescheduled; an
-  infrastructure failure (`outcome = "error"`) is, by the next workflow run. `finalize` refuses (the run exits 3,
-  naming them) while any infrastructure failure remains: an error is not a measurement.
+* **Resume**: the plan stage reads the log back. A converged leg, or one that failed every rung, is not
+  rescheduled; an infrastructure failure (`outcome = "error"`) is, by the next workflow run. The cut refuses (the run
+  exits 3, naming them) while any infrastructure failure remains: an error is not a measurement.
 * **Pairwise drop** (chemistry failures only): a pose whose primary score failed for the parent is dropped for every
   analogue; one that failed for an analogue is dropped for that analogue and the parent's value at that pose is not in
   its ddE. Every drop is in `results.dropped_poses`; the kept original pose indices are in `results.pose_index`. An
@@ -48,6 +60,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import pickle
 import signal
 import sys
 import threading
@@ -55,12 +68,14 @@ import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 try:
     from temporalio import activity, workflow
     from temporalio.common import RetryPolicy
-    from temporalio.exceptions import ActivityError, ApplicationError
+    from temporalio.exceptions import ActivityError, ApplicationError, is_cancelled_exception
     from temporalio.exceptions import TimeoutError as TimeoutError_
+    from temporalio.workflow import ActivityCancellationType
 
     TEMPORAL_AVAILABLE = True
 except ImportError:  # pragma: no cover - the `temporal` extra is not installed
@@ -85,6 +100,17 @@ CONFIG_CHANGED = "ConfigChanged"
 #: blocks finalize.
 FINAL_OUTCOMES = ("not_converged", "clash_refused")
 TIMEOUT = "Timeout"
+#: Stage activities' error types (`_stage_error`): TRANSIENT is retried; the others are not.
+TRANSIENT = "Transient"
+PREPARE_FAILED = "PrepareFailed"
+FINALIZE_FAILED = "FinalizeFailed"
+STAGE_FAILED = "StageFailed"
+CHECKPOINT_REFUSED = "CheckpointRefused"
+JOB_SETTLED = "JobSettled"
+#: OSErrors that say the same thing on every attempt: an input that is not there, or not readable.
+DETERMINISTIC_OS_ERRORS = (FileNotFoundError, PermissionError, IsADirectoryError, NotADirectoryError)
+#: Activity retries of `CampaignRunWorkflow`'s stages after the first attempt fails for a transient reason.
+STAGE_ATTEMPTS = 3
 #: The server's start-to-close timeout is the leg's own limit plus this margin, so the activity's local timeout (which
 #: kills the child and reports "Timeout", non-retryable) always fires first; a server-side timeout would be retried.
 SERVER_TIMEOUT_MARGIN_S = 120.0
@@ -136,6 +162,11 @@ class RunInput:
     config_sha: str = ""
     #: The core record's run_id (a campaign job's, `smeltery.jobs`); None: smeltery's own, the input digest's head.
     run_id: str | None = None
+    #: The submitter's arm and own `ext` namespaces (a campaign job's `JobSpec.arm` / `.ext`, `smeltery run --arm /
+    #: --ext-json`): written into the core record the FIRST time it is written. Defaults keep an old history's payload
+    #: decodable (a workflow started before they existed carries neither).
+    arm: str | None = None
+    ext: dict | None = None
 
 
 @dataclass
@@ -179,6 +210,43 @@ class RunSummary:
     n_duplicates: int = 0
     n_torn: int = 0
     dropped_poses: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class PlanResult:
+    """`campaign_plan`'s result: the legs to score, the analyses to run after the cut (in order), and the digest of
+    the plan's checkpoint (`save_checkpoint`), which the next stage loads."""
+
+    prep: PrepareResult
+    analyses: list[str]
+    ref: str
+
+
+@dataclass
+class StageInput:
+    """A stage after the measurement: the run, the previous stage's checkpoint digest, and (an analysis) its key."""
+
+    run: RunInput
+    ref: str
+    key: str = ""
+    n_resumed: int = 0
+
+
+@dataclass
+class StageRef:
+    ref: str  # the sha256 of the stage's checkpoint
+
+
+@dataclass
+class SettleInput:
+    """End the run directory's campaign job: `outcome` complete | failed | cancelled, and why."""
+
+    out: str
+    outcome: str
+    message: str | None = None
+    config_sha: str = ""
+    arm: str | None = None
+    ext: dict | None = None
 
 
 # ------------------------------------------------------------------------------------------------ the SCF log
@@ -356,6 +424,12 @@ def legs_of(plan, models) -> list[tuple[str, int, str, str | None]]:
 def prepare_sync(inp: RunInput) -> PrepareResult:
     """Build the plan exactly as `smeltery run` does, check the log is this run's (before writing anything), write
     the poses and fields under OUT/temporal/, and return the legs still to run (resume: the log is read back)."""
+    return _prepare(inp)[0]
+
+
+def _prepare(inp: RunInput):
+    """`prepare_sync`, and the plan as `build_plan` left it (a copy taken before the extra fields are asked for), for
+    the stages after the measurement: `CampaignRunWorkflow` builds the plan once."""
     from .cli import _net_charge, build_plan, load_config, scf_timeout_s
     from .gates import require_passing_poses
 
@@ -366,6 +440,7 @@ def prepare_sync(inp: RunInput) -> PrepareResult:
     check_tier(plan.tier)
     for c in plan.candidates:  # the tier's own pre-SCF gate, once, before any leg is scheduled
         require_passing_poses(c, {})
+    built = pickle.loads(pickle.dumps(plan))  # what finalize would rebuild: before `extra_fields` touches the plan
     digest = _plan_digest(plan)
     rows, _ = read_rows(out, digest)  # refuses a foreign log before anything is written
     models, owner = field_models(plan, out)
@@ -402,7 +477,7 @@ def prepare_sync(inp: RunInput) -> PrepareResult:
             continue
         rung = 0 if st is None else int(st["next_rung"])
         pending.append(ScoreInput(*ident, rung, inp.out, inp.config, inp.config_sha, limit))
-    return PrepareResult(pending, done + len(pending), done, plan.tier.n_rungs, limit, digest)
+    return PrepareResult(pending, done + len(pending), done, plan.tier.n_rungs, limit, digest), built
 
 
 def vacuum_failed(state: dict, candidate: str, pose: int) -> bool:
@@ -603,7 +678,7 @@ def _stamp_runner(rec, rows: list[dict], builds: list[dict]) -> None:
             row["seconds"], row["seconds_kind"] = secs, SUMMED_CPU_SECONDS
 
 
-def clear_marker(out: str | Path, config_sha: str) -> None:
+def clear_marker(out: str | os.PathLike[str], config_sha: str) -> None:
     """Remove OUT/temporal/running.json when it names this run (its staged config): the run is over."""
     marker = Path(out) / WORK_DIR / MARKER
     with contextlib.suppress(OSError, ValueError):
@@ -611,18 +686,113 @@ def clear_marker(out: str | Path, config_sha: str) -> None:
             marker.unlink()
 
 
-def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
-    """The run record, from the per-SCF log, exactly as a non-Temporal run builds it (`run_plan`, `write_outputs`).
-    Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
+#: A campaign job's terminal states (`attestation_schema.jobs.TERMINAL`, by value: the schema is an optional extra).
+TERMINAL_STATES = ("complete", "failed", "cancelled")
+
+
+class JobSettled(ValueError):
+    """The run directory's campaign job is already terminal (cancelled, or failed by an observer): its record is
+    written, and a finished record is never rewritten."""
+
+
+def _job_state(out: str | Path):
+    """The campaign job's state.json in OUT (`attestation_schema.state`), None when OUT holds no job (a plain
+    `smeltery run --temporal`) or the schema is not installed."""
+    try:
+        from attestation_schema.state import read_state
+    except ImportError:
+        return None
+    return read_state(out)
+
+
+def _refuse_settled(out: str | Path) -> None:
+    st = _job_state(out)
+    if st is not None and st.state.value in TERMINAL_STATES:
+        raise JobSettled(
+            f"the campaign job in {out} is already {st.state.value} ({st.message or 'settled'}); its record is "
+            "written and is not rewritten"
+        )
+
+
+def _emit_record(path: Path, inp: RunInput) -> None:
+    """The core record, with the job's run_id, arm and ext, at its FIRST write. For a campaign job it is written under
+    the job's state lock, after checking the job is not already settled: a cancel's settle and this write cannot
+    interleave, so state.json and run.json never disagree and a cancelled record is never replaced."""
+    from .cli import emit_core_record
+
+    def emit() -> None:
+        # a durable run spans workers and resumes: no one start instant is recorded
+        emit_core_record(path, None, run_id=inp.run_id, arm=inp.arm, extra_ext=inp.ext or None)
+
+    if _job_state(inp.out) is None:
+        emit()
+        return
+    from attestation_schema.state import state_lock
+
+    with state_lock(inp.out):
+        _refuse_settled(inp.out)
+        emit()
+
+
+@dataclass
+class _Fill:
+    """The measurement as the log left it: fills `per_pose` of a plan (the `measure` `run_plan` takes, and what an
+    analysis's ctx["measure"] is). A class, not a closure, so it travels in a stage checkpoint."""
+
+    values: dict
+    primary: str
+    pose_index: dict | None
+    rung_of: dict
+    remedies: bool
+
+    def __call__(self, p) -> None:
+        for c in p.candidates:
+            keep = self.pose_index[c.name] if self.pose_index else list(range(len(c.poses)))
+            c.poses = [c.poses[i] for i in keep]
+            c.per_pose["dE_int"] = [float(self.values[self.primary][c.name][i]) for i in keep]
+            if self.remedies:
+                c.per_pose["scf_rung"] = [float(self.rung_of[c.name][i]) for i in keep]
+
+
+@dataclass
+class _Finishing:
+    """What the cut leaves for the analyses and the record: the plan as measured, the record so far, the log."""
+
+    plan: Any  # cli.Plan
+    rec: Any  # record.RunRecord
+    rows: list
+    builds: list
+    dropped: list
+    fill: _Fill
+    model_owner: dict
+    n_resumed: int
+    n_dup: int
+    torn: int
+    stages: Any = None  # smeltery.reuse.RunStages (the stage log), None in the frozen finalize
+
+
+def analysis_order(cfg: dict) -> list[str]:
+    """The analyses' keys in the order the record runs them: the ordinary ones in config order, then the ones that
+    re-measure under extra fields (their `summarize`, from the scored legs)."""
+    from .methods import active_hooks
+
+    again = {s.key for s in remeasuring_analyses(cfg)}
+    return [s.key for s in active_hooks("analysis", cfg) if s.key not in again] + [
+        s.key for s in remeasuring_analyses(cfg)
+    ]
+
+
+def cut_sync(inp: RunInput, plan, n_resumed: int = 0, stages=None) -> _Finishing:
+    """Pairing and the cut, from the per-SCF log, exactly as a non-Temporal run builds them (`run_plan`), with no
+    analysis yet. Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
     import numpy as np
 
-    from .cli import StageError, allow_mixed_builds, build_plan, emit_core_record, load_config, run_plan, write_outputs
+    from .cli import StageError, allow_mixed_builds, run_plan
     from .model import HARTREE_TO_KCAL
 
     out = Path(inp.out)
     check_config(inp.config, inp.config_sha)
-    cfg = load_config(Path(inp.config))
-    plan = build_plan(cfg, out_dir=out)
+    cfg = plan.cfg
     digest = _plan_digest(plan)
     work = _work(inp.out)
     if work["digest"] != digest:
@@ -713,60 +883,222 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
         if empty:
             raise StageError(f"stage 'pairing' failed: every pose of {', '.join(empty)} was dropped", stage="pairing")
 
-    remedies = bool(plan.tier.remedies)
+    fill = _Fill(values, primary, pose_index, rung_of, bool(plan.tier.remedies))
+    every = frozenset(analysis_order(cfg))  # each analysis is its own stage (`analysis_sync`)
+    rec, _ = run_plan(plan, measure=fill, skip_analyses=every, pose_index=pose_index, stages=stages)
+    return _Finishing(plan, rec, rows, builds, dropped, fill, work["model_owner"], n_resumed, n_dup, torn, stages)
 
-    def fill(p):
-        for c in p.candidates:
-            keep = pose_index[c.name] if pose_index else list(range(len(c.poses)))
-            c.poses = [c.poses[i] for i in keep]
-            c.per_pose["dE_int"] = [float(values[primary][c.name][i]) for i in keep]
-            if remedies:
-                c.per_pose["scf_rung"] = [float(rung_of[c.name][i]) for i in keep]
 
-    summarized = remeasuring_analyses(cfg)
-    rec, _ = run_plan(plan, measure=fill, skip_analyses=frozenset(s.key for s in summarized), pose_index=pose_index)
-    for spec in summarized:
-        fn = getattr(spec.hook, "summarize", None)
-        if fn is None:
-            raise ValueError(f"[{spec.section}] has extra_fields but no summarize: --temporal cannot finish it")
-        # per ORIGINAL pose index (None where a pose was dropped); summarize maps the compacted primary values in
-        # rec.results["per_pose"] back to original indices through results.pose_index before pairing
-        measured = {m: v for m, v in values.items() if work["model_owner"].get(m) == spec.key}
-        got = fn(plan, rec, measured)
-        if not isinstance(got, dict):
-            raise StageError(
-                f"stage {spec.key!r} failed: summarize returns a dict, got {type(got).__name__}", stage=spec.key
-            )
-        rec.results[spec.key] = {**(rec.results.get(spec.key) or {}), **got}
-    if dropped:
-        rec.results["dropped_poses"] = dropped
+def analysis_sync(done: _Finishing, key: str) -> None:
+    """One analysis, merged into the record so far: an ordinary one runs (`cli._run_analysis`); one that re-measured
+    under extra fields is summarized from its scored legs."""
+    from .cli import StageError, _run_analysis
+    from .methods import active_hooks
+
+    plan, rec = done.plan, done.rec
+    spec = next((s for s in active_hooks("analysis", plan.cfg) if s.key == key), None)
+    if spec is None:
+        raise ValueError(f"no active analysis {key!r} in this run's config")
+    if not hasattr(spec.hook, "extra_fields"):
+        _run_analysis(spec, plan, rec, {"measure": done.fill, "log": plan.stage_log}, done.stages)
+        return
+    fn = getattr(spec.hook, "summarize", None)
+    if fn is None:
+        raise ValueError(f"[{spec.section}] has extra_fields but no summarize: --temporal cannot finish it")
+    # per ORIGINAL pose index (None where a pose was dropped); summarize maps the compacted primary values in
+    # rec.results["per_pose"] back to original indices through results.pose_index before pairing
+    measured = {m: v for m, v in done.fill.values.items() if done.model_owner.get(m) == spec.key}
+    got = fn(plan, rec, measured)
+    if not isinstance(got, dict):
+        raise StageError(
+            f"stage {spec.key!r} failed: summarize returns a dict, got {type(got).__name__}", stage=spec.key
+        )
+    rec.results[spec.key] = {**(rec.results.get(spec.key) or {}), **got}
+
+
+def record_sync(done: _Finishing, inp: RunInput) -> RunSummary:
+    """The run record, its pose files and calcs.jsonl (`write_outputs`), then the core record with the job's run_id,
+    arm and ext (`_emit_record`). Refuses (`JobSettled`) when the run directory's job is already terminal."""
+    from .cli import write_outputs
+    from .reuse import discard_progress
+
+    out = Path(inp.out)
+    plan, rec, rows = done.plan, done.rec, done.rows
+    if done.dropped:
+        rec.results["dropped_poses"] = done.dropped
     if inp.config_info is not None:
         rec.results["config"] = inp.config_info
-    _stamp_runner(rec, rows, builds)
+    _stamp_runner(rec, rows, done.builds)
+    _refuse_settled(out)  # before the legacy record and pose files: a cancelled job's directory gains none
     path = write_outputs(plan, rec, out, calc_rows=rows)  # calcs.jsonl rewritten atomically, duplicates removed
     clear_marker(out, inp.config_sha)
-    # a durable run spans workers and resumes: no one start instant is recorded
-    emit_core_record(path, None, run_id=inp.run_id)
+    if done.stages is not None:  # the record is written: the stage log of a live run is not kept
+        discard_progress(out)
+    clear_checkpoints(out)  # before the core record's manifest is taken: they are scheduling state, not the run's
+    _emit_record(path, inp)
     n_scfs = sum(1 for r in rows if "outcome" not in r)
-    return RunSummary(str(path), rec.input_digest, n_scfs, n_resumed, len(dropped), n_dup, torn, dropped)
+    return RunSummary(
+        str(path), rec.input_digest, n_scfs, done.n_resumed, len(done.dropped), done.n_dup, done.torn, done.dropped
+    )
+
+
+def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
+    """The run record, from the per-SCF log, exactly as a non-Temporal run builds it (`run_plan`, `write_outputs`):
+    the plan rebuilt, the cut, every analysis, the records, in one call. The frozen `PipelineRunWorkflow`'s
+    `pipeline_finalize`; `CampaignRunWorkflow` runs the same steps as one activity each, on the plan it built once.
+    Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
+    from .cli import build_plan, load_config
+
+    check_config(inp.config, inp.config_sha)
+    plan = build_plan(load_config(Path(inp.config)), out_dir=Path(inp.out))
+    done = cut_sync(inp, plan, n_resumed)
+    for key in analysis_order(plan.cfg):
+        analysis_sync(done, key)
+    return record_sync(done, inp)
+
+
+# ------------------------------------------------------------------------------------------------ stage checkpoints
+
+#: OUT/temporal/<this>/<sha256>.pkl: one stage's output, for the next stage activity (`CampaignRunWorkflow`).
+CHECKPOINTS = "stages"
+
+
+class CheckpointRefused(ValueError):
+    """A stage checkpoint that is missing, changed since its digest was recorded, or written by another build."""
+
+
+def save_checkpoint(out: str | Path, state) -> str:
+    """Write `state` to OUT/temporal/stages/<sha256>.pkl and return the sha256 (what the workflow history records).
+    Content-addressed: a retried stage writes its own file and never overwrites what another attempt recorded."""
+    from .reuse import source_digest
+
+    data = pickle.dumps({"code": source_digest(), "state": state}, protocol=pickle.HIGHEST_PROTOCOL)
+    ref = hashlib.sha256(data).hexdigest()
+    d = Path(out) / WORK_DIR / CHECKPOINTS
+    d.mkdir(parents=True, exist_ok=True)
+    final = d / f"{ref}.pkl"
+    if not final.is_file():
+        tmp = d / f".{ref}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, final)
+    return ref
+
+
+def load_checkpoint(out: str | Path, ref: str):
+    """The state a stage checkpointed under `ref`, or CheckpointRefused: the file must hash to `ref` (the digest the
+    workflow history recorded) and have been written by this smeltery (`reuse.source_digest`: a pickle is only as
+    stable as the code that wrote it)."""
+    from .reuse import source_digest
+
+    p = Path(out) / WORK_DIR / CHECKPOINTS / f"{ref}.pkl"
+    rerun = "run the same command again: the run resumes (the plan is rebuilt, finished SCFs are read back)"
+    try:
+        data = p.read_bytes()
+    except FileNotFoundError:
+        raise CheckpointRefused(f"the stage checkpoint {p} is gone; {rerun}") from None
+    if hashlib.sha256(data).hexdigest() != ref:
+        raise CheckpointRefused(f"the stage checkpoint {p} changed after it was recorded; {rerun}")
+    got = pickle.loads(data)
+    if got.get("code") != source_digest():
+        raise CheckpointRefused(
+            f"the stage checkpoint {p} was written by another smeltery build (source {str(got.get('code'))[:12]}, "
+            f"this worker's {source_digest()[:12]}); {rerun}"
+        )
+    return got["state"]
+
+
+def clear_checkpoints(out: str | Path) -> None:
+    import shutil
+
+    shutil.rmtree(Path(out) / WORK_DIR / CHECKPOINTS, ignore_errors=True)
+
+
+# ------------------------------------------------------------------------------------------------ the job's state
+
+
+#: The run directory's job spec as the submitter gave it (arm, ext), written by `TemporalJobBackend.submit`.
+JOB_FILE = "job.json"
+
+
+def write_job_file(out: str | Path, arm: str | None, ext: dict | None) -> None:
+    d = Path(out) / WORK_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / (JOB_FILE + ".tmp")
+    tmp.write_text(json.dumps({"arm": arm, "ext": dict(ext or {})}, sort_keys=True))
+    os.replace(tmp, d / JOB_FILE)
+
+
+def read_job_file(out: str | os.PathLike[str]) -> tuple[str | None, dict]:
+    """(arm, ext) the submitter gave the job; (None, {}) for a job submitted before they were carried."""
+    try:
+        d = json.loads((Path(out) / WORK_DIR / JOB_FILE).read_text())
+    except (OSError, ValueError):
+        return None, {}
+    return d.get("arm"), dict(d.get("ext") or {})
+
+
+def begin_sync(out: str) -> None:
+    """A campaign job's state.json: submitted -> running, now (the worker's clock), once. Nothing without a job."""
+    st = _job_state(out)
+    if st is None or st.state.value != "submitted":
+        return
+    from attestation_schema.jobs import JobState
+    from attestation_schema.state import IllegalTransitionError, transition
+
+    with contextlib.suppress(IllegalTransitionError):  # settled or started by someone else meanwhile
+        transition(out, JobState.RUNNING)
+
+
+def settle_sync(inp: SettleInput) -> str | None:
+    """End a campaign job in OUT at `inp.outcome`, exactly once (`smeltery.jobs.settle`: a failed or cancelled job
+    gets the minimal record, with the stages it completed), and return the state it ended in; None when OUT holds no
+    job (a plain `smeltery run --temporal`). The stage checkpoints are removed first, so the record's manifest is the
+    run's files."""
+    clear_checkpoints(inp.out)
+    clear_marker(inp.out, inp.config_sha)
+    st = _job_state(inp.out)
+    if st is None:
+        return None
+    import tomllib
+
+    from attestation_schema.jobs import JobSpec, JobState
+
+    from . import jobs
+
+    cfg = tomllib.loads((Path(inp.out) / "config.toml").read_text())
+    spec = JobSpec(st.run_id, cfg.get("campaign"), inp.arm, cfg, inp.out, ext=dict(inp.ext or {}))
+    return jobs.settle(inp.out, spec, JobState(inp.outcome), inp.message, observer=False).state.value
 
 
 # ------------------------------------------------------------------------------------------------ Temporal
 
 if TEMPORAL_AVAILABLE:
 
-    async def _heartbeating(coro_fn, limit: float | None = None):
+    async def _heartbeating(coro_fn, limit: float | None = None, details: dict | None = None):
         """Await `coro_fn()` (a task), heartbeating every quarter of the heartbeat timeout, and end it after `limit`
         seconds (else the start-to-close timeout) here: the server's timeout alone would leave the work running in
         this worker. A timeout is non-retryable ("Timeout", details: the seconds reached): it is recorded, not
-        retried, and the remedy is a longer `[run] scf_timeout_s`."""
+        retried, and the remedy is a longer `[run] scf_timeout_s`.
+
+        Each heartbeat carries `details` (what is running: the stage, or the leg and rung) plus the attempt, the
+        seconds elapsed and the phase ("start", "running"): what `temporal workflow describe` shows for a pending
+        activity, and what a heartbeat timeout's failure names. A cancel (a cancelled workflow, or a heartbeat the
+        server refuses) cancels the task, which kills its child before this activity ends."""
         info = activity.info()
         every = max(0.5, (info.heartbeat_timeout.total_seconds() / 4) if info.heartbeat_timeout else 30.0)
         if not limit:
             limit = info.start_to_close_timeout.total_seconds() if info.start_to_close_timeout else None
         t0 = time.monotonic()
+        base = {**(details or {}), "attempt": info.attempt}
+
+        def beat(phase: str) -> None:
+            activity.heartbeat({**base, "phase": phase, "elapsed_s": round(time.monotonic() - t0, 1)})
+
         task = asyncio.ensure_future(coro_fn())
-        activity.heartbeat("start")
+        beat("start")
         try:
             while True:
                 left = None if limit is None else limit - (time.monotonic() - t0)
@@ -777,12 +1109,28 @@ if TEMPORAL_AVAILABLE:
                 done, _ = await asyncio.wait({task}, timeout=every if left is None else min(every, left))
                 if done:
                     return task.result()
-                activity.heartbeat("running")
+                beat("running")
         except BaseException:
             task.cancel()  # the task kills its child and waits for it before this activity ends
             with contextlib.suppress(BaseException):
                 await task
             raise
+
+    def _stage_error(e: BaseException, kind: str) -> BaseException:
+        """An exception from a stage activity, as Temporal should treat it. Retried (type "Transient"): an OSError
+        that can pass (a network fetch, a shared filesystem), or a worker short of memory. Not retried (`kind`,
+        non_retryable): everything else -- a config error, a gate refusing, a changed config or a foreign log, a
+        bug: the same inputs fail the same way every time. A cancel passes through untouched."""
+        if isinstance(e, asyncio.CancelledError | ApplicationError):
+            return e
+        msg = f"{type(e).__name__}: {e}"
+        if isinstance(e, MemoryError) or (isinstance(e, OSError) and not isinstance(e, DETERMINISTIC_OS_ERRORS)):
+            return ApplicationError(msg, type=TRANSIENT)
+        if isinstance(e, CheckpointRefused):
+            return ApplicationError(msg, type=CHECKPOINT_REFUSED, non_retryable=True)
+        if isinstance(e, JobSettled):
+            return ApplicationError(msg, type=JOB_SETTLED, non_retryable=True)
+        return ApplicationError(msg, type=kind, non_retryable=True)
 
     class PipelineActivities:
         """The run's activities. `threads` is RAYON_NUM_THREADS of each score child; `command` the child's argv
@@ -795,9 +1143,9 @@ if TEMPORAL_AVAILABLE:
         @activity.defn(name="pipeline_prepare")
         async def prepare(self, inp: RunInput) -> PrepareResult:
             try:
-                return await _heartbeating(lambda: asyncio.to_thread(prepare_sync, inp))
-            except Exception as e:  # a config or stage error: the same inputs fail the same way every time
-                raise ApplicationError(f"{type(e).__name__}: {e}", type="PrepareFailed", non_retryable=True) from e
+                return await _heartbeating(lambda: asyncio.to_thread(prepare_sync, inp), details={"stage": "plan"})
+            except Exception as e:  # a config or stage error fails the same way every time; an OSError may pass
+                raise _stage_error(e, PREPARE_FAILED) from e
 
         @activity.defn(name="pipeline_score")
         async def score(self, inp: ScoreInput) -> ScoreResult:
@@ -816,7 +1164,9 @@ if TEMPORAL_AVAILABLE:
             cpu = 0.0
             if row is None:  # not already logged by an attempt whose completion was lost
                 started = utc_now()
-                got = await _heartbeating(lambda: self._child(inp), inp.timeout_s or None)
+                leg = {"stage": "measure", "candidate": inp.candidate, "pose": inp.pose, "leg": inp.leg}
+                leg.update(field_model=inp.field_model, rung=inp.rung)
+                got = await _heartbeating(lambda: self._child(inp), inp.timeout_s or None, leg)
                 row = scf_row(inp, got, digest, started)
                 cpu = got["seconds"]
                 row = refuse_false_convergence(row, earlier)  # logged as the ladder judged it
@@ -866,16 +1216,72 @@ if TEMPORAL_AVAILABLE:
         @activity.defn(name="pipeline_finalize")
         async def finalize(self, inp: RunInput, n_resumed: int) -> RunSummary:
             try:
-                return await _heartbeating(lambda: asyncio.to_thread(finalize_sync, inp, n_resumed))
+                return await _heartbeating(lambda: asyncio.to_thread(finalize_sync, inp, n_resumed), details={})
             except Exception as e:
-                raise ApplicationError(f"{type(e).__name__}: {e}", type="FinalizeFailed", non_retryable=True) from e
+                raise _stage_error(e, FINALIZE_FAILED) from e
+
+        # -- CampaignRunWorkflow's stages: one activity each, handing the next its state as a checkpoint
+
+        @activity.defn(name="campaign_begin")
+        async def begin(self, out: str) -> None:
+            await asyncio.to_thread(begin_sync, out)
+
+        @activity.defn(name="campaign_plan")
+        async def plan(self, inp: RunInput) -> PlanResult:
+            def go() -> PlanResult:
+                from .cli import RunRecord, funnel_counts
+                from .reuse import RunStages
+
+                prep, plan = _prepare(inp)
+                stages = RunStages(inp.out)  # the stage log (OUT/stages.partial.jsonl): what a stopped job completed
+                stages.run_id = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest[:12]
+                stages.plan_built(plan, funnel_counts(plan))
+                ref = save_checkpoint(inp.out, {"plan": plan, "stages": stages})
+                return PlanResult(prep, analysis_order(plan.cfg), ref)
+
+            try:
+                return await _heartbeating(lambda: asyncio.to_thread(go), details={"stage": "plan"})
+            except Exception as e:
+                raise _stage_error(e, PREPARE_FAILED) from e
+
+        @activity.defn(name="campaign_cut")
+        async def cut(self, inp: StageInput) -> StageRef:
+            def go() -> StageRef:
+                got = load_checkpoint(inp.run.out, inp.ref)
+                done = cut_sync(inp.run, got["plan"], inp.n_resumed, got["stages"])
+                return StageRef(save_checkpoint(inp.run.out, done))
+
+            return await self._stage("cut", go)
+
+        @activity.defn(name="campaign_analysis")
+        async def analysis(self, inp: StageInput) -> StageRef:
+            def go() -> StageRef:
+                done = load_checkpoint(inp.run.out, inp.ref)
+                analysis_sync(done, inp.key)
+                return StageRef(save_checkpoint(inp.run.out, done))
+
+            return await self._stage(inp.key, go)
+
+        @activity.defn(name="campaign_record")
+        async def record(self, inp: StageInput) -> RunSummary:
+            return await self._stage("record", lambda: record_sync(load_checkpoint(inp.run.out, inp.ref), inp.run))
+
+        @activity.defn(name="campaign_settle")
+        async def settle(self, inp: SettleInput) -> str | None:
+            return await asyncio.to_thread(settle_sync, inp)
+
+        async def _stage(self, name: str, fn):
+            try:
+                return await _heartbeating(lambda: asyncio.to_thread(fn), details={"stage": name})
+            except Exception as e:
+                raise _stage_error(e, STAGE_FAILED) from e
 
     @workflow.defn(name="PipelineRunWorkflow")
     class PipelineRunWorkflow:
         """One pipeline run: prepare, every SCF leg (up the remedy ladder), finalize. Control flow only."""
 
         def __init__(self) -> None:
-            self._progress = {"total": 0, "done": 0, "failed": 0, "running": 0, "phase": "prepare"}
+            self._progress: dict[str, Any] = {"total": 0, "done": 0, "failed": 0, "running": 0, "phase": "prepare"}
 
         @workflow.query
         def progress(self) -> dict:
@@ -983,6 +1389,177 @@ if TEMPORAL_AVAILABLE:
             )
             return False
 
+    def _root(e: BaseException) -> BaseException:
+        """The innermost cause of a workflow-side failure (an ActivityError wraps the activity's ApplicationError)."""
+        while (inner := getattr(e, "cause", None)) is not None:
+            e = inner
+        return e
+
+    @workflow.defn(name="CampaignRunWorkflow")
+    class CampaignRunWorkflow:
+        """One campaign run (one run directory), one activity per stage: begin, plan (the tiers before the
+        measurement), the measurement tier's SCF legs (up the remedy ladder), the cut, each analysis, the record,
+        settle. Control flow only: every read, write and SCF is in an activity, and each stage after the plan loads
+        the previous one's checkpoint by the digest this workflow's history recorded.
+
+        Replaces `PipelineRunWorkflow` for new runs (a new name rather than `workflow.patched`, so executions of the
+        old shape that are still open replay unchanged); see docs/superpowers/specs/2026-11-20-temporal-per-tier-
+        design.md. A cancel reaches the running tier (activities wait for their cancellation to complete, so a
+        score's child is dead first), then the job is settled cancelled; a failure settles it failed, naming the
+        stage and the cause. The record on disk is the outcome; this history is the scheduling."""
+
+        def __init__(self) -> None:
+            self._progress: dict[str, Any] = {"total": 0, "done": 0, "failed": 0, "running": 0, "phase": "begin"}
+
+        @workflow.query
+        def progress(self) -> dict:
+            return dict(self._progress)
+
+        @workflow.run
+        async def run(self, inp: RunInput) -> RunSummary:
+            try:
+                await workflow.execute_activity(
+                    "campaign_begin",
+                    inp.out,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=RetryPolicy(initial_interval=timedelta(seconds=1), maximum_attempts=5),
+                )
+                summary = await self._stages(inp)
+            except BaseException as e:
+                if is_cancelled_exception(e):
+                    self._progress["phase"] = "cancelled"
+                    await self._settle(inp, "cancelled", "the workflow was cancelled")
+                    raise asyncio.CancelledError() from None
+                if isinstance(e, ActivityError):
+                    self._progress["phase"] = "failed"
+                    where = self._progress.get("stage") or "the run"
+                    await self._settle(inp, "failed", f"{where} failed: {_root(e)}"[:400])
+                raise
+            await self._settle(inp, "complete", None)
+            self._progress["phase"] = "done"
+            return summary
+
+        async def _settle(self, inp: RunInput, outcome: str, message: str | None) -> None:
+            """The job's outcome, on disk (a no-op for a plain `run --temporal`, which has no state.json)."""
+            await workflow.execute_activity(
+                "campaign_settle",
+                SettleInput(inp.out, outcome, message, inp.config_sha, inp.arm, inp.ext),
+                result_type=str,
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=RetryPolicy(initial_interval=timedelta(seconds=1), maximum_attempts=5),
+            )
+
+        async def _stage(self, inp: RunInput, name: str, activity_name: str, arg, result_type, kind=STAGE_FAILED):
+            """One stage after the measurement (or the plan): heartbeating, retried only for a transient error, and
+            waited for when cancelled (its thread cannot be interrupted, but its record stage refuses a settled job)."""
+            self._progress.update(phase=name, stage=name)
+            return await workflow.execute_activity(
+                activity_name,
+                arg,
+                result_type=result_type,
+                start_to_close_timeout=timedelta(hours=6),
+                heartbeat_timeout=timedelta(seconds=inp.heartbeat_s),
+                retry_policy=RetryPolicy(
+                    initial_interval=timedelta(seconds=2),
+                    maximum_attempts=STAGE_ATTEMPTS,
+                    non_retryable_error_types=[kind],
+                ),
+                cancellation_type=ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+            )
+
+        async def _stages(self, inp: RunInput) -> RunSummary:
+            got = await self._stage(inp, "plan", "campaign_plan", inp, PlanResult, PREPARE_FAILED)
+            prep = got.prep
+            self._progress.update(total=prep.n_total, done=prep.n_done, phase="measure", stage="measure")
+            sem = asyncio.Semaphore(max(1, inp.workers))
+
+            async def one(u: ScoreInput) -> bool:
+                async with sem:
+                    self._progress["running"] += 1
+                    try:
+                        return await self._climb(inp, prep, u)
+                    finally:
+                        self._progress["running"] -= 1
+                        self._progress["done"] += 1
+
+            poses: dict[tuple[str, int], list[ScoreInput]] = {}
+            for u in prep.pending:
+                poses.setdefault((u.candidate, u.pose), []).append(u)
+
+            async def pose(legs: list[ScoreInput]) -> None:
+                """The vacuum leg first: a pose whose vacuum leg failed gives no value, so its field legs do not run
+                (a rerun schedules them if the vacuum leg's failure was not chemistry)."""
+                vac = [u for u in legs if u.leg == "vacuum"]
+                fields = [u for u in legs if u.leg != "vacuum"]
+                if vac and not await one(vac[0]):
+                    self._progress["done"] += len(fields)
+                    return
+                await asyncio.gather(*(one(u) for u in fields))
+
+            await asyncio.gather(*(pose(legs) for legs in poses.values()))
+            cut = await self._stage(inp, "cut", "campaign_cut", StageInput(inp, got.ref, "", prep.n_done), StageRef)
+            ref = cut.ref
+            for key in got.analyses:  # each analysis is its own activity, on the previous stage's checkpoint
+                ref = (await self._stage(inp, key, "campaign_analysis", StageInput(inp, ref, key), StageRef)).ref
+            return await self._stage(inp, "record", "campaign_record", StageInput(inp, ref), RunSummary)
+
+        async def _climb(self, inp: RunInput, prep: PrepareResult, u: ScoreInput) -> bool:
+            """The leg up the ladder; True when it converged. A failure is recorded as an outcome line; a cancel is
+            not a failure and is re-raised."""
+            tried: list[int] = list(range(u.rung))
+            outcome, error = "not_converged", "every rung of the remedy ladder was tried before this run resumed"
+            extra: dict = {}
+            for rung in range(u.rung, prep.n_rungs):
+                tried.append(rung)
+                try:
+                    await workflow.execute_activity(
+                        "pipeline_score",
+                        dataclasses.replace(u, rung=rung),
+                        result_type=ScoreResult,
+                        start_to_close_timeout=timedelta(seconds=prep.scf_timeout_s + SERVER_TIMEOUT_MARGIN_S),
+                        heartbeat_timeout=timedelta(seconds=inp.heartbeat_s),
+                        retry_policy=RetryPolicy(
+                            initial_interval=timedelta(seconds=5),
+                            maximum_attempts=3,
+                            non_retryable_error_types=[SCF_NOT_CONVERGED, CLASH_REFUSED, CONFIG_CHANGED, TIMEOUT],
+                        ),
+                        cancellation_type=ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+                    )
+                    return True
+                except ActivityError as e:
+                    if is_cancelled_exception(e):
+                        raise asyncio.CancelledError() from None
+                    cause = e.cause
+                    kind = getattr(cause, "type", None)
+                    error = f"{type(cause or e).__name__}: {cause or e}"[:400]
+                    if kind == SCF_NOT_CONVERGED:
+                        continue  # chemistry: the next rung, never a retry of this one
+                    if kind == TIMEOUT or isinstance(cause, TimeoutError_):
+                        details = list(getattr(cause, "details", None) or [])
+                        seconds = (
+                            (details[0] or {}).get("seconds") if details and isinstance(details[0], dict) else None
+                        )
+                        outcome, extra = "timeout", {"rung": rung, "seconds": seconds or prep.scf_timeout_s}
+                    else:
+                        outcome = "clash_refused" if kind == CLASH_REFUSED else "error"
+                    break
+            self._progress["failed"] += 1
+            row = {
+                "candidate": u.candidate,
+                "pose": u.pose,
+                "leg": u.leg,
+                "field_model": u.field_model,
+                "outcome": outcome,
+                "rungs_tried": tried,
+                "error": error,
+                "digest": prep.digest[:12],
+                **extra,
+            }
+            await workflow.execute_activity(
+                "pipeline_record_outcome", args=[inp.out, row], start_to_close_timeout=timedelta(minutes=2)
+            )
+            return False
+
 
 def kill_group(pid: int) -> None:
     try:
@@ -1019,8 +1596,13 @@ async def run_worker(
     async with Worker(
         client,
         task_queue=task_queue,
-        workflows=[PipelineRunWorkflow],
-        activities=[acts.prepare, acts.score, acts.record_outcome, acts.finalize],
+        # PipelineRunWorkflow and its activities stay registered: executions started before CampaignRunWorkflow
+        # existed replay and finish on this worker
+        workflows=[CampaignRunWorkflow, PipelineRunWorkflow],
+        activities=[
+            *(acts.prepare, acts.score, acts.record_outcome, acts.finalize),
+            *(acts.begin, acts.plan, acts.cut, acts.analysis, acts.record, acts.settle),
+        ],
         workflow_runner=UnsandboxedWorkflowRunner(),
         max_concurrent_activities=max(1, workers) + 2,  # + prepare/finalize/record beside the scores
     ):
@@ -1063,7 +1645,7 @@ async def start_and_wait(
 
     wid = workflow_id(inp.out, Path(inp.config).read_text())
     handle = await client.start_workflow(
-        PipelineRunWorkflow.run,
+        CampaignRunWorkflow.run,
         inp,
         id=wid,
         task_queue=task_queue,
@@ -1092,7 +1674,7 @@ async def start_and_wait(
             )
             warned = True
         try:
-            p = await handle.query(PipelineRunWorkflow.progress)
+            p = await handle.query("progress")  # both workflow types answer it (an old execution may be attached)
         except Exception:  # no worker has picked it up yet
             p = None
         if p != last and p is not None:
@@ -1166,8 +1748,11 @@ def run_cli(
     poll_s: float = 10.0,
     namespace: str = "default",
     run_id: str | None = None,
+    arm: str | None = None,
+    ext: dict | None = None,
 ) -> int:
-    """`smeltery run --temporal`: 0 done, 2 the server is down (never a silent fallback), 3 the run failed."""
+    """`smeltery run --temporal`: 0 done, 2 the server is down (never a silent fallback), 3 the run failed. `arm` /
+    `ext` (`--arm`, `--ext-json`) reach the core record at its first write, as in a plain run."""
     if not TEMPORAL_AVAILABLE:
         print("config error: --temporal needs temporalio (the `temporal` extra)", file=sys.stderr)
         return 2
@@ -1187,6 +1772,8 @@ def run_cli(
             config_info,
             config_sha=sha256_file(config),
             run_id=run_id,
+            arm=arm,
+            ext=ext,
         )
         try:
             s = await start_and_wait(client, inp, task_queue, poll_s)

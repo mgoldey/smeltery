@@ -220,12 +220,32 @@ def test_run_temporal_host_and_task_queue_flags(monkeypatch, tmp_path):
     assert cli.main(["run", str(cfg), "--out", out, "--temporal", "--host", "h:1", "--task-queue", "q"]) == 0
     a, k = seen[-1]
     # (config, out, workers, host, queue, config_info): flags win, env fills the rest
-    assert a[2:5] == (5, "h:1", "q") and k == {"namespace": "lab", "run_id": None}
+    assert a[2:5] == (5, "h:1", "q") and k == {"namespace": "lab", "run_id": None, "arm": None, "ext": None}
     monkeypatch.delenv("SMELTERY_WORKERS")
     monkeypatch.delenv("SMELTERY_TEMPORAL_NAMESPACE")
     assert cli.main(["run", str(cfg), "--out", out, "--temporal"]) == 0
     a, k = seen[-1]
-    assert a[2:5] == (2, "localhost:7233", "smeltery-pipeline") and k == {"namespace": "default", "run_id": None}
+    assert a[2:5] == (2, "localhost:7233", "smeltery-pipeline") and k == {
+        "namespace": "default",
+        "run_id": None,
+        "arm": None,
+        "ext": None,
+    }
+
+
+def test_run_temporal_carries_the_arm_and_ext_to_the_workflow(monkeypatch, tmp_path):
+    """`--arm` / `--ext-json` combine with `--temporal`: they reach the workflow's input, whose record stage writes
+    them into the core record at its first write (they were refused before the workflow carried them)."""
+    seen = []
+    monkeypatch.setattr(temporal_run, "run_cli", lambda *a, **k: seen.append((a, k)) or 0)
+    monkeypatch.setattr(cli, "_stage_config", lambda config, out, temporal=False: (config, None))
+    monkeypatch.setattr(cli, "load_config", lambda p: {})
+    cfg = tmp_path / "c.toml"
+    cfg.write_text("")
+    argv = ["run", str(cfg), "--out", str(tmp_path / "o"), "--temporal", "--arm", "iter-001"]
+    assert cli.main([*argv, '--ext-json={"smeltery.al": {"loop": "x"}}']) == 0
+    _, k = seen[-1]
+    assert (k["arm"], k["ext"]) == ("iter-001", {"smeltery.al": {"loop": "x"}})
 
 
 def test_task_worker_alias_runs_the_tasks_queue(monkeypatch):

@@ -85,9 +85,10 @@ The loop's own cross-iteration summary (every iteration's batch, scores, uncerta
 `al-manifest.json`, which is the loop's artifact; the records carry the per-arm scalar, and the manifest carries the
 curve and the chain of record digests.
 
-Grouping needs the `attestation` extra, as campaign jobs do. `SMELTERY_BACKEND=temporal` carries no arm or ext and
-refuses such a spec, so a loop runs on the local backend; the refusal becomes the loop's stop reason rather than
-silently ungrouped runs.
+Grouping needs the `attestation` extra, as campaign jobs do. Both backends carry the arm and ext: the local one hands
+them to the run (`smeltery run --arm --ext-json`), and `SMELTERY_BACKEND=temporal` carries them in the workflow's
+input to its record stage, so on either one each iteration's core record states its family and arm at its first
+write.
 
 ## The loop manifest and resume
 

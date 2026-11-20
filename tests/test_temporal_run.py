@@ -3,7 +3,8 @@
 The SCFs are a fake `ferric` (`tests/fake_ferric.py`; no engine runs): its energies are a deterministic function of
 the geometry and the field, it fails to converge or hangs on demand, and it serves both this process (a plain run)
 and the score child processes the Temporal worker spawns, so both compute the same numbers. The workflow tests need
-the Temporal dev server at 127.0.0.1:7233; each uses its own task queue and an in-process worker (as
+a Temporal server (tests/temporal_server.py: the dev server at $SMELTERY_TEMPORAL_ADDRESS, or with
+SMELTERY_TEST_TEMPORAL_LOCAL=1 one this process starts); each uses its own task queue and an in-process worker (as
 `smeltery temporal-worker` runs it), and terminates what it started.
 """
 
@@ -14,7 +15,6 @@ import contextlib
 import json
 import os
 import re
-import socket
 import sys
 import threading
 import time
@@ -29,6 +29,7 @@ import pytest
 pytest.importorskip("temporalio", reason="temporalio (the `temporal` extra) is not installed")
 
 import fake_ferric  # noqa: E402
+import temporal_server  # noqa: E402
 from golden_path import results_without_timing  # noqa: E402
 
 from smeltery import cli, temporal_run  # noqa: E402
@@ -37,7 +38,7 @@ from smeltery.methods import MethodSpec, register, unregister  # noqa: E402
 from smeltery.model import HARTREE_TO_KCAL, PointCharge  # noqa: E402
 from smeltery.tiers import FieldInteraction  # noqa: E402
 
-HOST = "127.0.0.1:7233"
+HOST = temporal_server.address() or temporal_server.DEFAULT  # without a server, the workflow tests skip
 FAKE_CHILD = [sys.executable, str(Path(fake_ferric.__file__).resolve())]
 
 TINY = """
@@ -71,15 +72,11 @@ floor = 0.0
 """
 
 
-def _server_up() -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 7233), timeout=1):
-            return True
-    except OSError:
-        return False
-
-
-needs_server = pytest.mark.skipif(not _server_up(), reason="no Temporal dev server at 127.0.0.1:7233")
+# the dev server at $SMELTERY_TEMPORAL_ADDRESS, or one this process starts (tests/temporal_server.py)
+needs_server = pytest.mark.skipif(
+    temporal_server.address() is None and os.environ.get("SMELTERY_TEST_TEMPORAL_REQUIRE") != "1",
+    reason=temporal_server.reason() or "no Temporal server",
+)
 
 
 # ------------------------------------------------------------------------------------------------ the fake engine
