@@ -7,10 +7,13 @@ second execution path), polled to completion, its paired-ΔΔE scores read back 
 the proposer for the next batch.
 
 Recording (spec "family / arm choice"): the loop is one attestation family `al:<name>`, each iteration an arm
-`iter-NNN`, so `attest runs compare al:<name>` ranks the iterations by the `al.batch_best` metric -- the proposer's
-learning curve. smeltery's campaign record is `family=campaign, arm=null`, so the job writes `family=al:<name>,
-arm=null` and the loop re-stamps that finished record with the arm, the iteration metrics and `ext.smeltery.al`,
-through attestation-schema's own writer. No second record; `attestation/digests.json` is untouched.
+`iter-NNN`, so `attest runs compare al:<name>` ranks the iterations by `best_paired_ddE` -- the proposer's learning
+curve. A finished core record is NEVER rewritten: its bytes are what other readers hash (the job's own `settle`, a
+dataset's `source_runs[].record_sha256`, a ledger scan), and a record annotated afterwards would claim the producer
+observed at run time something it did not. So everything the record says about the loop is handed to the run at
+SUBMIT -- `JobSpec.arm` and `JobSpec.ext` (`jobs.check_spec`, `smeltery run --arm --ext-json`) -- and the record
+states it the first and only time it is written. The arm metrics are the RUN's own
+(`core_record.arm_metrics`, derived from its results); the loop's manifest keeps the cross-iteration summary.
 
 Public surface: `Proposer`, `ScoredCandidate`, `PoolProposer`, `load_proposer`, `run_loop`, `LoopManifest`, and the
 `smeltery al run` CLI (`al_main`). smeltery depends on `attestation_schema` only, never on `attestation`.
@@ -33,8 +36,8 @@ from typing import Protocol, runtime_checkable
 
 MANIFEST = "al-manifest.json"
 MANIFEST_SCHEMA = "smeltery.al/1"
-#: The quantity the funnel scores on; mirrors `smeltery.mcp.screening.QUANTITY`.
-QUANTITY = "dE_int"
+#: The core record's `ext` namespace the loop fills (`JobSpec.ext`, written at the record's first write).
+EXT_NAMESPACE = "smeltery.al"
 #: How long `run_loop` waits for one iteration's job before giving up (seconds). Fake-engine jobs finish in ~1 s.
 DEFAULT_TIMEOUT_S = 1800.0
 
@@ -253,51 +256,19 @@ def _finite(x: object) -> bool:
     return isinstance(x, int | float) and not isinstance(x, bool) and x == x and abs(float(x)) != float("inf")
 
 
-def restamp_core_record(
-    run_dir: Path,
-    *,
-    arm: str,
-    al_ext: dict,
-    scores: list[float],
-    unit: str | None,
-    proposer_seeds: Mapping[str, int],
-) -> str | None:
-    """Annotate a finished iteration's core record with its place in the loop: `arm`, `ext.smeltery.al`, the
-    iteration-level metrics (`al.batch_best|mean|n`) shared across iterations, and the proposer's seeds. Written back
-    through attestation-schema's own writer; `attestation/digests.json` is untouched. Returns the record's sha256,
-    or None when the schema package is absent (the loop then records a plain manifest).
-
-    The metrics carry no `labels`, so their key is identical in every iteration's record: that is what lets
-    `attest runs compare al:<loop>` rank the arms by `al.batch_best` (spec "family / arm choice")."""
+def core_record_sha256(run_dir: Path) -> str | None:
+    """The sha256 of the iteration's core record AS THE JOB WROTE IT, for the loop manifest. Read-only: the record is
+    the artifact of record and is never rewritten -- other readers (the job's `settle`, a dataset's
+    `source_runs[].record_sha256`, a ledger scan) may already have hashed those bytes, and a record re-stamped after
+    the fact would claim the producer observed at run time something it did not. The arm, the `ext.smeltery.al`
+    namespace and the arm metrics are therefore handed to the run at SUBMIT (`JobSpec.arm` / `JobSpec.ext` ->
+    `smeltery run --arm --ext-json`), so the first and only write already states them. None when there is no record
+    (no `attestation` extra, or a run that wrote none)."""
+    path = Path(run_dir) / "attestation" / "run.json"
     try:
-        import attestation_schema as schema
-
-        from .core_record import _metric
-    except ImportError:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
         return None
-    record_path = schema.record_path(Path(run_dir))
-    try:
-        rec = json.loads(record_path.read_bytes())
-    except (OSError, ValueError):
-        return None
-    rec["arm"] = arm
-    ext = dict(rec.get("ext") or {})
-    ext["smeltery.al"] = al_ext
-    rec["ext"] = ext
-    finite = [float(s) for s in scores if _finite(s)]
-    extra: list[dict] = []
-    if finite:
-        extra.append(_metric("al.batch_best", min(finite), "min", unit))
-        extra.append(_metric("al.batch_mean", sum(finite) / len(finite), "min", unit))
-        extra.append(_metric("al.batch_n", len(finite), None, None))
-    rec["metrics"] = list(rec.get("metrics") or []) + extra
-    if proposer_seeds:
-        seeds = dict(rec.get("seeds") or {}) if isinstance(rec.get("seeds"), dict) else {}
-        for k, v in proposer_seeds.items():
-            seeds[f"al:{k}"] = v
-        rec["seeds"] = seeds
-    schema.write(schema.from_dict(rec), Path(run_dir), overwrite=True)
-    return hashlib.sha256(record_path.read_bytes()).hexdigest()
 
 
 # ---- reading an iteration's scores ------------------------------------------------------------------------------
@@ -330,10 +301,6 @@ def _scores_for(record: dict, names: list[str], iteration: int, smiles: dict[str
             )
         )
     return out
-
-
-def _unit(record: dict) -> str | None:
-    return ((record.get("results") or {}).get("units") or {}).get(QUANTITY)
 
 
 # ---- the loop ---------------------------------------------------------------------------------------------------
@@ -423,6 +390,7 @@ def run_loop(
         smiles = dict(zip(names, proposed, strict=True))
         ligand_set = {reference_name: ref_canon, **smiles}
         iter_dir = loop_dir / f"iter-{n:03d}"
+        arm = f"iter-{n:03d}"
         try:
             _cfg, built = screening.plan(
                 target,
@@ -448,6 +416,19 @@ def run_loop(
                     "over_budget",
                     f"iteration {n}: {spent:.3f}+{cost_h:.3f} CPU-hours would cross the budget of {budget_cpu_h:g}",
                 )
+        # everything the record says about the loop is known HERE, before the run: the loop, the iteration, the
+        # proposer's identity and seeds, the batch it proposed, and what this screen was predicted to cost. The job
+        # hands it to the run, which states it the first (and only) time it writes its core record.
+        al_ext = {
+            "loop": loop,
+            "iteration": n,
+            "proposer": manifest.proposer,
+            "proposer_seeds": dict(pseeds),
+            "batch": [{"name": nm, "smiles": smiles[nm]} for nm in names],
+            "budget_cpu_h": budget_cpu_h,
+            "budget_spent_before_cpu_h": spent,
+            "predicted_cpu_h": cost_h,
+        }
         try:
             scr = screening.screen(
                 target,
@@ -462,6 +443,8 @@ def run_loop(
                 root=root,
                 confirm=confirm,
                 backend=backend,
+                arm=arm,
+                ext={EXT_NAMESPACE: al_ext},
             )
         except screening.Refusal as e:
             return stop("failed", f"iteration {n}: {e}")
@@ -482,7 +465,7 @@ def run_loop(
                     run_dir=os.path.relpath(iter_dir, loop_dir),
                     campaign=f"al:{loop}",
                     family=f"al:{loop}",
-                    arm=f"iter-{n:03d}",
+                    arm=arm,
                     state=st.state,
                     candidates=[{"name": nm, "smiles": smiles[nm]} for nm in names],
                     batch_best=None,
@@ -495,22 +478,7 @@ def run_loop(
         scored = _scores_for(record or {}, names, n, smiles) if record else []
         finite = [c.score for c in scored if c.score is not None and _finite(c.score)]
         batch_best = min(finite) if finite else None
-        arm = f"iter-{n:03d}"
-        al_ext = {
-            "loop": loop,
-            "iteration": n,
-            "proposer": manifest.proposer,
-            "batch": [{"name": c.name, "smiles": c.smiles} for c in scored],
-            "budget_spent_cpu_h": spent,
-        }
-        sha = restamp_core_record(
-            iter_dir,
-            arm=arm,
-            al_ext=al_ext,
-            scores=[c.score for c in scored if c.score is not None],
-            unit=_unit(record or {}),
-            proposer_seeds=pseeds,
-        )
+        sha = core_record_sha256(iter_dir)  # read, never written: the job's record is the artifact of record
         manifest.iterations.append(
             IterationRecord(
                 iteration=n,

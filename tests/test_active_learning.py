@@ -155,8 +155,10 @@ def test_too_few_new_candidates_exhausts(workspace):
 
 
 def test_core_records_are_grouped_for_compare(workspace):
-    """The re-stamped records carry what `attest runs compare al:<loop>` needs: one family, an arm per iteration, and
-    a label-free `al.batch_best` metric with direction min, shared across iterations so the arms are comparable."""
+    """The records carry what `attest runs compare al:<loop>` needs, AT THEIR FIRST WRITE: one family, an arm per
+    iteration, the loop's own ext namespace, and label-free directional `best_paired_ddE` / `mean_paired_ddE` that
+    are the same key in every arm's record (the per-analogue metrics cannot serve: each arm screens other
+    molecules)."""
     import attestation_schema as schema
 
     backend = _backend(workspace)
@@ -167,20 +169,105 @@ def test_core_records_are_grouped_for_compare(workspace):
 
     for it in manifest.iterations:
         run_dir = workspace / "loop" / it.run_dir
-        rec = schema.read(run_dir)  # the frozen reader accepts the re-stamped record
+        rec = schema.read(run_dir)  # the frozen reader accepts it
         assert rec.family == "al:demo"
         assert rec.arm == it.arm
         raw = json.loads((run_dir / "attestation" / "run.json").read_bytes())
-        assert hashlib.sha256((run_dir / "attestation" / "run.json").read_bytes()).hexdigest() == it.core_record_sha256
         al_ext = raw["ext"]["smeltery.al"]
+        assert raw["ext"]["smeltery"], "the run's own namespace is kept beside the loop's"
         assert al_ext["loop"] == "demo" and al_ext["iteration"] == it.iteration
         assert al_ext["proposer"]["class"] == "PoolProposer"
-        best = [m for m in raw["metrics"] if m["name"] == "al.batch_best"]
-        assert len(best) == 1
+        assert al_ext["proposer_seeds"] == {"pool": 0}  # exposed by the proposer, never invented
+        assert [c["name"] for c in al_ext["batch"]] == [c["name"] for c in it.candidates]
+        best = [m for m in raw["metrics"] if m["name"] == "best_paired_ddE"]
+        mean = [m for m in raw["metrics"] if m["name"] == "mean_paired_ddE"]
+        assert len(best) == 1 and len(mean) == 1
         assert best[0]["direction"] == "min" and best[0]["labels"] == {}
+        assert best[0]["unit"] == "kcal/mol"
         assert best[0]["value"] == pytest.approx(it.batch_best)
-        # the proposer's seed is recorded (it exposes one), never invented
-        assert raw["seeds"]["al:pool"] == 0
+
+
+def test_a_run_without_an_arm_is_unchanged(workspace):
+    """The arm and its metrics appear only for a run whose submitter named an arm, so every other smeltery record --
+    every run outside a job -- is byte-for-byte what it was."""
+    from smeltery.core_record import arm_metrics, core_fields
+
+    legacy = {
+        "campaign": "plain",
+        "input_digest": "a" * 64,
+        "results": {
+            "cut": {"survivors": ["x"]},
+            "funnel": [],
+            "units": {"dE_int": "kcal/mol"},
+            "paired_ddE": {"x": {"mean": -1.0, "sem": 0.1, "n": 3}},
+        },
+    }
+    common = {
+        "legacy_name": "run-aaaaaaaaaaaa.json",
+        "legacy_sha256": "b" * 64,
+        "manifest": {"name": "attestation/digests.json", "sha256": "c" * 64, "role": "manifest"},
+        "producer": {"name": "smeltery", "version": "0"},
+        "dependencies": [],
+    }
+    without = core_fields(legacy, **common)
+    assert without["arm"] is None
+    assert [m["name"] for m in without["metrics"] if not m["labels"]] == ["cut.survivors"]
+
+    with_arm = core_fields(legacy, **common, arm="iter-007", extra_ext={"smeltery.al": {"loop": "l"}})
+    assert with_arm["arm"] == "iter-007"
+    assert with_arm["ext"]["smeltery.al"] == {"loop": "l"}
+    assert with_arm["ext"]["smeltery"] == without["ext"]["smeltery"]
+    # the only difference in metrics is the arm's own two, appended
+    assert with_arm["metrics"] == without["metrics"] + arm_metrics(legacy["results"])
+    assert [m["name"] for m in arm_metrics(legacy["results"])] == ["best_paired_ddE", "mean_paired_ddE"]
+
+
+def test_the_finished_core_record_is_never_rewritten(workspace):
+    """The record is the artifact of record: its bytes can already have been hashed by `settle`, a dataset's
+    `source_runs[].record_sha256` or a ledger scan. The loop READS its sha256 for the manifest and never touches the
+    file again -- so iteration 0's record is byte- and mtime-identical after later iterations have run."""
+    backend = _backend(workspace)
+    try:
+        first = _run(workspace, backend, iterations=1, batch=2)
+        record = workspace / "loop" / "iter-000" / "attestation" / "run.json"
+        before_sha = hashlib.sha256(record.read_bytes()).hexdigest()
+        before_mtime = record.stat().st_mtime_ns
+        # the sha the manifest pins IS the bytes the job wrote
+        assert first.iterations[0].core_record_sha256 == before_sha
+        second = _run(workspace, _backend(workspace), iterations=3, batch=2, proposer=al.PoolProposer(POOL, seed=0))
+    finally:
+        backend.queue.stop_live("teardown")
+
+    assert hashlib.sha256(record.read_bytes()).hexdigest() == before_sha
+    assert record.stat().st_mtime_ns == before_mtime
+    # and every iteration's pinned sha still matches its bytes on disk
+    for it in second.iterations:
+        path = workspace / "loop" / it.run_dir / "attestation" / "run.json"
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == it.core_record_sha256
+    assert not hasattr(al, "restamp_core_record"), "the loop must not re-stamp a finished record"
+
+
+def test_check_spec_validates_the_arm_and_the_ext_namespaces():
+    """`jobs.check_spec` is where an arm becomes honest: a label, and never the run's own `smeltery` namespace."""
+    from attestation_schema import JobSpec
+
+    from smeltery import jobs
+
+    cfg = {"campaign": "al:demo"}
+
+    def spec(**kw):
+        base = {"run_id": "r0", "family": "al:demo", "arm": None, "config": cfg, "run_dir": "/tmp/x"}
+        return JobSpec(**{**base, **kw})
+
+    jobs.check_spec(spec())  # no arm, no ext: as before
+    jobs.check_spec(spec(arm="iter-000", ext={"smeltery.al": {"loop": "demo"}}))
+    for bad in ("iter 000", "iter/000", "", "iter\n000"):
+        with pytest.raises(ValueError, match="arm must be"):
+            jobs.check_spec(spec(arm=bad))
+    with pytest.raises(ValueError, match="the run's own"):
+        jobs.check_spec(spec(ext={"smeltery": {"x": 1}}))
+    with pytest.raises(ValueError, match="must map to an object"):
+        jobs.check_spec(spec(ext={"other": 1}))
 
 
 def test_proposer_identity_and_loading(tmp_path):

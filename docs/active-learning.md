@@ -61,29 +61,40 @@ budget, never under it. The per-screen `SMELTERY_MAX_CPU_HOURS` / `SMELTERY_MAX_
 The loop is **one attestation family, `al:<loop-name>`, with one arm per iteration, `iter-NNN`**. That is the choice
 that makes `attest runs compare al:<loop-name>` meaningful: it ranks the arms of a family by a shared metric, so with
 each iteration an arm the comparison becomes the proposer's learning curve — did the best score fall across
-iterations? One family per iteration (the roadmap's literal wording) would give each iteration its own single-arm
-family with nothing to compare across them.
+iterations? One family per iteration would give each iteration its own single-arm family with nothing to compare
+across them.
 
-smeltery's campaign record is `family = campaign`, `arm = null`. The job writes its record as usual
-(`family = al:<loop>`), and the loop then **annotates that finished record** with the arm and the metrics it alone
-knows, written back through attestation-schema's own writer — no second record, and `attestation/digests.json` is
-untouched. The annotation adds only:
+**The record is correct the first time it is written, and is never rewritten afterwards.** A finished core record is
+the artifact of record: its bytes are what other readers hash (the job's own `settle`, a dataset's
+`source_runs[].record_sha256`, a ledger scan). So the loop hands everything over at **submit** instead — the campaign
+job carries the arm and the loop's `ext` namespace (`JobSpec.arm` / `JobSpec.ext`, validated by `jobs.check_spec`,
+reaching the run as `smeltery run --arm --ext-json`; see [jobs.md](jobs.md#arm-and-ext)) — and the run states them
+when it writes its record. What the record then carries:
 
-- `arm = "iter-NNN"`;
-- `ext.smeltery.al`: the loop name, iteration index, the proposer's recorded identity, the batch (name + SMILES), and
-  the CPU-hours spent so far;
-- iteration-level metrics with no labels, so their key is the same in every iteration: `al.batch_best` (min score,
-  direction `min`), `al.batch_mean`, `al.batch_n`;
-- the proposer's seeds, folded into the record's `seeds` under `al:<key>`, only when it exposes them.
+- `family = al:<loop>`, `arm = iter-NNN`;
+- `ext.smeltery.al`, beside the run's own `ext.smeltery`: the loop name, the iteration index, the proposer's recorded
+  identity and its exposed seeds, the batch it proposed, the budget, what was spent before, and this screen's
+  *predicted* cost. All of it is known before the run starts — nothing post-hoc;
+- `best_paired_ddE` and `mean_paired_ddE`: label-free, direction `min`, the quantity's unit, **derived from the run's
+  own results** (the lowest / mean paired ΔΔE among its analogues). These are what `compare` ranks the arms by: the
+  per-analogue `paired_ddE.*` metrics cannot serve, because each iteration screens different molecules and so carries
+  different `labels.analogue`. They are emitted only for a run whose submitter named an arm — an arm exists to be
+  compared — so every other smeltery record is unchanged.
 
-Without the `attestation` extra the loop still runs and scores; it writes a plain manifest and does not group the
-iterations.
+The loop's own cross-iteration summary (every iteration's batch, scores, uncertainties and batch best) lives in
+`al-manifest.json`, which is the loop's artifact; the records carry the per-arm scalar, and the manifest carries the
+curve and the chain of record digests.
+
+Grouping needs the `attestation` extra, as campaign jobs do. `SMELTERY_BACKEND=temporal` carries no arm or ext and
+refuses such a spec, so a loop runs on the local backend; the refusal becomes the loop's stop reason rather than
+silently ungrouped runs.
 
 ## The loop manifest and resume
 
 `<out>/al-manifest.json` (canonical JSON) is the audit trail: the loop, the reference, the proposer's identity, the
-budget, and one entry per iteration — its run directory, its `core_record_sha256` (the exact record bytes it
-recorded), its family/arm, its scored candidates and the batch best. It is rewritten after each iteration. A loop
+budget, and one entry per iteration — its run directory, its `core_record_sha256` (the sha256 of the record **as the
+job wrote it**; the loop reads it and never writes the file), its family/arm, its scored candidates and the batch
+best. It is rewritten after each iteration. A loop
 stopped by `Ctrl-C`, a crash or `smeltery cancel` **resumes** from it: re-running the same command into the same
 `--out` keeps the iterations already recorded complete, re-seeds the proposer's history from their scores, and
 continues.

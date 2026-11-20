@@ -56,10 +56,25 @@ RUN_DIR/attestation/digests.json    the manifest the record binds
 ```
 
 `submit` refuses (JobExistsError) a run directory holding `state.json` or `run.json`: resubmission is a new run
-directory. In Python, `smeltery.jobs.campaign_spec(config, run_dir)` stages a config and returns the `JobSpec`, whose
-`config` is the staged campaign config, `family` its `campaign`, `arm` None and `ext` empty (anything else is refused
-by `check_spec`: `smeltery run` has no way to carry a caller's `ext`, another family or an arm into the record it
-writes, and the contract says a backend that cannot hand them over refuses the spec).
+directory. In Python, `smeltery.jobs.campaign_spec(config, run_dir, arm=..., ext=...)` stages a config and returns
+the `JobSpec`, whose `config` is the staged campaign config and `family` its `campaign` (another family is refused by
+`check_spec`: `smeltery run` names the family after the config).
+
+### arm and ext
+
+A submitter may name an `arm` and its own `ext` namespaces, and the local backend **hands them to the run**
+(`smeltery run --arm NAME --ext-json JSON`), so they are in the core record the FIRST time it is written, in every
+terminal state -- a finished record is never rewritten, because its bytes are what other readers hash. `check_spec`
+holds them to what is honest: an arm is a label (`^[A-Za-z0-9_.:-]+$`, a key readers group and compare runs by),
+smeltery has none of its own so an arm is always the submitter's, and an `ext` namespace maps to an object and may
+not be `smeltery`, which is the run's own. A named arm also makes the run state the scalars its family's arms are
+compared on (`best_paired_ddE`, `mean_paired_ddE`; [core-record.md](core-record.md)). The schema's own
+`terminal_record` already carries the spec's arm into a failed or cancelled record.
+
+`SMELTERY_BACKEND=temporal` carries neither: its finalize activity takes the run_id only, so a spec with an arm or an
+ext is **refused at `submit`** rather than having them dropped (the contract's rule for a backend that cannot hand
+them to its producer). `smeltery run --temporal --arm` is refused for the same reason.
+`smeltery al` ([active-learning.md](active-learning.md)) is the one caller that uses both.
 
 ### run_id
 
@@ -114,8 +129,8 @@ than guessing; `transition` refuses an illegal or terminal move (`IllegalTransit
 
 ### Terminal records
 
-Every terminal record carries the job's `run_id`, `family`, `arm` (null) and `config` (the campaign config the job
-was given), whoever wrote it, and its `status` is never null.
+Every terminal record carries the job's `run_id`, `family`, `arm` (the submitter's, null without one) and `config`
+(the campaign config the job was given), whoever wrote it, and its `status` is never null.
 
 - **complete**: the record `smeltery run` writes (`smeltery.core_record`; see [core-record.md](core-record.md)), given
   the job's run_id; smeltery's derived `inputs` and the input digest are in `ext.smeltery`, with the reuse provenance
