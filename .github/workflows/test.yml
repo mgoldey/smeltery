@@ -8,6 +8,13 @@
 # against the git pin afterwards.
 #
 # Actions are pinned by commit SHA, in the style of release.yml.
+#
+# Three jobs (`pre-commit`, `test`, `wheel`) call the reusable workflows shared with attestation and ferric
+# (roadmap 39; attestation docs/superpowers/specs/2026-11-20-shared-ci-templates-design.md), pinned by ONE full commit
+# SHA of mgoldey/attestation (tests/test_shared_workflows.py). A called job's check reads
+# `<caller job> / <called job>`, e.g. `test (3.11) / test`. Workflow-level `env:` does NOT reach a called workflow,
+# so those jobs set OPENBLAS_NUM_THREADS themselves, and the ruff pin is the `test` job's `ruff-version` input
+# (tests/test_ruff_pin.py keeps it equal to pyproject.toml's ruff==). Bump the SHA deliberately, all refs together.
 name: test
 
 on:
@@ -20,85 +27,67 @@ permissions:
   contents: read
 
 env:
-  # ferric's convention: no oversubscribed BLAS threads in tests.
+  # ferric's convention: no oversubscribed BLAS threads in tests. (Not seen by the reusable-workflow jobs.)
   OPENBLAS_NUM_THREADS: "1"
-  # Exact ruff pin; must equal the ruff== pin in pyproject.toml's dev extras
-  # (tests/test_ruff_pin.py fails if they disagree). The lint step also checks
-  # the installed version against it.
-  RUFF_VERSION: "0.16.10"
 
 jobs:
   # The local gate (.pre-commit-config.yaml) run as-is, so what a contributor's hooks check and what CI checks cannot
-  # drift. Hooks only (the default stage): the pytest hook is pre-push and is the `test` job below.
+  # drift. Hooks only (the default stage): the pytest hook is pre-push and is the `test` job below. The ty hook
+  # resolves imports against .venv, like the `ty` job, hence the bench and rdkit extras.
   pre-commit:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0   # uv sync builds the project; hatch-vcs derives the version from tags
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.11"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      # The ty hook resolves imports against .venv, like the `ty` job.
-      - name: Install (what the hooks and ty resolve against)
-        run: uv sync --extra dev --extra bench --extra rdkit --no-sources
-      - name: pre-commit run --all-files
-        run: uv run --no-sync pre-commit run --all-files
+    uses: mgoldey/attestation/.github/workflows/reusable-pre-commit.yml@b1c5cb2f93b43d0b2441f40c323a4c7741ebc5a9 # attestation main 2026-11-20 (PR #70)
+    with:
+      runs-on: ubuntu-24.04
+      python-version: "3.11"
+      timeout-minutes: 30
+      fetch-depth: 0   # uv sync builds the project; hatch-vcs derives the version from tags
+      sync-args: --extra dev --extra bench --extra rdkit --no-sources
+      args: run --all-files
 
   # Python 3.11 and 3.12: the classifiers claim both. fail-fast is off so a 3.12-only failure does not hide the 3.11
   # result. The two legs run in parallel, so wall time stays that of one leg (~30 min); the cost is doubled runner
   # minutes.
+  #
+  # `dataset` (pyarrow): without it every Parquet/Arrow test in tests/test_dataset_*.py skipped here. The dataset
+  # DIRECTORY tests (tests/test_dataset_record.py) also need attestation-schema with attestation.dataset/1
+  # (>= smeltery.dataset_record.REQUIRED_SCHEMA); they skip until the `attestation` extra's floor reaches that
+  # release, and from then on a test there fails instead of letting them skip.
+  #
+  # `setup`: attestation-schema comes from PyPI through the `attestation` extra, so the core run record tests run on
+  # 3.11 too; fail loudly if it did not install rather than letting tests/test_core_record.py skip. The
+  # danuglipron-halogen prebuilt reads a .pdb pocket, so planning it needs pdb2pqr30 to assign the charges (3.8.0 is
+  # the version the committed records were made with, which the digest guards expect). OPENBLAS_NUM_THREADS goes
+  # through $GITHUB_ENV because the workflow-level env above does not reach a called workflow.
+  #
+  # Ruff is the exact `ruff-version` through uvx (format --check, then check); uv.lock is checked by the pre-commit
+  # job's uv-lock hook and ty by the `ty` job, so both are off here.
   test:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0   # hatch-vcs derives the version from tags
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: ${{ matrix.python-version }}
-          enable-cache: true
-          cache-dependency-glob: uv.lock
+    uses: mgoldey/attestation/.github/workflows/reusable-python-gates.yml@b1c5cb2f93b43d0b2441f40c323a4c7741ebc5a9 # attestation main 2026-11-20 (PR #70)
+    with:
+      name: test
+      runs-on: ubuntu-24.04
+      python-version: ${{ matrix.python-version }}
+      fetch-depth: 0   # hatch-vcs derives the version from tags
+      timeout-minutes: 90
+      enable-cache: "true"
+      sync-args: >-
+        --extra dev --extra posebusters --extra experiments --extra bench
+        --extra attestation --extra dataset --no-sources
+      setup: |
+        echo "OPENBLAS_NUM_THREADS=1" >> "$GITHUB_ENV"
+        uv run --no-sync python -c "from smeltery import core_record as c; assert c.AVAILABLE, c.NOT_INSTALLED"
+        uv pip install pdb2pqr
+      ruff-version: "0.16.10"   # must equal the ruff== pin in pyproject.toml's dev extras (tests/test_ruff_pin.py)
+      lock-check: false
+      test-command: |
+        uv run --no-sync pytest -q
+        uv run --no-sync pytest -q experiments
+        uv run --no-sync python examples/mwe_benzoic.py
 
-      # `dataset` (pyarrow): without it every Parquet/Arrow test in tests/test_dataset_*.py skipped here. The dataset
-      # DIRECTORY tests (tests/test_dataset_record.py) also need attestation-schema with attestation.dataset/1
-      # (>= smeltery.dataset_record.REQUIRED_SCHEMA); they skip until the `attestation` extra's floor reaches that
-      # release, and from then on a test there fails instead of letting them skip.
-      - name: Install (ferric from PyPI)
-        run: uv sync --extra dev --extra posebusters --extra experiments --extra bench --extra attestation --extra dataset --no-sources
-      # attestation-schema 0.1.0 comes from PyPI through the `attestation` extra above, so the core run record tests
-      # run on 3.11 too; fail loudly if it did not install rather than letting tests/test_core_record.py skip.
-      - name: Check attestation-schema is installed
-        run: uv run --no-sync python -c "from smeltery import core_record as c; assert c.AVAILABLE, c.NOT_INSTALLED"
-      # The danuglipron-halogen prebuilt reads a .pdb pocket, so planning it needs pdb2pqr30 to assign the
-      # charges. 3.8.0 is the version the committed records were made with, which the digest guards expect.
-      - name: Install pdb2pqr30 (a .pdb pocket's charges come from it)
-        run: uv pip install pdb2pqr
-
-      - name: Lint (ruff check)
-        run: |
-          uv run --no-sync ruff --version | grep -qx "ruff $RUFF_VERSION"
-          uv run --no-sync ruff check .
-
-      - name: Format (ruff format --check)
-        run: uv run --no-sync ruff format --check .
-
-      - name: Tests
-        run: uv run --no-sync pytest -q
-
-      - name: Frozen campaign record (experiments/)
-        run: uv run --no-sync pytest -q experiments
-
-      - name: Example (benzoic acid)
-        run: uv run --no-sync python examples/mwe_benzoic.py
 
   # The Bench gate on its own, so a Bench regression is reported in minutes instead of at the end of the ~30-minute
   # `test` job (which still runs these tests too). It runs on 3.11 and 3.12: the classifiers claim both, but every
@@ -318,68 +307,38 @@ jobs:
           fi
 
   # The BUILT wheel installed with plain pip into a fresh venv, with and without each extra the wheel declares
-  # (issue #31). The matrix comes from the wheel's own metadata, so a new extra is covered the moment it exists;
-  # scripts/wheel_smoke.py refuses an extra it has no checks for, and tests/test_wheel_smoke.py guards the same.
-  wheel-build:
-    runs-on: ubuntu-24.04
-    outputs:
-      extras: ${{ steps.extras.outputs.extras }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0   # hatch-vcs derives the version from tags
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.11"
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Build the Bench UI (shipped in the wheel; src/smeltery/bench/web is gitignored build output)
-        run: |
-          npm ci --prefix ui
-          npm run build --prefix ui
-      # Plain `python -m build`, the SAME command release.yml runs, not `--wheel`: it builds the sdist first and the
-      # wheel FROM that sdist, so an artifact the sdist drops is missing from the wheel. Building only the wheel here
-      # meant that difference went untested until a tag, and v0.1.0 published nothing because of it (the sdist had 0
-      # of the 59 bench/web files). Keep these two commands identical so the release path is exercised on every PR.
-      - name: Build the sdist and the wheel (the release path)
-        run: |
-          python -m pip install --upgrade build
-          python -m build
-      - id: extras
-        run: echo "extras=$(python scripts/wheel_smoke.py list-extras dist/*.whl)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: wheel
-          path: dist/
-          if-no-files-found: error
-
-  wheel-smoke:
-    needs: wheel-build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        extra: ${{ fromJSON(needs.wheel-build.outputs.extras) }}
-    env:
-      OPENBLAS_NUM_THREADS: "1"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.11"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: wheel
-          path: dist/
-      - name: Wheel with extra "${{ matrix.extra }}"
-        run: python scripts/wheel_smoke.py check dist/*.whl --extra "${{ matrix.extra }}" --config examples/mwe_benzoic.toml
-      - name: The example runs from the installed wheel, and the run record's ferric provenance is VERIFIED
-        if: matrix.extra == 'none'
-        run: python scripts/wheel_smoke.py check dist/*.whl --extra none --example examples/mwe_benzoic.py
+  # (issue #31). The matrix comes from the wheel's own metadata (`matrix-command`), so a new extra is covered the
+  # moment it exists; scripts/wheel_smoke.py refuses an extra it has no checks for, and tests/test_wheel_smoke.py
+  # guards the same. The Bench UI is built first (shipped in the wheel; src/smeltery/bench/web is gitignored build
+  # output).
+  #
+  # Plain `python -m build`, the SAME command release.yml runs, not `--wheel`: it builds the sdist first and the
+  # wheel FROM that sdist, so an artifact the sdist drops is missing from the wheel. Building only the wheel here
+  # meant that difference went untested until a tag, and v0.1.0 published nothing because of it (the sdist had 0
+  # of the 59 bench/web files). Keep this build command identical to release.yml's so the release path is exercised
+  # on every PR (twine check --strict too, which release.yml also runs).
+  wheel:
+    uses: mgoldey/attestation/.github/workflows/reusable-wheel-smoke.yml@b1c5cb2f93b43d0b2441f40c323a4c7741ebc5a9 # attestation main 2026-11-20 (PR #70)
+    with:
+      runs-on: ubuntu-24.04
+      build-python-version: "3.11"
+      fetch-depth: 0   # hatch-vcs derives the version from tags
+      node-version: "22"
+      node-cache-dependency-path: ui/package-lock.json
+      pre-build: npm ci --prefix ui && npm run build --prefix ui
+      build-command: python -m pip install --upgrade build && python -m build
+      twine-check: true
+      artifact-name: wheel
+      matrix-command: python scripts/wheel_smoke.py list-extras dist/*.whl
+      smoke-python-versions: '["3.11"]'
+      # Per extra; for "none" also: the example runs from the installed wheel, and the run record's ferric provenance
+      # is VERIFIED.
+      smoke-command: |
+        export OPENBLAS_NUM_THREADS=1
+        python scripts/wheel_smoke.py check dist/*.whl --extra "$SMOKE_CELL" --config examples/mwe_benzoic.toml
+        if [ "$SMOKE_CELL" = none ]; then
+          python scripts/wheel_smoke.py check dist/*.whl --extra none --example examples/mwe_benzoic.py
+        fi
 
   # The PoseBusters gate on Python 3.12 (issue #68). The `test` job runs 3.11
   # only, which hid a segfault in posebusters_check on uv's CPython 3.12.11+
