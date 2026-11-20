@@ -126,6 +126,18 @@ def test_minimal_pipeline_reports_every_missing_knob_at_once():
     }
 
 
+def test_minimal_copies_the_workspace_defaults_its_methods_know_under_nothing_it_sets():
+    p = Pipeline.minimal("t", "benzoic", CANDS, defaults={"cut": {"keep": 2, "no_such_knob": 1}, "docking": {"x": 1}})
+    assert p.stage("cut").params == {"keep": 2}
+    assert "docking" not in p.keys()
+    assert Pipeline.minimal("t", "benzoic", CANDS).stage("cut").params == {}
+
+
+def test_try_from_config_is_none_for_a_config_that_is_not_a_pipeline():
+    assert Pipeline.try_from_config({"candidates": "not a table"}) is None
+    assert Pipeline.try_from_config(Pipeline.minimal("t", "benzoic", CANDS).to_config()) is not None
+
+
 def test_compile_refuses_with_every_error():
     p = Pipeline.minimal("t", "benzoic", CANDS)
     with pytest.raises(PipelineError) as e:

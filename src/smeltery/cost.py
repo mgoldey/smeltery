@@ -155,6 +155,7 @@ _STO3G_NBF = {
     "I": 27,
     "Xe": 27,
 }
+STO3G_NBF = _STO3G_NBF  # the public name; which elements the STO-3G estimators can count
 
 
 def sto3g_basis_functions(symbols: list[str]) -> int:

@@ -110,6 +110,8 @@ import itertools
 from dataclasses import dataclass
 from pathlib import Path
 
+from .model import NM_TO_ANGSTROM
+
 __all__ = [
     "MissingBackend",
     "StructureError",
@@ -232,7 +234,10 @@ def _require(module: str, fmt: str, extra: str):
 # ── readers: each returns a Structure, none of them touch ferric ──
 
 
-def _read_xyz(path: Path, charge: int, multiplicity: int) -> Structure:
+def parse_xyz(path: str | Path, charge: int = 0, multiplicity: int = 1) -> Structure:
+    """An XYZ file as a `Structure`: the atom count must match the rows, and every row needs a symbol and three
+    coordinates. `StructureError` (a `ValueError`) otherwise."""
+    path = Path(path)
     lines = path.read_text().splitlines()
     if not lines:
         raise StructureError(f"{path}: empty file")
@@ -343,8 +348,6 @@ def _read_pqr(path: Path, charge: int, multiplicity: int) -> Structure:
 # An ion-heavy system needs a format with a real element column.
 # `crates/ferric-cli/src/config.rs::element_from_pqr_name` makes the same call
 # for the same reason; these two must agree.
-#: GROMACS stores coordinates in nanometres; everything else here is Angstrom.
-NM_TO_ANGSTROM = 10.0
 
 _TWO_LETTER_OK = frozenset({"CL", "BR", "ZN", "FE", "MG", "MN", "NA", "CU", "SE"})
 
@@ -523,6 +526,8 @@ def _from_rdkit_mol(mol, charge: int | None, multiplicity: int, source: str) -> 
     return Structure(tuple(symbols), tuple(coords), charge, multiplicity, source)
 
 
+_read_xyz = parse_xyz
+
 _READERS = {
     "xyz": _read_xyz,
     "pdb": _read_pdb,
@@ -623,13 +628,14 @@ def from_smiles(
     energy irreproducible.
     """
     _require("rdkit", "SMILES", "rdkit")
-    from rdkit import Chem
     from rdkit.Chem import AllChem
 
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        raise StructureError(f"rdkit could not parse SMILES: {smiles!r}")
-    mol = Chem.AddHs(mol)
+    from .gates import mol_with_h
+
+    try:
+        mol = mol_with_h(smiles)
+    except ValueError:
+        raise StructureError(f"rdkit could not parse SMILES: {smiles!r}") from None
     params = AllChem.ETKDGv3()
     params.randomSeed = seed
     if AllChem.EmbedMolecule(mol, params) != 0:

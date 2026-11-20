@@ -14,12 +14,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-TASK_QUEUE = "smeltery-tasks"
+from .temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE, DOCKER_COMMAND
+from .temporal_defaults import TASKS_QUEUE as TASK_QUEUE
+
 WORKFLOW_TYPE = "ShellTaskWorkflow"
 
 #: `TemporalTaskManager` defines a `list` method, so the builtin is unreachable by name inside that class
@@ -28,6 +31,39 @@ _TaskList = list["Task"]
 
 
 MAX_RETRIES = 5
+
+#: `read_tail` reads backwards in blocks of this size, and never more than `_TAIL_MAX_BYTES` in all, so a 50 MB log
+#: (or one giant `\r` progress line) costs the same as a short one.
+_TAIL_BLOCK = 64 * 1024
+_TAIL_MAX_BYTES = 4 * 1024 * 1024
+
+
+def read_tail(path: str | Path, lines: int) -> str:
+    """The last `lines` whole lines of a file, reading from the end instead of the whole file.
+
+    Lines are counted, not guessed from a byte budget, so long lines still give `lines` of them; past
+    `_TAIL_MAX_BYTES` it stops and drops the partial line it stopped inside rather than return a fragment."""
+    if lines <= 0:
+        return ""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        end = pos = os.fstat(fd).st_size
+        chunks: list[bytes] = []
+        newlines = 0
+        # lines + 1 newlines mean the first wanted line is complete (a trailing newline ends the last line).
+        while pos > 0 and newlines <= lines and end - pos < _TAIL_MAX_BYTES:
+            n = min(_TAIL_BLOCK, pos)
+            pos -= n
+            chunk = os.pread(fd, n, pos)
+            chunks.append(chunk)
+            newlines += chunk.count(b"\n")
+    finally:
+        os.close(fd)
+    data = b"".join(reversed(chunks))
+    text = data.decode(errors="replace").splitlines()
+    if pos > 0 and newlines <= lines:  # hit the byte cap inside a line: the first line is partial
+        text = text[1:]
+    return "\n".join(text[-lines:])
 
 
 class TemporalUnavailable(RuntimeError):
@@ -173,11 +209,63 @@ def worker_workflows():
     return [ShellTaskWorkflow] if TEMPORAL_AVAILABLE else []
 
 
+def worker_cli(
+    host: str = DEFAULT_HOST,
+    namespace: str = DEFAULT_NAMESPACE,
+    task_queue: str = TASK_QUEUE,
+    concurrency: int = 2,
+) -> int:
+    """`smeltery task-worker`: run the shell-task worker until Ctrl+C (0); 2 when temporalio is missing or the server
+    cannot be reached (said on stderr, with how to start one), as `smeltery temporal-worker` does."""
+    if not TEMPORAL_AVAILABLE:
+        print("temporalio is not installed", file=sys.stderr)
+        return 2
+    from temporalio.client import Client
+    from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+
+    async def main() -> int:
+        try:
+            client = await Client.connect(host, namespace=namespace)
+        except Exception as e:  # noqa: BLE001
+            print(
+                f"cannot reach the Temporal server at {host}: {e}\nstart one with:\n  {DOCKER_COMMAND}", file=sys.stderr
+            )
+            return 2
+        async with Worker(
+            client,
+            task_queue=task_queue,
+            workflows=worker_workflows(),
+            activities=worker_activities(),
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            max_concurrent_activities=concurrency,
+        ):
+            print(f"smeltery task worker up on {task_queue} (Ctrl+C stops)", flush=True)
+            await asyncio.Future()
+        return 0
+
+    try:
+        return asyncio.run(main())
+    except KeyboardInterrupt:
+        return 0
+
+
+async def _settle_returncode(task: Task, handle) -> None:
+    """A workflow Temporal calls succeeded only ran its command: read the command's return code from the workflow's
+    result, and a non-zero one makes the task "failed"."""
+    if task.status == "succeeded":
+        try:
+            task.returncode = await handle.result()
+        except Exception:
+            pass
+        if task.returncode is not None and task.returncode != 0:
+            task.status = "failed"
+
+
 # ---------- client manager ----------
 
 
 class TemporalTaskManager:
-    def __init__(self, host: str = "127.0.0.1:7233", namespace: str = "default", task_queue: str = TASK_QUEUE):
+    def __init__(self, host: str = DEFAULT_HOST, namespace: str = DEFAULT_NAMESPACE, task_queue: str = TASK_QUEUE):
         self.host = host
         self.namespace = namespace
         self.task_queue = task_queue
@@ -283,13 +371,7 @@ class TemporalTaskManager:
         except Exception:
             return None
         task = await self._from_describe(task_id, desc)
-        if task.status == "succeeded":
-            try:
-                task.returncode = await handle.result()
-            except Exception:
-                pass
-            if task.returncode is not None and task.returncode != 0:
-                task.status = "failed"
+        await _settle_returncode(task, handle)
         return task
 
     def get(self, task_id):
@@ -311,16 +393,10 @@ class TemporalTaskManager:
         t = await self.get_async(task_id)
         if t is None or not t.log_path:
             return ""
-        p = Path(t.log_path)
-        if not p.exists():
+        try:
+            return read_tail(t.log_path, lines)
+        except FileNotFoundError:
             return ""
-        size = p.stat().st_size
-        chunk = min(size, max(4096, lines * 256))
-        with p.open("rb") as f:
-            if size > chunk:
-                f.seek(size - chunk)
-            data = f.read().decode(errors="replace")
-        return "\n".join(data.splitlines()[-lines:])
 
     def tail_log(self, task_id, lines=40):
         return self._run(self.tail_log_async(task_id, lines=lines))
@@ -330,13 +406,7 @@ class TemporalTaskManager:
             handle = client.get_workflow_handle(wf.id, run_id=wf.run_id)
             desc = await handle.describe()
             task = await self._from_describe(wf.id, desc, run_id=wf.run_id)
-            if task.status == "succeeded":
-                try:
-                    task.returncode = await handle.result()
-                except Exception:
-                    pass
-                if task.returncode is not None and task.returncode != 0:
-                    task.status = "failed"
+            await _settle_returncode(task, handle)
             return task
         except Exception as e:  # noqa: BLE001
             return Task(id=wf.id, name=wf.id, command=[], cwd="", status=str(wf.status), note=str(e))

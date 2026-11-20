@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..cost import available_memory_gb
 from ..model import HARTREE_TO_KCAL
 from .embedding import embed_ligand
 from .energy import compute_charges, compute_energy
@@ -30,17 +31,6 @@ DDE_NOISE_FLOOR_KCAL_MOL = 4.07
 RANKS_ANALOGUES = False
 
 
-def _available_gb() -> float | None:
-    """MemAvailable from /proc/meminfo in GB, or None where that file does not exist."""
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) / (1024**2)
-    except (OSError, ValueError, IndexError):
-        pass
-    return None
-
-
 def check_available_memory(min_available_gb: float) -> None:
     """Refuse to launch an SCF job when free memory is below `min_available_gb`.
 
@@ -49,7 +39,7 @@ def check_available_memory(min_available_gb: float) -> None:
     OOM-killed. A pre-flight guard, not a cap. Where free memory cannot be read
     (no /proc/meminfo) the check is skipped, not failed.
     """
-    available = _available_gb()
+    available = available_memory_gb()
     if available is not None and available < min_available_gb:
         raise MemoryError(
             f"Only {available:.1f} GB available (need >= {min_available_gb:.1f} GB). "

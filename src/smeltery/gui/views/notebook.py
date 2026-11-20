@@ -18,7 +18,6 @@ with app.setup:
     from smeltery.decisions import REASONS, STATUSES
     from smeltery.gui import Comparison, Pipeline
     from smeltery.gui import app as gui_app
-    from smeltery.gui.results import ddE_table, funnel_rows, load_run, per_pose_table, resolved_matrix
     from smeltery.gui.scenes import pose_scene
     from smeltery.gui.views import builder
     from smeltery.gui.views.compare import compare_figure, comparison_caption, unpaired_table
@@ -28,6 +27,7 @@ with app.setup:
     from smeltery.gui.views.matrix import matrix_figure
     from smeltery.gui.views.per_pose import per_pose_figure
     from smeltery.gui.views.pose import pose_iframe
+    from smeltery.run_view import ddE_table, funnel_rows, load_run, per_pose_table, resolved_matrix
 
     TABS = ("Results", "Grid", "Pose", "Compare", "Pipeline")
 
@@ -42,8 +42,7 @@ def _():
 def _(out_dir):
     run = load_run(out_dir)
     rows = ddE_table(run)
-    units = run.record["results"].get("units", {})
-    unit = units.get("dE_int", "kcal/mol")
+    unit = run.unit
     return rows, run, unit
 
 
@@ -106,7 +105,9 @@ def _(out_dir, run):
             _loaded[_d.name] = load_run(_d)
         except Exception as _e:  # noqa: BLE001 - any unreadable sibling is reported, not raised
             _bad.append((_d.name, str(_e)))
-    _loaded[out_dir.name if out_dir.is_dir() else out_dir.parent.name] = run
+    from smeltery.run_tools import run_dir as _run_dir
+
+    _loaded[_run_dir(out_dir).name] = run
     sibling_by_name = dict(sorted(_loaded.items()))
     unreadable_siblings = _bad
     return sibling_by_name, unreadable_siblings

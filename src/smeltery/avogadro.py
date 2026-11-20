@@ -53,26 +53,23 @@ def export_run(run, dest: str | Path) -> Path:
     """Copy a run's receptor and pose SDFs into ``dest``. Returns ``dest``."""
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
+    from smeltery.run_outputs import pose_file_name  # lazy: it imports RDKit, and the dashboard imports this module
+    from smeltery.run_view import pose_sdf, receptor_pdb
+
     out_dir = Path(run.out_dir)
     results = run.record["results"]
 
     receptor = results.get("receptor")
-    receptor_file = None
     if isinstance(receptor, dict):
-        receptor_file = receptor.get("file")
-    elif isinstance(receptor, str):
-        receptor_file = receptor
-    if receptor_file:
-        src = out_dir / receptor_file
-        if src.exists():
-            (dest / "receptor.pdb").write_bytes(src.read_bytes())
+        (dest / "receptor.pdb").write_text(receptor_pdb(run) or "")
+    elif isinstance(receptor, str) and (out_dir / receptor).exists():  # an older record: a bare path
+        (dest / "receptor.pdb").write_bytes((out_dir / receptor).read_bytes())
 
-    poses = results.get("poses") or {}
-    for name, rel in poses.items():
-        src = out_dir / rel
-        if src.exists():
-            safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
-            (dest / f"{safe}.sdf").write_bytes(src.read_bytes())
+    for name, entry in (results.get("poses") or {}).items():
+        if isinstance(entry, dict):
+            (dest / pose_file_name(name)).write_text(pose_sdf(run, name))
+        elif (out_dir / entry).exists():  # an older record: a bare path
+            (dest / pose_file_name(name)).write_bytes((out_dir / entry).read_bytes())
 
     # field charges as a simple XYZ (Avogadro can open it; charges in the comment line)
     field = results.get("field")
@@ -104,10 +101,11 @@ def main(argv=None) -> int:
     ap.add_argument("--path", default=None, help="specific file to open (default: first pose SDF)")
     args = ap.parse_args(argv)
 
-    from smeltery.gui.results import load_run
+    from smeltery.run_tools import run_dir
+    from smeltery.run_view import load_run
 
     run = load_run(args.out)
-    out_dir = Path(args.out) if Path(args.out).is_dir() else Path(args.out).parent
+    out_dir = run_dir(args.out)
     dest = Path(args.dest) if args.dest else (out_dir / "avogadro")
     export_run(run, dest)
     print(f"exported to {dest}")

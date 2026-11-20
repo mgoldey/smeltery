@@ -9,7 +9,7 @@ What lives here
 * `MUTATIONS`: for each gate, how to switch ONLY that gate off. `if_false` recompiles the named function from
   its source with the `if` that guards the refusal turned into `if False`; `noop` replaces the gate function
   by one that does nothing. The patched function is installed under every name that refers to it, so a
-  `from .funnel import tier_floor` in cli.py is patched too. A needle that matches no `if`, or two, is an
+  `from .funnel import tier_floor` in planning.py is patched too. A needle that matches no `if`, or two, is an
   error: a mutation that changed nothing would be a false proof.
 * The CLI runs as a SUBPROCESS (`run_cli`): PoseBusters cannot run in-process under pytest's stderr capture.
   The subprocess is this file run as a script (`python tests/golden_path.py --mutate G3:0 -- run ...`): it
@@ -145,7 +145,7 @@ MUTATIONS: dict[str, list[Callable[[], Callable[[], None]]]] = {
             ),
         )
     ],
-    "G3": [lambda: replace_function("smeltery.cli", "_check_parity", lambda old: _noop)],
+    "G3": [lambda: replace_function("smeltery.planning", "_check_parity", lambda old: _noop)],
     "G4": [
         lambda: replace_function(
             "smeltery.funnel", "tier_floor", _if_false_factory("smeltery.funnel", "tier_floor", ("floor is None",))
@@ -213,7 +213,7 @@ def apply_mutation(spec: str) -> Callable[[], None]:
 TRACE_POINTS: list[tuple[str, str, Callable[[tuple, dict], list[str]]]] = [
     ("smeltery.gates", "require_passing_poses", lambda a, k: ["G1"]),
     ("smeltery.tiers", "PairedPoses._paired", lambda a, k: ["G2"]),
-    ("smeltery.cli", "_check_parity", lambda a, k: ["G3"]),
+    ("smeltery.planning", "_check_parity", lambda a, k: ["G3"]),
     ("smeltery.funnel", "tier_floor", lambda a, k: ["G4"]),
     (
         "smeltery.funnel",

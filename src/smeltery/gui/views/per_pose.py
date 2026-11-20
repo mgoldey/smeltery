@@ -3,11 +3,13 @@ run parallel are what pairing cancels: the pose-to-pose spread the unpaired SEM 
 
 from __future__ import annotations
 
+from smeltery.run_view import QUANTITY
+
 from ._style import INK_MUTED, KEPT, layout
 
 
 def per_pose_figure(
-    table: list[dict], run, *, quantity: str = "dE_int", unit: str = "", rows: list[dict] | None = None
+    table: list[dict], run, *, quantity: str = QUANTITY, unit: str = "", rows: list[dict] | None = None
 ):
     """`table` is `results.per_pose_table(run, quantity)`. One subplot per analogue (in `rows` order when given,
     i.e. cut order), one trace per (analogue, pose)."""

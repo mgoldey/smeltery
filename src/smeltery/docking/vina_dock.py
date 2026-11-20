@@ -180,8 +180,17 @@ def prepare_receptor(
     # residues within 6 A of the bound ligand were lost (atom count rose
     # 3223 -> 3882, which is Meeko adding hydrogens). Re-run that check for any
     # new receptor rather than assuming it carries over.
+    # The console script sits beside the interpreter; find it there when the venv is not activated (PATH first).
+    import os
+    import shutil
+    import sys
+
+    here = str(Path(sys.executable).parent)
+    meeko_cli = shutil.which("mk_prepare_receptor.py") or shutil.which(
+        "mk_prepare_receptor.py", path=os.pathsep.join(p for p in (here, os.environ.get("PATH", "")) if p)
+    )
     cmd = [
-        "mk_prepare_receptor.py",
+        meeko_cli or "mk_prepare_receptor.py",
         "--read_pdb",
         str(pdb_path),
         "-o",

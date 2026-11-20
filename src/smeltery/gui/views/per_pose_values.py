@@ -4,13 +4,15 @@ ligand's value for it side by side."""
 
 from __future__ import annotations
 
+from smeltery.run_view import QUANTITY
+
 from ._style import INK, KEPT, NEUTRAL, NOT_KEPT, layout
 
 #: One symbol per ligand, in order, so two ligands the same colour still tell apart without the legend.
 SYMBOLS = ("circle", "square", "diamond", "triangle-up", "x", "cross", "star", "hexagon")
 
 
-def per_pose_values_figure(table: list[dict], run, quantity: str = "dE_int"):
+def per_pose_values_figure(table: list[dict], run, quantity: str = QUANTITY):
     """`table` is `results.per_pose_table(run, quantity)`, whose analogue order (the cut's) is the legend's. Every
     y is a number from the record's `results.per_pose`: the parent's directly, each analogue's from `table`.
     `customdata` of each point is `[candidate, pose, value, paired, position]` (paired is None for the parent),
@@ -18,7 +20,7 @@ def per_pose_values_figure(table: list[dict], run, quantity: str = "dE_int"):
     pose drop a ligand's points stay over the poses they are; `position` is the pose's place in that ligand's SDF."""
     import plotly.graph_objects as go
 
-    from smeltery.gui.results import pose_indices
+    from smeltery.run_view import pose_indices
 
     results = run.record["results"]
     unit = results.get("units", {}).get(quantity, "")

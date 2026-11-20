@@ -50,16 +50,16 @@ def test_only_candidate_writes_a_partial_and_no_cut(tmp_path):
 
 @pytest.mark.needs_ferric
 def test_an_analogue_partial_does_not_remeasure_the_parent(tmp_path, monkeypatch):
-    import smeltery.cli as cli_mod
+    from smeltery.tiers import FieldInteraction
 
     calls = {"n": 0}
-    orig = cli_mod.FieldInteraction.run
+    orig = FieldInteraction.run
 
     def counting(self, candidates, ctx):
         calls["n"] += len(candidates)
         return orig(self, candidates, ctx)
 
-    monkeypatch.setattr(cli_mod.FieldInteraction, "run", counting)
+    monkeypatch.setattr(FieldInteraction, "run", counting)
 
     cfg = tmp_path / "c.toml"
     cfg.write_text(SMALL)

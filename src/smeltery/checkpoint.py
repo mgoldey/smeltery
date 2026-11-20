@@ -2,8 +2,8 @@
 
 A plain run writes calcs.jsonl once, at the end, so a crash, an OOM kill or a cancel hours in used to lose every SCF.
 Now each SCF of the measurement tier is also appended to OUT/calcs.partial.jsonl the moment it finishes (fsync'd,
-through `temporal_run.append_row`), stamped with the run's input digest and staged-config sha256 (12 hex each). A rerun
-into the same OUT reads it back with the `--temporal` resume's own machinery (`temporal_run.read_rows`, `dedupe`, the
+through `calc_log.append_row`), stamped with the run's input digest and staged-config sha256 (12 hex each). A rerun
+into the same OUT reads it back with the `--temporal` resume's own machinery (`calc_log.read_rows`, `dedupe`, the
 leg identity `_ident` plus the rung) and reuses every line whose (candidate, pose, leg, field model, rung) the tier asks
 for, instead of recomputing that SCF.
 
@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from pathlib import Path
+
+from .calc_log import _ident, _tag, append_row, dedupe, read_rows
+from .record import write_text_atomic
 
 PARTIAL = "calcs.partial.jsonl"
 PROGRESS = "progress.json"
@@ -43,8 +45,6 @@ class ScfCheckpoint:
     each one it ran."""
 
     def __init__(self, out: str | Path, digest: str, config_sha256: str, primary: str) -> None:
-        from .temporal_run import _ident, dedupe, read_rows
-
         self.out = Path(out)
         self.digest = digest[:12]
         self.config_sha256 = config_sha256[:12]
@@ -73,9 +73,6 @@ class ScfCheckpoint:
 
     def put(self, row: dict) -> None:
         """Append one finished SCF line (a tier's calc_log line), tagged with the primary field model and its rung."""
-        from .cli import _tag
-        from .temporal_run import append_row
-
         append_row(
             self.out, {**_tag(row, self.primary), "digest": self.digest, "config_sha256": self.config_sha256}, PARTIAL
         )
@@ -89,9 +86,7 @@ class ScfCheckpoint:
             "digest": self.digest,
             "config_sha256": self.config_sha256,
         }
-        tmp = self.out / (PROGRESS + ".tmp")
-        tmp.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
-        os.replace(tmp, self.out / PROGRESS)
+        write_text_atomic(self.out / PROGRESS, json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
 def discard(out: str | Path) -> None:

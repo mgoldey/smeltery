@@ -10,7 +10,6 @@ written into the tier settings.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import subprocess
@@ -21,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from ..model import PointCharge
+from ..record import file_sha256
 
 PDB2PQR = "pdb2pqr30"
 
@@ -37,8 +37,7 @@ class PocketField(list):
         self.provenance: dict = dict(provenance or {})
 
 
-def file_digest(path: str | Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+file_digest = file_sha256  # the one file hash (`smeltery.record.file_sha256`), under its older name
 
 
 def pdb2pqr_exe() -> str | None:

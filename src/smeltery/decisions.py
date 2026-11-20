@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .record import TIME_FORMAT, utc_now, write_text_atomic  # utc_now: the stamp `DecisionSet.set` writes
+
 SCHEMA = 1
 STATUSES: tuple[str, ...] = ("keep", "reject", "hold")
 REASONS: tuple[str, ...] = (
@@ -37,13 +39,12 @@ REASONS: tuple[str, ...] = (
 )
 #: Reasons that say nothing on their own: the note is where the choice is explained.
 NOTE_REQUIRED: frozenset[str] = frozenset({"within_tie_choice", "other"})
-TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _TOP_KEYS = ("schema", "campaign", "run", "decisions")
 
 
-def utc_now() -> str:
-    """The current UTC time as `YYYY-MM-DDTHH:MM:SSZ`, the stamp `DecisionSet.set` writes."""
-    return time.strftime(TIME_FORMAT, time.gmtime())
+def decisions_path(out_dir: str | Path, input_digest: str) -> Path:
+    """`OUT/decisions-<input_digest[:12]>.json`: where the decisions made on a run are kept, beside its record."""
+    return Path(out_dir) / f"decisions-{input_digest[:12]}.json"
 
 
 @dataclass(frozen=True)
@@ -225,15 +226,46 @@ class DecisionSet:
         except ValueError as e:
             raise ValueError(f"{path}: {e}") from e
 
+    @classmethod
+    def load_or_new(cls, path: str | Path, *, campaign: str, run: str, candidates: dict[str, str]) -> DecisionSet:
+        """The decisions saved at `path`, else an empty set for `run`; either way knowing the run's `candidates`
+        (name -> SMILES), so `set` can decide a candidate that has no entry yet. A file that is there but does not
+        validate is `load`'s ValueError, never an empty set: that would overwrite it on the next save."""
+        p = Path(path)
+        ds = cls.load(p) if p.is_file() else cls(campaign=campaign, run=run)
+        ds.candidates = dict(candidates)
+        return ds
+
     def dump(self, path: str | Path) -> Path:
         """Validate, then write `path` (indented JSON, entries in order). Nothing is written when invalid."""
         self.validate()
         path = Path(path)
-        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+        write_text_atomic(path, json.dumps(self.to_dict(), indent=2) + "\n")
         return path
 
 
 CSV_COLUMNS: tuple[str, ...] = ("candidate", "smiles", "status", "reason", "note", "user", "time")
+#: A spreadsheet reads a cell starting with one of these as a formula.
+_FORMULA_START = ("=", "+", "-", "@")
+
+
+def csv_cell(value: str) -> str:
+    """A free-text CSV cell a spreadsheet will show as text: one that starts like a formula gets a leading `'`.
+
+    Only for text columns. A number such as a formal charge of -1 would be corrupted by it, and a valid SMILES never
+    starts with one of these characters, so a SMILES column is only ever changed when its SMILES is unreadable."""
+    return "'" + value if value.startswith(_FORMULA_START) else value
+
+
+def sdf_value(value: object) -> str:
+    """An SDF property value: a blank line would end the property, so paragraph breaks collapse to one newline."""
+    return re.sub(r"\n\s*\n", "\n", str(value))
+
+
+def sdf_line(value: object) -> str:
+    """A value on one line, for an SDF title (whose newline would shift the counts line and break the record) or a
+    property meant to be read as a single line."""
+    return re.sub(r"\s*\n\s*", " ", str(value)).strip()
 
 
 def to_csv(ds: DecisionSet) -> str:
@@ -245,7 +277,7 @@ def to_csv(ds: DecisionSet) -> str:
     w = csv.writer(out, lineterminator="\n")
     w.writerow(CSV_COLUMNS)
     for d in ds.decisions:
-        w.writerow(["'" + v if v.startswith(("=", "+", "-", "@")) else v for v in (getattr(d, k) for k in CSV_COLUMNS)])
+        w.writerow([csv_cell(getattr(d, k)) for k in CSV_COLUMNS])
     return out.getvalue()
 
 
@@ -266,7 +298,6 @@ def to_sdf(ds: DecisionSet) -> str:
             AllChem.Compute2DCoords(mol)
             mol.SetProp("_Name", d.candidate)
             for k in CSV_COLUMNS:
-                # a blank line would end the SDF property value, so paragraph breaks collapse to one newline
-                mol.SetProp(k, re.sub(r"\n\s*\n", "\n", getattr(d, k)))
+                mol.SetProp(k, sdf_value(getattr(d, k)))
             w.write(mol)
     return out.getvalue()

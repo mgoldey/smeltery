@@ -34,9 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .model import R_KCAL_MOL_K, ROOM_TEMPERATURE_K
+
 SCHEMA_VERSION = 1
-R_KCAL_MOL_K = 8.31446261815324 / 4184.0  # CODATA 2018 exact R, J/(mol K) -> kcal/(mol K)
-TEMPERATURE_K = 298.15
+TEMPERATURE_K = ROOM_TEMPERATURE_K
 
 MEASUREMENT_TYPES = ("ic50", "ki", "pic50")
 # Unit -> factor to molar. pIC50 is dimensionless: its unit must be the empty string, exactly as PLB writes it.
