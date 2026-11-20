@@ -306,6 +306,28 @@ def test_a_dataset_directory_keeps_its_record_and_its_digests_are_reused(dataset
         H.export_hf(dataset_dir, tmp_path / "other", license="CC0-1.0")
 
 
+def test_editing_the_hub_folder_in_place_leaves_the_source_dataset_intact(dataset_dir, tmp_path):
+    from attestation_schema import conformance
+
+    before = _tree(dataset_dir)
+    out = H.export_hf(dataset_dir, tmp_path / "out")
+    for rel in before:
+        a, b = (out / "dataset" / rel).stat(), (dataset_dir / rel).stat()
+        assert (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino), rel  # a copy, not a hard link
+    for rel in before:  # write THROUGH each file, as an editor saving in place would
+        with open(out / "dataset" / rel, "r+b") as f:
+            f.seek(0)
+            f.write(b"X")
+    assert _tree(dataset_dir) == before
+    assert conformance.check_dataset_dir(dataset_dir).ok
+    assert any("sha256" in m for m in H.verify_folder(out))  # the Hub folder itself notices
+
+
+def test_a_bare_table_is_copied_not_linked(table, folder):
+    a, b = (folder / H.TABLE).stat(), table.stat()
+    assert (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino)
+
+
 def test_a_tampered_dataset_directory_is_refused(dataset_dir, tmp_path):
     bad = tmp_path / "bad"
     shutil.copytree(dataset_dir, bad)
@@ -365,7 +387,6 @@ def test_push_refuses_a_folder_that_changed_states_no_license_or_was_made_for_an
         H.push(pushable, "owner/another", api=api)
     p = pushable / H.TABLE
     data = p.read_bytes()
-    p.unlink()  # a hard link to the source table: replace it, never write through it
     p.write_bytes(data + b"\0")
     with pytest.raises(H.HubError, match="dataset/runs.parquet: sha256"):
         H.push(pushable, "owner/smeltery-mwe", api=api)

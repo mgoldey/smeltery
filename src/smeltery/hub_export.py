@@ -4,7 +4,7 @@
 with its `attestation.dataset/1` record) or one Parquet file (`export parquet`, optionally with split files made on it)
 -- and writes a folder `datasets.load_dataset(OUT, ...)` and the Hugging Face Hub read:
 
-    OUT/dataset/runs.parquet                 the table, byte for byte (hard-linked or copied)
+    OUT/dataset/runs.parquet                 the table, byte for byte (a copy, never a hard link)
     OUT/dataset/splits/<name>.json           each split file, byte for byte
     OUT/dataset/attestation/{digests,dataset}.json   the dataset record, byte for byte (dataset-directory input only)
     OUT/data/<split>/<partition>.parquet     each split's partitions as Parquet, the rows the split file names
@@ -404,12 +404,12 @@ def provenance(rows: list[dict]) -> list[dict]:
 # ---- the files -------------------------------------------------------------------------------------------------------
 
 
-def _link_or_copy(src: Path, dst: Path) -> None:
+def _copy(src: Path, dst: Path) -> None:
+    """A real copy, never a hard link: a dataset directory is immutable, and a link would let an in-place edit of the
+    Hub folder rewrite the source's bytes (its digests would then fail). shutil.copy2 may clone or use
+    copy_file_range where the OS offers it; either way the result is a separate inode."""
     dst.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.link(src, dst)
-    except OSError:
-        shutil.copy2(src, dst)
+    shutil.copy2(src, dst)
 
 
 def _write_partitions(stage: Path, table_path: Path, splits: list[tuple[str, Path]]) -> dict[str, dict[str, int]]:
@@ -806,7 +806,7 @@ def export_hf(
         if table_rel != TABLE_NAME:
             raise HubError(f"the table is {table_rel}; this layout expects {TABLE_NAME}")
         for rel, p in copies:
-            _link_or_copy(p, stage / SOURCE_DIR / rel)
+            _copy(p, stage / SOURCE_DIR / rel)
             if sha256_file(stage / SOURCE_DIR / rel) != source.digests[rel]:
                 raise HubError(f"{p} changed while it was being copied")
         split_rel = {  # source-relative

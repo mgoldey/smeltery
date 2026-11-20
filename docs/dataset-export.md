@@ -249,7 +249,7 @@ smeltery export hf push hf/ddE-1 owner/ddE --confirm                 # uploads (
 ```
 
 ```
-OUT/dataset/runs.parquet                       the table, byte for byte (hard-linked or copied)
+OUT/dataset/runs.parquet                       the table, byte for byte (copied, never hard-linked)
 OUT/dataset/splits/<name>.json                 each split file, byte for byte
 OUT/dataset/attestation/{digests,dataset}.json the dataset record, byte for byte (dataset-directory input only)
 OUT/data/<split>/<partition>.parquet           each split's partitions (train, valid, test) as Parquet
@@ -259,7 +259,8 @@ OUT/README.md                                  the dataset card: YAML front matt
 
 The source sits under `OUT/dataset/` unchanged, so a dataset directory is still a conformant one there
 (`attestation_schema.conformance.check_dataset_dir(OUT / "dataset")`): the check refuses files its manifest does not
-list, which the card and the partition files would be if they sat beside it.
+list, which the card and the partition files would be if they sat beside it. The files are copies, never hard links:
+editing one in the Hub folder cannot change the source directory's bytes (`tests/test_hub_export.py`).
 
 - **Generated, deterministic.** Card and croissant.json are built from the table, its schema metadata and the dataset
   record; nothing is written by hand or by a model, and there is no timestamp or path in them. The same input writes
