@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import shutil
 import sys
@@ -410,6 +411,30 @@ def metrics(results: dict) -> list[dict]:
     return out
 
 
+def arm_metrics(results: dict) -> list[dict]:
+    """The scalars an ARM is compared on, derived from this run's own results -- emitted only for a run the submitter
+    named an arm of a family (`core_fields(arm=...)`), because that is what an arm exists for.
+
+    `attest runs compare FAMILY` ranks a family's arms by a metric whose name AND labels are the same in every arm's
+    record. The per-analogue `paired_ddE.*` metrics cannot serve: each arm screens different molecules, so their
+    `labels.analogue` differ. These two are label-free and directional: `best_paired_ddE` (the lowest paired ddE mean
+    among this run's analogues -- lower is better, the same direction the cut ranks on) and `mean_paired_ddE` (their
+    mean). Both carry the quantity's unit. `paired_ddE` holds analogues only (never the parent), so these are over the
+    analogues exactly. A run whose analogues have no finite mean gets neither: nothing is invented."""
+    unit = (results.get("units") or {}).get(DDE_QUANTITY)
+    means = [
+        float(m["mean"])
+        for m in (results.get("paired_ddE") or {}).values()
+        if isinstance(m, dict) and _number(m.get("mean")) and math.isfinite(float(m["mean"]))
+    ]
+    if not means:
+        return []
+    return [
+        _metric("best_paired_ddE", min(means), "min", unit),
+        _metric("mean_paired_ddE", sum(means) / len(means), "min", unit),
+    ]
+
+
 def seeds(tiers: list[dict]) -> dict[str, int | list[int]] | None:
     """`{tier: seed}` from each tier's integer `seed`, or `{tier: [seed, ...]}` from a tier's seed list (docking runs
     Vina once per seed, in order). None (unknown) when no tier records one, and when a tier records a seed list that is
@@ -477,6 +502,8 @@ def core_fields(
     run_id: str | None = None,
     config: dict | None = None,
     config_unobserved: str | None = None,
+    arm: str | None = None,
+    extra_ext: dict | None = None,
 ) -> dict:
     """The core record, as plain JSON, for one finished (not partial) legacy record. Pure: no clock, no environment.
 
@@ -488,6 +515,12 @@ def core_fields(
     `config`: the campaign config the run read (`staged_config`). None when it cannot be observed: `config` is then
     `{}` -- the schema has no null for it -- and `ext.smeltery.config_unobserved` says why, so `{}` is never read as
     "configured with nothing" (docs/core-record.md, "Post-freeze findings").
+
+    `arm`: smeltery has no arm of its own, so this is the submitter's (a campaign job's `JobSpec.arm`, validated by
+    `jobs.check_spec`, reaching the run as `smeltery run --arm`), `None` without one -- which is every run outside a
+    job, so those records are unchanged. A named arm also emits `arm_metrics`: the label-free scalars its family's
+    arms are compared on, derived from this run's own results. `extra_ext`: the submitter's own `ext` namespaces
+    (`JobSpec.ext`, e.g. `smeltery.al`), merged beside `ext.smeltery`, which is never rewritten.
     """
     results = legacy.get("results") or {}
     if "cut" not in results or "funnel" not in results:
@@ -513,7 +546,7 @@ def core_fields(
         "schema": _schema.SCHEMA if _schema else "attestation.run/1",
         "run_id": run_id if run_id is not None else input_digest[:12],
         "family": legacy.get("campaign"),
-        "arm": None,
+        "arm": arm,
         "status": "complete",
         "started_at": started_at,
         "finished_at": finished_at,
@@ -521,11 +554,11 @@ def core_fields(
         "code": _code(legacy.get("smeltery"), legacy.get("smeltery_version"), results.get("builds")),
         "config": config if config is not None else {},
         "data": [*data(legacy, legacy_name, legacy_sha256), manifest],
-        "metrics": metrics(results),
+        "metrics": metrics(results) + (arm_metrics(results) if arm is not None else []),
         "history": None,  # smeltery logs no curves: every value it records is final, so there is no sidecar
         "seeds": seeds(tiers),
         "dependencies": dependencies,
-        "ext": {"smeltery": ext},
+        "ext": {"smeltery": ext, **(extra_ext or {})},
     }
 
 
@@ -592,6 +625,8 @@ def write_core(
     overwrite: bool = False,
     run_id: str | None = None,
     config: dict | None = None,
+    arm: str | None = None,
+    extra_ext: dict | None = None,
 ) -> Path:
     """Write the core record for the legacy record at `legacy_path` into its directory (the run directory): steps,
     then `attestation/digests.json`, then `attestation/run.json` through `attestation_schema.write`. Returns run.json.
@@ -601,7 +636,9 @@ def write_core(
     refused (FileExistsError) unless `overwrite`; then it, the manifest and `steps/` are replaced.
 
     `run_id`: the record's run_id when the run was given one (`core_fields`). `config`: the campaign config, given by
-    a live run that staged none; otherwise it is read from the run directory (`staged_config`).
+    a live run that staged none; otherwise it is read from the run directory (`staged_config`). `arm` / `extra_ext`:
+    the submitter's arm and `ext` namespaces, written into the record the FIRST time it is written (`core_fields`);
+    a finished record is never re-stamped, because its bytes are what other readers hash.
     """
     _require()
     legacy_path = Path(legacy_path)
@@ -633,6 +670,8 @@ def write_core(
         run_id=run_id,
         config=config,
         config_unobserved=config_unobserved,
+        arm=arm,
+        extra_ext=extra_ext,
     )
     return _schema.write(_schema.from_dict(fields), run_dir, overwrite=overwrite)
 

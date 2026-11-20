@@ -479,8 +479,14 @@ def screen(
     dry_run: bool = False,
     confirm: bool = False,
     backend=None,
+    arm: str | None = None,
+    ext: dict | None = None,
 ) -> Screen:
-    """Plan, check the ceiling, and (unless `dry_run`) submit. Returns as soon as the job is queued."""
+    """Plan, check the ceiling, and (unless `dry_run`) submit. Returns as soon as the job is queued.
+
+    `arm` / `ext` are the submitter's, carried into the campaign job's spec (`jobs.campaign_spec`) so the run states
+    them in its core record the first time it writes one. The MCP tools pass neither; `smeltery al` names the loop's
+    iteration arm and its own `ext.smeltery.al` namespace (docs/active-learning.md)."""
     from .. import jobs
 
     cfg, built, reuse = _plan(
@@ -507,7 +513,7 @@ def screen(
     try:
         run_dir.mkdir(parents=True, exist_ok=True)
         config_path = _write_config(run_dir, cfg, built.overrides)
-        handle = backend.submit(jobs.campaign_spec(config_path, run_dir))
+        handle = backend.submit(jobs.campaign_spec(config_path, run_dir, arm=arm, ext=ext))
     except jobs.JobError as e:  # an existing run, a backend that is down: the caller is told which
         raise Refusal(str(e)) from e
     except OSError as e:

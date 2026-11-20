@@ -484,8 +484,9 @@ def test_an_unknown_handle_is_not_found(harness, tmp_path):
     "change, match",
     [
         ({"family": "other"}, "family must be the config's campaign"),
-        ({"arm": "a"}, "no arm"),
-        ({"ext": {"x": {}}}, "no ext"),
+        ({"arm": "not a label"}, "arm must be"),  # an arm is carried, but only as a label
+        ({"ext": {"smeltery": {}}}, "the run's own"),  # the submitter's namespaces only
+        ({"ext": {"x": 1}}, "must map to an object"),
         ({"run_id": ""}, "run_id"),
     ],
 )
@@ -496,6 +497,33 @@ def test_a_spec_smeltery_cannot_record_honestly_is_refused_before_anything_is_wr
     with pytest.raises(ValueError, match=match):
         harness.backend.submit(spec)
     assert not jobs.state_path(spec.run_dir).exists()
+
+
+def test_an_arm_and_an_ext_reach_the_record_the_first_time_it_is_written(harness, tmp_path):
+    """A submitter's arm and `ext` namespaces are carried (docs/jobs.md "arm and ext"): the local backend hands them
+    to the run, so the complete record states them at its FIRST write -- nothing re-stamps a finished record. The
+    Temporal backend carries neither and refuses the spec instead of dropping it."""
+    import dataclasses
+
+    spec = dataclasses.replace(_spec(tmp_path), arm="iter-000", ext={"smeltery.al": {"loop": "demo"}})
+    if harness.name != "local":
+        with pytest.raises(schema.JobError, match="carries no arm or ext"):
+            harness.backend.submit(spec)
+        assert not jobs.state_path(spec.run_dir).exists()
+        return
+    with harness.running():
+        h = harness.backend.submit(spec)
+        st = _finish(harness.backend, h)
+    assert st.state is S.COMPLETE, st.message
+    rec = schema.read(h.run_dir)
+    assert (rec.family, rec.arm) == (spec.family, "iter-000")
+    raw = json.loads(jobs.record_path(h.run_dir).read_bytes())
+    assert raw["ext"]["smeltery.al"] == {"loop": "demo"}
+    assert raw["ext"]["smeltery"], "the run's own namespace is kept beside the submitter's"
+    # an arm declares the scalars its family's arms are compared on, derived from the run's own results
+    arm_metrics = {m["name"]: m for m in raw["metrics"] if not m["labels"]}
+    assert arm_metrics["best_paired_ddE"]["direction"] == "min"
+    assert arm_metrics["mean_paired_ddE"]["direction"] == "min"
 
 
 # ------------------------------------------------------------------------------------------------ state.json itself

@@ -17,6 +17,24 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   else "not stated"). `--push OWNER/NAME` (new `hub` extra, huggingface_hub) is a dry run unless `--confirm`, re-checks
   every file against croissant.json and refuses a folder with no stated license; `export hf push FOLDER OWNER/NAME`
   uploads one written earlier.
+- A campaign job may carry an `arm` and the submitter's own `ext` namespaces (`smeltery.jobs.campaign_spec(...,
+  arm=, ext=)`, `check_spec`, docs/jobs.md "arm and ext"). The local backend hands them to the run (`smeltery run
+  --arm NAME --ext-json JSON`), so they are in the core record the FIRST time it is written, in every terminal state:
+  a finished record is never rewritten, since its bytes are what `settle`, a dataset's `source_runs[].record_sha256`
+  and a ledger scan hash. An arm must be a label (`^[A-Za-z0-9_.:-]+$`) and an ext namespace may not be `smeltery`
+  (the run's own). smeltery still has no arm of its own, so every run outside a job is unchanged. A run that IS an
+  arm also states the scalars its family's arms are compared on -- `best_paired_ddE` and `mean_paired_ddE`
+  (`core_record.arm_metrics`), label-free, direction `min`, derived from its own results. `SMELTERY_BACKEND=temporal`
+  carries neither and refuses such a spec at submit rather than dropping it, as the contract requires.
+- `smeltery al run` (`smeltery.al`, docs/active-learning.md): an active-learning loop. An external `Proposer`
+  (`propose(history, n) -> [SMILES]`, optional `fit`) proposes candidates, smeltery scores them through the funnel as
+  an ordinary campaign job (ceiling, stage reuse and `cancel` all apply — no second execution path), and the scores
+  feed back. `--budget` caps the loop's total predicted CPU-hours; a built-in dependency-free `PoolProposer`
+  (`--pool FILE --seed K`) ships for demos and tests. Each iteration is recorded as one attestation **family
+  `al:<loop>`, arm `iter-NNN`**, so `attest runs compare al:<loop>` ranks the iterations by a shared `best_paired_ddE`
+  metric (the proposer's learning curve). A canonical `al-manifest.json` pins every iteration's run dir and
+  core-record sha256, and a stopped loop resumes from it. Canonical-SMILES dedup across iterations. Needs the
+  `attestation` extra to group the records.
 - `smeltery export dataset RUN... -o DIR` (`smeltery.dataset_record`, docs/dataset-export.md): a dataset DIRECTORY
   with an `attestation.dataset/1` record (draft schema) -- the table, its `--split`s, then `attestation/digests.json`
   (whose sha256 is the content digest), then `attestation/dataset.json` naming each source run's core record by the
