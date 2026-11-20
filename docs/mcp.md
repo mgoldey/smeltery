@@ -172,3 +172,6 @@ what they mean in production: a handle returned while an SCF hangs, a screen pol
 candidate explained, the cost estimate, the dry run, the ceiling refusal followed by `confirm=True`, an unknown
 handle, a bug answered generically, and one subprocess test that speaks the protocol over stdio. One test asserts
 that no tool description uses an acronym it does not spell out.
+
+The same server, spawned over stdio beside attestation's `attest-mcp`, is driven end to end by an agent transcript
+(submit, poll, then ask attestation for the ranking and the provenance): [cross-server.md](cross-server.md).

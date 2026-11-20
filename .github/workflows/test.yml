@@ -448,3 +448,54 @@ jobs:
       - name: Container logs
         if: always()
         run: docker logs bench || true
+
+  # Roadmap 27: an agent transcript as CI (tests/cross_server/test_agent_transcript.py, docs/cross-server.md). Two MCP
+  # servers over stdio, as an agent drives them: smeltery's on the fake engine submits and polls two screens, then
+  # attestation's `attest-mcp` reports what is in flight, scans the run directories, ranks the campaign and reads each
+  # run's provenance from the core record smeltery wrote. The `test` job has no `mcp` extra and no attest-mcp, so the
+  # test skips there; here SMELTERY_REQUIRE_CROSS_SERVER=1 turns a skip into a failure.
+  #
+  # attestation is installed with `uv tool install` into ITS OWN environment (its own Python, >= 3.12), never into
+  # smeltery's: smeltery must not import attestation, and the only thing the two share is the run directory. It comes
+  # from git, not PyPI, because PyPI's attestation 0.5.0 predates both pieces this test talks to (the ledger's
+  # core-record reader and runs.status), and attestation main needs attestation-schema >= 0.2.0, which PyPI does not
+  # have yet (0.1.0): a git install builds it from the same checkout. Tracking main is deliberate -- this job is the
+  # check that the two repositories' heads still fit -- and ATTESTATION_REF can pin a tag once one is released.
+  cross-server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ATTESTATION_REF: main
+      SMELTERY_REQUIRE_CROSS_SERVER: "1"
+      SMELTERY_CROSS_SERVER_TRANSCRIPT: ${{ github.workspace }}/cross-server/transcript.jsonl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install smeltery (dev + mcp + attestation extras, ferric from PyPI)
+        run: uv sync --extra dev --extra mcp --extra attestation --no-sources
+
+      - name: Install attestation in its own tool environment
+        run: uv tool install --python 3.12 "git+https://github.com/mgoldey/attestation@${ATTESTATION_REF}"
+
+      - name: Check the two stay apart (attest-mcp on PATH, attestation not importable from smeltery's env)
+        run: |
+          command -v attest-mcp
+          uv run --no-sync python -c "import importlib.util as u; assert u.find_spec('attestation') is None"
+
+      - name: Cross-server transcript
+        run: uv run --no-sync pytest -q -rs -p no:randomly tests/cross_server
+
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cross-server-transcript
+          path: cross-server/
+          if-no-files-found: warn
