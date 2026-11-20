@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .adapters.task_supervisor import LOG_JSON_ENV, LOG_LEVEL_ENV, setup_logging
+from .adapters.workspace_root import ROOT_ENV, default_root
 from .api import active_site, ligands, lineage, methods, notebook, pipelines, prebuilt, runs, work
 from .api.common import install_run_ref_deprecation
 from .errors import install_errors
@@ -73,25 +74,10 @@ class Settings:
 _log = logging.getLogger(__name__)
 MIN_FREE_BYTES = 100 * 2**20
 
-ROOT_ENV = "SMELTERY_BENCH_ROOT"
 HOST_ENV = "SMELTERY_BENCH_HOST"
 PORT_ENV = "SMELTERY_BENCH_PORT"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-
-
-def default_root() -> Path:
-    """Where Bench keeps its work when no ROOT is given: `$SMELTERY_BENCH_ROOT`, else the per-user XDG data directory
-    (`$XDG_DATA_HOME/smeltery/bench`, or `~/.local/share/smeltery/bench`). Never the current directory, whose run
-    glob would walk a `.venv` or `node_modules`."""
-    env = os.environ.get(ROOT_ENV)
-    if env:
-        return Path(env).expanduser()
-    data = os.environ.get("XDG_DATA_HOME")
-    base = (
-        Path(data).expanduser() if data and Path(data).expanduser().is_absolute() else Path.home() / ".local" / "share"
-    )
-    return base / "smeltery" / "bench"
 
 
 def port_in_use(host: str, port: int) -> OSError | None:
@@ -168,6 +154,8 @@ def create_app(
     structure_source: Any = None,
     pipeline_store: Any = None,
     method_defaults: Any = None,
+    prebuilt_source: Any = None,
+    run_progress: Any = None,
     settings: Settings | None = None,
     security: SecurityConfig | None = None,
     stop_tasks_on_exit: bool = False,
@@ -181,7 +169,7 @@ def create_app(
     if comment_store is None:
         from .adapters.comment_store import SqliteCommentStore
 
-        comment_store = SqliteCommentStore(local / "comments.sqlite")
+        comment_store = SqliteCommentStore(local / "comments.sqlite", clock=clock)
     if project_store is None:
         from .adapters.project_store import SqliteProjectStore
 
@@ -205,6 +193,18 @@ def create_app(
 
         method_defaults = FilesystemMethodDefaults(local / "methods.toml")
 
+    if prebuilt_source is None:
+        from .adapters.prebuilt_source import PackagedPrebuilts
+
+        prebuilt_source = PackagedPrebuilts()
+
+    if run_progress is None:
+        # Per app, not per process: the progress cache remembers checkpoint files by path, and two apps (two roots,
+        # or every test's app) must not read each other's counts.
+        from .adapters.run_progress import RunProgress
+
+        run_progress = RunProgress()
+
     app = FastAPI(title="smeltery bench", version="1", lifespan=_lifespan)
     st = app.state
     st.run_store, st.task_queue, st.identity, st.clock = run_store, task_queue, identity, clock
@@ -212,6 +212,7 @@ def create_app(
     st.structure_source, st.settings = structure_source, settings
     st.pipeline_store = pipeline_store
     st.method_defaults = method_defaults
+    st.prebuilt_source, st.run_progress = prebuilt_source, run_progress
     st.stop_tasks_on_exit = stop_tasks_on_exit
     st.structures = {}  # sha256 -> PDB text of structures opened this session (a cache, rebuilt by reopening)
     install_errors(app)
@@ -411,10 +412,13 @@ def main(argv: list[str] | None = None) -> int:
     root.mkdir(parents=True, exist_ok=True)
     landing = ""
     if args.demo:
+        from .adapters.pipeline_store import FilesystemPipelineStore
+        from .adapters.prebuilt_source import PackagedPrebuilts
+        from .adapters.run_store import FilesystemRunStore
         from .use_cases.seed_demo import landing_path, seed_demo
 
-        added = seed_demo(root)
-        landing = landing_path(root)
+        added = seed_demo(FilesystemPipelineStore(root), PackagedPrebuilts())
+        landing = landing_path(FilesystemRunStore(root))
         what = "added " + ", ".join(added) if added else "already seeded"
         print(
             f"smeltery bench: demo workspace {root.resolve()} ({what})",

@@ -6,8 +6,8 @@ import json
 import os
 import sqlite3
 
-from smeltery.bench.adapters import task_queue as tq
-from smeltery.bench.adapters.task_queue import SubprocessTaskQueue, read_tail
+from smeltery import tasks as tq  # `read_tail` lives in core, shared by both queues
+from smeltery.bench.adapters.task_queue import DEFAULT_LIST_LIMIT, SubprocessTaskQueue, read_tail
 
 
 def _insert(db, n, status, *, prefix, start=0, log_path=""):
@@ -35,7 +35,7 @@ def test_the_list_is_bounded_and_newest_first(tmp_path):
     _insert(q.db, 500, "succeeded", prefix="d")
     got = q.list(limit=25)
     assert [t.id for t in got] == [f"d{i}" for i in range(499, 474, -1)]
-    assert len(q.list()) == tq.DEFAULT_LIST_LIMIT
+    assert len(q.list()) == DEFAULT_LIST_LIMIT
     assert len(q.list(limit=None)) == 500
 
 
@@ -105,3 +105,31 @@ def test_tail_log_through_the_queue(tmp_path):
     assert q.tail_log("t0", lines=3) == "l997\nl998\nl999"
     log.unlink()
     assert q.tail_log("t0") == ""
+
+
+def test_long_lines_still_give_the_lines_asked_for_and_no_fragment(tmp_path):
+    """The Temporal queue used to read a byte budget of `lines * 256`: 1 KB lines gave fewer lines than asked, the
+    first of them cut mid-line. Both queues now share `read_tail`, which counts lines."""
+    p = tmp_path / "wide.log"
+    p.write_text("".join(f"{i:04d}" + "x" * 1020 + "\n" for i in range(100)))
+    out = read_tail(p, 10).split("\n")
+    assert [line[:4] for line in out] == [f"{i:04d}" for i in range(90, 100)]
+    assert all(len(line) == 1024 for line in out)
+
+
+def test_the_temporal_manager_tails_through_the_same_reader(tmp_path, monkeypatch):
+    import asyncio
+
+    from smeltery.tasks import Task, TemporalTaskManager
+
+    p = tmp_path / "wide.log"
+    p.write_text("".join(f"{i:04d}" + "x" * 1020 + "\n" for i in range(100)))
+    m = TemporalTaskManager.__new__(TemporalTaskManager)
+
+    async def get_async(task_id):
+        return Task(id=task_id, name="t", command=["x"], cwd="", status="running", log_path=str(p))
+
+    monkeypatch.setattr(m, "get_async", get_async)
+    assert asyncio.run(m.tail_log_async("t1", lines=10)) == read_tail(p, 10)
+    p.unlink()
+    assert asyncio.run(m.tail_log_async("t1", lines=10)) == ""

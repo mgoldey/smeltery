@@ -129,3 +129,46 @@ def test_a_symlink_to_a_finished_run_is_still_refused(client_for, tmp_path):
 
 # Read-only is not re-tested here: `test_read_only.py` walks every route the app exposes and asserts each unsafe
 # operation is 403 with no safelist, so this POST is covered there the moment it exists.
+
+
+def test_a_resumed_run_gets_the_memory_ceiling_a_launch_gets(client_for, resumable, monkeypatch):
+    """`docs/bench.md`: every launched run gets a memory ceiling. A resumed one used to be submitted with none. It has
+    no pipeline preview to predict from, so it gets what a launch without a preview gets: the host share."""
+    from smeltery.bench.use_cases import launch_run
+
+    monkeypatch.setattr(launch_run, "host_memory_gb", lambda: 10.0)
+    out = _half_finished(resumable)
+    q = FakeTaskQueue()
+    c, _ = client_for(run_dir=out, queue=q)
+    assert c.post("/api/runs/resume", json={"out": str(out)}).status_code == 201
+    assert q.options == [
+        {"memory_limit_gb": pytest.approx(10.0 * launch_run.HOST_RAM_SHARE), "timeout_s": None, "capped": True}
+    ]
+    assert "--temporal" not in q.submitted[-1][1]
+
+
+def test_a_run_resumed_on_a_durable_queue_is_resumed_as_one(client_for, resumable):
+    """On the Temporal queue a fresh launch is `smeltery run --temporal` with no limits (the queue refuses them);
+    a resumed run used to be the plain run. Both now come from the same code."""
+
+    class Durable(FakeTaskQueue):
+        def run_flags(self):
+            return ["--temporal"]
+
+    out = _half_finished(resumable)
+    q = Durable()
+    c, _ = client_for(run_dir=out, queue=q)
+    assert c.post("/api/runs/resume", json={"out": str(out)}).status_code == 201
+    assert q.submitted[-1][1][-1] == "--temporal"
+    assert q.options == [{"memory_limit_gb": None, "timeout_s": None, "capped": True}]
+
+
+def test_a_real_config_names_the_task_after_its_campaign(client_for, resumable):
+    """A config says `campaign = "..."`. Reading it as a `[campaign]` table raised AttributeError: a 500."""
+    out = _half_finished(resumable)
+    (out / "config.toml").write_text('campaign = "benzoic"\nparent = "benzoic"\n')
+    q = FakeTaskQueue()
+    c, _ = client_for(run_dir=out, queue=q)
+    r = c.post("/api/runs/resume", json={"out": str(out)})
+    assert r.status_code == 201, r.text
+    assert q.submitted[-1][0] == "run benzoic"

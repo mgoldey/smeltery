@@ -19,10 +19,14 @@ from typing import Any
 import numpy as np
 from rdkit import Chem
 
-from smeltery import cli
+# Read through the module, not imported by name: build_plan reaches docking (`planning._dock_parent`) and
+# memory_estimate reads `planning.available_memory_gb`, and tests patch those on `smeltery.planning`.
+from smeltery import planning
+from smeltery.config import validate_config
 from smeltery.gui.pipeline import Pipeline
 from smeltery.gui.steps import steps
 from smeltery.model import Candidate, Pose
+from smeltery.run_inputs import poses_key
 
 _log = logging.getLogger(__name__)
 
@@ -46,13 +50,6 @@ class ImpactResult:
     poses_from: str
     issues: list[dict] = field(default_factory=list)
     preview_task: str | None = None
-
-
-def _pipeline(cfg: dict) -> Pipeline | None:
-    try:
-        return Pipeline.from_config(cfg)
-    except (KeyError, ValueError, TypeError):
-        return None
 
 
 def _read_sdfs(directory: Path, entries: dict[str, dict], smiles: dict[str, str]) -> list[Candidate] | None:
@@ -85,7 +82,7 @@ def _recorded_poses(src: SourceRun, key: str, base: Path, smiles: dict[str, str]
         recorded = tomllib.loads(cfg_file.read_text())
     except (OSError, tomllib.TOMLDecodeError):
         return None
-    if cli.poses_key(recorded, cfg_file.parent) != key:
+    if poses_key(recorded, cfg_file.parent) != key:
         return None
     return _read_sdfs(src.out_dir, poses, smiles)
 
@@ -113,14 +110,14 @@ def impact(
     poses behind those numbers came from. TOML that does not parse is the caller's to refuse."""
     raw = tomllib.loads(toml)
     base_raw = tomllib.loads(baseline_toml)
-    new, old = _pipeline(raw), _pipeline(base_raw)
+    new, old = Pipeline.try_from_config(raw), Pipeline.try_from_config(base_raw)
     issues = [{"level": i.level, "stage": i.stage, "message": i.message} for i in new.check()] if new else []
     if new is None:
         issues.append({"level": "error", "stage": None, "message": "this TOML is not a pipeline config"})
     changes = [s.key for s in steps(new, old) if s.state == "changed"] if new and old else []
     result = ImpactResult(
         seconds={"value": None, "basis": CANNOT_SAY},
-        memory=cli.memory_cannot_say(None, CANNOT_SAY),
+        memory=planning.memory_cannot_say(None, CANNOT_SAY),
         changes=changes,
         new_digest=raw != base_raw,
         poses_from="none",
@@ -129,33 +126,33 @@ def impact(
     )
     tier = None
     try:
-        cfg = cli.validate_config(dict(raw))
+        cfg = validate_config(dict(raw))
         cfg["_dir"] = str(base_dir)
-        tier = cli.measurement_tier(cfg)
+        tier = planning.measurement_tier(cfg)
         cands: list[Candidate] | None = None
         if "docking" not in cfg and "structure" not in cfg:
-            plan = cli.build_plan(cfg)  # RDKit placement and the gates; no SCF
+            plan = planning.build_plan(cfg)  # RDKit placement and the gates; no SCF
             cands, poses_from = plan.candidates, "computed"
         else:
             smiles = dict(cfg["candidates"])
-            key = cli.poses_key(raw, base_dir)
+            key = poses_key(raw, base_dir)
             poses_from = "source run"
             if source is not None:
                 cands = _recorded_poses(source, key, base_dir, smiles)
             if cands is None and preview_dir is not None:
                 cands, poses_from = _preview_poses(preview_dir, key, smiles), "computed"
         if cands is None:
-            result.memory = cli.memory_cannot_say(tier, CANNOT_SAY)
+            result.memory = planning.memory_cannot_say(tier, CANNOT_SAY)
             return result
         cost = tier.estimate_cost(cands)
         result.seconds = {"value": cost.get("predicted"), "basis": cost.get("basis", CANNOT_SAY)}
-        result.memory = cli.memory_estimate(SimpleNamespace(tier=tier, candidates=cands))
+        result.memory = planning.memory_estimate(SimpleNamespace(tier=tier, candidates=cands))
         result.poses_from = poses_from
     except Exception as e:  # noqa: BLE001 - a live-typing endpoint answers "cannot say" with the reason, never a 500
         _log.debug("cost estimate failed", exc_info=True)
         issues.append({"level": "error", "stage": None, "message": f"cannot estimate: {type(e).__name__}: {e}"})
         result.seconds = {"value": None, "basis": CANNOT_SAY}
-        result.memory = cli.memory_cannot_say(tier, CANNOT_SAY)
+        result.memory = planning.memory_cannot_say(tier, CANNOT_SAY)
         result.poses_from = "none"
     return result
 

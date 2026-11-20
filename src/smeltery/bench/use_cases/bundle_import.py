@@ -10,25 +10,31 @@ import hashlib
 import json
 import re
 import stat
+import tomllib
 import zipfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-#: One path component of an unpacked input: a plain name, no leading dot (the store's upload rule).
-COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()+._-]{0,127}")
+from smeltery.backup import unsafe_member_name
+from smeltery.bench.ports.pipeline_store import FILENAME
+from smeltery.config_text import set_value
+from smeltery.run_inputs import named_inputs
+
 MAX_ENTRIES = 500
+#: One file of a bundle, and (as `api.common.MAX_UPLOAD`) one uploaded input: the one 64 MB cap.
 MAX_FILE = 64 * 1024 * 1024
 MAX_TOTAL = 256 * 1024 * 1024
 _DAMAGED = (zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError, OSError)
 
 
 class BundleRefused(Exception):
-    """The zip as a whole is not acceptable (not a zip, too many entries, too large, no single top folder)."""
+    """The zip as a whole is not acceptable (not a zip, too many entries, too large, no single top folder).
+    `too_large` is true when the refusal is about size or count rather than shape."""
 
-    def __init__(self, message: str, status: int = 400):
+    def __init__(self, message: str, too_large: bool = False):
         super().__init__(message)
-        self.status = status
+        self.too_large = too_large
 
 
 @dataclass
@@ -43,14 +49,7 @@ class Unpacked:
 
 
 def _bad_name(name: str) -> str | None:
-    if "\\" in name or "\x00" in name:
-        return "backslash or NUL in the entry name"
-    p = PurePosixPath(name)
-    if name.startswith("/") or p.is_absolute() or re.match(r"^[A-Za-z]:", name):
-        return "absolute path"
-    if ".." in p.parts:
-        return "path leaves the bundle ('..')"
-    return None
+    return unsafe_member_name(name, container="bundle", member="entry")
 
 
 def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, max_total=None) -> Unpacked:
@@ -64,9 +63,9 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
     with z:
         infos = [i for i in z.infolist() if not i.is_dir()]
         if len(z.infolist()) > max_entries:
-            raise BundleRefused(f"more than {max_entries} entries", 413)
+            raise BundleRefused(f"more than {max_entries} entries", too_large=True)
         if sum(i.file_size for i in infos) > max_total:
-            raise BundleRefused(f"more than {max_total // (1024 * 1024)} MB uncompressed", 413)
+            raise BundleRefused(f"more than {max_total // (1024 * 1024)} MB uncompressed", too_large=True)
         errors: list[tuple[str, str]] = []
         entries: dict[str, zipfile.ZipInfo] = {}
         for i in infos:
@@ -119,7 +118,8 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
             if not isinstance(meta, dict):
                 errors.append((rel, "its manifest.json entry is not an object"))
                 continue
-            if rel != "config.toml" and not all(COMPONENT.fullmatch(c) for c in PurePosixPath(rel).parts):
+            # each path component is held to the store's upload rule: a plain name, no leading dot
+            if rel != "config.toml" and not all(FILENAME.fullmatch(c) for c in PurePosixPath(rel).parts):
                 errors.append((rel, "file name not allowed (plain names only, no leading dot)"))
                 continue
             dest = staging / rel
@@ -131,7 +131,7 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
                         n += len(chunk)
                         spent += len(chunk)
                         if n > max_file or spent > max_total:
-                            raise BundleRefused("the bundle expands to more than its declared size", 413)
+                            raise BundleRefused("the bundle expands to more than its declared size", too_large=True)
                         h.update(chunk)
                         w.write(chunk)
             except _DAMAGED as e:  # bad CRC, encrypted, unsupported compression, a file where a folder is needed
@@ -152,3 +152,31 @@ def unpack(zip_path: Path, staging: Path, *, max_entries=None, max_file=None, ma
     pipeline = manifest.get("pipeline")
     missing = [m for m in manifest.get("missing") or [] if isinstance(m, str)] if isinstance(manifest, dict) else []
     return Unpacked(top, pipeline if isinstance(pipeline, str) else None, config, files, originals, errors, missing)
+
+
+def _escapes(value: str) -> bool:
+    p = Path(value)
+    return p.is_absolute() or ".." in p.parts or value.startswith("~") or bool(re.match(r"^[A-Za-z]:", value))
+
+
+def rewrite_inputs(text: str, originals: dict[str, str]) -> tuple[str, list[str], list[tuple[str, str]]]:
+    """Point the config's input paths at the bundle's copies: (new text, notes, errors).
+
+    `originals` is `Unpacked.originals`, {relative path: the absolute path the config named when it was exported}.
+    An input naming one of those is rewritten to its copy; any other absolute, `~` or `..` input path is an error,
+    so a hostile config cannot point a run at a file outside the pipeline. A copy the config no longer names is an
+    error too. `text` must be TOML."""
+    cfg = tomllib.loads(text)
+    by_original = {orig: rel for rel, orig in originals.items()}
+    used: set[str] = set()
+    notes: list[str] = []
+    errors: list[tuple[str, str]] = []
+    for table, key, value in named_inputs(cfg):
+        if value in by_original:
+            text = set_value(text, f"{table}.{key}", by_original[value])
+            notes.append(f"{table}.{key}: {value} -> {by_original[value]}")
+            used.add(value)
+        elif _escapes(value):
+            errors.append((f"{table}.{key}", f"{value!r} points outside the bundle and was not exported with it"))
+    errors += [(rel, f"the config does not name {orig}") for orig, rel in by_original.items() if orig not in used]
+    return text, notes, errors

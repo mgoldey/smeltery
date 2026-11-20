@@ -24,6 +24,12 @@ _STEPS = (
 SCHEMA_VERSION = len(_STEPS)
 
 
+def _campaign(row) -> Campaign:
+    """A campaigns row in the column order of `id,name,created_at,description,run_paths`."""
+    cid, name, created, desc, runs = row
+    return Campaign(id=cid, name=name, created_at=created, description=desc or "", run_paths=json.loads(runs or "[]"))
+
+
 class SqliteProjectStore:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
@@ -102,18 +108,12 @@ class SqliteProjectStore:
             ).fetchone()
         if not row:
             raise KeyError(campaign_id)
-        cid, name, created, desc, runs = row
-        return Campaign(
-            id=cid, name=name, created_at=created, description=desc or "", run_paths=json.loads(runs or "[]")
-        )
+        return _campaign(row)
 
     def list_campaigns(self):
         with self._conn() as con:
             rows = con.execute("SELECT id,name,created_at,description,run_paths FROM campaigns").fetchall()
-        return [
-            Campaign(id=r[0], name=r[1], created_at=r[2], description=r[3] or "", run_paths=json.loads(r[4] or "[]"))
-            for r in rows
-        ]
+        return [_campaign(r) for r in rows]
 
     def add_run(self, campaign_id, run_path):
         c = self.get_campaign(campaign_id)
@@ -123,41 +123,8 @@ class SqliteProjectStore:
             con.execute("UPDATE campaigns SET run_paths=? WHERE id=?", (json.dumps(c.run_paths), campaign_id))
             con.commit()
 
-    def add_entry(self, entry=None, *args, **kw):
-        # support port style (entry) and bench style (campaign_id, title=, body=, ...)
-        if isinstance(entry, NotebookEntry):
-            e = entry
-        elif isinstance(entry, dict):
-            e = NotebookEntry.from_dict(entry)
-        elif entry is not None and (args or kw) and isinstance(entry, str) is not False:
-            # entry may be campaign_id positional
-            pass
-        # bench style: first positional is campaign_id
-        if not isinstance(entry, (NotebookEntry, dict)) and (kw or args):
-            from smeltery.project import make_entry_id, utc_now
-
-            campaign_id = entry if entry is not None else kw.pop("campaign_id")
-            title = kw.pop("title", "")
-            body = kw.pop("body", "")
-            author = kw.pop("author", "")
-            supersedes = kw.pop("supersedes", None)
-            artefacts = kw.pop("artefacts", ())
-            files = kw.pop("files", ())
-            created_at = kw.pop("created_at", utc_now())
-            eid = kw.pop("id", None) or make_entry_id(str(campaign_id), str(title), str(created_at))
-            e = NotebookEntry(
-                id=eid,
-                campaign_id=str(campaign_id),
-                title=title,
-                body=body,
-                author=author,
-                created_at=created_at,
-                artefacts=tuple(artefacts) if not isinstance(artefacts, tuple) else artefacts,
-                supersedes=supersedes,
-                files=tuple(files),
-            )
-        if isinstance(entry, dict):
-            e = NotebookEntry.from_dict(entry)
+    def add_entry(self, entry: NotebookEntry) -> NotebookEntry:
+        e = entry
         e.validate()
         # append-only: refuse editing an existing id
         with self._conn() as con:
@@ -211,9 +178,6 @@ class SqliteProjectStore:
 
     def supersede(self, old_entry_id, new_entry):
         ne = new_entry if isinstance(new_entry, NotebookEntry) else NotebookEntry.from_dict(new_entry)
-        if ne.supersedes != old_entry_id:
-            # allow setting
-            ne = NotebookEntry(**{**ne.__dict__, "supersedes": old_entry_id}) if False else ne
         # ensure supersedes points to old
         if ne.supersedes != old_entry_id:
             d = ne.to_dict()

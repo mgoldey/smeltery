@@ -1,14 +1,11 @@
 """Runs: the record, its verdict and tables, the figures Python already draws, poses, and the judgement layered on
-top (decisions, comments, proposals). Every number comes from `smeltery.gui.results`; nothing here recomputes it."""
+top (decisions, comments, proposals). Every number comes from `smeltery.run_view`; nothing here recomputes it."""
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import math
-import re
-import tomllib
 import zipfile
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -19,15 +16,19 @@ from molviewspec.nodes import RepresentationTypeT, validate_state_tree
 from pydantic import BaseModel, Field
 from rdkit import Chem
 
+from smeltery import run_view as R
 from smeltery.bench.pymol_export import ligand_filename, ligand_stems, pymol_session
-from smeltery.bench.use_cases.launch_run import smeltery_command
+from smeltery.bench.use_cases import read_run
+from smeltery.bench.use_cases import record_decision as decisions
+from smeltery.bench.use_cases.comment_on_run import CommentOnRun, CommentRefused
+from smeltery.bench.use_cases.compare_arms import CompareArms
+from smeltery.bench.use_cases.launch_run import LaunchRun, ResumeRefused
+from smeltery.bench.use_cases.propose_candidate import ProposalRefused, ProposeCandidate
+from smeltery.bench.use_cases.publish_report import REPORT_EXTERNAL as REPORT_EXTERNAL  # the report's own list
+from smeltery.bench.use_cases.publish_report import PublishReport, report_name
 from smeltery.bench.verdict import verdict_of
-from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, DecisionSet, to_csv, to_sdf
-from smeltery.gui import results as R
-from smeltery.gui.compare import Comparison as Cmp
-from smeltery.gui.compare import candidate_rows
+from smeltery.decisions import NOTE_REQUIRED, REASONS, STATUSES, to_csv, to_sdf
 from smeltery.gui.limits import floor_statement
-from smeltery.gui.report import MOLSTAR_CSS, MOLSTAR_JS, RDKIT_JS, RDKIT_WASM, render_html
 from smeltery.gui.scenes import pose_scene
 from smeltery.gui.views._style import themed
 from smeltery.gui.views.compare import compare_figure, comparison_caption
@@ -35,27 +36,20 @@ from smeltery.gui.views.forest import forest_figure
 from smeltery.gui.views.matrix import matrix_figure
 from smeltery.gui.views.per_pose import per_pose_figure
 from smeltery.gui.views.per_pose_values import per_pose_values_figure
-from smeltery.project import Proposal, make_entry_id
+from smeltery.project import Proposal
 from smeltery.sdf_export import enriched_sdf
 
 from . import models as M
-from .common import confined_out, ports, record, row, rows, run, utc_iso
+from .common import confined_out, ports, record, row, rows, run, submitted_task, utc_iso
 
 router = APIRouter(prefix="/api", tags=["runs"])
 
-QUANTITY = "dE_int"
-#: The frozen report's only external references, by design (docs/gui-contract.md section 4): pinned and
-#: integrity-hashed copies of the 2D and 3D libraries. Its numbers, plots and tables need no network.
-REPORT_EXTERNAL = (RDKIT_JS, RDKIT_WASM, MOLSTAR_JS, MOLSTAR_CSS)
+QUANTITY = R.QUANTITY
 
 
 def _verdict(raw: dict) -> M.Verdict:
     v = verdict_of(raw)
     return M.Verdict(state=v.state, winner=v.winner, floor=v.floor, missing=list(v.missing))
-
-
-def _unit(r: R.Run) -> str:
-    return r.record.get("results", {}).get("units", {}).get(QUANTITY, "kcal/mol")
 
 
 def _plain(fig: Any) -> dict[str, Any]:
@@ -106,13 +100,13 @@ def run_detail(request: Request, run_id: str) -> M.RunDetail:
         survivors=list(r.survivors) if r.survivors is not None else None,
         floor=r.floor,
         floor_source=r.floor_source,
-        floor_statement=floor_statement(r.floor, _unit(r), r.floor_source, r.z),
+        floor_statement=floor_statement(r.floor, r.unit, r.floor_source, r.z),
         z=r.z,
         keep=r.keep,
         unranked=r.unranked,
         has_pose_output=r.has_pose_output,
         n_poses={k: int(v["n_poses"]) for k, v in poses.items()},
-        unit=_unit(r),
+        unit=r.unit,
         verdict=_verdict(raw),
         decisions_in=_decisions_in(raw),
     )
@@ -151,7 +145,7 @@ def run_dde(request: Request, run_id: str) -> M.DdeTable:
         floor_source=r.floor_source,
         z=r.z,
         keep=r.keep,
-        unit=_unit(r),
+        unit=r.unit,
         verdict=_verdict(raw),
     )
 
@@ -188,7 +182,7 @@ def _figure(request: Request, run_id: str, name: str) -> dict[str, Any]:
     r = run(request, run_id)
     table = R.ddE_table(r)
     if name == "forest":
-        return _plain(forest_figure(table, r, unit=_unit(r)))
+        return _plain(forest_figure(table, r, unit=r.unit))
     if name == "matrix":
         names, matrix = R.resolved_matrix(r)
         return _plain(matrix_figure(names, matrix, table))
@@ -198,7 +192,7 @@ def _figure(request: Request, run_id: str, name: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(e)) from e
     if name == "per_pose_values":
         return _plain(per_pose_values_figure(pp, r, QUANTITY))
-    return _plain(per_pose_figure(pp, r, quantity=QUANTITY, unit=_unit(r), rows=table))
+    return _plain(per_pose_figure(pp, r, quantity=QUANTITY, unit=r.unit, rows=table))
 
 
 @router.get("/runs/{run_id}/scene")
@@ -349,35 +343,7 @@ class Gates(BaseModel):
 
 @router.get("/runs/{run_id}/gates", response_model=Gates)
 def run_gates(request: Request, run_id: str) -> Gates:
-    raw = record(request, run_id)
-    results = raw.get("results", {})
-    gates: dict[str, Any] = results.get("gates") or {}
-    limit = (raw.get("inputs", {}).get("gates") or {}).get("max_strain_kcal")
-    pb: dict[str, Any] = gates.get("posebusters") or {}
-    strain: dict[str, list[float]] = gates.get("strain_kcal") or {}
-    order = list(results.get("candidate_order") or [*pb, *(c for c in strain if c not in pb)])
-    rows = []
-    for name in order:
-        verdicts = (pb.get(name) or {}).get("poses")
-        n = max(len(verdicts or []), len(strain.get(name, [])))
-        for i in range(n):
-            v = verdicts[i] if verdicts is not None and i < len(verdicts) else None
-            s = float(strain[name][i]) if name in strain and i < len(strain[name]) else None
-            over = None if limit is None or s is None else s > float(limit)
-            passed = None if v is None else bool(v["passed"])
-            rows.append(
-                GateRow(
-                    candidate=name,
-                    pose=i,
-                    posebusters=passed,
-                    failed_checks=list(v["failed_checks"]) if v else [],
-                    strain_kcal=s,
-                    over_strain=over,
-                    checked=passed is not None or over is not None,
-                    ok=passed is not False and over is not True,
-                )
-            )
-    return Gates(ran=sorted(gates), max_strain_kcal=None if limit is None else float(limit), rows=rows, raw=gates)
+    return Gates.model_validate(read_run.gate_rows(record(request, run_id)))
 
 
 class CalcLines(BaseModel):
@@ -389,17 +355,6 @@ class CalcLines(BaseModel):
     lines: list[dict[str, Any]]
 
 
-def _original_pose(raw: dict, candidate: str, pose: int) -> int:
-    """The original pose index of record `pose` of `candidate`: `results.pose_index[candidate][pose]` after a pairwise
-    drop, else `pose` itself. The calc log is written before any drop, so it is keyed by the original index."""
-    index = ((raw.get("results") or {}).get("pose_index") or {}).get(candidate)
-    if index is None:
-        return pose
-    if not 0 <= pose < len(index):
-        raise HTTPException(status_code=400, detail=f"pose {pose} out of range: {candidate} kept {len(index)} poses")
-    return int(index[pose])
-
-
 @router.get("/runs/{run_id}/calcs", response_model=CalcLines)
 def run_calcs(request: Request, run_id: str, candidate: str, pose: int, field_model: str | None = None) -> CalcLines:
     """Lines from the file `results.calcs` names (calcs.jsonl, or calcs-<candidate>.jsonl for a partial run), read as
@@ -408,33 +363,13 @@ def run_calcs(request: Request, run_id: str, candidate: str, pose: int, field_mo
     candidate's poses, as `/scene` takes it; it is mapped through `results.pose_index` to the log's original index.
     409 when the run kept no SCF log."""
     raw = record(request, run_id)
-    calcs = (raw.get("results") or {}).get("calcs")
-    if not calcs:
-        raise HTTPException(status_code=409, detail="this run kept no SCF log")
-    pose = _original_pose(raw, candidate, pose)
-    out_dir = Path(row(request, run_id)["path"]).parent.resolve()
-    path = (out_dir / str(calcs["file"])).resolve()
-    if out_dir not in path.parents:
-        raise HTTPException(status_code=409, detail=f"the SCF log {calcs['file']!r} is outside the run directory")
     try:
-        text = path.read_text()
-    except OSError as e:
-        raise HTTPException(status_code=409, detail=f"cannot read the SCF log {path}: {e}") from e
-    primary = calcs.get("primary")
-    want = field_model if field_model is not None else primary
-    lines = []
-    for x in text.splitlines():
-        if not x.strip():
-            continue
-        try:
-            d = json.loads(x)
-        except ValueError:
-            continue
-        if isinstance(d, dict) and d.get("candidate") == candidate and d.get("pose") == pose:
-            model = d.get("field_model", primary)
-            if want is None or model is None or model == want:  # None: a --temporal vacuum leg, shared by all
-                lines.append(d)
-    return CalcLines(file=str(calcs["file"]), pose=pose, lines=lines)
+        got = read_run.calc_lines(Path(row(request, run_id)["path"]).parent, raw, candidate, pose, field_model)
+    except read_run.PoseOutOfRange as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except read_run.CalcsUnavailable as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return CalcLines.model_validate(got)
 
 
 class DroppedPose(BaseModel):
@@ -566,8 +501,9 @@ def run_bundle(request: Request, run_id: str) -> Response:
 # ---------------------------------------------------------------------------------------------------- decisions
 
 
-def _decisions_path(r: R.Run) -> Path:
-    return Path(r.out_dir) / f"decisions-{r.record['input_digest'][:12]}.json"
+def _record_decision(request: Request) -> decisions.RecordDecision:
+    st = ports(request)
+    return decisions.RecordDecision(st.run_store, st.identity, st.clock)
 
 
 @router.get("/decisions/vocabulary", response_model=M.Vocabulary)
@@ -577,37 +513,21 @@ def decisions_vocabulary() -> M.Vocabulary:
 
 @router.get("/runs/{run_id}/decisions", response_model=list[M.DecisionOut])
 def list_decisions(request: Request, run_id: str) -> list[M.DecisionOut]:
-    p = _decisions_path(run(request, run_id))
-    if not p.is_file():
+    r = run(request, run_id)
+    if not decisions.decisions_path(r).is_file():
         return []
-    return [M.DecisionOut(**d.__dict__) for d in DecisionSet.load(p).decisions]
+    return [M.DecisionOut(**d.__dict__) for d in decisions.load(r).decisions]
 
 
 @router.post("/runs/{run_id}/decisions", response_model=M.DecisionOut)
 def record_decision(request: Request, run_id: str, body: M.DecisionIn) -> M.DecisionOut:
     """Every refusal is `DecisionSet`'s own; this route adds no rule. The user is `Identity.current()`."""
     r = run(request, run_id)
-    p = _decisions_path(r)
-    ds = _load_decisions(r)
-    if body.candidate not in r.candidates:
-        raise HTTPException(status_code=400, detail=f"no candidate {body.candidate!r} in this run")
     try:
-        d = ds.set(body.candidate, body.status, body.reason, body.note, user=ports(request).identity.current())
-        ds.dump(p)
-    except ValueError as e:
+        d = _record_decision(request).set(r, body.candidate, body.status, body.reason, body.note)
+    except decisions.DecisionRefused as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return M.DecisionOut(**d.__dict__)
-
-
-def _load_decisions(r: R.Run) -> DecisionSet:
-    p = _decisions_path(r)
-    ds = (
-        DecisionSet.load(p)
-        if p.is_file()
-        else DecisionSet(campaign=r.campaign, run=r.record["input_digest"], candidates=dict(r.candidates))
-    )
-    ds.candidates = dict(r.candidates)
-    return ds
 
 
 @router.post("/runs/{run_id}/decisions/bulk", response_model=list[M.DecisionOut])
@@ -615,22 +535,17 @@ def record_decisions_bulk(request: Request, run_id: str, body: M.BulkDecisionIn)
     """One decision applied to many candidates, all or nothing: any unknown candidate or invalid decision is a 400
     naming every problem, and nothing is written. The file is written once."""
     r = run(request, run_id)
-    unknown = [c for c in body.candidates if c not in r.candidates]
-    if unknown:
-        raise HTTPException(status_code=400, detail=f"no candidate {', '.join(map(repr, unknown))} in this run")
-    ds = _load_decisions(r)
     try:
-        done = ds.set_many(body.candidates, body.status, body.reason, body.note, user=ports(request).identity.current())
-        ds.dump(_decisions_path(r))
-    except ValueError as e:
+        done = _record_decision(request).set_many(r, body.candidates, body.status, body.reason, body.note)
+    except decisions.DecisionRefused as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return [M.DecisionOut(**d.__dict__) for d in done]
 
 
 def _decisions_download(request: Request, run_id: str, ext: str, serialise, media_type: str) -> Response:
     r = run(request, run_id)
-    text = serialise(_load_decisions(r))
-    name = f"decisions-{r.record['input_digest'][:12]}.{ext}"
+    text = serialise(decisions.load(r))
+    name = decisions.decisions_path(r).with_suffix(f".{ext}").name
     return Response(
         content=text, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{name}"'}
     )
@@ -652,7 +567,7 @@ def export_sdf(request: Request, run_id: str) -> Response:
     (`smeltery.sdf_export`). Unlike decisions.sdf (2D, one record per decided candidate) this is the poses."""
     r = run(request, run_id)
     try:
-        text = enriched_sdf(r, _load_decisions(r))
+        text = enriched_sdf(r, decisions.load(r))
     except (ValueError, KeyError) as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     name = f"poses-{r.record['input_digest'][:12]}.sdf"
@@ -664,8 +579,6 @@ def export_sdf(request: Request, run_id: str) -> Response:
 
 
 # ---------------------------------------------------------------------------------------------------- comments
-
-_ANCHOR = re.compile(r"^(run|candidate:[^:]+|pose:[^:]+:\d+)$")
 
 
 @router.get("/runs/{run_id}/comments", response_model=list[M.CommentOut])
@@ -681,13 +594,13 @@ def list_comments(request: Request, run_id: str) -> list[M.CommentOut]:
 
 @router.post("/runs/{run_id}/comments", response_model=M.CommentOut, status_code=201)
 def add_comment(request: Request, run_id: str, body: M.CommentIn) -> M.CommentOut:
-    if not _ANCHOR.match(body.anchor):
-        raise HTTPException(status_code=400, detail="anchor is 'run', 'candidate:<name>' or 'pose:<name>:<i>'")
-    if not body.body.strip():
-        raise HTTPException(status_code=400, detail="a comment needs some text")
-    digest = record(request, run_id).get("input_digest", "")
     st = ports(request)
-    c = st.comment_store.add(run=digest, anchor=body.anchor, author=st.identity.current(), body=body.body)
+    uc = CommentOnRun(st.comment_store, st.identity, st.clock)
+    try:
+        uc.check(body.anchor, body.body)  # before the run is looked up: a bad comment is a 400 on any run
+        c = uc.run(record(request, run_id).get("input_digest", ""), body.anchor, body.body)
+    except CommentRefused as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return M.CommentOut(
         id=c.id, anchor=c.anchor_text or body.anchor, author=c.author, body=c.body, created_at=utc_iso(c.created_at)
     )
@@ -726,21 +639,12 @@ def propose(request: Request, run_id: str, body: M.ProposalIn) -> M.ProposalOut:
     """Store a proposal for review. This route never touches the task queue: a comment must not start compute."""
     st = ports(request)
     digest = record(request, run_id).get("input_digest", "")
-    now = utc_iso(st.clock.now())
-    p = Proposal(
-        id=make_entry_id(digest, body.smiles, now),
-        run=digest,
-        smiles=body.smiles,
-        reason=body.reason,
-        note=body.note,
-        candidate=body.candidate,
-        author=st.identity.current(),
-        created_at=now,
-    )
-    bad = p.problems()
-    if bad:
-        raise HTTPException(status_code=400, detail="; ".join(bad))
-    st.project_store.add_proposal(p)
+    try:
+        p = ProposeCandidate(st.project_store, st.identity, st.clock).run(
+            digest, body.smiles, body.reason, body.note, body.candidate
+        )
+    except ProposalRefused as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return _proposal_out(p)
 
 
@@ -756,81 +660,23 @@ def run_config(request: Request, run_id: str) -> M.RunConfig:
     comments are the documentation. A run whose config was not kept beside it reports `text = None` instead of a
     reconstruction, because a plausible-looking config that is not the one that ran is worse than none.
     """
-    r = run(request, run_id)
-    cfg = r.record.get("results", {}).get("config")
-    if not isinstance(cfg, dict) or not cfg.get("file"):
-        return M.RunConfig(file=None, sha256=None, text=None, reason="this run's record does not name a config file")
-    out = Path(r.out_dir).resolve()
-    path = (out / cfg["file"]).resolve()
-    # The name comes out of the record, which is a file on disk: it is not to be trusted to stay inside the run
-    # directory. Nothing here should ever serve a file from elsewhere on the machine.
-    if not path.is_relative_to(out):
-        return M.RunConfig(
-            file=cfg["file"],
-            sha256=cfg.get("sha256"),
-            text=None,
-            reason=f"the record names {cfg['file']}, which is outside the run directory",
-        )
-    if not path.is_file():
-        return M.RunConfig(
-            file=cfg["file"],
-            sha256=cfg.get("sha256"),
-            text=None,
-            reason=f"the record names {cfg['file']}, but it is no longer beside the run",
-        )
-    text = path.read_text()
-    digest = hashlib.sha256(text.encode()).hexdigest()
-    recorded = cfg.get("sha256")
-    # A changed file is still shown -- it is what is on disk -- but never silently: a run is only reproducible
-    # from the bytes that ran, and an edited config would otherwise read as provenance.
-    changed = bool(recorded) and recorded != digest
-    return M.RunConfig(
-        file=cfg["file"],
-        sha256=digest,
-        text=text,
-        reason="this file has changed since the run read it" if changed else None,
-        changed=changed,
-    )
+    return M.RunConfig(**read_run.recorded_config(run(request, run_id)))
 
 
 # ---------------------------------------------------------------------------------------------------- snapshot
 
 
-def _render_report(request: Request, run_id: str) -> tuple[R.Run, str]:
-    """The frozen report's HTML for `run_id`, rendered in memory, with the run it describes.
-
-    Shared by the two ways out, so the file a chemist downloads is byte-for-byte the file the notebook archives.
-    Rendering and writing are separate on purpose: the download writes nothing, which is what lets it work on a
-    `--read-only` server, where `POST .../snapshot` is refused with 403.
-    """
-    r = run(request, run_id)
-    digest = r.record["input_digest"]
-    comments = [
-        {"anchor": c.anchor_text or "run", "author": c.author, "time": utc_iso(c.created_at), "body": c.body}
-        for c in ports(request).comment_store.for_run(digest)
-    ]
-    decisions = [d.__dict__ for d in _load_decisions(r).decisions]
-    # One stamp from the injected clock, not two readings of the wall clock. The download and the snapshot render
-    # the same report, and the report carries the time it was written to the second: rendering twice across a tick
-    # produced two files differing by one digit, which failed the byte-for-byte promise above for no real reason.
-    return r, render_html(r, comments, decisions, utc_iso(ports(request).clock.now()))
-
-
-def _external(data: bytes) -> list[str]:
-    found = sorted(set(re.findall(rb"https?://[^\s\"'<>)]+", data)))
-    return [u.decode() for u in found if u.decode() in REPORT_EXTERNAL]
+def _publish(request: Request) -> PublishReport:
+    st = ports(request)
+    return PublishReport(st.comment_store, st.clock)
 
 
 @router.post("/runs/{run_id}/snapshot", response_model=M.Snapshot)
 def snapshot(request: Request, run_id: str) -> M.Snapshot:
     """Write the frozen report beside the run, unmodified. Its numbers, plots and tables are inline; its only
     external references are the pinned, integrity-hashed 2D/3D libraries, and it says so when they cannot load."""
-    r, html = _render_report(request, run_id)
-    path = Path(r.out_dir) / f"report-{r.record['input_digest'][:12]}.html"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(html, encoding="utf-8")
-    data = path.read_bytes()
-    return M.Snapshot(path=str(path), sha256=hashlib.sha256(data).hexdigest(), external=_external(data))
+    snap = _publish(request).write(run(request, run_id))
+    return M.Snapshot(path=str(snap.path), sha256=snap.sha256, external=snap.external)
 
 
 @router.get("/runs/{run_id}/report.html")
@@ -840,27 +686,16 @@ def run_report_download(request: Request, run_id: str) -> Response:
     `POST .../snapshot` leaves the file on the server and names a path, which only helps someone with a shell on
     that machine. This hands the bytes to whoever is reading the page.
     """
-    r, html = _render_report(request, run_id)
-    digest = r.record["input_digest"][:12]
+    r = run(request, run_id)
+    html = _publish(request).render(r)
     return Response(
         content=html.encode("utf-8"),
         media_type="text/html; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="report-{digest}.html"'},
+        headers={"Content-Disposition": f'attachment; filename="{report_name(r)}"'},
     )
 
 
 # ---------------------------------------------------------------------------------------------------- compare
-
-
-def _arm_labels(ra: R.Run, rb: R.Run) -> tuple[str, str]:
-    """Each arm's campaign. When both arms share one (two runs of one campaign, the usual comparison), the arm letter
-    the page chose it as and its digest are added, so the caption never says a run favours itself."""
-    if ra.campaign != rb.campaign:
-        return ra.campaign, rb.campaign
-    return (
-        f"A ({ra.campaign} {ra.record['input_digest'][:8]})",
-        f"B ({rb.campaign} {rb.record['input_digest'][:8]})",
-    )
 
 
 @router.get("/compare", response_model=M.Comparison)
@@ -871,9 +706,8 @@ def compare(request: Request, a: str, b: str, theme: Theme = "light") -> M.Compa
         raise HTTPException(
             status_code=400, detail="a run is in both arms; an arm compared with itself is not a comparison"
         )
-    ra, rb = run(request, a), run(request, b)
-    label_a, label_b = _arm_labels(ra, rb)
-    cmp = Cmp.from_runs({"run": ra}, {"run": rb}, label_a=label_a, label_b=label_b, floor=max(ra.floor, rb.floor))
+    got = CompareArms(ports(request).run_store).runs(run(request, a), run(request, b))
+    cmp = got.comparison
     rows = [
         M.CompareRow(
             key=k.key,
@@ -888,15 +722,14 @@ def compare(request: Request, a: str, b: str, theme: Theme = "light") -> M.Compa
         )
         for k in cmp.rows()
     ]
-    candidates, note = candidate_rows(ra, rb, max(ra.z, rb.z))
     return M.Comparison(
         figure=themed(_plain(compare_figure(cmp)), theme),
         caption=comparison_caption(cmp),
         summary=cmp.summary(),
         rows=rows,
         unit=cmp.unit,
-        candidates=candidates,
-        candidates_note=note,
+        candidates=got.candidates,
+        candidates_note=got.candidates_note,
     )
 
 
@@ -935,38 +768,8 @@ def resume_run(request: Request, body: ResumeRun) -> Any:
         return out
     if not out.is_dir():
         return JSONResponse(status_code=409, content={"reason": f"{body.out} is not a directory on this Bench"})
-    if done := sorted(out.glob("run-*.json")):
-        return JSONResponse(
-            status_code=409,
-            content={
-                "reason": f"{out.name} already holds the run record {done[0].name}: it finished, so there is "
-                "nothing to resume. Run the pipeline again to start a new round."
-            },
-        )
-    config = out / "config.toml"
-    if not config.is_file():
-        return JSONResponse(
-            status_code=409,
-            content={"reason": f"{out.name} holds no config.toml, so there is no staged run in it to resume"},
-        )
-    campaign = _campaign_of(config)
-    tid = st.task_queue.submit(
-        f"run {campaign}" if campaign else f"resume {out.name}",
-        [*smeltery_command(), "run", str(config), "--out", str(out)],
-        cwd=str(out.parent),
-        note=f"resumed by user={st.identity.current()} time={st.clock.now().isoformat()}",
-        capped=True,
-    )
-    t = st.task_queue.get(tid)
-    if t is None:
-        raise HTTPException(status_code=500, detail=f"task {tid} was submitted but cannot be read back")
-    return M.Task(**(t.to_dict() if hasattr(t, "to_dict") else t))
-
-
-def _campaign_of(config: Path) -> str | None:
-    """The campaign name out of a staged config, for the task's name. Unreadable or absent is not an error: the
-    task gets named after its directory instead, which is still the thing the user is looking for."""
     try:
-        return tomllib.loads(config.read_text()).get("campaign", {}).get("name") or None
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return None
+        tid = LaunchRun(st.task_queue, st.run_store, st.artifact_store, st.identity, st.clock, root=root).resume(out)
+    except ResumeRefused as e:
+        return JSONResponse(status_code=409, content={"reason": str(e)})
+    return submitted_task(request, tid)

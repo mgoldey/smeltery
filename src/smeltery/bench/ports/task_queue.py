@@ -71,3 +71,14 @@ class StoppableTasks(Protocol):
         still has the recorded identity). Returns the ids. Queued tasks are cancelled too, or a finishing
         supervisor would start them as the running ones die."""
         ...
+
+
+@runtime_checkable
+class DurableRuns(Protocol):
+    """Optional, beside `TaskQueue`: a queue on which a launched run is itself a durable workflow (Temporal) rather
+    than one long local process. Such a queue bounds its own work, so a launch passes it no memory or time limit,
+    and the run is told so by the flags it gets. A queue without it (local subprocesses) gets the plain run."""
+
+    def run_flags(self) -> List[str]:
+        """The extra `smeltery run` arguments a run launched on this queue needs, e.g. `["--temporal"]`."""
+        ...

@@ -1,5 +1,7 @@
 """Importing candidates from CSV/SDF into the draft, and exporting them."""
 
+import csv
+import io
 import tomllib
 
 from rdkit import Chem
@@ -65,3 +67,34 @@ def test_export_csv_and_sdf_are_attachments(client_for):
     ]
     r = c.get("/api/pipelines/p1/ligands.sdf")
     assert r.text.count("$$$$") == 2 and ">  <role>" in r.text
+
+
+def _record(name, smiles="CCO", charge=0):
+    return {
+        "name": name,
+        "smiles": smiles,
+        "role": "analogue",
+        "formal_charge": charge,
+        "electrons": 26,
+        "electrons_even": True,
+        "sto3g_ok": True,
+    }
+
+
+def test_a_name_that_starts_like_a_formula_is_exported_as_text_and_a_negative_charge_is_not_touched():
+    """Names are free text: `=HYPERLINK(...)` must not run in the spreadsheet that opens the export. The same rule
+    as the decisions CSV (`smeltery.decisions.csv_cell`)."""
+    text = ligand_io.to_csv([_record("=HYPERLINK(1)", charge=-1)])
+    (row,) = csv.reader(io.StringIO(text.splitlines()[1]))
+    assert row[:4] == ["'=HYPERLINK(1)", "CCO", "analogue", "-1"]
+    # the SMILES column round-trips through the importer unchanged: no valid SMILES starts with = + - @
+    rows, bad = ligand_io.parse("x.csv", text)
+    assert [r.smiles for r in rows] == ["CCO"] and not bad
+
+
+def test_a_name_with_a_newline_does_not_break_the_sdf_record():
+    """The name is the record's title line: a newline in it shifted the counts line and the record was unreadable."""
+    sdf = ligand_io.to_sdf([_record("first\n\nsecond"), _record("b", "CCN")])
+    rows, bad = ligand_io.parse("x.sdf", sdf)
+    assert not bad
+    assert [(r.name, r.smiles) for r in rows] == [("first second", "CCO"), ("b", "CCN")]
