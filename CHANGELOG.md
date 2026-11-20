@@ -17,6 +17,16 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   else "not stated"). `--push OWNER/NAME` (new `hub` extra, huggingface_hub) is a dry run unless `--confirm`, re-checks
   every file against croissant.json and refuses a folder with no stated license; `export hf push FOLDER OWNER/NAME`
   uploads one written earlier.
+- `smeltery al run` (`smeltery.al`, docs/active-learning.md): an active-learning loop. An external `Proposer`
+  (`propose(history, n) -> [SMILES]`, optional `fit`) proposes candidates, smeltery scores them through the funnel as
+  an ordinary campaign job (ceiling, stage reuse and `cancel` all apply — no second execution path), and the scores
+  feed back. `--budget` caps the loop's total predicted CPU-hours; a built-in dependency-free `PoolProposer`
+  (`--pool FILE --seed K`) ships for demos and tests. Each iteration is recorded as one attestation **family
+  `al:<loop>`, arm `iter-NNN`**, so `attest runs compare al:<loop>` ranks the iterations by a shared `al.batch_best`
+  metric (the proposer's learning curve); the loop annotates each finished core record with its arm, the
+  iteration metrics and `ext.smeltery.al` through attestation-schema's own writer, leaving `attestation/digests.json`
+  untouched. A canonical `al-manifest.json` pins every iteration's run dir and core-record sha256, and a stopped loop
+  resumes from it. Canonical-SMILES dedup across iterations. Needs the `attestation` extra to group the records.
 - `smeltery export dataset RUN... -o DIR` (`smeltery.dataset_record`, docs/dataset-export.md): a dataset DIRECTORY
   with an `attestation.dataset/1` record (draft schema) -- the table, its `--split`s, then `attestation/digests.json`
   (whose sha256 is the content digest), then `attestation/dataset.json` naming each source run's core record by the

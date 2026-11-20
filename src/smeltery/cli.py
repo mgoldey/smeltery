@@ -1663,6 +1663,7 @@ VIEWERS = {
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
     "record": "smeltery.core_record",
+    "al": "smeltery.al:al_main",
     "mcp": "smeltery.mcp:main",
     "serve": "smeltery.services:serve_main",
     "worker": "smeltery.services:worker_main",
@@ -1801,6 +1802,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
     sub.add_parser("record", help="write a run's core record (smeltery record core RUN.json; attestation extra)")
+    sub.add_parser("al", help="active-learning loop: propose, score, record each iteration (docs/active-learning.md)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
     # Alias of `smeltery worker --backend temporal` for the tasks queue alone. Defaults are None so that
     # settings.resolve gives flag > SMELTERY_* env var > default (docs/temporal-runs.md).
