@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from bench.conftest import run_id_of
-from smeltery import cli, planning
+from smeltery import cli, planning, run_inputs
 from smeltery.run_inputs import poses_key, stage_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -210,7 +210,9 @@ def test_an_estimation_crash_is_an_issue_not_a_500(client_for, monkeypatch, tmp_
     unreadable = tmp_path / "pocket.pdb"
     unreadable.mkdir()  # a path that exists as a file-like name but cannot be read as a file
     toml = _docking_toml().replace(f'{ROOT}/tests/data/pocket_pep5.pdb"', f'{unreadable}"')
-    monkeypatch.setattr(cli.hashlib, "sha256", lambda *a, **k: (_ for _ in ()).throw(OSError("unreadable input")))
+    monkeypatch.setattr(
+        run_inputs.hashlib, "sha256", lambda *a, **k: (_ for _ in ()).throw(OSError("unreadable input"))
+    )
     got = _post(c, toml, toml)
     assert got["poses_from"] == "none" and any("OSError" in i["message"] for i in got["issues"])
 
