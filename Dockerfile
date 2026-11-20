@@ -23,6 +23,8 @@ FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb
 
 # hatch-vcs derives the version from git tags, and .git is not in the build context; pin one instead.
 ARG SMELTERY_VERSION=0.0.0+docker
+# Extras to install. The compose `temporal` profile's worker builds with "bench,temporal".
+ARG SMELTERY_EXTRAS=bench
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SMELTERY_VERSION} \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -33,7 +35,7 @@ COPY pyproject.toml README.md LICENSE-MIT LICENSE-APACHE ./
 COPY src/ src/
 COPY --from=ui /app/src/smeltery/bench/web/ src/smeltery/bench/web/
 # A non-editable install: the wheel carries the built UI and the prebuilt pipelines (hatch `artifacts`).
-RUN pip install --root-user-action=ignore ".[bench]" && rm -rf /src
+RUN pip install --root-user-action=ignore ".[${SMELTERY_EXTRAS}]" && rm -rf /src
 
 # Non-root. /data is the Bench root and a volume, owned by the app user so a fresh named volume is writable.
 RUN useradd --create-home --uid 10001 bench \

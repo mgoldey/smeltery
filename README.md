@@ -48,6 +48,10 @@ git clone https://github.com/mgoldey/smeltery && cd smeltery
 uv sync --extra dev
 ```
 
+Contributing: `uv run pre-commit install` activates the local gate (ruff format and check, ty, `uv lock --check`
+on every commit; the full pytest suite on `git push`). `uv run pre-commit run --all-files` runs the commit-time hooks
+by hand, and CI runs the same ones in its `pre-commit` job.
+
 **1. Check the install (about 1 s, no SCF).** `--plan` builds the poses and the pocket and
 estimates the cost. It runs no quantum chemistry.
 
@@ -228,8 +232,11 @@ Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 | Use the Bench web app | [docs/bench.md](docs/bench.md) |
 | See who Bench is for and the path each person takes | [docs/user-flows.md](docs/user-flows.md) |
 | Use the Marimo GUI | [docs/gui.md](docs/gui.md) |
+| Export runs as Parquet or Arrow | [docs/dataset-export.md](docs/dataset-export.md) |
 | Plug in structure, docking, scoring or potential providers | [docs/providers.md](docs/providers.md) |
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
+| Submit a run and come back for it (`smeltery submit/status/cancel/result`) | [docs/jobs.md](docs/jobs.md) |
+| Drive a screen from an agent (MCP: `smeltery mcp`) | [docs/mcp.md](docs/mcp.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
 | Fix an error message | [docs/troubleshooting.md](docs/troubleshooting.md) |
@@ -273,13 +280,19 @@ For long work, Temporal is the system of record. smeltery keeps no process table
 store of its own, so a task's status, timings and exit code outlive the worker that ran it. A
 task runs at most once, because an arbitrary shell command isn't safe to re-run
 automatically. A task whose worker died is reported as failed, and resubmitting it is your
-decision. This needs the `temporal` extra and a reachable Temporal server (`--temporal-host`,
-default `127.0.0.1:7233`), for example `docker run temporalio/temporal:latest server start-dev`.
+decision. This needs the `temporal` extra and a reachable Temporal server (`SMELTERY_TEMPORAL_ADDRESS`, default
+`localhost:7233`; the dashboard's `--temporal-host`), for example `docker compose --profile temporal up -d temporal`
+(or `docker run temporalio/temporal:latest server start-dev`).
 
 ```bash
 uv run --extra temporal smeltery task-worker &             # executes submitted tasks
 uv run --extra temporal smeltery dashboard out/ --port 8123 # runs, task status, task submission
 ```
+
+Or configure a deployment by environment: `smeltery serve` is Bench and `smeltery worker` its worker, for
+`SMELTERY_BACKEND=local` (the default: SQLite and subprocesses, no server) or `temporal`. `docker compose --profile
+temporal up --build` starts a Temporal dev server and a worker beside Bench. Every `SMELTERY_*` variable is in the
+[table in docs/temporal-runs.md](docs/temporal-runs.md#environment-variables).
 
 If Temporal is down, the run list still works, and task operations return 503 or raise
 `TemporalUnavailable` rather than quietly falling back. More in

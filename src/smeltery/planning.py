@@ -625,6 +625,7 @@ def run_plan(
     skip_analyses: frozenset[str] = frozenset(),
     pose_index: dict[str, list[int]] | None = None,
     checkpoint=None,
+    stages=None,
 ) -> tuple[RunRecord, dict]:
     """Run the measurement, pair, cut, and build the record (written by `write_outputs`).
 
@@ -639,11 +640,20 @@ def run_plan(
 
     `checkpoint` (`smeltery.checkpoint.ScfCheckpoint`): the measurement tier reuses the SCFs it holds and appends the
     ones it runs (a plain run into OUT; analyses never see it).
+
+    `stages` (`smeltery.reuse.RunStages`): each stage is digested and logged as it completes; the measurement and
+    the analyses are taken from the stage store when an identical earlier run stored them, and stored otherwise.
     """
     _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
+    if stages is not None:
+        stages.run_id = plan.input_digest[:12]
+        stages.plan_built(plan, funnel_counts(plan))
     if measure is None:
         ctx = {"field": plan.field} if checkpoint is None else {"field": plan.field, "checkpoint": checkpoint}
-        _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
+        if stages is None:
+            _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
+        else:  # a reused measurement is never timed: its funnel row says seconds null, not "took 0 s"
+            stages.measure(plan, lambda: _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx)))
     else:
         _stage(plan.tier.name, lambda: measure(plan))
     analogues = [c for c in plan.candidates if c is not plan.parent]
@@ -667,6 +677,8 @@ def run_plan(
             "stages": plan.stage_log,
             "funnel": funnel_counts(plan, res),
         }
+        if stages is not None:
+            stages.cut(plan, results)
     results["candidate_order"] = [c.name for c in plan.candidates]
     if pose_index:  # only after a pairwise drop, so ordinary records keep their shape
         results["pose_index"] = {k: list(v) for k, v in pose_index.items()}
@@ -688,14 +700,19 @@ def run_plan(
         for spec in active_hooks("analysis", plan.cfg):
             if spec.key in skip_analyses:
                 continue
-            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log})
+            _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log}, stages)
     return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
 
 
-def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict) -> None:
-    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`."""
+def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict, stages=None) -> None:
+    """An `analysis` hook runs after the measurement; the dict it returns is merged into `results[spec.key]`.
+    `stages` (`smeltery.reuse.RunStages`): the stored dict of an identical earlier run, when there is one."""
     hook = cast(Analysis, spec.hook)
-    got = _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+
+    def run():
+        return _stage(spec.key, lambda: hook.run(plan, rec, ctx))
+
+    got = run() if stages is None else stages.analysis(spec, plan, rec, run)
     if not isinstance(got, dict):
         raise StageError(
             f"stage {spec.key!r} failed: an analysis returns a dict, got {type(got).__name__}", stage=spec.key

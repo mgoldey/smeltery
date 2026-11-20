@@ -282,12 +282,15 @@ def build_app(
     max_runs: int = 1,
     stop_tasks_on_exit: bool = False,
     read_only: bool = False,
+    task_queue: Any = None,
 ) -> FastAPI:
     """The composition root: local adapters, everything under ROOT/.smeltery/bench/, behind the request guard.
 
     `host` is the address the server binds; it and `allowed_hosts` join the loopback names a request's Host may
     carry. `token`, when set, is required on every request (see `security.py`). `max_runs` is how many launched
-    runs execute at once; the rest wait as queued. `read_only` refuses every POST/PUT/PATCH/DELETE with 403."""
+    runs execute at once; the rest wait as queued. `read_only` refuses every POST/PUT/PATCH/DELETE with 403.
+    `task_queue` replaces the local subprocess queue (`smeltery serve` passes the Temporal one); `max_runs` then
+    does not apply."""
     from .adapters.identity import LocalIdentity
     from .adapters.run_store import FilesystemRunStore
     from .adapters.task_queue import SubprocessTaskQueue
@@ -297,7 +300,9 @@ def build_app(
     local = root / ".smeltery" / "bench"
     return create_app(
         run_store=FilesystemRunStore(root),
-        task_queue=SubprocessTaskQueue(local / "tasks", max_concurrent_runs=max_runs),
+        task_queue=task_queue
+        if task_queue is not None
+        else SubprocessTaskQueue(local / "tasks", max_concurrent_runs=max_runs),
         identity=LocalIdentity(),
         clock=SystemClock(),
         settings=Settings(root=root, studies=tuple(studies), web_dir=web_dir),
@@ -323,7 +328,7 @@ def _redact_token(record: logging.LogRecord) -> bool:
     return True
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, task_queue: Any = None) -> int:
     ap = argparse.ArgumentParser(prog="smeltery bench", description="Serve Bench for the runs under ROOT.")
     ap.add_argument(
         "root",
@@ -440,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
         max_runs=args.max_runs,
         stop_tasks_on_exit=bool(args.stop_tasks_on_exit) or os.environ.get(STOP_TASKS_ENV, "").lower() in _TRUE,
         read_only=bool(args.read_only) or os.environ.get(READ_ONLY_ENV, "").lower() in _TRUE,
+        task_queue=task_queue,
     )
     # uvicorn runs at log_level="warning", so without this line a healthy server prints nothing and looks hung.
     shown = args.host if args.host not in ("0.0.0.0", "::") else "localhost"

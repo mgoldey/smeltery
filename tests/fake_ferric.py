@@ -2,11 +2,13 @@
 
 The same module serves the test process (`install()` puts it in `sys.modules`) and the score child processes the
 runner spawns (run as a script: it installs itself, then calls `smeltery.temporal_run.child_main`), so a plain run and
-a Temporal run compute the same numbers. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
+a Temporal run compute the same numbers. Run as `fake_ferric.py _job STORE JOB_ID` it is a local campaign job's
+runner (`smeltery.jobs.runner_main`) on this engine. Behaviour comes from the JSON file named by `$FAKE_FERRIC`:
 
     {"rules": {"<label>|<leg>": "never" | "needs:<kwarg>" | "false_unless:<kwarg>" | "hang" | "hang_once" | "crash"},
      "dir": "<scratch dir>",
-     "build": {"git_sha": "...", "dirty": false}}   # optional: what `ferric.__build__` reports
+     "build": {"git_sha": "...", "dirty": false},   # optional: what `ferric.__build__` reports
+     "register_recheck": true}                     # optional: a `_job` runner registers the `[recheck]` analysis
 
 "false_unless:<kwarg>" is the false convergence ferric had before 455b8fbad: with no level shift the SCF does not
 converge; with a level shift but without `<kwarg>` it "converges" 0.8 Ha above the true energy; with `<kwarg>` it
@@ -19,6 +21,7 @@ does so only the first time (marked by `<dir>/hung-<label>|<leg>`), and writes `
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import sys
@@ -110,6 +113,50 @@ def _module_getattr(name: str):
     raise AttributeError(name)
 
 
+@dataclasses.dataclass
+class RecheckKnobs:
+    scale: float = 1.0
+
+
+class Recheck:
+    """A test analysis (`[recheck]`) that runs one more SCF per pose in the plan's field, labelled
+    "<candidate> pose <i> recheck", so a rule can hang it after the measurement has finished."""
+
+    def run(self, plan, rec, ctx) -> dict:
+        import ferric
+
+        charges = [c.as_ferric_bohr() for c in plan.field]
+        energies = {}
+        for c in plan.candidates:
+            for i, pose in enumerate(c.poses):
+                mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{c.name} pose {i} recheck"))
+                energies[f"{c.name}/{i}"] = ferric.run_rhf(mol, "sto-3g", point_charges=charges).energy
+        scale = float((plan.cfg.get("recheck") or {}).get("scale", 1.0))
+        return {"scaled_mean": scale * sum(energies.values()) / len(energies), "n": len(energies)}
+
+
+def register_recheck():
+    """Register `[recheck]` (an analysis that re-runs the SCFs); returns the spec, for `unregister`."""
+    from smeltery.methods import MethodSpec, register
+
+    return register(
+        MethodSpec(
+            "recheck",
+            "Recheck (test)",
+            "ab_initio",
+            "measure",
+            step="measure",
+            slot="analysis",
+            section="recheck",
+            knobs=RecheckKnobs,
+            order=151,
+            needs=("dE_int",),
+            hook=Recheck(),
+            summary="A test registration: one more SCF per pose, after the measurement.",
+        )
+    )
+
+
 def install() -> types.ModuleType:
     """Put the fake in `sys.modules` for good: only for a score child process, never in the test process."""
     mod = make()
@@ -119,6 +166,13 @@ def install() -> types.ModuleType:
 
 if __name__ == "__main__":
     install()
+    if sys.argv[1:2] == ["_job"]:  # a campaign job's runner (smeltery.jobs), its SCFs on this fake
+        from smeltery.jobs import runner_main
+
+        if _cfg().get("register_recheck"):  # the `[recheck]` test analysis, for tests/test_stage_reuse.py
+            register_recheck()
+
+        sys.exit(runner_main(sys.argv[2:]))
     from smeltery.temporal_run import child_main
 
     sys.exit(child_main(sys.argv[1:]))

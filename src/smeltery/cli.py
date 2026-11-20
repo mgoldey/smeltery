@@ -135,8 +135,8 @@ Exit codes: 0 done (including UNRANKED), 2 bad config, 3 a stage failed, 4 UNRAN
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -206,7 +206,9 @@ from .planning import (  # noqa: F401 -- moved to `smeltery.planning`; re-export
     run_plan,
 )
 from .record import RunRecord, dump_record, stamp_record, write_text_atomic  # noqa: F401 -- RunRecord: re-exported
-from .run_inputs import pose_sections, staged_sha256, write_staged
+from .run_inputs import check_out_guard as _guard_out  # the staging of `--out`, `smeltery.run_inputs`
+from .run_inputs import pose_sections
+from .run_inputs import stage_config as _stage_config
 from .run_outputs import (  # noqa: F401 -- moved to `smeltery.run_outputs`; re-exported, the same objects
     POSES_DIR,
     _analysis_calcs,
@@ -225,7 +227,6 @@ from .run_outputs import (  # noqa: F401 -- moved to `smeltery.run_outputs`; re-
     write_pose_sdfs,
 )
 from .run_view import QUANTITY  # noqa: F401 -- re-exported: the measured quantity
-from .temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE, PIPELINE_QUEUE, TASKS_QUEUE
 
 
 def __getattr__(name: str):
@@ -373,41 +374,23 @@ VIEWERS = {
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
     "bench": "smeltery.bench.app",
+    "target": "smeltery.target_file",
     "verify-run": "smeltery.run_tools:verify_run",
     "inspect": "smeltery.run_tools:inspect_run",
     "diff-run": "smeltery.run_tools:diff_run",
     "export-sdf": "smeltery.sdf_export",
+    "export": "smeltery.dataset_export",
     "backup": "smeltery.backup:backup_main",
     "restore": "smeltery.backup:restore_main",
+    "record": "smeltery.core_record",
+    "mcp": "smeltery.mcp:main",
+    "serve": "smeltery.services:serve_main",
+    "worker": "smeltery.services:worker_main",
+    "submit": "smeltery.jobs:submit_main",
+    "status": "smeltery.jobs:status_main",
+    "cancel": "smeltery.jobs:cancel_main",
+    "result": "smeltery.jobs:result_main",
 }
-
-
-def _stage_config(config: Path, out_dir: Path, temporal: bool = False) -> tuple[Path, dict]:
-    """Write OUT/config.toml with every input file copied under OUT/inputs/, and return its path and the record's
-    `results.config` entry; the run then reads only from OUT. Refused (ConfigError) while a Temporal run is live in
-    OUT, unless this is `--temporal` with the same staged config (it attaches)."""
-    config = Path(config)
-    try:
-        text = config.read_text()
-    except OSError as e:
-        raise ConfigError(f"cannot read {config}: {e}") from e
-    try:
-        tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        raise ConfigError(f"cannot read {config}: {e}") from e
-    out_dir = Path(out_dir)
-    # the guard first: nothing is written into an OUT whose Temporal run is live
-    _guard_out(out_dir, lambda: staged_sha256(text, config.resolve().parent), temporal)
-    dest, staged, inputs = write_staged(text, config.resolve().parent, out_dir)
-    return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
-
-
-def _guard_out(out_dir: Path, staged_sha, temporal: bool = False) -> None:
-    from .temporal_run import guard_out
-
-    why = guard_out(Path(out_dir), staged_sha, temporal)
-    if why:
-        raise OutGuardRefused(why)
 
 
 def _open_checkpoint(plan: Plan, out_dir: Path, config_sha256: str, force: bool):
@@ -465,17 +448,33 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
+    sub.add_parser("serve", help="Bench, configured by SMELTERY_* env vars (smeltery serve --help)")
+    sub.add_parser("mcp", help="serve the screening tools to an MCP client over stdio (docs/mcp.md; `mcp` extra)")
+    sub.add_parser("worker", help="the worker for SMELTERY_BACKEND=local|temporal (smeltery worker --help)")
+    sub.add_parser("submit", help="submit `run CONFIG --out RUN_DIR` as a campaign job, return at once (docs/jobs.md)")
+    sub.add_parser("status", help="a campaign job's state (smeltery status RUN_DIR)")
+    sub.add_parser("cancel", help="cancel a campaign job (smeltery cancel RUN_DIR); idempotent")
+    sub.add_parser("result", help="a finished campaign job's core record (smeltery result RUN_DIR)")
+    sub.add_parser("target", help="check a target definition .toml (smeltery target check FILE; docs/targets.md)")
     sub.add_parser("verify-run", help="check a run record's self-hash and file hashes (accidental edits only)")
     sub.add_parser("inspect", help="plain-text summary of a run record")
     sub.add_parser("export-sdf", help="poses + ddE, tie group, gates, decisions as one SDF (smeltery export-sdf OUT)")
+    sub.add_parser(
+        "export", help="runs as one Parquet or Arrow file (smeltery export parquet RUN... -o F; dataset extra)"
+    )
     sub.add_parser("diff-run", help="compare two runs' inputs and tiers")
     sub.add_parser("backup", help="archive a Bench workspace with a hash manifest (smeltery backup ROOT --out F)")
     sub.add_parser("restore", help="restore a backup into an empty directory (smeltery restore F --into DIR)")
+    sub.add_parser("record", help="write a run's core record (smeltery record core RUN.json; attestation extra)")
     tw = sub.add_parser("task-worker", help="run a Temporal worker for smeltery tasks")
-    tw.add_argument("--host", default=DEFAULT_HOST)
-    tw.add_argument("--namespace", default=DEFAULT_NAMESPACE)
-    tw.add_argument("--task-queue", default=TASKS_QUEUE)
-    tw.add_argument("--concurrency", type=int, default=2, help="max concurrent activities")
+    # Alias of `smeltery worker --backend temporal` for the tasks queue alone. Defaults are None so that
+    # settings.resolve gives flag > SMELTERY_* env var > default (docs/temporal-runs.md).
+    tw.add_argument("--host", default=None, help="Temporal server (env SMELTERY_TEMPORAL_ADDRESS)")
+    tw.add_argument("--namespace", default=None, help="env SMELTERY_TEMPORAL_NAMESPACE")
+    tw.add_argument("--task-queue", default=None, help="env SMELTERY_TASK_QUEUE")
+    tw.add_argument(
+        "--concurrency", type=int, default=None, help="max concurrent activities (SMELTERY_TASK_CONCURRENCY)"
+    )
     run = sub.add_parser("run", help="run a campaign config")
     run.add_argument("config", type=Path)
     run.add_argument(
@@ -500,26 +499,65 @@ def main(argv: list[str] | None = None) -> int:
         help="run into an OUT that already holds a run record; also discards an interrupted run's SCF checkpoint "
         "(OUT/calcs.partial.jsonl), which a rerun without --force resumes from",
     )
+    run.add_argument(
+        "--stage-cache",
+        dest="stage_cache",
+        type=Path,
+        default=None,
+        help="a stage store (smeltery.reuse): reuse the stages an identical earlier run completed, store this run's; "
+        "with --out only (env SMELTERY_STAGE_CACHE)",
+    )
+    run.add_argument(
+        "--run-id",
+        dest="run_id",
+        default=None,
+        help="the core record's run_id (default: the input digest's first 12 hex); a campaign job passes its own",
+    )
     run.add_argument("--combine", action="store_true", help="combine partial results into the full record")
     run.add_argument(
         "--temporal",
         action="store_true",
         help="run as a durable Temporal workflow (needs --out, a server and `smeltery temporal-worker`)",
     )
-    run.add_argument("--workers", type=int, default=2, help="with --temporal: scores run at once")
-    run.add_argument("--host", default=DEFAULT_HOST, help="with --temporal: the Temporal server")
-    run.add_argument("--task-queue", dest="task_queue", default=PIPELINE_QUEUE, help="with --temporal")
+    run.add_argument("--workers", type=int, default=None, help="with --temporal: scores run at once (SMELTERY_WORKERS)")
+    run.add_argument("--host", default=None, help="with --temporal: the Temporal server (SMELTERY_TEMPORAL_ADDRESS)")
+    run.add_argument("--task-queue", dest="task_queue", default=None, help="with --temporal (SMELTERY_PIPELINE_QUEUE)")
+    run.add_argument("--namespace", default=None, help="with --temporal (SMELTERY_TEMPORAL_NAMESPACE)")
     me = sub.add_parser("methods", help="every method's config section, knobs and defaults, as TOML")
     me.add_argument("--out", help="write one <key>.toml per method plus index.toml into this directory")
     me.add_argument("--only", help="one method key, e.g. field_interaction")
     pw = sub.add_parser("temporal-worker", help="run a Temporal worker for `smeltery run --temporal`")
-    pw.add_argument("--workers", type=int, default=2, help="SCFs at once, one child process each (memory-bound)")
     pw.add_argument(
-        "--threads-per-worker", dest="threads_per_worker", type=int, default=1, help="RAYON_NUM_THREADS per SCF"
+        "--workers", type=int, default=None, help="SCFs at once, one child process each (memory-bound; default 2)"
     )
-    pw.add_argument("--host", default=DEFAULT_HOST)
-    pw.add_argument("--task-queue", dest="task_queue", default=PIPELINE_QUEUE)
+    pw.add_argument(
+        "--threads-per-worker", dest="threads_per_worker", type=int, default=None, help="RAYON_NUM_THREADS per SCF"
+    )
+    pw.add_argument("--host", default=None, help="Temporal server (env SMELTERY_TEMPORAL_ADDRESS)")
+    pw.add_argument("--namespace", default=None, help="env SMELTERY_TEMPORAL_NAMESPACE")
+    pw.add_argument("--task-queue", dest="task_queue", default=None, help="env SMELTERY_PIPELINE_QUEUE")
     args = ap.parse_args(argv)
+    temporal_settings = None
+    if args.command in ("task-worker", "temporal-worker") or (args.command == "run" and args.temporal):
+        from .settings import SettingsError, resolve
+
+        # one resolution for the Temporal flags of all three commands: flag > SMELTERY_* env var > default. The
+        # `--task-queue` flag means the tasks queue for task-worker and the pipeline queue for the other two.
+        is_tasks = args.command == "task-worker"
+        try:
+            temporal_settings = resolve(
+                os.environ,
+                temporal_address=args.host,
+                namespace=args.namespace,
+                task_queue=args.task_queue if is_tasks else None,
+                pipeline_queue=None if is_tasks else args.task_queue,
+                workers=getattr(args, "workers", None),
+                threads_per_worker=getattr(args, "threads_per_worker", None),
+                task_concurrency=getattr(args, "concurrency", None),
+            )
+        except SettingsError as e:
+            print(f"config error: {e}", file=sys.stderr)
+            return 2
     if getattr(args, "command", None) == "golden":
         from smeltery.golden import main as _golden_main
 
@@ -544,12 +582,19 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "command", None) == "task-worker":
         from smeltery.tasks import worker_cli as task_worker_cli
 
-        return task_worker_cli(args.host, args.namespace, args.task_queue, args.concurrency)
+        ts = temporal_settings
+        assert ts is not None
+        return task_worker_cli(ts.temporal_address, ts.namespace, ts.task_queue, ts.task_concurrency)
     if args.command == "temporal-worker":
         from .temporal_run import worker_cli
 
-        return worker_cli(args.host, args.task_queue, args.workers, args.threads_per_worker)
+        ts = temporal_settings
+        assert ts is not None
+        return worker_cli(ts.temporal_address, ts.pipeline_queue, ts.workers, ts.threads_per_worker, ts.namespace)
     explicit_out = args.out is not None
+    from .core_record import emit_core_record, utc_now
+
+    started_at = utc_now()  # the core record's started_at (a whole run); None without the `attestation` extra
     if args.temporal and (not explicit_out or args.only_candidate is not None or args.combine):
         print(
             "config error: --temporal needs --out OUT, and runs the whole config (no --only-candidate/--combine)",
@@ -574,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
         elif explicit_out:  # a combine writes its record into OUT
             _guard_out(args.out, None)
         cfg = load_config(args.config)
+        given = tomllib.loads(Path(args.config).read_text())  # verbatim: load_config adds `_dir`, a machine path
         # --plan runs no SCF, so planning one candidate of such a config is fine
         if (args.only_candidate is not None and not args.plan) or args.combine:
             from .temporal_run import remeasuring_analyses
@@ -587,7 +633,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.temporal and not args.plan:
             from .temporal_run import run_cli
 
-            return run_cli(args.config, args.out, args.workers, args.host, args.task_queue, config_info)
+            ts = temporal_settings
+            assert ts is not None
+            return run_cli(
+                args.config,
+                args.out,
+                ts.workers,
+                ts.temporal_address,
+                ts.pipeline_queue,
+                config_info,
+                namespace=ts.namespace,
+                run_id=args.run_id,
+            )
         if args.only_candidate is not None:
             if args.only_candidate not in cfg["candidates"]:
                 print(f"config error: unknown candidate {args.only_candidate!r}", file=sys.stderr)
@@ -675,8 +732,12 @@ def main(argv: list[str] | None = None) -> int:
                 rec.results["config"] = partial_configs[0]
             merged = merged_partial_calcs(out_dir, partials)
             path = _stage("outputs", lambda: write_outputs(plan, rec, args.out, calc_rows=merged))
+            # a combine's start is its partials' starts: not one instant
+            core = emit_core_record(path, None, run_id=args.run_id)
             print(format_table(plan, out))
             print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+            if core is not None:
+                print(f"core record: {core}")
             return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
         plan = build_plan(cfg, out_dir=args.out)
         if args.plan:
@@ -685,17 +746,32 @@ def main(argv: list[str] | None = None) -> int:
             if explicit_out:
                 write_plan_preview(plan, digest, args.out, args.config)
             return 0
-        checkpoint = None
+        checkpoint = stages = None
         if config_info is not None:  # a run into an explicit OUT checkpoints its SCFs there (smeltery.checkpoint)
+            from .reuse import RunStages, store_for
+
             checkpoint = _open_checkpoint(plan, args.out, config_info["sha256"], args.force)
-        rec, out = run_plan(plan, checkpoint=checkpoint)
+            # every completed stage is logged in OUT; with a stage store, reused or stored (smeltery.reuse)
+            stages = RunStages(args.out, store_for(args.stage_cache))
+            if stages.why_not:
+                print(f"stage reuse off: {stages.why_not}")
+        rec, out = run_plan(plan, checkpoint=checkpoint, stages=stages)
         if config_info is not None:
             rec.results["config"] = config_info
+        reuse = stages.summary() if stages is not None else None
+        if reuse is not None:
+            rec.results["reuse"] = reuse
+            print(f"stages reused: {reuse['reused']} of {reuse['reusable']} reusable")
         path = _stage("outputs", lambda: write_outputs(plan, rec, args.out))
         if checkpoint is not None:  # the record is written: a finished OUT holds today's outputs only
             from .checkpoint import discard
+            from .reuse import discard_progress
 
             discard(args.out)
+            discard_progress(args.out)
+        # last: the manifest covers what the run left in OUT. Without --out nothing was staged, so the config the run
+        # read is handed over as it read it (with --out, write_core reads OUT/config.toml by its recorded digest)
+        core = emit_core_record(path, started_at, run_id=args.run_id, config=None if config_info is not None else given)
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         if explicit_out and args.plan and not isinstance(e, OutGuardRefused):
@@ -722,6 +798,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     print(format_table(plan, out))
     print(f"\nrun record: {path}\ninput_digest {rec.input_digest}")
+    if core is not None:
+        print(f"core record: {core}")
     return 4 if args.fail_on_unranked and out["cut"].unranked_at_boundary else 0
 
 

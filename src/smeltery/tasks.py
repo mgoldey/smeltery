@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE, DOCKER_COMMAND
+from .temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE
 from .temporal_defaults import TASKS_QUEUE as TASK_QUEUE
 
 WORKFLOW_TYPE = "ShellTaskWorkflow"
@@ -215,32 +215,21 @@ def worker_cli(
     task_queue: str = TASK_QUEUE,
     concurrency: int = 2,
 ) -> int:
-    """`smeltery task-worker`: run the shell-task worker until Ctrl+C (0); 2 when temporalio is missing or the server
-    cannot be reached (said on stderr, with how to start one), as `smeltery temporal-worker` does."""
+    """`smeltery task-worker`: run the shell-task worker (`run_task_worker`) until Ctrl+C (0); 2 when temporalio is
+    missing or the server cannot be reached (said on stderr, with how to start one), as `smeltery temporal-worker`
+    does."""
     if not TEMPORAL_AVAILABLE:
         print("temporalio is not installed", file=sys.stderr)
         return 2
-    from temporalio.client import Client
-    from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+    from .temporal_run import connect, server_down_message
 
     async def main() -> int:
         try:
-            client = await Client.connect(host, namespace=namespace)
-        except Exception as e:  # noqa: BLE001
-            print(
-                f"cannot reach the Temporal server at {host}: {e}\nstart one with:\n  {DOCKER_COMMAND}", file=sys.stderr
-            )
+            client = await connect(host, namespace)
+        except Exception as e:  # noqa: BLE001 - any connect failure is "the server is down", reported, exit 2
+            print(server_down_message(host, e), file=sys.stderr)
             return 2
-        async with Worker(
-            client,
-            task_queue=task_queue,
-            workflows=worker_workflows(),
-            activities=worker_activities(),
-            workflow_runner=UnsandboxedWorkflowRunner(),
-            max_concurrent_activities=concurrency,
-        ):
-            print(f"smeltery task worker up on {task_queue} (Ctrl+C stops)", flush=True)
-            await asyncio.Future()
+        await run_task_worker(client, task_queue, concurrency)
         return 0
 
     try:
@@ -259,6 +248,23 @@ async def _settle_returncode(task: Task, handle) -> None:
             pass
         if task.returncode is not None and task.returncode != 0:
             task.status = "failed"
+
+
+async def run_task_worker(client, task_queue: str = TASK_QUEUE, concurrency: int = 2, stop=None) -> None:
+    """A worker for Bench's shell tasks (`smeltery task-worker`, and half of `smeltery worker`): runs until `stop`
+    (an asyncio.Event) is set, or forever when it is None."""
+    from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+
+    async with Worker(
+        client,
+        task_queue=task_queue,
+        workflows=worker_workflows(),
+        activities=worker_activities(),
+        workflow_runner=UnsandboxedWorkflowRunner(),
+        max_concurrent_activities=concurrency,
+    ):
+        print(f"smeltery task worker up on {task_queue} (Ctrl+C stops)", flush=True)
+        await (stop.wait() if stop is not None else asyncio.Future())
 
 
 # ---------- client manager ----------

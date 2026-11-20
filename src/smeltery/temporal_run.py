@@ -66,7 +66,7 @@ from .calc_log import (  # noqa: F401 -- the SCF log lives in `smeltery.calc_log
     read_rows,
 )
 from .record import file_sha256, utc_now, write_text_atomic
-from .temporal_defaults import DEFAULT_HOST, DOCKER_COMMAND
+from .temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE, DOCKER_COMMAND
 from .temporal_defaults import PIPELINE_QUEUE as TASK_QUEUE
 
 try:
@@ -101,6 +101,7 @@ def server_down_message(host: str, err: object) -> str:
     return (
         f"cannot reach the Temporal server at {host}: {err}\n"
         f"start one with:\n  {DOCKER_COMMAND}\n"
+        "or the compose profile: docker compose --profile temporal up -d temporal\n"
         "(--temporal never falls back to an in-process run)"
     )
 
@@ -134,6 +135,8 @@ class RunInput:
     heartbeat_s: float = 180.0
     #: sha256 of the staged config: every activity refuses a changed file.
     config_sha: str = ""
+    #: The core record's run_id (a campaign job's, `smeltery.jobs`); None: smeltery's own, the input digest's head.
+    run_id: str | None = None
 
 
 @dataclass
@@ -518,6 +521,7 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     import numpy as np
 
     from .config import StageError, allow_mixed_builds, load_config
+    from .core_record import emit_core_record
     from .planning import build_plan, run_plan
     from .run_outputs import write_outputs
     from .tiers import interaction_kcal
@@ -648,6 +652,8 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     _stamp_runner(rec, rows, builds)
     path = write_outputs(plan, rec, out, calc_rows=rows)  # calcs.jsonl rewritten atomically, duplicates removed
     clear_marker(out, inp.config_sha)
+    # a durable run spans workers and resumes: no one start instant is recorded
+    emit_core_record(path, None, run_id=inp.run_id)
     n_scfs = sum(1 for r in rows if "outcome" not in r)
     return RunSummary(str(path), rec.input_digest, n_scfs, n_resumed, len(dropped), n_dup, torn, dropped)
 
@@ -898,7 +904,7 @@ def workflow_id(out: str | Path, config_text: str) -> str:
     return "smeltery-run-" + h.hexdigest()[:20]
 
 
-async def connect(host: str, namespace: str = "default"):
+async def connect(host: str, namespace: str = DEFAULT_NAMESPACE):
     from temporalio.client import Client
 
     return await Client.connect(host, namespace=namespace)
@@ -1066,6 +1072,8 @@ def run_cli(
     task_queue: str,
     config_info: dict | None,
     poll_s: float = 10.0,
+    namespace: str = DEFAULT_NAMESPACE,
+    run_id: str | None = None,
 ) -> int:
     """`smeltery run --temporal`: 0 done, 2 the server is down (never a silent fallback), 3 the run failed."""
     if not TEMPORAL_AVAILABLE:
@@ -1076,7 +1084,7 @@ def run_cli(
 
     async def main() -> int:
         try:
-            client = await connect(host)
+            client = await connect(host, namespace)
         except Exception as e:
             print(server_down_message(host, e), file=sys.stderr)
             return 2
@@ -1086,6 +1094,7 @@ def run_cli(
             workers,
             config_info,
             config_sha=sha256_file(config),
+            run_id=run_id,
         )
         try:
             s = await start_and_wait(client, inp, task_queue, poll_s)
@@ -1110,7 +1119,9 @@ def run_cli(
     return asyncio.run(main())
 
 
-def worker_cli(host: str, task_queue: str, workers: int, threads_per_worker: int = 1) -> int:
+def worker_cli(
+    host: str, task_queue: str, workers: int, threads_per_worker: int = 1, namespace: str = DEFAULT_NAMESPACE
+) -> int:
     """`smeltery temporal-worker`: 2 when the server is down."""
     if not TEMPORAL_AVAILABLE:
         print("temporalio is not installed", file=sys.stderr)
@@ -1118,7 +1129,7 @@ def worker_cli(host: str, task_queue: str, workers: int, threads_per_worker: int
 
     async def main() -> int:
         try:
-            client = await connect(host)
+            client = await connect(host, namespace)
         except Exception as e:
             print(server_down_message(host, e), file=sys.stderr)
             return 2

@@ -14,6 +14,7 @@ import tomllib
 from pathlib import Path
 
 from smeltery import config_text
+from smeltery.config import ConfigError, OutGuardRefused
 from smeltery.methods import registry
 from smeltery.record import file_sha256
 
@@ -114,6 +115,37 @@ def write_staged(text: str, config_dir: Path, out_dir: Path) -> tuple[Path, str,
     if not dest.is_file() or dest.read_text() != staged:
         dest.write_text(staged)
     return dest, staged, inputs
+
+
+def check_out_guard(out_dir: Path, staged_sha, temporal: bool = False) -> None:
+    """Raise OutGuardRefused while a Temporal run is live in OUT (`smeltery.temporal_run.guard_out`); `--temporal`
+    with the same staged config (`staged_sha`: its sha256, or a callable computing it) attaches instead."""
+    from .temporal_run import guard_out
+
+    why = guard_out(Path(out_dir), staged_sha, temporal)
+    if why:
+        raise OutGuardRefused(why)
+
+
+def stage_config(config: Path, out_dir: Path, temporal: bool = False) -> tuple[Path, dict]:
+    """Write OUT/config.toml with every input file copied under OUT/inputs/, and return its path and the record's
+    `results.config` entry; the run then reads only from OUT. Refused (ConfigError) while a Temporal run is live in
+    OUT, unless this is `--temporal` with the same staged config (it attaches). `smeltery run --out` and a campaign
+    job's submit (`smeltery.jobs`) stage this way."""
+    config = Path(config)
+    try:
+        text = config.read_text()
+    except OSError as e:
+        raise ConfigError(f"cannot read {config}: {e}") from e
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"cannot read {config}: {e}") from e
+    out_dir = Path(out_dir)
+    # the guard first: nothing is written into an OUT whose Temporal run is live
+    check_out_guard(out_dir, lambda: staged_sha256(text, config.resolve().parent), temporal)
+    dest, staged, inputs = write_staged(text, config.resolve().parent, out_dir)
+    return dest, {"file": "config.toml", "sha256": hashlib.sha256(staged.encode()).hexdigest(), "inputs": inputs}
 
 
 # ---------------------------------------------------------------- which edits move the poses

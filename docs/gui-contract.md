@@ -8,6 +8,9 @@ changing a field here means changing every side.
 
 Unchanged: `OUT/run-<digest12>.json` (the `RunRecord`); `OUT/structure/` when `[structure]` is used.
 
+With the `attestation` extra a finished run also writes the core run record, `OUT/attestation/` and `OUT/steps/`
+([core-record.md](core-record.md)). Nothing on this page reads them, and nothing on this page moves for them.
+
 Added under `record.results`. None of these feed `input_digest`, which hashes inputs and tiers only.
 
 | Key | Shape | Meaning |

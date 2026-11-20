@@ -28,21 +28,56 @@ env:
   RUFF_VERSION: "0.16.10"
 
 jobs:
+  # The local gate (.pre-commit-config.yaml) run as-is, so what a contributor's hooks check and what CI checks cannot
+  # drift. Hooks only (the default stage): the pytest hook is pre-push and is the `test` job below.
+  pre-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # uv sync builds the project; hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # The ty hook resolves imports against .venv, like the `ty` job.
+      - name: Install (what the hooks and ty resolve against)
+        run: uv sync --extra dev --extra bench --extra rdkit --no-sources
+      - name: pre-commit run --all-files
+        run: uv run --no-sync pre-commit run --all-files
+
+  # Python 3.11 and 3.12: the classifiers claim both. fail-fast is off so a 3.12-only failure does not hide the 3.11
+  # result. The two legs run in parallel, so wall time stays that of one leg (~30 min); the cost is doubled runner
+  # minutes.
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # hatch-vcs derives the version from tags
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      # `dataset` (pyarrow): without it every Parquet/Arrow test in tests/test_dataset_*.py skipped here. The dataset
+      # DIRECTORY tests (tests/test_dataset_record.py) also need attestation-schema with attestation.dataset/1
+      # (>= smeltery.dataset_record.REQUIRED_SCHEMA); they skip until the `attestation` extra's floor reaches that
+      # release, and from then on a test there fails instead of letting them skip.
       - name: Install (ferric from PyPI)
-        run: uv sync --extra dev --extra posebusters --extra experiments --extra bench --no-sources
+        run: uv sync --extra dev --extra posebusters --extra experiments --extra bench --extra attestation --extra dataset --no-sources
+      # attestation-schema 0.1.0 comes from PyPI through the `attestation` extra above, so the core run record tests
+      # run on 3.11 too; fail loudly if it did not install rather than letting tests/test_core_record.py skip.
+      - name: Check attestation-schema is installed
+        run: uv run --no-sync python -c "from smeltery import core_record as c; assert c.AVAILABLE, c.NOT_INSTALLED"
       # The danuglipron-halogen prebuilt reads a .pdb pocket, so planning it needs pdb2pqr30 to assign the
       # charges. 3.8.0 is the version the committed records were made with, which the digest guards expect.
       - name: Install pdb2pqr30 (a .pdb pocket's charges come from it)

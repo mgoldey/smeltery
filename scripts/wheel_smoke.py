@@ -35,7 +35,12 @@ EXTRA_CHECKS: dict[str, list[str]] = {
     "gemmi": ["import gemmi"],
     "rdkit": ["import rdkit"],
     "pocket-charges": ["import openmm"],
-    "temporal": ["import temporalio", "from temporalio import activity, workflow"],
+    "temporal": [
+        "import temporalio",
+        "from temporalio import activity, workflow",
+        "from smeltery.settings import resolve; assert resolve({'SMELTERY_BACKEND': 'temporal'}).backend == 'temporal'",
+        "from smeltery.services import serve_main, worker_main",
+    ],
     # pdbfixer repairs an unprepped crystal pocket (missing side-chain heavy atoms, a missing chain
     # terminal, absent hydrogens) before the force field types it; openmm.app.Modeller cannot add
     # missing HEAVY atoms, which is why the extra exists. Used by scripts/plb_pocket_charges.py --prep.
@@ -46,6 +51,95 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "from smeltery.docking import VinaProvider, Docking, Box",
     ],
     "experiments": ["import psutil, scipy"],
+    # Write a Parquet file from a run the wheel itself ships and read its metadata back; an Arrow IPC file too.
+    "dataset": [
+        "import pyarrow, pyarrow.parquet",
+        "import tempfile, pyarrow.parquet as pq; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; "
+        "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "n = write_dataset([str(run)], d + '/o.parquet'); "
+        "t = pq.read_table(d + '/o.parquet'); assert t.num_rows == n > 0, n; "
+        "assert t.schema.metadata[b'smeltery.schema_version'] == b'3'; "
+        "write_dataset([str(run)], d + '/o.arrow', 'arrow')",
+        # A dataset DIRECTORY also needs attestation-schema (the `attestation` extra), absent here: the module imports
+        # and every entry point refuses naming the release it needs, rather than failing on an import.
+        "import tempfile; from importlib import resources; from smeltery import dataset_record as r; "
+        "assert not r.AVAILABLE; run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "assert r.main([str(run), '-o', tempfile.mkdtemp() + '/ds']) == 2",
+        # A Hugging Face folder (card + croissant.json) needs only pyarrow: no huggingface_hub, no datasets, no network.
+        "import json, sys, tempfile; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; from smeltery import hub_export as h; "
+        "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "write_dataset([str(run)], d + '/o.parquet'); out = h.export_hf(d + '/o.parquet', d + '/hf'); "
+        "assert h.verify_folder(out) == [] and 'huggingface_hub' not in sys.modules; "
+        "doc = json.loads((out / 'croissant.json').read_text()); assert 'license' not in doc; "
+        "assert doc['recordSet'][0]['field'][0]['name'] == 'run_id' and (out / 'README.md').is_file()",
+    ],
+    # A scaffold split and a target split of an exported table, loaded back through ExportDataset as tensors.
+    "torch": [
+        "import torch, pyarrow",
+        "import tempfile, torch; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; "
+        "from smeltery.dataset_splits import make_split, write_split; "
+        "from smeltery.dataset_torch import ExportDataset; "
+        "pre = resources.files('smeltery.prebuilt'); d = tempfile.mkdtemp(); "
+        "runs = [str(pre.joinpath(n).joinpath('run')) for n in ('benzoic-rhf', 'structure')]; "
+        "write_dataset(runs, d + '/o.parquet'); "
+        "write_split(make_split(d + '/o.parquet', 'target', fractions={'train': 0.5, 'test': 0.5}), d + '/s.json'); "
+        "ds = ExportDataset(d + '/o.parquet', features=['score_n'], target='score', split=d + '/s.json', "
+        "partition='train'); x, y = ds[0]; assert isinstance(x, torch.Tensor) and len(ds) > 0",
+    ],
+    # `smeltery export hf --push`: the client imports, and a push of a folder written from a run the wheel ships is
+    # planned (a dry run: no token, no network); the folder is re-checked against croissant.json first.
+    "hub": [
+        "import huggingface_hub, pyarrow; from huggingface_hub import HfApi",
+        "import tempfile; from importlib import resources; "
+        "from smeltery.dataset_export import write_dataset; from smeltery import hub_export as h; "
+        "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "write_dataset([str(run)], d + '/o.parquet'); "
+        "assert h.main([d + '/o.parquet', '-o', d + '/hf', '--license', 'CC0-1.0', '--push', 'owner/name']) == 0; "
+        "plan = h.plan_push(d + '/hf', 'owner/name'); assert plan.url.endswith('/datasets/owner/name'), plan",
+    ],
+    # Convert a run the wheel ships into its core record and read it back with attestation-schema's own reader. The
+    # schema supports Python >= 3.11 (smeltery's floor), so the extra is never empty: this runs on CI's 3.11 too. The
+    # docking run is the one with a seed list and NaN (unranked cut) values, so it exercises the wire forms.
+    "attestation": [
+        "import sys; from smeltery import core_record as c; assert c.AVAILABLE, sys.version_info",
+        "import pathlib, shutil, tempfile; from importlib import resources; from smeltery import core_record as c; "
+        "import attestation_schema as a; r = resources.files('smeltery.prebuilt'); "
+        "runs = {n: pathlib.Path(tempfile.mkdtemp()) / n for n in ('benzoic-rhf', 'docking')}; "
+        "[shutil.copytree(str(r.joinpath(n).joinpath('run')), d) for n, d in runs.items()]; "
+        "assert [c.main(['core', str(d)]) for d in runs.values()] == [0, 0]; "
+        "rec = a.read(runs['benzoic-rhf']); assert rec.family == 'mwe-benzoic-cli', rec.family; "
+        "assert rec.history is None and a.read_history(runs['benzoic-rhf'], rec) is None, rec.history; "
+        "assert {m.unit for m in rec.metrics if m.name == 'paired_ddE.mean'} == {'kcal/mol'}; "
+        "assert rec.config['campaign'] == rec.family and 'candidates' in rec.ext['smeltery']['inputs'], rec.config; "
+        "dock = a.read(runs['docking']); assert dock.seeds['docking'] == [7], dock.seeds; "
+        "assert a.dumps(dock) == (runs['docking'] / 'attestation' / 'run.json').read_bytes()",
+        # Campaign jobs (smeltery.jobs) need this extra: the local backend is a JobBackend and opens its queue, and
+        # job state is attestation-schema's own (`attestation_schema.state`, attestation 9fb7eed), not a copy.
+        "import tempfile, attestation_schema as a; from attestation_schema import state; from smeltery import jobs; "
+        "assert jobs.AVAILABLE and jobs.read_state is state.read_state and jobs.transition is state.transition; "
+        "assert isinstance(jobs.LocalJobBackend(tempfile.mkdtemp()), a.JobBackend)",
+        # Dataset directories (smeltery.dataset_record) are available exactly when the installed schema has
+        # attestation.dataset/1 (REQUIRED_SCHEMA, 0.2.0); 0.1.0, the extra's current floor, does not.
+        "from importlib import metadata; from smeltery import dataset_record as r; "
+        "have = tuple(int(x) for x in metadata.version('attestation-schema').split('.')[:2]); "
+        "need = tuple(int(x) for x in r.REQUIRED_SCHEMA.split('.')[:2]); "
+        "assert r.AVAILABLE == (have >= need), (have, r.not_installed())",
+    ],
+    # The MCP surface: the SDK imports, the server builds with its four tools, and the target-class table the
+    # tool descriptions are generated from loads out of the installed package data (not the checkout).
+    "mcp": [
+        "import mcp; from mcp.server.mcpserver import MCPServer",
+        "import asyncio; from smeltery.mcp.server import build_server, ToolContext; "
+        "from smeltery.settings import resolve; "
+        "s = build_server(ToolContext(resolve({}))); "
+        "names = sorted(t.name for t in asyncio.run(s.list_tools())); "
+        "assert names == ['estimate_cost', 'explain_drop', 'run_status', 'screen_candidates'], names",
+        "from smeltery.mcp import targets; "
+        "assert targets.default_name() in targets.names() and len(targets.names()) >= 2, targets.names()",
+    ],
     "ml-potential": [
         "import openmm, openmmml, torch, torchani",
         "from smeltery.providers.openmm_ml import OpenMMMLAni2x",

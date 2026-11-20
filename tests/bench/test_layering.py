@@ -28,8 +28,9 @@ def test_no_sqlite_or_temporal_outside_the_adapters():
     bad = []
     for p in root.rglob("*.py"):
         # tasks.py and temporal_run.py are the CLI's own Temporal adapters (shell tasks; pipeline runs);
-        # backup.py is the CLI's sqlite snapshot for `smeltery backup`
-        if "bench/adapters" in p.as_posix() or p.name in ("tasks.py", "temporal_run.py", "backup.py"):
+        # backup.py is the CLI's sqlite snapshot for `smeltery backup`; jobs.py is the CLI's campaign-job backends
+        # (`smeltery submit`: its job table in sqlite, and the Temporal one over PipelineRunWorkflow)
+        if "bench/adapters" in p.as_posix() or p.name in ("tasks.py", "temporal_run.py", "backup.py", "jobs.py"):
             continue
         if re.search(r"^\s*import\s+sqlite3|^\s*(from|import)\s+temporalio", p.read_text(), re.M):
             bad.append(p.relative_to(root).as_posix())
@@ -191,6 +192,7 @@ def test_core_modules_import_neither_the_gui_nor_the_cli_on_import():
 #: `smeltery.run_outputs`; a module that executes a run imports those, never the command line.
 IMPORTS_CLI = {
     "__main__.py": "`python -m smeltery` is the CLI's entry point",
+    "jobs.py": "a local campaign job's runner executes `smeltery run` in-process, the command line itself",
 }
 
 

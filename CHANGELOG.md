@@ -7,7 +7,127 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- `smeltery export hf SRC -o OUT` (`smeltery.hub_export`, docs/dataset-export.md): a Hugging Face–loadable folder from a
+  dataset directory or a Parquet export -- the source byte for byte under `OUT/dataset/`, each split's partitions as
+  Parquet, a generated dataset card (`README.md`: license when stated, `configs`, `dataset_info.features`, columns with
+  units, provenance) and `croissant.json` (Croissant 1.0: a FileObject per file with the export's own sha256, a
+  RecordSet whose fields are the Parquet columns, W3C PROV naming each source run, its core-record sha256 and the
+  ferric builds its rows state). Needs pyarrow only; the license is never invented (`--license`, else the record's,
+  else "not stated"). `--push OWNER/NAME` (new `hub` extra, huggingface_hub) is a dry run unless `--confirm`, re-checks
+  every file against croissant.json and refuses a folder with no stated license; `export hf push FOLDER OWNER/NAME`
+  uploads one written earlier.
+- `smeltery export dataset RUN... -o DIR` (`smeltery.dataset_record`, docs/dataset-export.md): a dataset DIRECTORY
+  with an `attestation.dataset/1` record (draft schema) -- the table, its `--split`s, then `attestation/digests.json`
+  (whose sha256 is the content digest), then `attestation/dataset.json` naming each source run's core record by the
+  sha256 of its `run.json`. `--dataset-id`, `--version`, `--name`, `--license` (SPDX; null by default, never smeltery's
+  own code license). Every row's `ferric_git_sha` is checked against its run's core-record ferric `build_sha`. A
+  dataset directory is immutable: `smeltery export split KIND DIR -o NEWDIR` writes a new version with the split
+  added, and `ExportDataset`/`export split verify` accept a dataset directory (checked against its record first; a
+  split by name; `dataset_sha256=` pins the digest; `lineage_entries()` gives a training run's `data[]`). Needs
+  attestation-schema >= 0.2.0, not yet released; with 0.1.0 it refuses naming that version and its tests skip.
+- Target definition files are a documented format (`smeltery.target_file`, docs/targets.md): `schema_version = 1` plus
+  only `[pocket]`/`[[pocket.site]]`, `[structure]`, `[docking]`, `[gates]`, each checked by `smeltery run`'s own
+  validator; an unknown section or key, a missing or other version, or a missing pocket file is refused with the
+  reason. `smeltery target check FILE` runs the check; example: `examples/targets/two_site_pocket.toml`. MCP's
+  `target` now requires `schema_version`.
+- MCP `screen_candidates` / `estimate_cost` take `relax_unmapped` (default: the target class's `true`). The description
+  says what turning it off risks (the pose geometry check may refuse substituted analogues); an override is listed in
+  the plan's `overrides` and written into the screen's `config.toml` (the value, plus a comment naming the override).
+  The class default now also reaches docked screens (`[poses] relax_unmapped`), which previously got the tier's own
+  default (`false`).
+- Resumability and cancellation (`smeltery.reuse`, docs/jobs.md "Resumability"): every stage of a run gets a content
+  digest over its upstream output, its settings and the code identity (smeltery's source bytes, ferric's build), and
+  a resubmitted identical campaign reuses the measurement and any analysis an earlier run completed, from a
+  per-workspace content-addressed store (`ROOT/.smeltery/stages`, used by local campaign jobs and by
+  `smeltery run --stage-cache DIR` / `SMELTERY_STAGE_CACHE`). Never reused across ferric builds, nor from a dirty or
+  unverified one; a corrupted entry is detected by digest and recomputed; concurrent writers cannot corrupt the store.
+  A reused stage is recorded in `results.reuse` / `ext.smeltery.reuse` and `steps/NN-<stage>/stage.json` (which run,
+  which digest); the output is otherwise byte-identical. A run logs completed stages to `OUT/stages.partial.jsonl`,
+  so a cancelled or failed job's record lists them (`ext["smeltery.job"].stages_completed`) and a resubmission reuses
+  them; `smeltery status` and MCP's `run_status` / `screen_candidates` report reused stages.
+- `smeltery mcp`: an MCP server (official `mcp` SDK, the new optional `mcp` extra) with four intent-shaped tools for
+  an agent with no quantum chemistry -- `screen_candidates` (plans and submits a screen through the campaign
+  `JobBackend`, returning a handle at once; `dry_run=True` returns the plan and its cost without submitting),
+  `run_status` (state plus per-stage progress where the run leaves enough on disk to tell), `explain_drop` (which
+  stage dropped a molecule, on what number, against what threshold and systematic-error floor, read from the run's
+  own record) and `estimate_cost` (CPU-hours, candidates and memory from `smeltery.cost`, null with a reason when it
+  cannot price the settings). Defaults come per target class from a data table
+  (`src/smeltery/data/target_classes.toml`), each justified from this repository's own tier pages and cost
+  measurements, so no caller picks a basis set. Guardrails: `SMELTERY_MAX_CPU_HOURS` and `SMELTERY_MAX_CANDIDATES`
+  (via `smeltery.settings`) refuse a submission above the ceiling -- an unpriceable screen counts as over it -- and
+  the refusal says to pass `confirm=True`. Expected refusals reach the caller verbatim; anything else is logged and
+  answered generically. See `docs/mcp.md`.
+- Campaign jobs: `smeltery submit CONFIG --out RUN_DIR` returns at once, and `smeltery status / cancel / result
+  RUN_DIR` follow the job (`smeltery.jobs`, the `attestation` extra). Two implementations of attestation-schema's
+  `JobBackend` behind `SMELTERY_BACKEND`: `local` (default; a capped task on Bench's SQLite queue under its own
+  supervisor, sharing `SMELTERY_MAX_RUNS`, no server) and `temporal` (the existing `PipelineRunWorkflow`, started
+  without waiting). The backend owns `RUN_DIR/attestation/state.json` (`attestation.state/1`: JCS, atomic, under a
+  `flock`, history checked against the state machine), and every terminal job has a core record: a complete run's own,
+  or a minimal `failed`/`cancelled` record. `smeltery worker` (local) settles jobs whose process ended.
+  `tests/test_job_backends.py` runs one conformance suite against both backends (the temporal leg needs a server).
+  See `docs/jobs.md`.
+- `smeltery serve` (Bench, the repo's one server, with a backend choice) and `smeltery worker` (the worker for that
+  backend: a local supervisor loop, or one Temporal process polling both `smeltery-tasks` and `smeltery-pipeline`),
+  configured by `SMELTERY_BACKEND`, `SMELTERY_TEMPORAL_ADDRESS`, `SMELTERY_TEMPORAL_NAMESPACE`, `SMELTERY_TASK_QUEUE`,
+  `SMELTERY_PIPELINE_QUEUE`, `SMELTERY_HOST`, `SMELTERY_PORT`, `SMELTERY_ROOT`, `SMELTERY_WORKERS`,
+  `SMELTERY_THREADS_PER_WORKER`, `SMELTERY_TASK_CONCURRENCY` and `SMELTERY_MAX_RUNS` (flag, then variable, then default;
+  one pure resolver, `smeltery.settings`; a bad value exits 2 naming the variable). `task-worker`, `temporal-worker` and
+  `run --temporal --host/--task-queue` keep working and now read the same variables; `run` and `temporal-worker` gain
+  `--namespace`. `compose.yaml` gains an opt-in `temporal` profile (Temporal dev server plus a `smeltery worker`
+  service); the Dockerfile takes an `SMELTERY_EXTRAS` build argument. See `docs/temporal-runs.md`.
+- `smeltery export parquet|arrow RUN... -o FILE`: finished runs as one columnar dataset, one row per (ligand, target,
+  tier), with scores and units and floors from the tiers' own declarations, the paired ddE, the funnel decision, and
+  provenance columns (run id, `record_sha256`, smeltery and ferric versions, ferric build commit, dirty flag and
+  provenance level). Units and the schema version are in the file's key-value metadata. pyarrow is the optional
+  `dataset` extra, with a wheel smoke check; see `docs/dataset-export.md`.
+- `smeltery export split scaffold|target|verify`: train/valid/test splits of an exported table as versioned JSON
+  artifacts (kind, algorithm version, seed, parameters, the table file's SHA-256, row identities per partition).
+  Byte-identical for the same table and seed; loading against a changed table raises. Scaffold splits use RDKit Murcko
+  scaffolds and refuse without RDKit. `smeltery.dataset_torch.ExportDataset` reads the table for a PyTorch
+  `DataLoader` (feature and target columns, tier/decision filters, split partition, transform hook); torch is the new
+  optional `torch` extra, with a wheel smoke check.
+- The core run record (`attestation.run/1`, v1-DRAFT): with the new optional `attestation` extra (attestation-schema,
+  attestation-schema 0.1.0 from PyPI; Python >= 3.11) every finished run also writes `OUT/attestation/run.json`
+  through the schema's own writer, with a manifest of OUT and one `steps/NN-<stage>/` per funnel stage, beside the
+  unchanged `run-<digest12>.json`. `smeltery record core OUT` converts an existing run. Dependencies, ferric included,
+  go through one identity ladder (`record.package_identity`); a conda/distro install is now INFERRED, not VERIFIED.
+  Mapping and the schema findings: `docs/core-record.md`.
+- The core run record follows attestation-schema `314e4ff` (pin moved from `93bb5ab`): `code` carries `version`,
+  `provenance` and `evidence`; metrics carry `unit` and `labels` (`paired_ddE.mean|sem|n` labelled by analogue,
+  `stage.*` by stage, ddE in `kcal/mol`); an undefined value (a one-pose sem, an unranked cut's count) is `"NaN"`, not
+  omitted; docking's seed list is recorded; dependencies carry `source`; `history` is `[]`; timestamps go through
+  `format_timestamp`; a run that mixed ferric builds records ferric as `unknown`. The `attestation` extra now installs
+  on Python 3.11 too. The golden core record changed accordingly. Findings disposition: `docs/core-record.md`.
+- The core run record follows attestation-schema `f809522` (pin moved from `314e4ff`): `history` is `null` (the schema
+  moved curves to a digest-bound `attestation/history.jsonl` sidecar; smeltery has none); a run whose rows came from
+  more than one smeltery commit records `code` as `unknown` with `git_sha: null` and `evidence` naming each commit and
+  its row count (`danuglipron-halogen`); `dependencies[].source` uses the schema's closed vocabulary (Python and distro
+  installs are `system`, conda-family installs `conda`, a wheel from a URL `null`); rdkit and numpy unidentified by a
+  converted record carry `evidence` instead of being empty entries; `core_record.wire_value` is gone in favour of
+  `attestation_schema.spell_value`; a failed/cancelled job's record writes `history` and `dependencies` as `null`
+  unconditionally. The golden core record changed accordingly. Findings and open items: `docs/core-record.md`.
+- The core run record follows the **frozen** `attestation.run/1` (attestation `9fb7eed`, attestation-schema 0.1.0; the
+  extra requires `attestation-schema>=0.1.0,<0.2`: attestation-schema 0.1.0 from PyPI, no git pin and no preinstall step in the wheel smoke or CI). `config` is the campaign
+  config the run read (the staged `config.toml`, by its recorded digest), the same with and without a job; the derived
+  `inputs` moved to `ext.smeltery.inputs`; a conversion that cannot observe the config writes `{}` and says why in
+  `ext.smeltery.config_unobserved`. `smeltery run --run-id` names the run. `dependencies[].source` gains `url:<url>`
+  (credentials and query stripped, `#sha256=` kept) and `hg+`/`svn+`/`bzr+` (from PEP 610's `vcs_info.vcs`). The golden
+  core record changed accordingly. Findings resolved at the freeze and v2 candidates: `docs/core-record.md`.
+
+### Changed
+- `smeltery export` tables are `smeltery.schema_version` 2: new columns `family` and `core_record_sha256` (sha256 of
+  the run's core `attestation/run.json`, null without one), and `run_id` is the core record's run_id (a job's
+  `--run-id`), no longer always `input_digest[:12]`, which remains derivable from `input_digest`. A core record
+  that lists the legacy record with another sha256 is stale and refuses the export. CI's test job installs the
+  `dataset` extra, so the Parquet/Arrow tests no longer skip there.
+- Campaign jobs (`smeltery.jobs`) use `attestation_schema.state` for `state.json`, its lock, `settle` and the terminal
+  record; smeltery's own copy is deleted. `read_state` returns a `StateFile` (`--json` prints its `to_dict()`), a
+  malformed file raises `StateFormatError`, `IllegalTransition` is the schema's `IllegalTransitionError`, and ending a
+  job is `settle`'s alone. The job's run_id now names its complete record too (the runner passes `--run-id`; Temporal
+  passes `RunInput.run_id`), and settle fails a job whose record is not its own. The Temporal backend passes the
+  workflow's start and close times to settle. `ext["smeltery.job"]` is `{backend, job_id, stages_completed}`: the
+  message lives in `state.json` only. Without `flock` (Windows) state writes are refused. Docs: `docs/jobs.md`.
 
 ## [0.1.0] - 2026-11-09
 

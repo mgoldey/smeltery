@@ -50,7 +50,7 @@ Issues = "https://github.com/mgoldey/smeltery/issues"
 # ruff is pinned EXACTLY, and must equal the pin in .github/workflows/test.yml
 # (tests/test_ruff_pin.py enforces it): a drifting linter moves the baseline.
 # httpx2: starlette's TestClient, which the Bench API tests use (httpx is deprecated there).
-dev = ["pytest>=8", "pytest-cov>=7", "ruff==0.16.10", "httpx2>=2.13"]
+dev = ["pytest>=8", "pytest-cov>=7", "ruff==0.16.10", "httpx2>=2.13", "pre-commit>=4"]
 # Optional readers for smeltery.structure. A missing one raises MissingBackend
 # naming the extra. gemmi is currently also pulled in by ferric itself; rdkit is
 # also a core dependency while smeltery.tiers imports it at module level.
@@ -98,6 +98,34 @@ temporal = ["temporalio>=1.35"]
 # and needs only numpy and openmm, so this extra adds no new stack. openmm.app.Modeller cannot add missing HEAVY
 # atoms, which is why this is a separate tool and not a few lines. Nothing under src/smeltery imports it.
 pocket-prep = ["openmm>=8.6.1", "pdbfixer>=1.12"]
+
+# `smeltery export parquet|arrow` (smeltery.dataset_export, docs/dataset-export.md): runs as one columnar file. Only the
+# writers need pyarrow, imported inside the functions that write, so `export_rows` and core smeltery work without it.
+dataset = ["pyarrow>=15"]
+# smeltery.dataset_torch.ExportDataset: a DataLoader-ready view of that table. A separate extra from `dataset` so parquet
+# users do not pull torch, and it repeats pyarrow so `smeltery[torch]` alone is enough. Splits (smeltery.dataset_splits)
+# need only `dataset`; torch is imported when ExportDataset(tensors=True) is built.
+torch = ["torch>=2", "pyarrow>=15"]
+# `smeltery export hf ... --push REPO_ID --confirm` (smeltery.hub_export, docs/dataset-export.md): upload the Hugging
+# Face folder. Writing the folder (card, croissant.json, partition Parquet files) needs only pyarrow, so `export hf`
+# works with the `dataset` extra alone; huggingface_hub is imported only by the upload. pyarrow is repeated so
+# `smeltery[hub]` alone is enough. 0.24 is the floor for HfApi.create_repo(exist_ok=...) + upload_folder as used.
+hub = ["huggingface_hub>=0.24", "pyarrow>=15"]
+# The core run record (`attestation.run/1`, frozen at attestation 9fb7eed; smeltery.core_record, docs/core-record.md): a second record beside
+# OUT/run-<digest12>.json, written through attestation-schema's own writer. smeltery depends on the stdlib-only schema
+# distribution, never on `attestation` itself. attestation-schema 0.1.0 is published on PyPI (content-identical to
+# attestation 9fb7eed's packages/attestation-schema), so the extra resolves from the index with plain pip or uv. Capped
+# below 0.2 because pre-1.0 minor releases may break the API.
+# attestation-schema supports Python >= 3.11 (from attestation 314e4ff), smeltery's own floor, so no marker.
+# Dataset directories (`smeltery export dataset`, smeltery.dataset_record) need attestation.dataset/1, which 0.1.0 does
+# not have: they refuse naming `dataset_record.REQUIRED_SCHEMA` (0.2.0) until this becomes ">=0.2.0,<0.3" once that
+# release is on PyPI -- and from that commit tests/test_dataset_record.py refuses to skip.
+attestation = ["attestation-schema>=0.1.0,<0.2"]
+# `smeltery mcp` (smeltery.mcp, docs/mcp.md): the four screening tools over the official MCP Python SDK. The SDK's
+# server class is `mcp.server.mcpserver.MCPServer`, which is FastMCP renamed in 2.0, so the floor is >=2.3: on
+# mcp 1.x the import that module provides does not exist. It pulls pydantic/starlette/httpx, all pure Python, and
+# nothing outside src/smeltery/mcp/server.py imports it, so core smeltery and every other extra work without it.
+mcp = ["mcp>=2.3"]
 
 [tool.uv.sources]
 # ferric comes from its PyPI wheel (the floor above), so `uv sync` / `uv run` never compile Rust or libint2.
