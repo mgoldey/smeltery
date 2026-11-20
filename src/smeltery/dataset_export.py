@@ -21,9 +21,15 @@ values (`Measurement.from_samples`, the funnel's estimator), the paired ddE and 
   file beside the record (`decisions-<digest12>.json`) adds `user_decision`, null when there is none.
 * **SMILES** are RDKit-canonical when RDKit imports and parses them, else as recorded; `smiles_form` says which, per
   row, and the file's metadata lists the forms present.
-* **Provenance** columns: `run_id` (the first 12 hex of `input_digest`, the digest in the record's file name),
-  `input_digest`, `record_sha256` (null in records written before the self-hash existed; not re-verified here:
-  `smeltery verify-run` does that), smeltery and ferric versions, ferric's build commit and dirty flag, and
+* **Provenance** columns: `run_id` and `family`, the run's identity as its CORE record (`OUT/attestation/run.json`,
+  `smeltery.core_record`) states it -- a job run carries the submitter's run_id there, not `input_digest[:12]` -- and
+  `core_record_sha256`, the sha256 of that run.json's bytes (what `attestation_schema.record_digest` returns and a
+  dataset record's `source_runs[].record_sha256` names). A run with no core record has `core_record_sha256` null and
+  falls back to what a core record would have said for a run given no name: `run_id` = the first 12 hex of
+  `input_digest` (the digest in the legacy record's file name; that value stays derivable from `input_digest` and
+  `record_file` for every row), `family` = the campaign. Then `input_digest`, `record_sha256` (the LEGACY record's
+  self-hash, null in records written before it existed; not re-verified here: `smeltery verify-run` does that; no core
+  reader resolves it), smeltery and ferric versions, ferric's build commit and dirty flag, and
   `ferric_provenance_level` (VERIFIED / INFERRED / UNKNOWN, the first word of the record's provenance label).
 
 File-level key-value metadata (`smeltery.*`): `schema_version`, `units` (JSON quantity -> unit, a list when runs
@@ -34,6 +40,7 @@ nothing beyond the core install.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import re
@@ -48,7 +55,12 @@ from .model import Measurement
 from .record import digest
 
 #: Bump when a column is added, renamed, removed or changes type. Stored in the file's metadata.
-SCHEMA_VERSION = 1
+#: 2: `family` and `core_record_sha256` added; `run_id` is the core record's run_id (was always `input_digest[:12]`).
+SCHEMA_VERSION = 2
+
+#: Where a run directory keeps its core record (`attestation_schema.layout.RUN_JSON`), spelled here so the row builder
+#: needs no attestation-schema: it reads the file as JSON and hashes its bytes, nothing more.
+CORE_RECORD = Path("attestation") / "run.json"
 
 #: The per-pose quantity the funnel cuts on. Mirrors `cli.QUANTITY` (a test pins them equal): importing it
 #: here would pull the whole run machinery in for one string.
@@ -201,6 +213,47 @@ def _entry(quantity, unit, value, sem, n, floor, floor_source, kind) -> dict:
     }
 
 
+@dataclass(frozen=True)
+class CoreRef:
+    """A legacy record's core record: where it is, the sha256 of its bytes, and the identity it states."""
+
+    path: Path
+    sha256: str
+    run_id: str
+    family: str | None
+
+
+def core_record_ref(legacy_path: str | Path) -> CoreRef | None:
+    """The core record beside the legacy record at `legacy_path`, or None when there is none for it.
+
+    A core record belongs to a legacy record when its `data[]` lists that file by name with role `output` (what
+    `core_record.write_core` writes). A core record that lists the file with ANOTHER sha256 is stale -- the legacy
+    record changed after it was written -- and is refused (`ExportError`), never silently paired. Standard library
+    only: the strict read is the dataset writer's (`dataset_record`)."""
+    legacy_path = Path(legacy_path)
+    core = legacy_path.parent / CORE_RECORD
+    if not core.is_file():
+        return None
+    raw = core.read_bytes()
+    try:
+        obj = json.loads(raw)
+    except ValueError as e:
+        raise ExportError(f"{core}: not JSON: {e}") from e
+    schema = obj.get("schema") if isinstance(obj, dict) else None
+    if not isinstance(obj, dict) or not str(schema).startswith("attestation.run/"):
+        raise ExportError(f"{core}: not a core run record (schema {schema!r})")
+    mine = [d for d in obj.get("data") or [] if d.get("name") == legacy_path.name and d.get("role") == "output"]
+    if not mine:
+        return None  # the core record of another legacy record in the same directory
+    legacy_sha = hashlib.sha256(legacy_path.read_bytes()).hexdigest()
+    if mine[0].get("sha256") != legacy_sha:
+        raise ExportError(
+            f"{core} lists {legacy_path.name} with sha256 {mine[0].get('sha256')}, but the file's is {legacy_sha}: "
+            "the legacy record changed after its core record was written (`smeltery record core --force` rewrites it)"
+        )
+    return CoreRef(core, hashlib.sha256(raw).hexdigest(), str(obj["run_id"]), obj.get("family"))
+
+
 def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
     """The rows of one run (`run-*.json`, or an OUT directory holding exactly one), in run order."""
     p = Path(path)
@@ -234,13 +287,15 @@ def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
         for q in leftover:
             declared[q] = (_UNATTRIBUTED, Declared(q, units[q], None, "no tier of the record declares this quantity"))
 
-    run_id = str(rec["input_digest"])[:12]
+    core = core_record_ref(p)
     base = {
-        "run_id": run_id,
+        "run_id": core.run_id if core else str(rec["input_digest"])[:12],
         "input_digest": rec["input_digest"],
         "record_sha256": rec.get("record_sha256"),
+        "core_record_sha256": core.sha256 if core else None,
         "record_file": p.name,
         "campaign": rec["campaign"],
+        "family": core.family if core else rec["campaign"],
         "started_utc": rec.get("started_utc"),
         "target": target,
         "target_kind": target_kind,
@@ -400,8 +455,10 @@ def arrow_schema(metadata_: dict[str, str] | None = None):
         ("run_id", s),
         ("input_digest", s),
         ("record_sha256", s),
+        ("core_record_sha256", s),
         ("record_file", s),
         ("campaign", s),
+        ("family", s),
         ("started_utc", s),
         ("ligand", s),
         ("is_parent", b),
@@ -474,12 +531,20 @@ def to_table(rows: list[dict]):
 
 
 def write_dataset(paths: list[str | Path], dest: str | Path, fmt: str = "parquet", *, canonicalize: bool = True) -> int:
-    """Export the runs under `paths` to `dest`; returns the number of rows written. `fmt` is parquet or arrow."""
+    """Export the runs under `paths` to `dest`; returns the number of rows written. `fmt` is parquet or arrow.
+
+    One file. A dataset DIRECTORY with its `attestation.dataset/1` record is `dataset_record.export_dataset_dir`."""
     if fmt not in FORMATS:
         raise ExportError(f"unknown format {fmt!r}; one of {', '.join(FORMATS)}")
     rows = export_rows(paths, canonicalize=canonicalize)
     if not rows:
         raise ExportError("no rows: none of the runs has a per-pose score to export")
+    write_rows(rows, dest, fmt)
+    return len(rows)
+
+
+def write_rows(rows: list[dict], dest: str | Path, fmt: str = "parquet") -> None:
+    """Write `rows` (from `export_rows`) to `dest` as Parquet or Arrow IPC, atomically."""
     table = to_table(rows)
     dest = Path(dest)
     tmp = dest.with_name(dest.name + ".tmp")
@@ -496,7 +561,6 @@ def write_dataset(paths: list[str | Path], dest: str | Path, fmt: str = "parquet
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
-    return len(rows)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -505,6 +569,10 @@ def main(argv: list[str] | None = None) -> int:
         from .dataset_splits import main as split_main
 
         return split_main(argv[1:])
+    if argv[:1] == ["dataset"]:  # `smeltery export dataset ...`: a dataset directory with its attestation.dataset/1
+        from .dataset_record import main as dataset_main
+
+        return dataset_main(argv[1:])
     ap = argparse.ArgumentParser(
         prog="smeltery export",
         description="Write finished runs as one columnar dataset, one row per (ligand, target, tier), with units, "
@@ -513,7 +581,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "format",
         choices=FORMATS,
-        help="parquet, or arrow (the Arrow IPC file format); `split` is `export split --help`",
+        help="parquet, or arrow (the Arrow IPC file format); `split` is `export split --help`, a dataset directory "
+        "with its record is `export dataset --help`",
     )
     ap.add_argument("runs", nargs="+", help="run OUT directories or run-*.json files; several are concatenated")
     ap.add_argument("-o", "--out", required=True, help="the file to write")

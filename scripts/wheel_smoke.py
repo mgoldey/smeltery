@@ -59,8 +59,13 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "d = tempfile.mkdtemp(); run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
         "n = write_dataset([str(run)], d + '/o.parquet'); "
         "t = pq.read_table(d + '/o.parquet'); assert t.num_rows == n > 0, n; "
-        "assert t.schema.metadata[b'smeltery.schema_version'] == b'1'; "
+        "assert t.schema.metadata[b'smeltery.schema_version'] == b'2'; "
         "write_dataset([str(run)], d + '/o.arrow', 'arrow')",
+        # A dataset DIRECTORY also needs attestation-schema (the `attestation` extra), absent here: the module imports
+        # and every entry point refuses naming the release it needs, rather than failing on an import.
+        "import tempfile; from importlib import resources; from smeltery import dataset_record as r; "
+        "assert not r.AVAILABLE; run = resources.files('smeltery.prebuilt').joinpath('benzoic-rhf').joinpath('run'); "
+        "assert r.main([str(run), '-o', tempfile.mkdtemp() + '/ds']) == 2",
     ],
     # A scaffold split and a target split of an exported table, loaded back through ExportDataset as tensors.
     "torch": [
@@ -97,6 +102,12 @@ EXTRA_CHECKS: dict[str, list[str]] = {
         "import tempfile, attestation_schema as a; from attestation_schema import state; from smeltery import jobs; "
         "assert jobs.AVAILABLE and jobs.read_state is state.read_state and jobs.transition is state.transition; "
         "assert isinstance(jobs.LocalJobBackend(tempfile.mkdtemp()), a.JobBackend)",
+        # Dataset directories (smeltery.dataset_record) are available exactly when the installed schema has
+        # attestation.dataset/1 (REQUIRED_SCHEMA, 0.2.0); 0.1.0, the extra's current floor, does not.
+        "from importlib import metadata; from smeltery import dataset_record as r; "
+        "have = tuple(int(x) for x in metadata.version('attestation-schema').split('.')[:2]); "
+        "need = tuple(int(x) for x in r.REQUIRED_SCHEMA.split('.')[:2]); "
+        "assert r.AVAILABLE == (have >= need), (have, r.not_installed())",
     ],
     # The MCP surface: the SDK imports, the server builds with its four tools, and the target-class table the
     # tool descriptions are generated from loads out of the installed package data (not the checkout).
