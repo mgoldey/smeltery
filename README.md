@@ -48,6 +48,10 @@ git clone https://github.com/mgoldey/smeltery && cd smeltery
 uv sync --extra dev
 ```
 
+Contributing: `uv run pre-commit install` activates the local gate (ruff format and check, ty, `uv lock --check`
+on every commit; the full pytest suite on `git push`). `uv run pre-commit run --all-files` runs the commit-time hooks
+by hand, and CI runs the same ones in its `pre-commit` job.
+
 **1. Check the install (about 1 s, no SCF).** `--plan` builds the poses and the pocket and
 estimates the cost. It runs no quantum chemistry.
 
