@@ -41,7 +41,9 @@ No Node or Python setup: `docker compose up --build`, then read the sign-in URL 
 ## Quickstart
 
 You need Linux x86_64, Python 3.11 or 3.12, and [uv](https://docs.astral.sh/uv/). ferric
-installs as a prebuilt wheel from PyPI, so you don't need a compiler.
+installs as a prebuilt wheel from PyPI, so you don't need a compiler. Which ferric versions each
+smeltery was tested against, and a pinned set of ferric, smeltery and attestation known to work
+together, are in [docs/compatibility.md](docs/compatibility.md).
 
 ```bash
 git clone https://github.com/mgoldey/smeltery && cd smeltery
@@ -254,6 +256,7 @@ smeltery and [attestation](https://github.com/mgoldey/attestation) together, so 
 | Run an active-learning loop (`smeltery al run`) | [docs/active-learning.md](docs/active-learning.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
+| See which ferric versions work, or install a pinned ferric + smeltery + attestation set | [docs/compatibility.md](docs/compatibility.md) |
 | Fix an error message | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Look up a term (ddE, floor, tie group, rung) | [docs/glossary.md](docs/glossary.md) |
 | Check tool and data licences | [docs/licensing.md](docs/licensing.md) |

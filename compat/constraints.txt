@@ -1,0 +1,7 @@
+# GENERATED from compat/stack.toml by `scripts/compat_matrix.py constraints --write`; do not edit by hand.
+# The pinned compatible set for the environment smeltery runs in (docs/compatibility.md#the-pinned-stack).
+# smeltery itself is not pinned here: install it from the SAME ref this file was read from.
+# attestation runs in its own environment (see stack.toml [attestation-env]), never this one.
+attestation-schema==0.1.0
+ferric==0.1.0rc10
+mcp==2.3.0

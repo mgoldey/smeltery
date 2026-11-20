@@ -1,0 +1,51 @@
+# The pinned compatible set of ferric, smeltery and attestation (roadmap 46; docs/compatibility.md#the-pinned-stack,
+# docs/superpowers/specs/2026-11-20-compat-matrix-design.md).
+#
+# TWO environments, because no single one can hold all three today:
+#   * smeltery requires mcp>=2.3 (its server class is mcp 2.x's MCPServer) and caps attestation-schema below 0.2;
+#   * attestation at the pinned rev requires mcp==1.28.1 exactly and attestation-schema>=0.2.0.
+# Both conflicts are hard (no version satisfies both sides), so attestation runs in its own environment and the
+# two share only the run directory -- the arrangement the `cross-server` CI job already tests.
+#
+# How each pin is verified (tests/test_compat_stack.py, plus the `stack` CI job):
+#   * every [smeltery-env.pins] version equals uv.lock's, so EVERY `uv sync` job in .github/workflows/test.yml
+#     tests exactly this set, and satisfies the specifier pyproject.toml declares for it;
+#   * compat/constraints.txt is generated from this file (`scripts/compat_matrix.py constraints --write`);
+#   * [attestation-env] is a full commit SHA, and the `stack` job installs it (and smeltery with
+#     compat/constraints.txt) and runs tests/cross_server against it.
+# To move a pin: change it here, `uv lock -P <name>==<version>` for the smeltery-env ones, regenerate the
+# constraints, and let CI run. docs/compatibility.md shows which other ferric versions pass.
+
+schema = 1
+updated = "2026-11-20"
+
+[smeltery-env]
+python = ">=3.11,<3.13"
+# smeltery itself: from git, at the SAME ref the constraints file is read from. PyPI's smeltery 0.1.0 (2026-11-09)
+# predates the `mcp` and `attestation` extras, so it is not this stack's smeltery.
+smeltery = { source = "git", url = "https://github.com/mgoldey/smeltery", ref = "the ref this file is read from" }
+
+[smeltery-env.pins.ferric]
+version = "0.1.0rc10"
+source = "pypi"
+why = "what uv.lock pins and every CI job runs; 0.1.0rc11 and 0.1.0rc12 also pass the compatibility matrix"
+
+[smeltery-env.pins.attestation-schema]
+version = "0.1.0"
+source = "pypi"
+why = "the only release on PyPI; the `attestation` extra caps <0.2 (0.2.0, with attestation.dataset/1, is unreleased)"
+
+[smeltery-env.pins.mcp]
+version = "2.3.0"
+source = "pypi"
+why = "the `mcp` extra's floor is >=2.3 (mcp.server.mcpserver.MCPServer)"
+
+[attestation-env]
+python = ">=3.12"
+# attestation from git at a full commit, not PyPI: PyPI's attestation 0.5.0 (2026-10-06) predates the ledger's
+# core-record reader and runs.status, which read what smeltery writes; the repository's v0.5.1 tag points at a commit
+# whose pyproject still says 0.5.0, and nothing newer is on PyPI. attestation-schema 0.2.0 and mcp come from that
+# commit's own requirements (a git install builds the schema from the same checkout).
+attestation = { source = "git", url = "https://github.com/mgoldey/attestation", rev = "6e2b14dcf9f939a80b798f348fb0ef8287385356", version = "0.5.1" }
+attestation-schema = { source = "git (same checkout)", version = "0.2.0" }
+mcp = { source = "pypi", version = "1.28.1", why = "attestation pins mcp==1.28.1 at this rev (a pending change moves it to 2.3.0)" }
