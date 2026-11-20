@@ -1,0 +1,57 @@
+# Local hooks only: every tool is already pinned by uv.lock (ruff exactly, in
+# the `dev` extra), so the hooks run the versions CI runs. pre-commit's own
+# isolated envs would install a second copy that drifts.
+#
+# Entries call `uv run --frozen ...`, never `.venv/bin/...` (gitignored, absent
+# on a fresh clone); --frozen keeps a hook from mutating uv.lock.
+#
+# Each hook mirrors a job in .github/workflows/test.yml, which runs the same
+# thing on every PR (the `pre-commit` job runs these hooks themselves).
+#
+#   uv run pre-commit install        # activate (commit-time hooks)
+#   uv run pre-commit run --all-files
+#   git commit --no-verify           # bypass once, deliberately
+repos:
+  - repo: local
+    hooks:
+      # --force-exclude: pre-commit passes explicit paths, which ruff otherwise lints even under extend-exclude
+      # (experiments/ is a frozen record, docs/archive/ is verbatim).
+      - id: ruff-format
+        name: ruff format --check --force-exclude
+        entry: uv run --frozen ruff format --check --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --frozen ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: ty
+        name: ty (src/smeltery/bench)
+        # ty is not a dependency (pyproject [tool.ty]); CI runs the same pinned
+        # `uvx ty@0.0.96 check`. Always the whole configured tree: ty resolves
+        # imports across modules, so staged files alone give a different answer.
+        entry: uvx ty@0.0.96 check
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+
+      - id: uv-lock
+        name: uv.lock matches pyproject.toml
+        entry: uv lock --check
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest (the CI `test` job's suite)
+        # CI's `Tests` step: plain `pytest -q` over testpaths = tests/. No
+        # markers are deselected there. Slow (CI budgets ~30 min), so it runs
+        # at pre-push, not on every commit.
+        entry: uv run --frozen pytest -q
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
