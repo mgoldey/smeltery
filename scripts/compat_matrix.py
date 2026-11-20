@@ -92,7 +92,12 @@ def parse_ferric(spec: str) -> dict:
     if spec.endswith(".whl"):
         path = Path(spec).resolve()
         version = path.name.split("-")[1] if path.name.count("-") >= 2 else "?"
-        return {"label": label or f"wheel:{version}", "kind": "wheel", "requirement": f"ferric @ {path.as_uri()}"}
+        return {
+            "label": label or f"wheel:{version}",
+            "kind": "wheel",
+            "requirement": f"ferric @ {path.as_uri()}",
+            "display": f"ferric @ {path.name}",  # what the cell records: no machine path in a committed doc
+        }
     version = spec.removeprefix("==")
     if not re.fullmatch(r"[0-9][0-9A-Za-z.+!-]*", version):
         raise ValueError(f"not a ferric version, `main`, git+URL or .whl path: {spec!r}")
@@ -217,7 +222,7 @@ def run_cell(ferric: dict, source: Path, smeltery_req: str | None, python: str) 
         "ferric": {
             "label": ferric["label"],
             "kind": ferric["kind"],
-            "requested": ferric["requirement"],
+            "requested": ferric.get("display", ferric["requirement"]),
             "floor": floor,
             # only an index release is judged against the floor: a build from source says 0.1.0.dev0 whatever it is
             "satisfies_floor": satisfies(ferric["label"], floor) if ferric["kind"] == "pypi" else None,

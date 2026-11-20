@@ -103,9 +103,25 @@ time, so the release's row exists the day it is cut.
 
 ## What was produced locally (2026-11-20)
 
-The committed docs/compatibility.md: this tree (main + this change) and the PyPI smeltery 0.1.0 release, each against
-ferric 0.1.0rc8 (below the floor, by override), 0.1.0rc10, 0.1.0rc11, 0.1.0rc12, and ferric main (2f484e7, built
-from source here: Rust, libint2 2.13.1 and OpenBLAS are present in this sandbox), on Python 3.11, linux-x86_64.
+The committed docs/compatibility.md, made by `scripts/compat_matrix.py` at fd21a12 (the commit before the page; the
+next commit only stopped cells recording the local wheel's machine path) on Python 3.11.15, linux-x86_64:
+
+| smeltery | ferric 0.1.0rc6 | rc7 | rc8 | rc10 | rc11 | rc12 | main (2f484e7) |
+|---|---|---|---|---|---|---|---|
+| 0.1.1.dev114+gfd21a12d8 (this tree) | FAIL (below floor) | FAIL (below floor) | FAIL (below floor) | pass | pass | pass | pass |
+| 0.1.0 (PyPI wheel, tests from the v0.1.0 tag) | -- | -- | FAIL (below floor) | pass | pass | pass | pass |
+
+Every below-floor failure is exactly the two basis tests (STO-3G past Ar), the floor's documented reason; the
+example's run record states a VERIFIED ferric provenance in every cell. ferric main is a wheel built here from
+2f484e7 (`maturin build --release`; Rust, libint2 2.13.1 and OpenBLAS are present in this sandbox), not the nightly
+wheel CI will download. Each cell takes ~30-60 s (install from a warm uv cache, ~100 tests, the example).
+
+The pinned stack was checked the way the `stack` job does it: the constraints file read back from the pushed ref
+(byte-identical), `uv pip install -c ... 'smeltery[mcp,attestation] @ git+...@<ref>'` resolved ferric 0.1.0rc10,
+attestation-schema 0.1.0, mcp 2.3.0 and `smeltery mcp --list-tools` listed the four tools; attestation installed at
+6e2b14d reported attestation 0.5.1, attestation-schema 0.2.0, mcp 1.28.1; the cross-server transcript passed against
+that pair. (Passing the constraints as an https URL to uv/pip failed in this sandbox only because of its TLS proxy;
+the file was fetched with curl instead.)
 
 ## Left open
 

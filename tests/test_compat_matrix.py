@@ -72,6 +72,7 @@ def test_parse_ferric_spec_forms():
     assert cm.parse_ferric("git+https://github.com/mgoldey/ferric@abc123")["label"] == "git:abc123"
     wheel = cm.parse_ferric("main=/w/ferric-0.1.0.dev0-cp311-cp311-linux_x86_64.whl")
     assert wheel["label"] == "main" and wheel["kind"] == "wheel" and wheel["requirement"].startswith("ferric @ file://")
+    assert wheel["display"] == "ferric @ ferric-0.1.0.dev0-cp311-cp311-linux_x86_64.whl"
     assert cm.parse_ferric("/w/ferric-0.1.0.dev0-cp311-abi3-x.whl")["label"] == "wheel:0.1.0.dev0"
     with pytest.raises(ValueError):
         cm.parse_ferric("latest please")
