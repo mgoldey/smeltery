@@ -1,7 +1,10 @@
 """The ruff pin in pyproject.toml (dev extras) and in the test workflow must agree.
 
 An unpinned linter gives a different baseline under every install, so the version
-is pinned exactly in both places; this test fails if they drift apart.
+is pinned exactly in both places; this test fails if they drift apart. In the
+workflow the pin is the `test` job's `ruff-version` input to attestation's reusable
+python-gates workflow, which runs `uvx ruff@<that version>` (a workflow-level env
+var would not reach a called workflow, so RUFF_VERSION is gone).
 """
 
 import re
@@ -21,8 +24,9 @@ def _pyproject_pin() -> str:
 
 def _workflow_pin() -> str:
     text = (ROOT / ".github" / "workflows" / "test.yml").read_text()
-    pins = re.findall(r"^\s*RUFF_VERSION:\s*\"?([^\s\"#]+)\"?", text, flags=re.MULTILINE)
-    assert len(pins) == 1, f"test.yml must define RUFF_VERSION exactly once, got {pins}"
+    pins = re.findall(r"^\s*ruff-version:\s*\"?([^\s\"#]+)\"?", text, flags=re.MULTILINE)
+    assert len(pins) == 1, f"test.yml must pass ruff-version exactly once, got {pins}"
+    assert "RUFF_VERSION" not in text, "RUFF_VERSION would not reach the reusable workflow; pass ruff-version"
     return pins[0]
 
 

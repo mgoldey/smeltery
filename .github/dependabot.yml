@@ -12,7 +12,7 @@ updates:
         patterns: ["*"]
     ignore:
       # ruff is pinned EXACTLY in two places that must move together: the ruff== pin in pyproject.toml's dev
-      # extra and RUFF_VERSION in .github/workflows/test.yml (tests/test_ruff_pin.py fails if they differ), and a
+      # extra and the `test` job's ruff-version input in .github/workflows/test.yml (tests/test_ruff_pin.py fails if they differ), and a
       # new ruff also moves the format baseline. Dependabot can only bump one of them, so it would turn CI red;
       # bump ruff by hand, both pins in one commit.
       - dependency-name: ruff
@@ -46,3 +46,8 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # The reusable workflows shared with attestation and ferric (roadmap 39) are pinned to an attestation MAIN
+      # merge commit, not a release tag, and every ref must carry the same SHA (tests/test_shared_workflows.py).
+      # Bump them by hand, all refs in one commit, when attestation changes a template.
+      - dependency-name: "mgoldey/attestation*"
