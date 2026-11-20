@@ -645,7 +645,7 @@ def run_plan(
     the analyses are taken from the stage store when an identical earlier run stored them, and stored otherwise.
     """
     _STAGE_SECONDS.set(plan.stage_seconds)  # this plan's seconds, whatever was built in this context since
-    if stages is not None:
+    if stages is not None and stages.plan_digest is None:  # the Temporal runner logs its plan stages when it builds it
         stages.run_id = plan.input_digest[:12]
         stages.plan_built(plan, funnel_counts(plan))
     if measure is None:
@@ -654,8 +654,10 @@ def run_plan(
             _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx))
         else:  # a reused measurement is never timed: its funnel row says seconds null, not "took 0 s"
             stages.measure(plan, lambda: _stage(plan.tier.name, lambda: plan.tier.run(plan.candidates, ctx)))
-    else:
+    elif stages is None:
         _stage(plan.tier.name, lambda: measure(plan))
+    else:  # the Temporal runner's measurement, from its log: logged as a completed stage like any other
+        stages.measure(plan, lambda: _stage(plan.tier.name, lambda: measure(plan)))
     analogues = [c for c in plan.candidates if c is not plan.parent]
     if partial:
         paired = {}

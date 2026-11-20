@@ -28,22 +28,25 @@ transition, settle) is refused with `StateLockUnavailableError` and nothing is w
 | | `local` (default) | `temporal` |
 |---|---|---|
 | Needs | nothing beyond the `attestation` extra: no server | the `temporal` extra and a Temporal server |
-| A job is | a task on Bench's SQLite queue (`ROOT/.smeltery/bench/tasks`) running `python -m smeltery.jobs _run`, under its own detached supervisor | a `PipelineRunWorkflow` execution (the one `run --temporal` runs); the job id is the workflow id |
+| A job is | a task on Bench's SQLite queue (`ROOT/.smeltery/bench/tasks`) running `python -m smeltery.jobs _run`, under its own detached supervisor | a `CampaignRunWorkflow` execution (the one `run --temporal` runs: one activity per stage, [temporal-runs.md](temporal-runs.md#one-workflow-per-campaign-one-activity-per-stage)); the job id is the workflow id |
 | Runs it | the task's supervisor, started at submit when a run slot is free | `smeltery worker` with `SMELTERY_BACKEND=temporal` (its pipeline queue) |
 | Concurrency | `SMELTERY_MAX_RUNS`, shared with Bench's launched runs: a job is a capped task, and shows in Bench's task panel | `SMELTERY_WORKERS` SCFs at once in the workflow |
 | Tiers | any `smeltery run` config | the RHF field-interaction tier only, as `run --temporal` |
 | Job metadata | `ROOT/.smeltery/jobs/jobs.sqlite` (`ROOT`: `--root`, `SMELTERY_ROOT`, else Bench's default) | the Temporal server |
-| A crashed worker | the job ends `failed` (its supervisor died, or its process was killed) | is retried on the next worker; the job does not fail |
-| `cancel` | marks the task cancelled and ends its process group (SIGTERM, SIGKILL after 2 s) | terminates the workflow (no worker needed); running SCF children are killed when their heartbeat is refused |
+| A crashed worker | the job ends `failed` (its supervisor died, or its process was killed) | its activity is retried on the next worker (heartbeat timeout); the job does not fail |
+| `cancel` | marks the task cancelled and ends its process group (SIGTERM, SIGKILL after 2 s) | a running job: cancels the workflow, which stops the running stage (an SCF child is killed) and settles the job cancelled; terminated if it has not stopped within `heartbeat_s + 10` s (at most 70 s). A job no worker has started is terminated at once |
 
 The local job's runner moves the job to `running`, runs `smeltery run RUN_DIR/config.toml --out RUN_DIR` in its own
 process, and settles it. What it cannot settle (a cancel, a kill, a supervisor that died) is settled by whoever looks
 next: `status`, `cancel`, `result`, or `smeltery worker` (local), which settles every job whose process ended every
-few seconds, so a crashed job gets its record even when nobody asks. A Temporal job is settled when it is looked at
-(`status`, `cancel`, `result`): the workflow does not write state.json, so it may lag the job and `run.json` is
-authoritative (the contract's own text since attestation `9fb7eed`). Settling passes the workflow's own times, when a
-worker first took it (`started_at`) and when it closed (`ended_at`), so the terminal entry and a backend-written
-record's `finished_at` are the workflow's end, not the time of the look.
+few seconds, so a crashed job gets its record even when nobody asks. A Temporal job's workflow writes its own state:
+its first activity moves state.json to `running` (the worker's clock) and its last settles it -- `complete`, `failed`
+naming the stage and its cause, or `cancelled` -- writing the failed or cancelled record, so the outcome is on disk
+whether or not anyone looks; Temporal's history holds the scheduling, never the only copy of an outcome. A look
+(`status`, `cancel`, `result`) still settles a job the workflow could not (a terminated workflow, one started before
+the workflow settled jobs itself), passing the workflow's own times, when a worker first took it (`started_at`) and
+when it closed (`ended_at`); settle is exactly-once, so the two never disagree, and `run.json` stays authoritative
+(the contract's own text since attestation `9fb7eed`).
 
 ## The run directory
 
@@ -71,16 +74,18 @@ not be `smeltery`, which is the run's own. A named arm also makes the run state 
 compared on (`best_paired_ddE`, `mean_paired_ddE`; [core-record.md](core-record.md)). The schema's own
 `terminal_record` already carries the spec's arm into a failed or cancelled record.
 
-`SMELTERY_BACKEND=temporal` carries neither: its finalize activity takes the run_id only, so a spec with an arm or an
-ext is **refused at `submit`** rather than having them dropped (the contract's rule for a backend that cannot hand
-them to its producer). `smeltery run --temporal --arm` is refused for the same reason.
-`smeltery al` ([active-learning.md](active-learning.md)) is the one caller that uses both.
+`SMELTERY_BACKEND=temporal` carries both the same way: they travel in the workflow's input (`RunInput.arm`,
+`RunInput.ext`) to its record stage, which hands them to the same `core_record.emit_core_record`, so the complete record
+states them at its first write; `RUN_DIR/temporal/job.json` keeps them beside the config, so a failed or cancelled
+record (written by the workflow or by a look) carries the arm too. `smeltery run --temporal --arm NAME --ext-json
+JSON` works for the same reason. `smeltery al` ([active-learning.md](active-learning.md)) is the one caller that
+uses both.
 
 ### run_id
 
 The submitter owns it (`--run-id` on `submit`, `JobSpec.run_id`; default a fresh 12-hex name): the handle,
 `state.json` and the core record in every terminal state carry the same one. The runner hands it to the run
-(`smeltery run --run-id=<id>`; on Temporal, `RunInput.run_id`, which the finalize activity uses), and `settle` ends a
+(`smeltery run --run-id=<id>`; on Temporal, `RunInput.run_id`, which the record stage uses), and `settle` ends a
 job `failed` if the record in its run directory names another run_id, family or config. The input digest is in the
 record's `ext.smeltery.input_digest`.
 
@@ -147,7 +152,7 @@ Every terminal record carries the job's `run_id`, `family`, `arm` (the submitter
   does one whose record is not the job's (another run_id, family or config).
 - `ext["smeltery.job"]["stages_completed"]`: the stages the run had completed when it stopped, in order, each with
   its digest and whether it was reused (read from `RUN_DIR/stages.partial.jsonl`, below), or null when the run left
-  no stage log (a Temporal job: the workflow keeps none).
+  no stage log (a Temporal job of the old `PipelineRunWorkflow` type; `CampaignRunWorkflow` logs its stages too).
 
 ## Resumability: resubmitting reuses completed stages
 
@@ -203,7 +208,11 @@ its unfinished SCFs on a rerun into the same OUT; a resubmission after the measu
 
 - **local**: the task is marked cancelled and its process group gets SIGTERM, then SIGKILL after a grace. `smeltery
   run` runs inside the runner's own process, in that group, so the signal ends the run itself (and any SCF in it).
-- **temporal**: the workflow is terminated; its SCF children are killed when their heartbeat is refused.
+- **temporal**: a running workflow is cancelled: the cancel reaches the running stage's activity at its next
+  heartbeat, a score activity kills its SCF child's process group before it reports cancelled (every activity is
+  started with `WAIT_CANCELLATION_COMPLETED`, so the workflow waits for that), and the workflow settles the job
+  `cancelled` and ends `CANCELED`. It is terminated only if it has not stopped within the grace, or if no worker had
+  started it.
 
 While it runs, `smeltery run --out` appends each completed stage to `RUN_DIR/stages.partial.jsonl` (fsync'd, one
 line per stage, removed once the run record is written). A stage is stored for reuse only after it completes, so a
@@ -230,12 +239,20 @@ exact contents (read back as a `StateFile`), and a record matching every termina
 entry's `at`; a record that is not the job's ends it failed. The campaign is a real `smeltery run` on the fake engine
 (`tests/fake_ferric.py`), about a second per job. The temporal leg runs against the dev server at
 `SMELTERY_TEMPORAL_ADDRESS` (default `127.0.0.1:7233`), or with `SMELTERY_TEST_TEMPORAL_LOCAL=1` against
-`temporalio.testing.WorkflowEnvironment.start_local()` (which downloads the dev server on first use); otherwise it
-skips. Its crashed-worker case always skips: Temporal retries a crashed worker's work instead of failing the job.
+`temporalio.testing.WorkflowEnvironment.start_local()` (which downloads the dev server on first use, or uses the
+`temporal` binary `SMELTERY_TEST_TEMPORAL_CLI` names); otherwise it skips. Its crashed-worker case always skips: Temporal retries a crashed worker's work instead of failing the job.
 
 `tests/test_stage_reuse.py` covers resumability and cancellation on the fake engine, counting its SCFs: an identical
 resubmission runs none and matches the first record except for reuse provenance and timestamps; a changed setting
 invalidates its stage and every one after it; another ferric build invalidates; a dirty build neither reuses nor
 stores; a corrupted entry is recomputed; concurrent writers leave one valid entry; a job cancelled mid-analysis lists
 its completed stages and its resubmission reuses the measurement only; MCP reports the reuse. The Temporal cancel leg
-is skipped there (no server here; `tests/test_job_backends.py` runs it against one).
+is `tests/test_temporal_campaign.py`'s (it needs a server).
+
+`tests/test_temporal_campaign.py` covers the Temporal workflow itself: one activity per stage in its history, heartbeat
+details on a running leg, a transient failure of a stage retried alone (the plan not rebuilt, no SCF re-run), a
+deterministic failure not retried and settled `failed` by the workflow with its terminal record, a cancel reaching the
+running leg and ending the workflow `CANCELED`, and an execution of the frozen `PipelineRunWorkflow` still finishing.
+CI's `temporal` job runs it, `tests/test_temporal_run.py` and this suite's temporal leg against
+`WorkflowEnvironment.start_local()` (`tests/temporal_server.py`) with `SMELTERY_TEST_TEMPORAL_REQUIRE=1`, so they
+cannot pass by skipping.

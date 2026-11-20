@@ -111,6 +111,54 @@ When Bench is configured with the Temporal task queue (`TemporalTaskQueue`), lau
 and `temporal-worker` to run the SCFs that command schedules. (`smeltery bench` as shipped builds the subprocess
 task queue, which needs neither.)
 
+## One workflow per campaign, one activity per stage
+
+A run is one `CampaignRunWorkflow` execution (one per OUT and staged config: re-running the same command attaches to
+it or resumes it, and a campaign job is exactly one). The workflow holds control flow only; every stage of the run is
+its own activity, with its own timeout, heartbeat and retries:
+
+| Activity | What it does | Retried |
+|---|---|---|
+| `campaign_begin` | a campaign job's `state.json` -> `running` | up to 5 attempts |
+| `campaign_plan` | the tiers before the measurement (structure, docking, paired poses, pocket, parity, gates): the plan, built once | transient errors only, 3 attempts |
+| `pipeline_score` (one per SCF leg and rung) | the measurement tier ([below](#what-one-unit-of-work-is)) | a crashed child or worker, 3 attempts; never chemistry or a timeout |
+| `campaign_cut` | pairing and the cut, from `calcs.jsonl` | transient errors only, 3 attempts |
+| `campaign_analysis` (one per analysis) | each `analysis` section, in config order | transient errors only, 3 attempts |
+| `campaign_record` | the run record, pose files, `calcs.jsonl`, the core record (with `--arm` / `--ext-json`) | transient errors only, 3 attempts |
+| `campaign_settle` | a campaign job's `state.json` -> complete / failed / cancelled, and its failed or cancelled record | up to 5 attempts |
+
+**Checkpoints.** Each stage after the plan starts from the previous stage's output, a content-addressed file
+`OUT/temporal/stages/<sha256>.pkl` whose digest the workflow history recorded: a retried stage starts again from
+exactly that, so it never rebuilds the plan or re-runs a finished stage, and a file whose bytes changed, or that
+another smeltery build wrote, is refused (exit 3; re-running the command resumes). They are removed when the record is
+written.
+
+**Retries.** A stage's `OSError` (a network fetch, a shared filesystem; not a missing or unreadable input) and
+`MemoryError` are retried; anything else -- a config error, a gate refusing, a changed config, a log of another run,
+a bug -- fails the run at once, because the same inputs fail the same way every time. A worker that dies is noticed
+within the heartbeat timeout and its activity runs again on another worker.
+
+**Heartbeats.** Every long activity heartbeats every quarter of `heartbeat_s` (default 180 s) with what it is running:
+`{stage, attempt, phase, elapsed_s}`, plus `candidate, pose, leg, field_model, rung` for an SCF leg. `temporal workflow
+describe --workflow-id ...` (or the UI's pending activities) shows them.
+
+**Cancellation.** Cancelling the workflow (`smeltery cancel` on a campaign job, or `temporal workflow cancel`) reaches
+the running activity at its next heartbeat; a score activity kills its child's process group before it reports
+cancelled, and the workflow waits for that, then settles the job `cancelled` and ends `CANCELED`. A cancel is never
+recorded as an SCF outcome. A stage that runs in the worker's own thread (plan, cut, an analysis) cannot be stopped
+mid-way, but it can no longer write the record: the record stage writes under the job's state lock and refuses a job
+already settled.
+
+**The record on disk.** For a campaign job the workflow writes the outcome itself (`campaign_begin`,
+`campaign_settle`), so `state.json` and `run.json` say how the run ended whether or not anyone runs `smeltery status`;
+Temporal's history is the scheduling state. Completed stages are logged in `OUT/stages.partial.jsonl` as the run
+goes, so a failed or cancelled job's record lists them.
+
+**Versions.** `PipelineRunWorkflow`, the single-finalize workflow of earlier releases, stays registered on every
+worker (its activities `pipeline_prepare` / `pipeline_finalize` too), so an execution started before the change
+finishes; nothing starts one any more. The design and its audit:
+[2026-11-20-temporal-per-tier-design.md](superpowers/specs/2026-11-20-temporal-per-tier-design.md).
+
 ## What one unit of work is
 
 The unit is one SCF leg: (candidate, pose, leg, field model). A field leg exists once per field model: the plan's
@@ -178,11 +226,12 @@ extra field model's failed score is `None` in what its analysis's `summarize` re
 |---|---|
 | 0 | done; the record path and input digest are printed |
 | 2 | the Temporal server is unreachable (the message includes the docker and compose commands above; re-running the same command resumes), or `temporalio` is not installed, or a bad config |
-| 3 | the workflow failed. Notably, finalize refuses while any leg has an infrastructure error or timed out: an error is not a measurement. For timeouts the remedy is to raise `[run] scf_timeout_s` (it does not change the digest) and run the same command again |
+| 3 | the workflow failed. Notably, the cut refuses while any leg has an infrastructure error or timed out: an error is not a measurement. For timeouts the remedy is to raise `[run] scf_timeout_s` (it does not change the digest) and run the same command again |
 
 ## Flags that do not combine with it
 
-`--temporal` runs the whole config: it refuses `--only-candidate` and `--combine`. Separately, an analysis that
+`--temporal` runs the whole config: it refuses `--only-candidate` and `--combine`. `--arm` and `--ext-json` combine
+with it: they reach the core record at its first write, as in a plain run. Separately, an analysis that
 re-measures every pose under other fields (`[charge_sensitivity]`) refuses `--only-candidate` and `--combine` even
 without `--temporal` (a partial measures one field only, and a combine has no SCFs to re-measure with). `--plan`
 works: it stops before the SCFs and reports the poses, pocket, parity, digest and the SCF count, which under
@@ -191,5 +240,6 @@ works: it stops before the SCFs and reports the poses, pocket, parity, digest an
 ## What the run leaves
 
 The ordinary run record, plus `OUT/calcs.jsonl` (see [bench.md](bench.md#provenance-and-lineage)) and `OUT/temporal/`
-(`work.json`, `running.json`: the scheduling state). The danuglipron-halogen prebuilt pipeline is a worked example
+(`work.json`, `running.json` while the workflow is live, `stages/` until the record is written, and for a campaign job
+`job.json`, its arm and ext: the scheduling state). The danuglipron-halogen prebuilt pipeline is a worked example
 (`src/smeltery/prebuilt/danuglipron-halogen/pipeline.toml`).

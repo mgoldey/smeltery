@@ -87,7 +87,8 @@ observed an arm and metrics at run time that it did not. So nothing is written b
   them to `core_record.write_core`, and `core_fields` writes them. The rule the contract states for a backend that
   *cannot* hand them over still holds: the Temporal backend's finalize activity takes the run_id only, so it
   **refuses** a spec with an arm or an ext at `submit` rather than dropping them, and `run --temporal --arm` is
-  refused too.
+  refused too. (Lifted by roadmap task 20, 2026-11-20-temporal-per-tier-design.md: the Temporal workflow now carries
+  both to its record stage, and neither is refused.)
 - **smeltery has no arm of its own**, so `arm` is `None` for every run outside a job and those records are unchanged.
 
 ### The iteration metric: the run's own, not the loop's
@@ -159,7 +160,8 @@ Library: `smeltery.al.run_loop(...)` takes an injected `settings` and optional `
 - Grouping needs the `attestation` extra, because it is the core record that carries the family and arm (campaign
   jobs need it at all). Without it there is no record to group, and `core_record_sha256` is null in the manifest.
 - `SMELTERY_BACKEND=temporal` cannot run a loop iteration: it carries no arm or ext, and refuses the spec. The loop
-  reports that refusal as its stop reason rather than silently recording ungrouped runs.
+  reports that refusal as its stop reason rather than silently recording ungrouped runs. (Lifted by roadmap task 20:
+  the Temporal backend carries both, so a loop runs on either backend.)
 
 ## Tests
 

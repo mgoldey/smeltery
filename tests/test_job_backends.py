@@ -4,10 +4,11 @@ Each test is parametrized over the two backends, so the local one cannot quietly
 one is held to (and the reverse). The campaign is a real `smeltery run` of a two-candidate config on the fake engine
 (`tests/fake_ferric.py`: deterministic energies, hangs and crashes on demand), which finishes in about a second.
 
-The `temporal` leg needs a Temporal server: the dev server at $SMELTERY_TEMPORAL_ADDRESS (default 127.0.0.1:7233),
-or, with SMELTERY_TEST_TEMPORAL_LOCAL=1, `WorkflowEnvironment.start_local()` (which downloads the dev server on first
-use, so it is opt-in: offline it fails). Without either it skips, like tests/test_temporal_run.py. Each temporal test
-runs an in-process pipeline worker on its own task queue, its score children on the fake engine.
+The `temporal` leg needs a Temporal server (tests/temporal_server.py): the dev server at $SMELTERY_TEMPORAL_ADDRESS
+(default 127.0.0.1:7233), or, with SMELTERY_TEST_TEMPORAL_LOCAL=1, `WorkflowEnvironment.start_local()` (which downloads
+the dev server on first use unless $SMELTERY_TEST_TEMPORAL_CLI names one, so it is opt-in). Without either it skips,
+like tests/test_temporal_run.py. Each temporal test runs an in-process pipeline worker on its own task queue, its
+score children on the fake engine.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ import contextlib
 import json
 import os
 import signal
-import socket
 import sys
 import threading
 import time
@@ -31,6 +31,7 @@ pytest.importorskip("attestation_schema", reason="campaign jobs need attestation
 
 import attestation_schema as schema  # noqa: E402
 import fake_ferric  # noqa: E402
+import temporal_server  # noqa: E402
 from attestation_schema import state as schema_state  # noqa: E402
 from attestation_schema.canonical import canonicalize  # noqa: E402
 
@@ -39,7 +40,6 @@ from smeltery.cli import main as smeltery_main  # noqa: E402
 
 FAKE_RUNNER = [sys.executable, str(Path(fake_ferric.__file__).resolve()), "_job"]
 FAKE_CHILD = [sys.executable, str(Path(fake_ferric.__file__).resolve())]
-TEMPORAL_ADDRESS = os.environ.get("SMELTERY_TEMPORAL_ADDRESS", "127.0.0.1:7233")
 S = schema.JobState
 
 TINY = """
@@ -152,20 +152,10 @@ class LocalHarness:
         self.backend.queue.stop_live("test teardown")
 
 
-def _temporal_server() -> bool:
-    host, _, port = TEMPORAL_ADDRESS.rpartition(":")
-    try:
-        with socket.create_connection((host, int(port)), timeout=1):
-            return True
-    except (OSError, ValueError):
-        return False
-
-
 class TemporalHarness:
     """A pipeline worker on its own thread and event loop (as `smeltery worker` runs it), on this test's queue."""
 
     name = "temporal"
-    _env = None  # a WorkflowEnvironment started for the session, when opted in
 
     def __init__(self, tmp: Path) -> None:
         pytest.importorskip("temporalio", reason="temporalio (the `temporal` extra) is not installed")
@@ -182,20 +172,9 @@ class TemporalHarness:
 
         self.backend.submit = tracking  # type: ignore[method-assign]
 
-    @classmethod
-    def _server(cls) -> str:
-        if _temporal_server():
-            return TEMPORAL_ADDRESS
-        if os.environ.get("SMELTERY_TEST_TEMPORAL_LOCAL") != "1":
-            pytest.skip(f"no Temporal server at {TEMPORAL_ADDRESS} (SMELTERY_TEST_TEMPORAL_LOCAL=1 starts one)")
-        if cls._env is None:
-            from temporalio.testing import WorkflowEnvironment
-
-            try:
-                cls._env = asyncio.run(WorkflowEnvironment.start_local())
-            except RuntimeError as e:
-                pytest.skip(f"WorkflowEnvironment.start_local() failed: {e}")
-        return cls._env.client.service_client.config.target_host
+    @staticmethod
+    def _server() -> str:
+        return temporal_server.require()
 
     @contextlib.contextmanager
     def running(self):
@@ -500,23 +479,21 @@ def test_a_spec_smeltery_cannot_record_honestly_is_refused_before_anything_is_wr
 
 
 def test_an_arm_and_an_ext_reach_the_record_the_first_time_it_is_written(harness, tmp_path):
-    """A submitter's arm and `ext` namespaces are carried (docs/jobs.md "arm and ext"): the local backend hands them
-    to the run, so the complete record states them at its FIRST write -- nothing re-stamps a finished record. The
-    Temporal backend carries neither and refuses the spec instead of dropping it."""
+    """A submitter's arm and `ext` namespaces are carried (docs/jobs.md "arm and ext") by both backends: the local
+    one hands them to the run (`--arm`, `--ext-json`), the Temporal one in the workflow's input to its record stage,
+    so the complete record states them at its FIRST write -- nothing re-stamps a finished record (whose bytes other
+    readers hash), and settle finds the record is the job's (`spec_conflicts` compares the arm and every ext)."""
     import dataclasses
 
     spec = dataclasses.replace(_spec(tmp_path), arm="iter-000", ext={"smeltery.al": {"loop": "demo"}})
-    if harness.name != "local":
-        with pytest.raises(schema.JobError, match="carries no arm or ext"):
-            harness.backend.submit(spec)
-        assert not jobs.state_path(spec.run_dir).exists()
-        return
     with harness.running():
         h = harness.backend.submit(spec)
         st = _finish(harness.backend, h)
     assert st.state is S.COMPLETE, st.message
     rec = schema.read(h.run_dir)
     assert (rec.family, rec.arm) == (spec.family, "iter-000")
+    assert schema_state.spec_conflicts(spec, rec) == []
+    assert rec.producer.name == "smeltery"  # the run's own record, not one a backend wrote over it
     raw = json.loads(jobs.record_path(h.run_dir).read_bytes())
     assert raw["ext"]["smeltery.al"] == {"loop": "demo"}
     assert raw["ext"]["smeltery"], "the run's own namespace is kept beside the submitter's"
