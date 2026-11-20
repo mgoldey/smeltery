@@ -1,11 +1,13 @@
 # The pinned compatible set of ferric, smeltery and attestation (roadmap 46; docs/compatibility.md#the-pinned-stack,
 # docs/superpowers/specs/2026-11-20-compat-matrix-design.md).
 #
-# TWO environments, because no single one can hold all three today:
-#   * smeltery requires mcp>=2.3 (its server class is mcp 2.x's MCPServer) and caps attestation-schema below 0.2;
-#   * attestation at the pinned rev requires mcp==1.28.1 exactly and attestation-schema>=0.2.0.
-# Both conflicts are hard (no version satisfies both sides), so attestation runs in its own environment and the
-# two share only the run directory -- the arrangement the `cross-server` CI job already tests.
+# TWO environments, because no single one can hold all three today. Both sides now agree on mcp (2.3.0: smeltery's
+# `mcp` extra needs >=2.3, attestation pins ==2.3.0 since 8c67578); the ONE remaining conflict is attestation-schema:
+#   * smeltery's `attestation` extra caps attestation-schema below 0.2 (0.2.0 is not on PyPI yet);
+#   * attestation at the pinned rev requires attestation-schema>=0.2.0.
+# No version satisfies both, so attestation runs in its own environment and the two share only the run directory --
+# the arrangement the `cross-server` CI job already tests. Once attestation-schema 0.2.0 is on PyPI and the extra
+# admits it, the two environments can become one.
 #
 # How each pin is verified (tests/test_compat_stack.py, plus the `stack` CI job):
 #   * every [smeltery-env.pins] version equals uv.lock's, so EVERY `uv sync` job in .github/workflows/test.yml
@@ -46,6 +48,6 @@ python = ">=3.12"
 # core-record reader and runs.status, which read what smeltery writes; the repository's v0.5.1 tag points at a commit
 # whose pyproject still says 0.5.0, and nothing newer is on PyPI. attestation-schema 0.2.0 and mcp come from that
 # commit's own requirements (a git install builds the schema from the same checkout).
-attestation = { source = "git", url = "https://github.com/mgoldey/attestation", rev = "6e2b14dcf9f939a80b798f348fb0ef8287385356", version = "0.5.1" }
+attestation = { source = "git", url = "https://github.com/mgoldey/attestation", rev = "8c67578802d51f772fc526faea58b2b5aec834f2", version = "0.5.1" }
 attestation-schema = { source = "git (same checkout)", version = "0.2.0" }
-mcp = { source = "pypi", version = "1.28.1", why = "attestation pins mcp==1.28.1 at this rev (a pending change moves it to 2.3.0)" }
+mcp = { source = "pypi", version = "2.3.0", why = "attestation pins mcp==2.3.0 at this rev, the same mcp as smeltery-env" }

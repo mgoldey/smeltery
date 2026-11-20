@@ -12,9 +12,9 @@ which ferric versions each smeltery release was tested against."
 | How is ferric declared? | `ferric>=0.1.0rc10` (a pre-release floor, no cap), from PyPI; `[tool.uv.sources]` is empty (a checkout or git rev is a commented-out recipe). uv.lock pins 0.1.0rc10. |
 | Which ferric does CI test? | Only the locked one: every job is `uv sync --no-sources` (0.1.0rc10). release.yml installs the built wheel with plain pip, so it gets the NEWEST ferric (0.1.0rc12 today) -- but only on a tag, and nothing records which. |
 | Which tests touch the real engine? | Those marked `needs_ferric` (21 files). The release workflow runs `test_funnel.py` + `test_anchors.py` + `examples/mwe_benzoic.py` from the installed wheel; the golden path (`test_golden_path_smoke.py`) drives `smeltery run` end to end. The cross-server test uses the FAKE engine (`tests/cross_server/smeltery_fake_mcp.py`) and says nothing about ferric. |
-| What is on PyPI? | ferric 0.1.0rc3..rc12 (no rc9 files), smeltery 0.0.1 and 0.1.0 (0.1.0, 2026-11-09, has neither the `mcp` nor the `attestation` extra), attestation 0.2.0..0.5.0 (0.5.0 pins `mcp==1.28.1`), attestation-schema 0.1.0 only, mcp 2.3.0. |
-| What is unreleased? | attestation 0.5.1 (main's pyproject says 0.5.1; the repository's `v0.5.1` tag points at the `schema-v0.1.0` commit, whose pyproject still says 0.5.0, and nothing was published from it) and attestation-schema 0.2.0 (main; attestation main requires `>=0.2.0`). A pending attestation change moves `mcp==1.28.1` to `mcp==2.3.0`. |
-| Can one environment hold all three? | **No.** smeltery's `mcp` extra needs `mcp>=2.3`, attestation pins `mcp==1.28.1` (0.5.0 and main); smeltery's `attestation` extra caps attestation-schema `<0.2`, attestation main needs `>=0.2.0`. Both conflicts are hard. The `cross-server` job already installs attestation into its own `uv tool` environment. |
+| What is on PyPI? | ferric 0.1.0rc3..rc12 (no rc9 files), smeltery 0.0.1 and 0.1.0 (0.1.0, 2026-11-09, has neither the `mcp` nor the `attestation` extra), attestation 0.2.0..0.5.0 (0.5.0 pins `mcp==1.28.1`; main pins `mcp==2.3.0` since 8c67578), attestation-schema 0.1.0 only, mcp 2.3.0. |
+| What is unreleased? | attestation 0.5.1 (main's pyproject says 0.5.1; the repository's `v0.5.1` tag points at the `schema-v0.1.0` commit, whose pyproject still says 0.5.0, and nothing was published from it) and attestation-schema 0.2.0 (main; attestation main requires `>=0.2.0`). attestation main moved from `mcp==1.28.1` to `mcp==2.3.0` at 8c67578 (its PR #68), which this stack pins. |
+| Can one environment hold all three? | **No, for one reason.** mcp no longer conflicts (smeltery's `mcp` extra needs `>=2.3`; attestation main pins `==2.3.0` since 8c67578; PyPI's 0.5.0 still pins 1.28.1). attestation-schema does: smeltery's `attestation` extra caps it `<0.2`, attestation main needs `>=0.2.0`, which is not on PyPI. The `cross-server` job already installs attestation into its own `uv tool` environment. |
 
 ## Decisions
 
@@ -25,8 +25,8 @@ smeltery-environment half as a pip/uv constraints file, GENERATED from stack.tom
 constraints --write`, `--check` in CI and in a test).
 
 A `smeltery[stack]` extra was rejected: it could only pull `attestation` into smeltery's own environment, which the
-boundary rule forbids (smeltery depends on attestation-schema, never attestation) and which the conflicts above make
-impossible anyway. A constraints file constrains without adding a dependency, so it is the honest shape: the
+boundary rule forbids (smeltery depends on attestation-schema, never attestation) and which the attestation-schema
+conflict above makes impossible anyway. A constraints file constrains without adding a dependency, so it is the honest shape: the
 one-liner is `uv pip install -c <raw constraints at REF> 'smeltery[mcp,attestation] @ git+...@REF'`, and attestation
 goes into its own environment at the commit stack.toml pins.
 
@@ -34,8 +34,8 @@ Two environments, stated in the file:
 
 * **smeltery-env**: ferric 0.1.0rc10, attestation-schema 0.1.0, mcp 2.3.0 (PyPI), smeltery from git at the same ref
   the constraints are read from. PyPI's smeltery 0.1.0 is not this stack's smeltery: it predates both extras.
-* **attestation-env**: attestation from git at a FULL commit (6e2b14d, main today, version 0.5.1), which brings
-  attestation-schema 0.2.0 from the same checkout and mcp 1.28.1. PyPI's 0.5.0 is not usable: it predates the ledger's
+* **attestation-env**: attestation from git at a FULL commit (8c67578, main today, version 0.5.1), which brings
+  attestation-schema 0.2.0 from the same checkout and mcp 2.3.0 (the same mcp as smeltery-env). PyPI's 0.5.0 is not usable: it predates the ledger's
   core-record reader and `runs.status`, which is what reads smeltery's output.
 
 Why ferric 0.1.0rc10 and not the newest: it is what uv.lock pins, so **every** `uv sync` job in test.yml tests exactly
@@ -52,7 +52,8 @@ How the pinned set is verified:
    versions equal the pins, installs attestation at the pinned rev with `uv tool install`, and runs
    `tests/cross_server` against that exact pair with `SMELTERY_REQUIRE_CROSS_SERVER=1`. The existing `cross-server`
    job keeps tracking attestation main (its purpose: do the two heads still fit); `stack` proves the pin.
-3. Run locally on 2026-11-20 (the same steps): versions as pinned, cross-server transcript passed (1 passed, 14 s).
+3. Run locally on 2026-11-20 (the same steps): versions as pinned, cross-server transcript passed against 6e2b14d
+   (1 passed, 14 s) and again after the pin moved to 8c67578 (1 passed, 10 s).
 
 ### The matrix: one variable at a time
 
@@ -119,15 +120,15 @@ wheel CI will download. Each cell takes ~30-60 s (install from a warm uv cache, 
 The pinned stack was checked the way the `stack` job does it: the constraints file read back from the pushed ref
 (byte-identical), `uv pip install -c ... 'smeltery[mcp,attestation] @ git+...@<ref>'` resolved ferric 0.1.0rc10,
 attestation-schema 0.1.0, mcp 2.3.0 and `smeltery mcp --list-tools` listed the four tools; attestation installed at
-6e2b14d reported attestation 0.5.1, attestation-schema 0.2.0, mcp 1.28.1; the cross-server transcript passed against
-that pair. (Passing the constraints as an https URL to uv/pip failed in this sandbox only because of its TLS proxy;
+8c67578 reported attestation 0.5.1, attestation-schema 0.2.0, mcp 2.3.0; the cross-server transcript passed against
+that pair (as it had against the earlier pin 6e2b14d, with mcp 1.28.1). (Passing the constraints as an https URL to uv/pip failed in this sandbox only because of its TLS proxy;
 the file was fetched with curl instead.)
 
 ## Left open
 
 * attestation is on PyPI only at 0.5.0; once 0.5.1 (and attestation-schema 0.2.0) are published, stack.toml's
-  attestation-env can move to PyPI pins, and once attestation moves to mcp 2.3.0 and smeltery's `attestation` extra
-  admits schema 0.2 the two environments could become one. Neither is true today and the stack says so.
+  attestation-env can move to PyPI pins, and once smeltery's `attestation` extra admits schema 0.2 the two
+  environments can become one (mcp already agrees at 2.3.0). Neither is true today and the stack says so.
 * smeltery 0.1.0 on PyPI has no `mcp`/`attestation` extras; the next smeltery release lets the one-liner use PyPI.
 * The matrix is Linux x86_64 and one Python (3.11). ferric now ships macOS arm64 and Windows wheels; smeltery does
   not claim those platforms.
