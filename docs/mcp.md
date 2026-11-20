@@ -9,6 +9,10 @@ smeltery mcp                               # an MCP server on stdin/stdout, the 
 smeltery mcp --list-tools                  # the tool names, no server
 ```
 
+`pip install` works once a release carries the `mcp` extra: smeltery 0.1.0 on PyPI (checked 2026-11-20) predates
+`smeltery mcp`, so until the next release install from git, as [the next section](#install-with-uvx-or-pipx-and-wire-it-into-claude)
+does.
+
 A client entry looks like this:
 
 ```json
@@ -19,6 +23,83 @@ A client entry looks like this:
 It is built on the official MCP Python SDK (`mcp`, the optional `mcp` extra). The SDK's server class is
 `mcp.server.mcpserver.MCPServer`, which is FastMCP renamed in SDK 2.0; the floor is `mcp>=2.3`. Every tool returns a
 dataclass, so each one publishes a real `outputSchema` and a client reads fields, not prose.
+
+## Install with uvx or pipx, and wire it into Claude
+
+A client spawns `smeltery mcp` itself, so nothing needs installing first. `uvx` and `pipx` each fetch the server into
+its own environment. smeltery supports Python 3.11 and 3.12 only, so name one (uv may otherwise pick 3.13 and fail to
+resolve); `mcp` is the extra that carries the SDK and `attestation` the one that writes the core run record
+attestation reads.
+
+```sh
+uvx --python 3.12 --from 'smeltery[mcp,attestation] @ git+https://github.com/mgoldey/smeltery' smeltery mcp --list-tools
+pipx run --python python3.12 --spec 'smeltery[mcp,attestation] @ git+https://github.com/mgoldey/smeltery' smeltery mcp --list-tools
+```
+
+Both print the four tool names and exit. Once a release with the `mcp` extra is on PyPI, replace the requirement with
+`smeltery[mcp,attestation]`.
+
+**Claude Code.** Name first, `--` before the command (`-e` takes several values, so a name written after it is read as
+another `KEY=value`):
+
+```sh
+claude mcp add smeltery -s user \
+  -e SMELTERY_ROOT=/data/smeltery \
+  -- uvx --python 3.12 --from 'smeltery[mcp,attestation] @ git+https://github.com/mgoldey/smeltery' smeltery mcp
+```
+
+**Claude Desktop**, in `claude_desktop_config.json` (macOS `~/Library/Application Support/Claude/`, Windows
+`%APPDATA%\Claude\`; restart the app after editing). This one file wires both servers, smeltery to run the screen and
+attestation to check what it wrote:
+
+```json
+{
+  "mcpServers": {
+    "smeltery": {
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.12",
+        "--from",
+        "smeltery[mcp,attestation] @ git+https://github.com/mgoldey/smeltery",
+        "smeltery",
+        "mcp"
+      ],
+      "env": {
+        "SMELTERY_ROOT": "/data/smeltery"
+      }
+    },
+    "attestation": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/mgoldey/attestation",
+        "attest-mcp"
+      ],
+      "env": {
+        "ATTEST_TOOLS": "provenance",
+        "ATTEST_EXPAND": "1",
+        "ATTEST_DB": "/data/attestation/ledger.db",
+        "RESEARCH_ROOT": "/data/smeltery/.smeltery/screens"
+      }
+    }
+  }
+}
+```
+
+A desktop app often starts with a shorter `PATH` than your shell: if `uvx` is not found, use the absolute path from
+`which uvx`.
+
+**One workspace for both.** A screen with no `out_dir` lands in `SMELTERY_ROOT/.smeltery/screens/<campaign>-<8 hex>`.
+attestation's `RESEARCH_ROOT` must be that `screens` directory, not `SMELTERY_ROOT`: its scanner skips hidden
+directories below its root, so the root itself shows nothing. With that set, the flow is `estimate_cost` and
+`screen_candidates` here, then attestation's `runs.status` for what is in flight (it reads each run's
+`attestation/state.json`), this server's `run_status` for per-stage progress, and when the run has finished
+attestation's `runs.scan` (with `confirm=true`), `runs.list` and `runs.detail` for the record and its provenance
+caveats, with `explain_drop` here for why a molecule was dropped. attestation's `runs.status` and its reader for
+smeltery's core record are in attestation 0.5.1; PyPI has 0.5.0, so use its git form (above) until 0.5.1 is out.
+The full guide, with the example conversation and the variable table, is attestation's
+[docs/guides/claude.md](https://github.com/mgoldey/attestation/blob/main/docs/guides/claude.md).
 
 ## The tools
 

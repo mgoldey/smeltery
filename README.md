@@ -222,6 +222,19 @@ flowchart LR
 
 Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 
+## Use it from Claude
+
+`smeltery mcp` serves four screening tools to an MCP client. Nothing to install first; the client spawns it through
+`uvx` (or `pipx run`). smeltery 0.1.0 on PyPI predates the server, so for now it installs from git:
+
+```bash
+claude mcp add smeltery -s user -e SMELTERY_ROOT=/data/smeltery \
+  -- uvx --python 3.12 --from 'smeltery[mcp,attestation] @ git+https://github.com/mgoldey/smeltery' smeltery mcp
+```
+
+[docs/mcp.md](docs/mcp.md#install-with-uvx-or-pipx-and-wire-it-into-claude) has the Claude Desktop config that wires
+smeltery and [attestation](https://github.com/mgoldey/attestation) together, so attestation can check the runs smeltery writes.
+
 ## Documentation
 
 | To... | Read |
@@ -237,6 +250,7 @@ Tests can build the app with fakes for any port (`tests/bench/fakes.py`).
 | Run long work under Temporal | [docs/temporal-runs.md](docs/temporal-runs.md) |
 | Submit a run and come back for it (`smeltery submit/status/cancel/result`) | [docs/jobs.md](docs/jobs.md) |
 | Drive a screen from an agent (MCP: `smeltery mcp`) | [docs/mcp.md](docs/mcp.md) |
+| Wire smeltery and attestation into Claude Code or Desktop | [docs/mcp.md](docs/mcp.md#install-with-uvx-or-pipx-and-wire-it-into-claude) |
 | Run an active-learning loop (`smeltery al run`) | [docs/active-learning.md](docs/active-learning.md) |
 | Set up optional environments (OpenMM, ML potentials) | [docs/environments.md](docs/environments.md) |
 | Check measured limits | [docs/limits.md](docs/limits.md) |
