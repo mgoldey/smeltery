@@ -95,7 +95,8 @@ def mol_with_coords(
     zipped away.
     """
     from rdkit import Chem
-    from rdkit.Geometry import Point3D
+
+    from ..gates import add_pose_conformer
 
     if len(symbols) != len(coords):
         raise ValueError(
@@ -134,11 +135,8 @@ def mol_with_coords(
     # enough to matter (it does so on strained danuglipron poses), and the
     # embedded coordinates were discarded anyway. Every position here is
     # supplied by the caller, so there is nothing to generate.
-    conf = Chem.Conformer(mol.GetNumAtoms())
-    for i, (x, y, z) in enumerate(coords):
-        conf.SetAtomPosition(i, Point3D(float(x), float(y), float(z)))
     mol.RemoveAllConformers()
-    mol.AddConformer(conf, assignId=True)
+    add_pose_conformer(mol, coords)
 
     if check:
         assert_graph_is_sane(mol, expect_heavy=parsed.GetNumAtoms())

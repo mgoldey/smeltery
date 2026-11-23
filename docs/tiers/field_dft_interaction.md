@@ -50,7 +50,7 @@
 ## Gates
 
 - **G1, pose validity (applied by this tier).** `FieldDftInteraction.run` calls `require_passing_poses` on every candidate first; a pose that failed PoseBusters raises `PoseGateError`. A candidate with no report runs unless `ctx["require_pose_report"]` is true.
-- **G3, electron parity (not applied by this tier).** Only `smeltery run` checks parity (`src/smeltery/cli.py`, `_check_parity`). The tier passes the SMILES' net formal charge to `ferric.Molecule.from_xyz_string` and the multiplicity stays 1, so it scores a closed-shell singlet at that charge. The charge is whatever the SMILES carries: a carboxylic acid given as the neutral acid is scored as the neutral acid.
+- **G3, electron parity (not applied by this tier).** Only `smeltery run` checks parity (`src/smeltery/planning.py`, `_check_parity`). The tier passes the SMILES' net formal charge to `ferric.Molecule.from_xyz_string` and the multiplicity stays 1, so it scores a closed-shell singlet at that charge. The charge is whatever the SMILES carries: a carboxylic acid given as the neutral acid is scored as the neutral acid.
 - **G4, unmeasured floor (applies to using the output).** `funnel.cut(tier=...)` refuses this tier because both its floors are unmeasured; `smeltery run` then requires an explicit `[cut] floor` and records that it came from the config.
 - Its own guards: SCF non-convergence of either calculation raises `RuntimeError` naming which leg failed; a basis the cost model cannot count raises `ValueError` from `_size`; a run over `memory_budget_gb` raises `DftMemoryError` before any SCF starts; and a ferric that applies dispersion inside `run_dft` raises `RuntimeError` from `_dft_energy` rather than double-counting it.
 

@@ -4,20 +4,29 @@ from __future__ import annotations
 
 import builtins
 import hashlib
-import os
-import re
 import shutil
-import tempfile
 import threading
 from pathlib import Path
 
-from ..ports.pipeline_store import NAME, InputFile, PipelineFile, StaleWrite
+from smeltery.record import file_sha256
 
-CONFIG = "config.toml"
-# An uploaded input's name: one path component, no leading dot, so it can neither leave the folder nor hide in it.
-# Spaces and parentheses are allowed because that is what a browser hands over ("7lcj (1).pdb"); what is excluded is
-# the separators and the characters a shell or TOML would have to be escaped for.
-FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()+._-]{0,127}")
+from ..ports.pipeline_store import (
+    CONFIG,
+    FILENAME,
+    NAME,
+    InputFile,
+    PipelineFile,
+    StaleWrite,
+    check_file_name,
+    check_pipeline_name,
+)
+from ._files import atomic_write, tmp_pattern
+
+__all__ = ["CONFIG", "FILENAME", "FilesystemPipelineStore"]
+
+#: Temp-file prefixes for the two in-flight writes; `clone` ignores exactly these.
+_CONFIG_TMP = ".config-"
+_UPLOAD_TMP = ".upload-"
 
 
 def _sha(text: str) -> str:
@@ -32,16 +41,8 @@ def _sha_file(path: Path) -> str:
     st = path.stat()
     key = (str(path), st.st_size, st.st_mtime_ns)
     if key not in _SHA_CACHE:
-        _SHA_CACHE[key] = _hash(path)
+        _SHA_CACHE[key] = file_sha256(path)
     return _SHA_CACHE[key]
-
-
-def _hash(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 class FilesystemPipelineStore:
@@ -50,8 +51,7 @@ class FilesystemPipelineStore:
         self._lock = threading.Lock()
 
     def _folder(self, name: str) -> Path:
-        if not isinstance(name, str) or not NAME.fullmatch(name):
-            raise ValueError(f"invalid pipeline name {name!r}: use [a-z0-9][a-z0-9_-]{{0,63}}")
+        check_pipeline_name(name)
         return self.dir / name
 
     def list(self) -> builtins.list[str]:
@@ -69,14 +69,7 @@ class FilesystemPipelineStore:
 
     @staticmethod
     def _write(folder: Path, text: str) -> None:
-        fd, tmp = tempfile.mkstemp(dir=folder, prefix=".config-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-                f.write(text)
-            os.replace(tmp, folder / CONFIG)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        atomic_write(folder / CONFIG, text, prefix=_CONFIG_TMP)
 
     def put(self, name: str, text: str, base_sha256: str | None) -> PipelineFile:
         with self._lock:
@@ -115,8 +108,7 @@ class FilesystemPipelineStore:
         return PipelineFile(name, text, _sha(text), folder)
 
     def add_file(self, name: str, filename: str, data: bytes) -> str:
-        if not FILENAME.fullmatch(filename or "") or filename == CONFIG:
-            raise ValueError(f"invalid file name {filename!r}: a plain name such as receptor.pdb")
+        check_file_name(filename)
         folder = self.get(name).folder
         with self._lock:
             dest = folder / filename
@@ -124,14 +116,7 @@ class FilesystemPipelineStore:
                 stem, suffix = Path(filename).stem, Path(filename).suffix
                 dest = folder / f"{stem}-{hashlib.sha256(data).hexdigest()[:8]}{suffix}"
             if not dest.exists():
-                fd, tmp = tempfile.mkstemp(dir=folder, prefix=".upload-", suffix=".tmp")
-                try:
-                    with os.fdopen(fd, "wb") as f:
-                        f.write(data)
-                    os.replace(tmp, dest)
-                except BaseException:
-                    Path(tmp).unlink(missing_ok=True)
-                    raise
+                atomic_write(dest, data, prefix=_UPLOAD_TMP)
         return dest.name
 
     def files(self, name: str) -> builtins.list[InputFile]:
@@ -164,7 +149,7 @@ class FilesystemPipelineStore:
                     source,
                     dst,
                     symlinks=True,
-                    ignore=shutil.ignore_patterns("preview", ".config-*.tmp", ".upload-*.tmp"),
+                    ignore=shutil.ignore_patterns("preview", tmp_pattern(_CONFIG_TMP), tmp_pattern(_UPLOAD_TMP)),
                 )
             except BaseException:
                 shutil.rmtree(dst, ignore_errors=True)

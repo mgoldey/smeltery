@@ -4,6 +4,7 @@ import { api, unwrap, type Schemas } from "../../api/client";
 import { MolstarViewer } from "../../components/MolstarViewer";
 import { receptorScene } from "../../components/scenes";
 import { Shell } from "../../components/Shell";
+import { StructureSummary } from "../../components/StructureSummary";
 
 type Info = Schemas["StructureInfo"];
 
@@ -68,51 +69,7 @@ export function Structure() {
           {dragging ? <p className="lede">Drop to open.</p> : null}
           {info ? (
             <>
-              <h2>What this structure is</h2>
-              <table className="grid" aria-label="Structure provenance">
-                <tbody>
-                  <tr>
-                    <th scope="row">Source</th>
-                    <td className="mono">{info.source}</td>
-                  </tr>
-                  <tr>
-                    <th scope="row">sha256</th>
-                    <td className="mono" data-testid="structure-sha">
-                      {info.sha256}
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row">Origin</th>
-                    <td data-testid="structure-origin">
-                      {info.origin}
-                      {info.license ? `, licence ${info.license}` : ""}
-                      {info.mean_plddt !== null && info.mean_plddt !== undefined ? `, mean pLDDT ${info.mean_plddt.toFixed(1)}` : ""}
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row">Atoms</th>
-                    <td className="num">{info.n_atoms}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <h2>What preparation drops</h2>
-              {info.dropped.length ? (
-                <>
-                  <p className="lede">
-                    Every HETATM residue is removed when the receptor is prepared. Crystal waters are among them; a pose that
-                    displaces one is ordinary chemistry, but check nothing here is a cofactor the site needs.
-                  </p>
-                  <ul data-testid="structure-dropped">
-                    {info.dropped.map((r) => (
-                      <li key={r} className="mono">
-                        {r}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <p className="empty-state">No HETATM residues: nothing is dropped.</p>
-              )}
+              <StructureSummary info={info} />
               <MolstarViewer state={receptorScene(info.file_url)} label="structure viewer" height={460} />
             </>
           ) : null}

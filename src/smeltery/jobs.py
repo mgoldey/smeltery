@@ -27,7 +27,7 @@ the `flock` on `attestation/`, `transition`, `settle` (end a job exactly once) a
 only: without `flock` (Windows) every state write is refused (`StateLockUnavailableError`).
 
 **Terminal records.** A complete run's record is the one `smeltery run` writes (`core_record`, through
-`cli.emit_core_record`), given the job's `run_id` (`smeltery run --run-id`, `RunInput.run_id` on Temporal) and with the
+`emit_core_record`), given the job's `run_id` (`smeltery run --run-id`, `RunInput.run_id` on Temporal) and with the
 campaign config as `config`, so `settle` finds it is this job's. A failed or cancelled job gets the schema's minimal
 record (`attestation_schema.state.terminal_record`, through `settle`): run_id, family, arm, config, times, the manifest
 of whatever the run left, no metrics, and in `ext["smeltery.job"]` the `backend`, the `job_id` and
@@ -264,11 +264,11 @@ def campaign_spec(
     `arm` and `ext` are the submitter's: both backends hand them to the run, so the record states them the first time
     it is written (`check_spec`, docs/jobs.md "arm and ext")."""
     _require()
-    from .cli import _stage_config
+    from .run_inputs import stage_config
 
     run_dir = Path(run_dir).resolve()
     _refuse_existing(run_dir)  # before staging: never rewrite a finished run's config
-    staged, _ = _stage_config(Path(config), run_dir)
+    staged, _ = stage_config(Path(config), run_dir)
     cfg = tomllib.loads(staged.read_text())
     return JobSpec(
         run_id=run_id or uuid.uuid4().hex[:12],
@@ -447,7 +447,7 @@ class LocalJobBackend:
 
 
 def _last_line(log_path: str) -> str:
-    from .bench.adapters.task_queue import read_tail
+    from .tasks import read_tail
 
     with contextlib.suppress(OSError):
         lines = [ln for ln in read_tail(log_path, 20).splitlines() if ln.strip()]
@@ -579,12 +579,12 @@ class TemporalJobBackend:
 
     def submit(self, spec: JobSpec) -> JobHandle:
         from . import temporal_run as tr
-        from .cli import _stage_config
+        from .run_inputs import stage_config
 
         check_spec(spec)
         run_dir = Path(spec.run_dir).resolve()
         _refuse_existing(run_dir)
-        config, info = _stage_config(write_config(run_dir, spec.config), run_dir, temporal=True)
+        config, info = stage_config(write_config(run_dir, spec.config), run_dir, temporal=True)
         inp = tr.RunInput(
             str(config),
             str(run_dir),
@@ -747,7 +747,7 @@ def backend_for(settings, root: str | os.PathLike[str] | None = None, name: str 
             root = settings.root
         else:
             try:
-                from .bench.app import default_root
+                from .bench.adapters.workspace_root import default_root
             except ImportError as e:  # the bench extra names the default; without it, say where
                 raise BackendUnavailable("give the workspace: --root ROOT or SMELTERY_ROOT") from e
             root = default_root()

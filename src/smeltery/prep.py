@@ -29,27 +29,22 @@ Downloaded structure text is data: it is only parsed here, never executed.
 from __future__ import annotations
 
 import contextlib
-import hashlib
-import os
-import re
-import shutil
-import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
+from .pdb_records import WATER_RESIDUES, PdbRecordError, iter_atoms
 from .pocket import load_pocket
-from .providers.structure import AfdbProvider, PdbProvider, StructureResult
+from .providers.structure import AfdbProvider, PdbProvider, StructureResult, is_pdb_id
+from .record import file_sha256
 
 #: Sanity bound: a box centre farther than this from every receptor heavy atom is almost surely in the
 #: wrong frame (or off the protein). A heuristic, not a measured threshold.
 MAX_CENTRE_GAP_ANG = 8.0
 #: PDBQT coordinates are written to 3 decimals; a heavy atom farther than this from its PDB atom is not it.
 FRAME_TOL_ANG = 0.01
-WATER = {"HOH", "WAT", "DOD", "TIP", "TIP3"}
-_PDB_ID = re.compile(r"^[0-9][A-Za-z0-9]{3}$")
 
 
 class PrepError(RuntimeError):
@@ -72,29 +67,11 @@ class PreparedTarget:
 
 
 def _atoms(text: str):
-    """(record, name, resname, chain, resnum, altloc, element, xyz, line) of the FIRST model's ATOM/HETATM."""
-    for line in text.splitlines():
-        if line.startswith("ENDMDL"):
-            return
-        if not line.startswith(("ATOM", "HETATM")):
-            continue
-        try:
-            xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
-        except ValueError as e:
-            raise PrepError(f"bad coordinates in PDB line: {line!r}") from e
-        name = line[12:16].strip()
-        el = (line[76:78].strip() or name.lstrip("0123456789")[:1]).upper()
-        yield (
-            line[:6].strip(),
-            name,
-            line[17:20].strip(),
-            line[21].strip(),
-            line[22:26].strip(),
-            line[16].strip(),
-            el,
-            xyz,
-            line,
-        )
+    """The FIRST model's ATOM/HETATM records (`pdb_records.AtomRecord`); bad coordinates are a `PrepError`."""
+    try:
+        yield from iter_atoms(text)
+    except PdbRecordError as e:
+        raise PrepError(str(e)) from e
 
 
 def clean_receptor(text: str, chains: list[str] | None) -> tuple[str, dict]:
@@ -131,7 +108,7 @@ def reference_ligand_centroid(text: str, ref: str) -> tuple[tuple[float, float, 
     resname, chain, num = parts[0], (parts[1] if len(parts) > 1 else None), (parts[2] if len(parts) > 2 else None)
     inst: dict[tuple[str, str], list] = {}
     for rec, _n, res, ch, rn, alt, el, xyz, _l in _atoms(text):
-        if rec != "HETATM" or res != resname or res in WATER or el == "H" or alt not in ("", "A"):
+        if rec != "HETATM" or res != resname or res in WATER_RESIDUES or el == "H" or alt not in ("", "A"):
             continue
         if (chain is None or ch == chain) and (num is None or rn == num):
             inst.setdefault((ch, rn), []).append(xyz)
@@ -167,8 +144,7 @@ def _nearest(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return out
 
 
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+_sha = file_sha256
 
 
 def obtain_structure(spec: str, provider: str, base: Path, allow_network: bool, fetch=None) -> StructureResult:
@@ -184,7 +160,7 @@ def obtain_structure(spec: str, provider: str, base: Path, allow_network: bool, 
         p = Path(spec) if Path(spec).is_absolute() else base / spec
         if p.is_file():
             prov, arg = PdbProvider(), str(p)
-        elif p.suffix.lower() == ".pdb" or not _PDB_ID.match(spec):
+        elif p.suffix.lower() == ".pdb" or not is_pdb_id(spec):
             raise PrepConfigError(f"[structure] spec {str(p)!r} is not an existing .pdb file or a PDB id")
         elif not allow_network:
             raise PrepConfigError(
@@ -196,20 +172,6 @@ def obtain_structure(spec: str, provider: str, base: Path, allow_network: bool, 
     if result is None:
         raise PrepError(f"stage 'structure' failed: {prov.last_error}")
     return result
-
-
-@contextlib.contextmanager
-def _tool_path():
-    """Meeko's CLI is a console script next to the interpreter; make it findable when the venv is not activated."""
-    if shutil.which("mk_prepare_receptor.py") is not None:
-        yield
-        return
-    old = os.environ.get("PATH", "")
-    os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + old
-    try:
-        yield
-    finally:
-        os.environ["PATH"] = old
 
 
 def prepare_target_from_structure(
@@ -257,8 +219,7 @@ def prepare_target_from_structure(
         )
     covers_corners = bool(cutoff >= float(np.linalg.norm(half)))
 
-    with _tool_path():
-        produced = prepare_receptor(receptor_pdb, sdir / "receptor.pdbqt")
+    produced = prepare_receptor(receptor_pdb, sdir / "receptor.pdbqt")
     receptor_pdbqt = Path(produced)  # a rigid receptor: a bare path
     qt = _heavy_xyz_pdbqt(receptor_pdbqt.read_text())
     if not len(qt):

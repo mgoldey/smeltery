@@ -24,7 +24,8 @@ from smeltery.bench.adapters.task_supervisor import (
     task_event,
     utc,
 )
-from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager
+from smeltery.tasks import MAX_RETRIES, Task, TemporalTaskManager, read_tail
+from smeltery.temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE, TASKS_QUEUE
 
 _GB = 1024**3
 _log = logging.getLogger(__name__)
@@ -78,35 +79,6 @@ _TASK_COLUMNS = (
 #: Most tasks listed by default: enough to see what matters, few enough to poll every 1.5 s.
 DEFAULT_LIST_LIMIT = 100
 _ACTIVE = "('queued','running')"
-#: `tail_log` reads backwards in blocks of this size, and never more than `_TAIL_MAX_BYTES` in all, so a 50 MB log
-#: (or one giant `\r` progress line) costs the same as a short one.
-_TAIL_BLOCK = 64 * 1024
-_TAIL_MAX_BYTES = 4 * 1024 * 1024
-
-
-def read_tail(path: str | Path, lines: int) -> str:
-    """The last `lines` lines of a file, reading from the end instead of the whole file."""
-    if lines <= 0:
-        return ""
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        end = pos = os.fstat(fd).st_size
-        chunks: list[bytes] = []
-        newlines = 0
-        # lines + 1 newlines mean the first wanted line is complete (a trailing newline ends the last line).
-        while pos > 0 and newlines <= lines and end - pos < _TAIL_MAX_BYTES:
-            n = min(_TAIL_BLOCK, pos)
-            pos -= n
-            chunk = os.pread(fd, n, pos)
-            chunks.append(chunk)
-            newlines += chunk.count(b"\n")
-    finally:
-        os.close(fd)
-    data = b"".join(reversed(chunks))
-    text = data.decode(errors="replace").splitlines()
-    if pos > 0 and newlines <= lines:  # hit the byte cap inside a line: the first line is partial
-        text = text[1:]
-    return "\n".join(text[-lines:])
 
 
 def _age_s(iso: str) -> float:
@@ -425,7 +397,7 @@ class SubprocessTaskQueue:
 
 class TemporalTaskQueue:
     def __init__(
-        self, host: str = "127.0.0.1:7233", namespace: str = "default", task_queue: str = "smeltery-tasks"
+        self, host: str = DEFAULT_HOST, namespace: str = DEFAULT_NAMESPACE, task_queue: str = TASKS_QUEUE
     ) -> None:  # noqa: E501
         self._m = TemporalTaskManager(host=host, namespace=namespace, task_queue=task_queue)
 
@@ -493,3 +465,7 @@ class TemporalTaskQueue:
         if t is None:
             raise KeyError(task_id)
         return self._m.tail_log(task_id, lines=lines)
+
+    def run_flags(self) -> _StrList:
+        """`DurableRuns`: a launched run is itself a durable Temporal workflow (`smeltery run --temporal`)."""
+        return ["--temporal"]

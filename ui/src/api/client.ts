@@ -12,6 +12,17 @@ export type Schemas = components["schemas"];
 export type Verdict = Schemas["Verdict"];
 export type RunSummary = Schemas["RunSummary"];
 
+/** The verdict has a result to read: the run reached its cut (RESOLVED or UNRANKED). */
+export function hasResult(v: Verdict | null | undefined): v is Verdict {
+  return v != null && v.state !== "INCOMPLETE";
+}
+
+/** A verdict's state in the words every table and picker uses; "unreadable" when the run has none. */
+export function verdictLabel(v: Verdict | null | undefined): string {
+  if (v == null) return "unreadable";
+  return { RESOLVED: "resolved", UNRANKED: "does not resolve", INCOMPLETE: "incomplete" }[v.state];
+}
+
 /**
  * The run a `/run/<ref>` URL names, out of a `GET /api/runs` listing. `ref` is normally a stable id, matched on
  * `id`; an older all-digits link is still its position in that listing, which is what the API does too (B04).

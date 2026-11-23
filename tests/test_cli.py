@@ -343,7 +343,7 @@ def _stub_posebusters(monkeypatch, failing: dict[str, tuple[str, ...]]):
         cand.pose_report = PoseReport((verdict,) * len(cand.poses), "mol", "9.9", receptor)
         return cand.pose_report
 
-    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    monkeypatch.setattr("smeltery.planning.check_candidate_poses", check)
 
 
 def test_gates_report_every_pose_of_every_candidate_before_failing(tmp_path, monkeypatch, capsys):
@@ -394,7 +394,7 @@ def test_gates_json_and_the_record_hold_no_absolute_path_inside_out(tmp_path, mo
         cand.pose_report = PoseReport((verdict,) * len(cand.poses), "mol", "9.9", receptor)
         return cand.pose_report
 
-    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    monkeypatch.setattr("smeltery.planning.check_candidate_poses", check)
     p = write(tmp_path, GATED_UNRELAXED)
     assert main(["run", str(p), "--out", str(out)]) == 3  # a rejected gate: gates.json is written
     gates = json.loads((out / "gates.json").read_text())
@@ -414,7 +414,7 @@ def test_no_value_in_the_record_results_is_an_absolute_path_inside_out(tmp_path,
         cand.pose_report = PoseReport((PoseVerdict(("sanitization",), ()),) * len(cand.poses), "mol", "9.9", receptor)
         return cand.pose_report
 
-    monkeypatch.setattr("smeltery.cli.check_candidate_poses", check)
+    monkeypatch.setattr("smeltery.planning.check_candidate_poses", check)
     plan = build_plan(load_config(write(tmp_path, GATED)), out_dir=out)
     per_pose = {c.name: {"dE_int": [0.0] * len(c.poses)} for c in plan.candidates}
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {"per_pose": per_pose})
@@ -589,12 +589,12 @@ def test_plan_says_cannot_say_for_a_basis_the_model_cannot_count_never_fits(tmp_
 
 
 def test_plan_compares_free_memory_with_require_free_gb(tmp_path, capsys, monkeypatch):
-    import smeltery.cli as cli_mod
+    import smeltery.planning as planning
 
-    monkeypatch.setattr(cli_mod, "available_memory_gb", lambda: 3.0)  # data source: a machine with 3 GB free
+    monkeypatch.setattr(planning, "available_memory_gb", lambda: 3.0)  # data source: a machine with 3 GB free
     out = _plan_text(BENZOIC_PBE + "require_free_gb = 12.0\n", tmp_path, capsys)
     assert "3.0 GB available now, below require_free_gb 12: the run would refuse if started now" in out
-    monkeypatch.setattr(cli_mod, "available_memory_gb", lambda: None)
+    monkeypatch.setattr(planning, "available_memory_gb", lambda: None)
     assert "unknown (no /proc/meminfo)" in _plan_text(BENZOIC_PBE, tmp_path, capsys)
 
 
@@ -609,9 +609,10 @@ def test_each_stage_records_its_seconds(monkeypatch):
     import types
 
     import smeltery.cli as cli
+    import smeltery.planning as planning
 
     ticks = iter(range(10_000))
-    monkeypatch.setattr(cli, "time", types.SimpleNamespace(perf_counter=lambda: next(ticks) * 0.25))
+    monkeypatch.setattr(planning, "time", types.SimpleNamespace(perf_counter=lambda: next(ticks) * 0.25))
     cfg = validate_config(tomllib.loads(SMALL.format(floor=0.0)))
     plan = build_plan(cfg)
     assert [e["stage"] for e in plan.stage_log] == ["poses", "pocket"]

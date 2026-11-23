@@ -13,6 +13,8 @@ import sys
 import zipfile
 from pathlib import Path
 
+from smeltery.run_tools import run_dir
+
 TEMPLATE = """# smeltery golden-path config (edit me)
 campaign = "{campaign}"
 parent = "{parent}"
@@ -63,7 +65,7 @@ def cmd_open(argv):
     a = ap.parse_args(argv)
     out = Path(a.out)
     if a.report:
-        rep = out / "report.html" if out.is_dir() else out.parent / "report.html"
+        rep = run_dir(out) / "report.html"
         if not rep.exists():
             subprocess.call([sys.executable, "-m", "smeltery.cli", "report", str(a.out), "-o", str(rep)])
     if not a.no_gui:
@@ -93,7 +95,7 @@ def cmd_bundle(argv):
     ap.add_argument("-o", "--output", default=None, help="zip path (default: OUT/bundle.zip)")
     a = ap.parse_args(argv)
     out = Path(a.out)
-    out_dir = out if out.is_dir() else out.parent
+    out_dir = run_dir(out)
     zip_path = Path(a.output) if a.output else (out_dir / "bundle.zip")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for p in out_dir.rglob("*"):

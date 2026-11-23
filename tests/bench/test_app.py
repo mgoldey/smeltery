@@ -191,14 +191,22 @@ def _serve_spy(monkeypatch, appmod):
     return seen
 
 
+def _seed(root):
+    """`seed_demo` with the collaborators `main` builds for it."""
+    from smeltery.bench.adapters.pipeline_store import FilesystemPipelineStore
+    from smeltery.bench.adapters.prebuilt_source import PackagedPrebuilts
+    from smeltery.bench.use_cases.seed_demo import seed_demo
+
+    return seed_demo(FilesystemPipelineStore(root), PackagedPrebuilts())
+
+
 def test_demo_seeds_every_prebuilt_and_lists_five_runs_without_scf(tmp_path):
     from fastapi.testclient import TestClient
 
     from smeltery.bench.app import build_app
-    from smeltery.bench.use_cases.seed_demo import seed_demo
 
     root = tmp_path / "demo"
-    added = seed_demo(root)
+    added = _seed(root)
     assert added == ["benzoic-pbe", "benzoic-rhf", "danuglipron-halogen", "docking", "structure"]
     c = TestClient(build_app(root, web_dir=tmp_path / "no-web"), base_url="http://localhost")
     runs = c.get("/api/runs").json()
@@ -209,14 +217,13 @@ def test_demo_seeds_every_prebuilt_and_lists_five_runs_without_scf(tmp_path):
 
 def test_a_second_demo_neither_duplicates_nor_overwrites(tmp_path):
     from smeltery.bench.adapters.run_store import FilesystemRunStore
-    from smeltery.bench.use_cases.seed_demo import seed_demo
 
     root = tmp_path / "demo"
-    seed_demo(root)
+    _seed(root)
     before = len(FilesystemRunStore(root).list_runs())
     edited = root / "pipelines" / "benzoic-rhf" / "config.toml"
     edited.write_text(edited.read_text() + "# mine\n")
-    assert seed_demo(root) == []
+    assert _seed(root) == []
     assert len(FilesystemRunStore(root).list_runs()) == before
     assert edited.read_text().endswith("# mine\n")
 

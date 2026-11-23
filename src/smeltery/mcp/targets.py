@@ -14,7 +14,7 @@ from importlib import resources
 
 DATA_FILE = "target_classes.toml"
 
-#: The config section each tier is selected by in a campaign config (`smeltery.cli.measurement_tier`).
+#: The config section each tier is selected by in a campaign config (`smeltery.planning.measurement_tier`).
 TIER_SECTIONS = {"field_interaction": "field_interaction", "field_dft_interaction": "field_dft_interaction"}
 #: Tier knobs an entry may set, beyond `basis`. Anything else in an entry is a table error, not a silent pass.
 TIER_KNOBS = ("functional", "memory_budget_gb", "require_free_gb")

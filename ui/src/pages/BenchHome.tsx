@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, unwrap, type Schemas } from "../api/client";
+import { api, unwrap, verdictLabel, type Schemas } from "../api/client";
 import { Writable } from "../components/ReadOnly";
 import { ImportBundle } from "../components/ImportBundle";
 import { Shell } from "../components/Shell";
 import { TaskInspector, WorkPanel } from "../components/WorkPanel";
-import { outName, pipelineHref, pipelineOfRun, runDate, runLabel } from "../components/runIdentity";
+import { latestRunOfPipeline, outName, pipelineHref, pipelineOfRun, pipelineUrl, runDate, runLabel } from "../components/runIdentity";
+import { day } from "../components/time";
+import { runsQuery } from "../api/queries";
 
 type Prebuilt = Schemas["Prebuilt"];
 
@@ -66,7 +68,7 @@ export function parseAnalogues(text: string): { ok: boolean; candidates: Record<
 }
 
 export function BenchHome() {
-  const runs = useQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+  const runs = useQuery(runsQuery());
   // `?task=<id>` opens that task's inspector on arrival, so launching a run can hand the user straight to the thing
   // they just started instead of to the top of this page with the Work panel somewhere below the fold.
   const [params] = useSearchParams();
@@ -83,7 +85,7 @@ export function BenchHome() {
     mutationFn: () => unwrap(api.POST("/api/pipelines", { body: { name: pipeName.trim(), from_run: fromRun } })),
     onSuccess: (d) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
-      navigate(`/pipelines/${d.name}?run=${fromRun}`);
+      navigate(pipelineUrl(d.name, { run: fromRun }));
     },
   });
   const prebuilt = useQuery({ queryKey: ["prebuilt"], queryFn: () => unwrap(api.GET("/api/prebuilt")) });
@@ -93,14 +95,14 @@ export function BenchHome() {
       const name = (prebuiltName[p] ?? copyName(p)).trim();
       const made = await unwrap(api.POST("/api/pipelines", { body: { name, from_prebuilt: p } }));
       // The example run was copied into the new pipeline's folder, so the run store lists it: find its id now.
-      const list = await unwrap(api.GET("/api/runs"));
-      const mine = list.find((r) => r.path.includes(`/pipelines/${made.name}/run/`));
+      const list = await qc.fetchQuery({ ...runsQuery(), staleTime: 0 });
+      const mine = latestRunOfPipeline(made.name, list);
       return { name: made.name, runId: mine?.id ?? null };
     },
     onSuccess: ({ name, runId }) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
       void qc.invalidateQueries({ queryKey: ["runs"] });
-      navigate(`/pipelines/${name}?${runId === null ? "" : `run=${runId}&`}step=measure`);
+      navigate(pipelineUrl(name, { run: runId, step: "measure" }));
     },
   });
   const [blank, setBlank] = useState({ name: "", campaign: "", parent: "", parentSmiles: "", analogues: "" });
@@ -123,7 +125,7 @@ export function BenchHome() {
       ),
     onSuccess: (d) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
-      navigate(`/pipelines/${d.name}?step=ligands`);
+      navigate(pipelineUrl(d.name, { step: "ligands" }));
     },
   });
   const field = (k: keyof typeof blank) => ({
@@ -420,7 +422,7 @@ export function BenchHome() {
                       <td className="num">{r.n_candidates ?? ""}</td>
                       <td>
                         <span className="status" data-state={r.verdict?.state}>
-                          {r.verdict?.state === "UNRANKED" ? "does not resolve" : (r.verdict?.state ?? "unreadable")}
+                          {verdictLabel(r.verdict)}
                         </span>
                       </td>
                       <td className="mono">{r.digest?.slice(0, 12)}</td>
@@ -443,7 +445,7 @@ export function BenchHome() {
                     <span style={{ color: "var(--ink-muted)" }}>
                       {" "}
                       {c.n_entries} {c.n_entries === 1 ? "entry" : "entries"} · {c.n_runs}{" "}
-                      {c.n_runs === 1 ? "run" : "runs"} · updated {c.updated_at.slice(0, 10)}
+                      {c.n_runs === 1 ? "run" : "runs"} · updated {day(c.updated_at)}
                     </span>
                   </li>
                 ))}

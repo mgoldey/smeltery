@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, unwrap } from "../../api/client";
+import { hasResult } from "../../api/client";
+import { cutOutcome, groupLabel, groupSizes } from "../../components/cut";
 import { LineageInspector } from "../../components/LineageInspector";
 import { EmptyState } from "../../components/EmptyState";
 import { PerPoseTable } from "../../components/PerPoseTable";
@@ -9,46 +10,26 @@ import { PlotlyFigure } from "../../components/PlotlyFigure";
 import { VerdictBanner } from "../../components/VerdictBanner";
 import { useScheme } from "../../styles/scheme";
 import { useRunId } from "./RunLayout";
+import { ddeQuery, figureQuery, perPoseQuery, verdictQuery } from "../../api/queries";
 
 function useFigure(runId: string, name: "forest" | "matrix" | "per_pose" | "per_pose_values", enabled: boolean) {
   const theme = useScheme();
-  return useQuery({
-    queryKey: ["figure", runId, name, theme],
-    queryFn: () =>
-      unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name }, query: { theme } } })),
-    enabled,
-  });
-}
-
-function groupLabel(group: number, size: number): string {
-  return size > 1 ? `tie group ${group + 1} (no order)` : `group ${group + 1}`;
+  return useQuery({ ...figureQuery(runId, name, theme), enabled });
 }
 
 export function Results() {
   const runId = useRunId();
   const [traced, setTraced] = useState<string | null>(null);
   const [pairs, setPairs] = useState(true);
-  const verdict = useQuery({
-    queryKey: ["verdict", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/verdict", { params: { path: { run_id: runId } } })),
-  });
-  const ok = verdict.data !== undefined && verdict.data.state !== "INCOMPLETE";
-  const table = useQuery({
-    queryKey: ["ddE", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/ddE", { params: { path: { run_id: runId } } })),
-    enabled: ok,
-  });
+  const verdict = useQuery(verdictQuery(runId));
+  const ok = hasResult(verdict.data);
+  const table = useQuery({ ...ddeQuery(runId), enabled: ok });
   const forest = useFigure(runId, "forest", ok);
   const matrix = useFigure(runId, "matrix", ok);
   const perPose = useFigure(runId, "per_pose", ok);
   const perPoseValues = useFigure(runId, "per_pose_values", ok && !pairs);
-  const rows = useQuery({
-    queryKey: ["per_pose", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/per_pose", { params: { path: { run_id: runId } } })),
-    enabled: ok,
-  });
-  const sizes = new Map<number, number>();
-  for (const r of table.data?.rows ?? []) sizes.set(r.group, (sizes.get(r.group) ?? 0) + 1);
+  const rows = useQuery({ ...perPoseQuery(runId), enabled: ok });
+  const sizes = groupSizes(table.data?.rows ?? []);
 
   return (
     <div className="body">
@@ -111,7 +92,7 @@ export function Results() {
                       </td>
                       <td className="num">{r.n}</td>
                       <td>{groupLabel(r.group, sizes.get(r.group) ?? 1)}</td>
-                      <td>{r.survivor === null ? "unranked" : r.survivor ? "kept" : "not kept"}</td>
+                      <td>{cutOutcome(r.survivor)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -16,15 +16,13 @@ from fastapi.responses import JSONResponse, Response
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from smeltery.bench.progress import RunProgress, out_dir_of
 from smeltery.bench.provisional import provisional_pose
-from smeltery.gui._toml import dumps
-from smeltery.gui.catalog import catalog, catalog_json, method
-from smeltery.gui.pipeline import Pipeline
+from smeltery.gates import add_pose_conformer, mol_with_h
+from smeltery.methods.catalog import catalog, catalog_json, method
 from smeltery.structure_check import check_pdb
 
 from . import models as M
-from .common import ports, run
+from .common import ports, task_model
 
 _log = logging.getLogger(__name__)
 
@@ -34,22 +32,20 @@ router = APIRouter(prefix="/api", tags=["work"])
 # ---------------------------------------------------------------------------------------------------- tasks
 
 
-_progress = RunProgress()
-
-
-def _task(t: Any) -> M.Task:
+def _task(request: Request, t: Any) -> M.Task:
     d = dict(t.to_dict() if hasattr(t, "to_dict") else t)
     # only a live run has progress; a finished one has deleted its checkpoint, and a stale file must not show
     if d.get("status") == "running":
-        d["progress"] = _progress.of(out_dir_of(list(d.get("command") or []), d.get("cwd") or ""))
-    return M.Task(**d)
+        progress = ports(request).run_progress  # one per app: see `create_app`
+        return task_model(d, progress=progress.of_task(list(d.get("command") or []), d.get("cwd") or ""))
+    return task_model(d)
 
 
 @router.get("/tasks", response_model=list[M.Task], responses={503: {"model": M.Problem}})
 def list_tasks(request: Request, limit: int = Query(100, ge=1, le=1000)) -> Any:
     """The newest `limit` tasks; queued and running ones are always chosen before finished ones."""
     try:
-        return [_task(t) for t in ports(request).task_queue.list(limit=limit)]
+        return [_task(request, t) for t in ports(request).task_queue.list(limit=limit)]
     except Exception as e:  # noqa: BLE001 - a dead backend degrades this panel, not the app
         _log.warning("the task queue could not list tasks", exc_info=True)
         return JSONResponse(status_code=503, content={"reason": str(e)})
@@ -73,7 +69,7 @@ def cancel_task(request: Request, task_id: str) -> M.Task:
     t = q.get(task_id)
     if t is None:
         raise HTTPException(status_code=404, detail=f"no task {task_id}")
-    return _task(t)
+    return _task(request, t)
 
 
 # ---------------------------------------------------------------------------------------------------- catalog
@@ -90,73 +86,14 @@ def get_catalog() -> dict[str, Any]:
     return out
 
 
-# ---------------------------------------------------------------------------------------------------- pipeline
-
-
-def pipeline_issues(p: Pipeline) -> list[M.Issue]:
-    return [M.Issue.model_validate({"level": i.level, "stage": i.stage, "message": i.message}) for i in p.check()]
-
-
-def _state(p: Pipeline) -> M.PipelineState:
-    issues = pipeline_issues(p)
-    return M.PipelineState(
-        toml=dumps(p.to_config()),
-        ok=not any(i.level == "error" for i in issues),
-        issues=issues,
-        stages=p.view(),
-        placed=p.keys(),
-        params={st.method: {k: v for k, v in st.params.items() if v is not None} for st in p.stages},
-        addable=p.addable(),
-        campaign=p.campaign,
-        parent=p.parent,
-        candidates=dict(p.candidates),
-    )
-
-
-def pipeline_from_run(request: Request, body: M.PipelineFromRun) -> M.PipelineState:
-    """A starting pipeline for the next round, rebuilt from what the run record holds: its candidates and parent,
-    the cut's keep and z, a floor that came from the config, and the gates that ran. The record stores the field's
-    charges as resolved positions, not the atom-index sites that produced them, so sites are not recovered: the
-    notes say so, and click-to-place puts them back."""
-    r = run(request, body.run)
-    inputs = r.record.get("inputs", {})
-    p = Pipeline.minimal(r.campaign, r.parent, dict(r.candidates))
-    notes = []
-    cut = {k: v for k, v in inputs.get("cut", {}).items() if k in ("keep", "z")}
-    floor = inputs.get("floor", {})
-    if str(floor.get("source", "")).startswith("config"):
-        cut["floor"] = floor.get("value")
-    p.set("cut", **cut)
-    by_gate = {m.gate_key: k for k, m in catalog().items() if m.gate_key}  # the TOML's gate names -> stage keys
-    gates = inputs.get("gates", {})
-    for gate, on in gates.items():
-        key = by_gate.get(gate)
-        if on is True and key and key in p.addable():
-            p.add(key)  # a copy of what ran: the workspace defaults are for methods added new, not for this
-    if "forcefield" in p.keys() and gates.get("max_strain_kcal") is not None:
-        p.set("forcefield", max_strain_kcal=gates["max_strain_kcal"])
-    if inputs.get("field"):
-        notes.append(
-            f"This run's {len(inputs['field'])} pocket charges are recorded as positions, not as the atom sites that "
-            "placed them, so they are not carried over: place the sites again by clicking atoms."
-        )
-    state = _state(p)
-    state.notes = notes
-    return state
-
-
 @router.get("/provisional", response_model=M.Provisional)
 def provisional(smiles: str) -> M.Provisional:
     """The provisional parent conformer: atoms in `Chem.AddHs` order, the order `[[pocket.site]]` indexes."""
     if Chem.MolFromSmiles(smiles) is None:
         raise HTTPException(status_code=400, detail=f"unparseable SMILES {smiles!r}")
     symbols, xyz = provisional_pose(smiles)
-    mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    conf = Chem.Conformer(mol.GetNumAtoms())
-    for i, (x, y, z) in enumerate(xyz):
-        conf.SetAtomPosition(i, (float(x), float(y), float(z)))
-    mol.RemoveAllConformers()
-    mol.AddConformer(conf, assignId=True)
+    mol = mol_with_h(smiles)
+    add_pose_conformer(mol, xyz)
     AllChem.AssignStereochemistryFrom3D(mol)  # ty: ignore[unresolved-attribute]
     return M.Provisional(smiles=smiles, symbols=list(symbols), molblock=Chem.MolToMolBlock(mol))
 

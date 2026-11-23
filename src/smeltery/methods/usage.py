@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..gui.catalog import Param
 from . import MethodSpec, registry
+from .catalog import Param, method_from_spec
 
 #: How a param's `kind` is written in the generated TOML, and what an unset value looks like.
 _EXAMPLE: dict[str, str] = {
@@ -53,7 +53,7 @@ def _param_line(p: Param) -> str:
 
 
 #: Knobs a config may set that the GUI has no widget for, so `params_from_dataclass` leaves them out
-#: (`smeltery.gui.catalog._NOT_KNOBS`). A usage document must still show them, with an example: they are config,
+#: (`smeltery.methods.catalog._NOT_KNOBS`). A usage document must still show them, with an example: they are config,
 #: not internals. Internals set by a hook (pose lists, core maps) are deliberately absent.
 _EXTRA_KNOBS: dict[str, tuple[str, str, str]] = {
     "field_interaction": (
@@ -68,8 +68,6 @@ _EXTRA_KNOBS: dict[str, tuple[str, str, str]] = {
 
 
 def _params_of(spec: MethodSpec) -> tuple[Param, ...]:
-    from ..gui.catalog import method_from_spec
-
     return tuple(method_from_spec(spec).params)
 
 

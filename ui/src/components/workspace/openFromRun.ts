@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api, runByRef, unwrap, type RunSummary } from "../../api/client";
+import { api, runByRef, type RunSummary } from "../../api/client";
 import { ApiError, describeReason } from "../../api/http";
+import { pipelineUrl } from "../runIdentity";
+import { runsQuery } from "../../api/queries";
 
 /** The workspace name of the pipeline made from a run: its campaign and digest, so reopening finds the same one. */
 export function pipelineName(run: Pick<RunSummary, "id" | "campaign" | "digest">): string {
@@ -37,12 +39,12 @@ export function useOpenRunPipeline(runId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async ({ step, replace = false }: { step?: string; replace?: boolean } = {}) => {
-      const runs = await qc.fetchQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+      const runs = await qc.fetchQuery(runsQuery());
       return { ...(await pipelineForRun(runId, runs)), step, replace };
     },
     onSuccess: ({ name, id, step, replace }) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
-      navigate(`/pipelines/${name}?run=${id}${step ? `&step=${step}` : ""}`, { replace });
+      navigate(pipelineUrl(name, { run: id, step }), { replace });
     },
   });
 }
@@ -68,7 +70,7 @@ export function useStartNextRound(runId: string) {
       drop = [],
       carryDecisions = true,
     }: { addProposals?: string[]; drop?: string[]; carryDecisions?: boolean } = {}) => {
-      const runs = await qc.fetchQuery({ queryKey: ["runs"], queryFn: () => unwrap(api.GET("/api/runs")) });
+      const runs = await qc.fetchQuery(runsQuery());
       const run = runByRef(runs, runId);
       if (!run) throw new Error(`no run ${runId}`);
       const made = await api.POST("/api/pipelines", {
@@ -87,7 +89,7 @@ export function useStartNextRound(runId: string) {
     },
     onSuccess: (doc) => {
       void qc.invalidateQueries({ queryKey: ["pipelines"] });
-      navigate(`/pipelines/${doc.name}?step=ligands`);
+      navigate(pipelineUrl(doc.name, { step: "ligands" }));
     },
   });
 }

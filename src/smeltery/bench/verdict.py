@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from smeltery.gui.results import _RESULT_KEYS, contract_record
+from smeltery.run_view import RESULT_KEYS, contract_record
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ def verdict_of(record: dict) -> Verdict:
     results = record.get("results", {}) if isinstance(record, dict) else {}
     if not isinstance(results, dict):
         results = {}
-    missing = tuple(k for k in _RESULT_KEYS if k not in results)
+    missing = tuple(k for k in RESULT_KEYS if k not in results)
     # floor from inputs if available
     floor = None
     try:

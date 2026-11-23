@@ -10,17 +10,21 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .model import Candidate, Pose
+
+if TYPE_CHECKING:
+    from rdkit import Chem
 
 # A model maps (candidate, quantity) to that candidate's scalar value, e.g. the
 # paired ΔΔE of the candidate re-scored with one set of point charges.
 ChargeModel = Callable[[Candidate, str], float]
 
 
-def _ranks(x: np.ndarray) -> np.ndarray:
+def average_ranks(x: np.ndarray) -> np.ndarray:
     """1-based ranks, ties given their average rank."""
     order = np.argsort(x, kind="stable")
     ranks = np.empty(len(x))
@@ -32,9 +36,12 @@ def _ranks(x: np.ndarray) -> np.ndarray:
     return ranks
 
 
+_ranks = average_ranks  # the older private name
+
+
 def spearman(a: Sequence[float], b: Sequence[float]) -> float:
     """Spearman rank correlation (Pearson on average ranks); nan if either side is constant."""
-    ra, rb = _ranks(np.asarray(a, dtype=float)), _ranks(np.asarray(b, dtype=float))
+    ra, rb = average_ranks(np.asarray(a, dtype=float)), average_ranks(np.asarray(b, dtype=float))
     if np.ptp(ra) == 0 or np.ptp(rb) == 0:
         return float("nan")
     return float(np.corrcoef(ra, rb)[0, 1])
@@ -167,10 +174,10 @@ def pose_geometry_problems(smiles: str, pose: Pose) -> list[str]:
 
     from rdkit import Chem
 
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
+    try:
+        mol = mol_with_h(smiles)
+    except ValueError:
         return [f"unparseable SMILES {smiles!r}"]
-    mol = Chem.AddHs(mol)
     want = Counter(a.GetSymbol() for a in mol.GetAtoms())
     have = Counter(pose.symbols)
     if want != have:
@@ -284,32 +291,71 @@ class PoseReport:
         }
 
 
-def _mol_for_pose(smiles: str, pose: Pose):
-    """RDKit mol with the SMILES' bond orders and the pose's coordinates.
+class AtomOrderError(ValueError):
+    """A pose whose elements are not its SMILES-with-H atom order (`mol_for_poses`). Callers re-raise it in their own
+    words; `index` is the pose's position in the list given, `pose_symbols` and `smiles_symbols` the two orders."""
 
-    Topology comes from the SMILES, never from the coordinates: perceiving bonds
-    from distances is what let chemically impossible docked poses through (carbons
-    of degree 5-6 with `usable=True`). The pose must be in `AddHs(smiles)` atom
-    order, which is how every pose builder in this package emits them.
-    """
+    def __init__(self, index: int, pose_symbols: tuple[str, ...], smiles_symbols: tuple[str, ...]) -> None:
+        super().__init__(f"pose {index} atoms {pose_symbols} are not the SMILES-with-H order {smiles_symbols}")
+        self.index, self.pose_symbols, self.smiles_symbols = index, pose_symbols, smiles_symbols
+
+
+def mol_with_h(smiles: str) -> Chem.Mol:
+    """`Chem.AddHs(Chem.MolFromSmiles(smiles))`: the atom order every pose in this package is in. An unparseable
+    SMILES is a ValueError."""
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"unparseable SMILES: {smiles!r}")
+    return Chem.AddHs(mol)
+
+
+def add_pose_conformer(mol: Chem.Mol, coords_ang, *, set_3d: bool = False) -> None:
+    """Add one conformer to `mol` holding `coords_ang` (Angstrom, row k = atom k), with a fresh id."""
     from rdkit import Chem
     from rdkit.Geometry import Point3D
 
-    parsed = Chem.MolFromSmiles(smiles)
-    if parsed is None:
-        raise ValueError(f"unparseable SMILES: {smiles!r}")
-    mol = Chem.AddHs(parsed)
-    syms = tuple(a.GetSymbol() for a in mol.GetAtoms())
-    if syms != tuple(pose.symbols):
-        raise ValueError(
-            f"pose atoms {tuple(pose.symbols)} are not in AddHs({smiles!r}) order {syms}; "
-            "refusing to assign bonds to a mismatched atom order"
-        )
     conf = Chem.Conformer(mol.GetNumAtoms())
-    for i, (x, y, z) in enumerate(pose.coords_ang):
+    for i, (x, y, z) in enumerate(coords_ang):
         conf.SetAtomPosition(i, Point3D(float(x), float(y), float(z)))
+    if set_3d:
+        conf.Set3D(True)
     mol.AddConformer(conf, assignId=True)
+
+
+def mol_for_poses(smiles: str, poses: Sequence[Pose], *, set_3d: bool = False) -> Chem.Mol:
+    """RDKit mol with the SMILES' bond orders and one conformer per pose (conformer i = pose i).
+
+    Topology comes from the SMILES, never from the coordinates: perceiving bonds
+    from distances is what let chemically impossible docked poses through (carbons
+    of degree 5-6 with `usable=True`). Every pose must be in `AddHs(smiles)` atom
+    order, which is how every pose builder in this package emits them; one that is
+    not is an `AtomOrderError`, raised before its coordinates touch the mol.
+    """
+    mol = mol_with_h(smiles)
+    syms = tuple(a.GetSymbol() for a in mol.GetAtoms())
+    for i, pose in enumerate(poses):
+        if tuple(pose.symbols) != syms:
+            raise AtomOrderError(i, tuple(pose.symbols), syms)
+        add_pose_conformer(mol, pose.coords_ang, set_3d=set_3d)
     return mol
+
+
+def mol_for_pose(smiles: str, pose: Pose, *, set_3d: bool = False) -> Chem.Mol:
+    """`mol_for_poses` of one pose."""
+    return mol_for_poses(smiles, [pose], set_3d=set_3d)
+
+
+def _mol_for_pose(smiles: str, pose: Pose):
+    """`mol_for_pose`, with the gate's own refusal for a mismatched atom order."""
+    try:
+        return mol_for_pose(smiles, pose)
+    except AtomOrderError as e:
+        raise ValueError(
+            f"pose atoms {e.pose_symbols} are not in AddHs({smiles!r}) order {e.smiles_symbols}; "
+            "refusing to assign bonds to a mismatched atom order"
+        ) from None
 
 
 def _flatness_coords(mol, indices) -> np.ndarray:

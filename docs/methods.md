@@ -10,12 +10,12 @@ used to list methods by hand is derived from `registry()`.
 | Field | Meaning |
 |---|---|
 | `key`, `label` | the method's id and its display name |
-| `rung`, `role` | its place in the hierarchy (`smeltery.gui.catalog.RUNGS`, `ROLES`); an unknown one is refused at `register` |
+| `rung`, `role` | its place in the hierarchy (`smeltery.methods.catalog.RUNGS`, `ROLES`); an unknown one is refused at `register` |
 | `step` | which step of the pipeline drawing holds it: one of `active_site`, `ligands`, `poses`, `checks`, `measure`, `cut` |
-| `slot` | the execution slot it fills (below), or `None` for a stage whose code lives in `smeltery.cli` |
+| `slot` | the execution slot it fills (below), or `None` for a stage whose code lives in `smeltery.planning` |
 | `section` | its config table, `[section]` |
 | `knobs` | a dataclass whose init fields are the section's keys (a tier's own class, so defaults cannot drift) |
-| `params` | typed knobs for a form (`smeltery.gui.catalog.Param`); derived from `knobs` when empty |
+| `params` | typed knobs for a form (`smeltery.methods.catalog.Param`); derived from `knobs` when empty |
 | `file_knobs` | knobs that name input files, so staging copies them (each must be among the knobs) |
 | `tier` | the tier it runs |
 | `required`, `exclusive` | every pipeline needs it; or the keys of methods it cannot be used beside |
@@ -24,7 +24,7 @@ used to list methods by hand is derived from `registry()`.
 | `needs`, `provides` | artefacts (`receptor`, `field`, `parent_poses`, `poses`, `dE_int`, `survivors`) |
 | `gate_key` | the `[gates]` key that switches it on |
 | `summary`, `extras`, `quantity`, `implicit` | catalog text and metadata |
-| `validate` | `validate(cfg)` replaces the generic section check; called for every config, present or not; raises `smeltery.cli.ConfigError` |
+| `validate` | `validate(cfg)` replaces the generic section check; called for every config, present or not; raises `smeltery.config.ConfigError` |
 | `cost_model`, `memory_model` | callables returning a sentence for `--plan` and the catalog |
 
 `__post_init__` refuses: an unknown slot or step; a hook without a slot, or without a section, or that does not
@@ -45,7 +45,7 @@ A hook runs when the method's section is in the config (or its gate is switched 
 | `analysis` | `run(plan, rec, ctx) -> dict` | runs after the measurement; the dict is merged into `results[key]` |
 
 At most one active method per `pose_source`, `field_source` and `measure` slot is allowed (the config is refused
-otherwise); any number of analyses run. A builtin with `hook=None` keeps its own code path in `smeltery.cli`.
+otherwise); any number of analyses run. A builtin with `hook=None` keeps its own code path in `smeltery.planning`.
 
 An analysis that re-measures under other fields (`--temporal` support) also defines `extra_fields(plan, ctx) ->
 {model: [PointCharge]}` and `summarize(plan, rec, measured) -> dict`, and optionally `extra_models(cfg)` to count SCFs
@@ -75,7 +75,7 @@ adding a module there: there is no list to edit.
 
 ## What derives from a registration
 
-- **the catalog** (`smeltery.gui.catalog`): the palette, forms and the `catalog_json` a GUI draws;
+- **the catalog** (`smeltery.methods.catalog`, re-exported as `smeltery.gui.catalog`): the palette, forms and the `catalog_json` a GUI draws;
 - **the execution order** (`execution_order()`: wired methods by `order`, ties by registration) and **the steps** of
   the pipeline drawing (`smeltery.gui.pipeline`, `smeltery.gui.steps`);
 - **the CLI's top-level keys and section validation** (`smeltery.cli`): a section is a table whose keys are the

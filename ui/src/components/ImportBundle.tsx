@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { Schemas } from "../api/client";
 import { reasonOf } from "../api/http";
+import { pipelineUrl } from "./runIdentity";
 
-type Imported = { pipeline: { name: string } | null; files: { path: string; ok: boolean; message?: string | null }[] };
 
 /** Import a pipeline from a bundle zip (what "Download saved bundle" writes). Any bad entry refuses the whole bundle
  * and is listed with its reason; nothing is created then. */
@@ -23,14 +24,14 @@ export function ImportBundle() {
         body: file,
       });
       if (res.status === 422) {
-        const body = (await res.json()) as Imported;
+        const body = (await res.json()) as Schemas["ImportRefused"];
         setProblems((body.files ?? []).filter((f) => !f.ok).map((f) => `${f.path}: ${f.message ?? "refused"}`));
       } else if (!res.ok) {
         setProblems([await reasonOf(res)]);
       } else {
-        const body = (await res.json()) as Imported;
+        const body = (await res.json()) as Schemas["ImportResult"];
         void qc.invalidateQueries({ queryKey: ["pipelines"] });
-        if (body.pipeline) navigate(`/pipelines/${body.pipeline.name}`);
+        if (body.pipeline) navigate(pipelineUrl(body.pipeline.name));
       }
     } catch (e) {
       setProblems([e instanceof Error ? e.message : String(e)]);

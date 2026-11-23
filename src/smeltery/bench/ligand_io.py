@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from rdkit import Chem
 from rdkit.Chem import rdDepictor
 
+from smeltery.decisions import csv_cell, sdf_line, sdf_value
+
 SMILES_COLUMNS = ("smiles", "canonical_smiles")
 NAME_COLUMNS = ("name", "id", "title")
 
@@ -121,15 +123,20 @@ EXPORT_PROPS = ("role", "formal_charge", "electrons", "electrons_even", "sto3g_o
 
 
 def to_csv(records: list[dict]) -> str:
+    """Names are free text, so they are escaped as the decisions export escapes its text (`csv_cell`): a name that
+    starts like a formula is not run by a spreadsheet. The SMILES gets the same treatment, which only ever changes an
+    unreadable one (no valid SMILES starts with `= + - @`). The numeric columns are left alone: `-1` is a charge."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(("name", "smiles", *EXPORT_PROPS))
     for r in records:
-        w.writerow([r["name"], r["smiles"], *("" if r[p] is None else r[p] for p in EXPORT_PROPS)])
+        w.writerow([csv_cell(r["name"]), csv_cell(r["smiles"]), *("" if r[p] is None else r[p] for p in EXPORT_PROPS)])
     return buf.getvalue()
 
 
 def to_sdf(records: list[dict]) -> str:
+    """The name is the record's title, which must be one line (`sdf_line`); property values may not hold a blank
+    line, which would end them (`sdf_value`)."""
     buf = io.StringIO()
     w = Chem.SDWriter(buf)
     for r in records:
@@ -137,11 +144,11 @@ def to_sdf(records: list[dict]) -> str:
         if mol is None:
             continue  # an unreadable SMILES has no structure to write; the CSV still lists it
         rdDepictor.Compute2DCoords(mol)
-        mol.SetProp("_Name", r["name"])
-        mol.SetProp("smiles", r["smiles"])
+        mol.SetProp("_Name", sdf_line(r["name"]))
+        mol.SetProp("smiles", sdf_value(r["smiles"]))
         for p in EXPORT_PROPS:
             if r[p] is not None:
-                mol.SetProp(p, str(r[p]))
+                mol.SetProp(p, sdf_value(r[p]))
         w.write(mol)
     w.close()
     return buf.getvalue()

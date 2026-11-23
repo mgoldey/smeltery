@@ -38,6 +38,25 @@ def test_a_draft_with_errors_is_saved_and_reports_them(client_for):
     assert c.get("/api/pipelines/p1").json()["toml"] == draft
 
 
+def test_a_blank_pipelines_empty_pocket_is_needs_input_on_the_active_site_step(client_for):
+    """A blank pipeline's `[pocket]` is empty (no site, no file), which `smeltery run` refuses. The config validator
+    says so, but `Pipeline.check()` used to ask it only when nothing else was wrong, and a blank pipeline's cut never
+    is: Active site read "ready" while only Cut said "needs input"."""
+    c, _ = client_for()
+    made = _make(c)
+    steps = {s["key"]: s for s in c.post("/api/pipelines/steps", json={"toml": made["toml"]}).json()["steps"]}
+    assert steps["cut"]["state"] == "needs_input"
+    assert steps["active_site"]["state"] == "needs_input"
+    assert [i["message"] for i in steps["active_site"]["issues"]] == [
+        "[[pocket.site]] (or [pocket] file) needs at least one charge: an empty field has no interaction"
+    ]
+    # once a site is placed the validator has nothing new to say, and the cut's errors are not repeated elsewhere
+    sited = made["toml"].replace("[pocket]\n", "[[pocket.site]]\nq = 1.0\natom = 0\nfrom_atom = 1\ndistance = 3.0\n")
+    steps = {s["key"]: s for s in c.post("/api/pipelines/steps", json={"toml": sited}).json()["steps"]}
+    assert steps["active_site"]["state"] == "ready" and steps["active_site"]["issues"] == []
+    assert steps["cut"]["state"] == "needs_input"
+
+
 def test_a_second_save_on_a_stale_base_is_409_and_keeps_the_first(client_for):
     c, _ = client_for()
     made = _make(c)
@@ -201,7 +220,7 @@ def _next(c, name="round2", **spec):
 
 
 def test_a_next_round_points_at_a_decisions_file_inside_the_new_folder_and_plans(client_for, run_dir, monkeypatch):
-    from smeltery import cli
+    from smeltery import cli, planning
 
     c, _ = client_for(_round1(run_dir))
     rid = run_id_of(c)
@@ -215,7 +234,7 @@ def test_a_next_round_points_at_a_decisions_file_inside_the_new_folder_and_plans
     copied = json.loads((folder / carried).read_text())
     assert [(d["candidate"], d["status"]) for d in copied["decisions"]] == [("4-Cl", "reject")]
     assert "# the parent every ddE is measured against" in body["toml"]  # the comments are the documentation
-    monkeypatch.setattr(cli, "available_memory_gb", lambda: 64.0)
+    monkeypatch.setattr(planning, "available_memory_gb", lambda: 64.0)
     assert cli.main(["run", str(folder / "config.toml"), "--plan"]) == 0
 
 

@@ -8,7 +8,8 @@ import json
 from html import escape
 from pathlib import Path
 
-from ..catalog import catalog_json, method
+from smeltery.methods.catalog import catalog_json, method
+
 from ..pipeline import Pipeline, PipelineError
 
 _LEVEL = {"error": ("#e34948", "error"), "warning": ("#eda100", "warning"), "note": ("#2a78d6", "note")}
@@ -130,7 +131,7 @@ def toml_preview(pipeline: Pipeline) -> tuple[str, bool]:
     try:
         return pipeline.to_toml(), True
     except PipelineError as e:
-        from .._toml import dumps
+        from smeltery.toml_write import dumps
 
         head = "".join(f"# {i.level}: {i.stage or 'pipeline'}: {i.message}\n" for i in e.issues)
         return f"# DRAFT: smeltery run refuses this config until these are fixed\n{head}\n" + dumps(

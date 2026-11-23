@@ -1,17 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrap } from "../../../api/client";
 import { PlotlyFigure } from "../../PlotlyFigure";
 import { useScheme } from "../../../styles/scheme";
 import type { StepViewProps } from "./registry";
 import { NotRun } from "./PosesView";
+import { figureQuery } from "../../../api/queries";
 
 function useCutFigure(runId: string, name: "forest" | "matrix", enabled: boolean) {
   const theme = useScheme();
-  return useQuery({
-    queryKey: ["figure", runId, name, theme],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/figures/{name}", { params: { path: { run_id: runId, name }, query: { theme } } })),
-    enabled,
-  });
+  return useQuery({ ...figureQuery(runId, name, theme), enabled });
 }
 
 /** Step 6: the cut. The forest and the resolved matrix Results draws, unchanged. */

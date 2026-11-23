@@ -9,7 +9,6 @@ for the measured yield: on the scaffold it was developed against, about 1 raw sa
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -24,6 +23,7 @@ from pathlib import Path
 from rdkit import Chem
 
 from ..model import Candidate
+from ..record import file_sha256
 from .base import GenerationResult, GeneratorError, Rejection
 from .sbdd_post import POSE_SOURCES, FilterConfig, build_scaffold, process_samples
 
@@ -31,13 +31,7 @@ RUNNER = Path(__file__).with_name("_sbdd_runner.py")
 STDERR_TAIL_CHARS = 2000
 
 
-def _sha256_of(path: str | PathLike) -> str:
-    """SHA-256 of a file's bytes, streamed; hashing never loads the (pickled) checkpoint."""
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+_sha256_of = file_sha256  # streamed: hashing never loads the (pickled) checkpoint
 
 
 def _tail(text: str | bytes | None) -> str:

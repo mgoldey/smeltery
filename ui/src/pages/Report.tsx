@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, unwrap } from "../api/client";
+import { hasResult } from "../api/client";
 import { CommentThread } from "../components/CommentThread";
+import { cutOutcome, groupLabel, groupSizes } from "../components/cut";
 import { PlotlyFigure } from "../components/PlotlyFigure";
 import { useScheme } from "../styles/scheme";
 import { PoseExplorer } from "../components/PoseExplorer";
@@ -11,6 +12,7 @@ import { Limits } from "../components/Limits";
 import { Shell } from "../components/Shell";
 import { Structure2D } from "../components/Structure2D";
 import { VerdictBanner } from "../components/VerdictBanner";
+import { ddeQuery, figureQuery, runQuery, verdictQuery } from "../api/queries";
 
 /**
  * What a bench chemist opens: read-only, the verdict first. They can comment on the run, a candidate or a pose,
@@ -18,55 +20,21 @@ import { VerdictBanner } from "../components/VerdictBanner";
  */
 export function Report() {
   const runId = useParams().runId ?? "";
-  const verdict = useQuery({
-    queryKey: ["verdict", runId],
-    queryFn: () =>
-      unwrap(
-        api.GET("/api/runs/{run_id}/verdict", {
-          params: { path: { run_id: runId } },
-        }),
-      ),
-  });
-  const ok = verdict.data !== undefined && verdict.data.state !== "INCOMPLETE";
-  const detail = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () =>
-      unwrap(
-        api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } }),
-      ),
-    enabled: ok,
-  });
-  const table = useQuery({
-    queryKey: ["ddE", runId],
-    queryFn: () =>
-      unwrap(
-        api.GET("/api/runs/{run_id}/ddE", {
-          params: { path: { run_id: runId } },
-        }),
-      ),
-    enabled: ok,
-  });
+  const verdict = useQuery(verdictQuery(runId));
+  const ok = hasResult(verdict.data);
+  const detail = useQuery({ ...runQuery(runId), enabled: ok });
+  const table = useQuery({ ...ddeQuery(runId), enabled: ok });
   const theme = useScheme();
-  const forest = useQuery({
-    queryKey: ["figure", runId, "forest", theme],
-    queryFn: () =>
-      unwrap(
-        api.GET("/api/runs/{run_id}/figures/{name}", {
-          params: { path: { run_id: runId, name: "forest" }, query: { theme } },
-        }),
-      ),
-    enabled: ok,
-  });
+  const forest = useQuery({ ...figureQuery(runId, "forest", theme), enabled: ok });
   const d = detail.data;
-  const sizes = new Map<number, number>();
-  for (const r of table.data?.rows ?? [])
-    sizes.set(r.group, (sizes.get(r.group) ?? 0) + 1);
+  const sizes = groupSizes(table.data?.rows ?? []);
 
   return (
     <Shell>
       <div className="body">
         <main className="work report">
-          <VerdictBanner runId={runId} />
+          {/* The floor statement is printed just below, under its own testid, so the banner does not repeat it. */}
+          <VerdictBanner runId={runId} floorStatement={false} />
           {/* This page is often the whole app for someone sent a link: a section that silently disappears on a
               failed fetch reads as "the run has none of that", so each failure says so instead. */}
           {detail.isError ? (
@@ -141,14 +109,8 @@ export function Report() {
                       </span>{" "}
                       ± <span className="num">{r.sem.toFixed(2)}</span>{" "}
                       {table.data.unit},{" "}
-                      {(sizes.get(r.group) ?? 1) > 1
-                        ? `tie group ${r.group + 1} (no order)`
-                        : `group ${r.group + 1}`}
-                      {r.survivor === true
-                        ? ", kept"
-                        : r.survivor === false
-                          ? ", not kept"
-                          : ", unranked"}
+                      {groupLabel(r.group, sizes.get(r.group) ?? 1)},{" "}
+                      {cutOutcome(r.survivor)}
                       <CommentThread
                         runId={runId}
                         anchor={`candidate:${r.candidate}`}

@@ -5,23 +5,32 @@ The scientist's loop is run -> read -> decide -> run again. Everything but the l
 before posing (docs/gui-contract.md section 3), and `POST /api/pipelines {from_run}` copies a run's config into a new
 pipeline folder. This module writes the edge between them, so nobody hand-edits a TOML to carry a decision forward.
 
-The config text is edited, never regenerated (`smeltery.gui.config_text`): the comments in a config are the project's
+The config text is edited, never regenerated (`smeltery.config_text`): the comments in a config are the project's
 documentation, and a round trip through `Pipeline` would drop them.
 
 `plan(...)` is the whole decision. It says what the new config text is, which files the new pipeline folder needs and
 what to tell the user, writing anything new (a pruned decisions file) into the staging directory it is given. It
 raises `NextRoundRefused` for a round that is empty or impossible, and it touches no store and no HTTP, so the API
 module only has to turn that refusal into a 400.
+
+`from_run(...)` is where every new pipeline built from a run starts (the plain copy and the next round alike), and
+`gather(...)` collects what `plan` needs from the run's folder and the project store.
 """
 
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from smeltery.decisions import Decision, DecisionSet, utc_now
-from smeltery.gui.config_text import apply, set_value
+from smeltery.bench.ports.project_store import ProjectStore
+from smeltery.config_text import apply, set_value
+from smeltery.decisions import Decision, DecisionSet, decisions_path, utc_now
+from smeltery.gui.pipeline import Pipeline
+from smeltery.methods.catalog import catalog
+from smeltery.toml_write import dumps
 
 
 class NextRoundRefused(ValueError):
@@ -44,6 +53,94 @@ class NextRound:
     toml: str
     files: dict[str, Path] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+
+
+class InputsMissing(Exception):
+    """The run's record names an input copy that is not in its folder (a 409 over HTTP: the run, not the request,
+    is what is wrong)."""
+
+
+@dataclass
+class Start:
+    """A new pipeline's first state: its config text, {relative path: file to copy into its folder}, and notes."""
+
+    toml: str
+    files: dict[str, Path] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+
+def rebuild(r: Any) -> Start:
+    """A starting pipeline for the next round, rebuilt from what the run record holds (`r` is the loaded run): its
+    candidates and parent, the cut's keep and z, a floor that came from the config, and the gates that ran. The
+    record stores the field's charges as resolved positions, not the atom-index sites that produced them, so sites
+    are not recovered: the notes say so, and click-to-place puts them back."""
+    inputs = r.record.get("inputs", {})
+    p = Pipeline.minimal(r.campaign, r.parent, dict(r.candidates))
+    notes = []
+    cut = {k: v for k, v in inputs.get("cut", {}).items() if k in ("keep", "z")}
+    floor = inputs.get("floor", {})
+    if str(floor.get("source", "")).startswith("config"):
+        cut["floor"] = floor.get("value")
+    p.set("cut", **cut)
+    by_gate = {m.gate_key: k for k, m in catalog().items() if m.gate_key}  # the TOML's gate names -> stage keys
+    gates = inputs.get("gates", {})
+    for gate, on in gates.items():
+        key = by_gate.get(gate)
+        if on is True and key and key in p.addable():
+            p.add(key)  # a copy of what ran: the workspace defaults are for methods added new, not for this
+    if "forcefield" in p.keys() and gates.get("max_strain_kcal") is not None:
+        p.set("forcefield", max_strain_kcal=gates["max_strain_kcal"])
+    if inputs.get("field"):
+        notes.append(
+            f"This run's {len(inputs['field'])} pocket charges are recorded as positions, not as the atom sites that "
+            "placed them, so they are not carried over: place the sites again by clicking atoms."
+        )
+    return Start(toml=dumps(p.to_config()), notes=notes)
+
+
+def from_run(out_dir: Path, record: dict, load: Callable[[], Any]) -> Start:
+    """A new pipeline built from the run in `out_dir` whose record is `record`: its recorded config and the input
+    copies it names. A run that recorded no config file is rebuilt from its record (`rebuild(load())`, where `load`
+    returns the loaded run). Raises `InputsMissing` when a recorded input copy is not there."""
+    cfg = record.get("results", {}).get("config")
+    cfg_file = out_dir / cfg["file"] if isinstance(cfg, dict) and cfg.get("file") else None
+    if cfg_file is None or not cfg_file.is_file():
+        return rebuild(load())
+    files: dict[str, Path] = {}
+    for dotted, info in (cfg.get("inputs") or {}).items():
+        copy = info.get("copy") if isinstance(info, dict) else None
+        if not copy:
+            continue
+        src = out_dir / copy
+        if not src.is_file():
+            raise InputsMissing(f"run records input {dotted} as {copy}, but {src} is not there")
+        files[copy] = src
+    return Start(toml=cfg_file.read_text(), files=files)
+
+
+@dataclass
+class Gathered:
+    """What `plan` needs beyond the config: the run's decisions file (loaded, and its name) and the proposals."""
+
+    decisions: DecisionSet | None
+    decisions_name: str | None
+    proposals: list[Proposed]
+
+
+def gather(*, out_dir: Path, digest: str, run_ref: str, projects: ProjectStore, proposal_ids: list[str]) -> Gathered:
+    """The decisions file run `run_ref` wrote into `out_dir` (`decisions-<digest[:12]>.json`, or none) and the
+    proposals `proposal_ids` names. A decisions file that does not load is its `ValueError`; a proposal that does
+    not belong to this run is `NextRoundRefused`."""
+    dpath = decisions_path(out_dir, digest)
+    decisions = DecisionSet.load(dpath) if dpath.is_file() else None
+    by_id = {p.id: p for p in projects.list_proposals(digest)}
+    proposed: list[Proposed] = []
+    for pid in proposal_ids:
+        p = by_id.get(pid)
+        if p is None:
+            raise NextRoundRefused(f"proposal {pid!r} does not belong to run {run_ref} (digest {digest[:12]})")
+        proposed.append(Proposed(id=p.id, candidate=p.candidate, smiles=p.smiles))
+    return Gathered(decisions, dpath.name if decisions is not None else None, proposed)
 
 
 def _free_name(base: str, taken: set[str]) -> str:

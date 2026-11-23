@@ -26,7 +26,7 @@ from pathlib import Path
 
 from . import targets
 
-#: The quantity the funnel cuts on; mirrors `cli.QUANTITY` (pinned equal in tests/test_mcp_server.py).
+#: The quantity the funnel cuts on; mirrors `run_view.QUANTITY` (pinned equal in tests/test_mcp_server.py).
 QUANTITY = "dE_int"
 #: Config sections a target file may carry. Everything else about the screen comes from the ligands and the class.
 TARGET_SECTIONS = ("pocket", "structure", "docking", "gates")  # mirrors smeltery.target_file.SECTIONS
@@ -119,7 +119,7 @@ def build_config(
     relax_unmapped: bool | None = None,
 ) -> tuple[dict, targets.TargetClass]:
     """The campaign config a screen runs, and the class it came from. Validated by `smeltery run`'s own checker."""
-    from ..cli import ConfigError, validate_config
+    from ..config import ConfigError, validate_config
 
     try:
         cls = targets.get(target_class)
@@ -266,7 +266,8 @@ def _plan(
     store=None,
 ) -> tuple[dict, Plan, Reuse]:
     """`plan`, plus what the stage store (`smeltery.reuse`) already holds of this screen."""
-    from ..cli import ConfigError, StageError, build_plan, memory_estimate
+    from ..config import ConfigError, StageError
+    from ..planning import build_plan, memory_estimate
     from ..reuse import predict
 
     cfg, cls = build_config(
@@ -399,7 +400,7 @@ def _stage_store(settings, root: str | None, backend):
     base = root or settings.root
     if base is None:
         try:
-            from ..bench.app import default_root
+            from ..bench.adapters.workspace_root import default_root
         except ImportError:
             return None
         base = default_root()
@@ -458,7 +459,7 @@ def _run_dir(out_dir: str | None, campaign: str, settings, root: str | None) -> 
         return Path(out_dir).expanduser().resolve()
     base = root or settings.root
     if base is None:
-        from ..bench.app import default_root
+        from ..bench.adapters.workspace_root import default_root
 
         base = default_root()
     return (Path(base).expanduser() / SCREEN_DIR / f"{campaign}-{uuid.uuid4().hex[:8]}").resolve()

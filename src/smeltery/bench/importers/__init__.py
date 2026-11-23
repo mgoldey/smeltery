@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from smeltery.gui.results import CONTRACT_INPUTS
+from smeltery.run_view import CONTRACT_INPUTS
 
 #: Every `results` key a viewer may read (`smeltery.gui.results`), plus the ones a run writes beside them.
 CONTRACT_KEYS = (

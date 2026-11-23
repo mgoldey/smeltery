@@ -3,29 +3,36 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
 
-from .record import _canonical_sha256
+from .record import _canonical_sha256, file_sha256
 
 
-class RunToolError(Exception):
+class RunToolError(ValueError):
     pass
 
 
-def locate_record(target: str) -> Path:
-    """The `run-*.json` for a run dir, or the given record file itself."""
+def locate_record(target: str | Path) -> Path:
+    """The `run-*.json` for an OUT directory (it must hold exactly one), or the given record file itself; anything
+    else is a RunToolError (a ValueError) that names what was found."""
     p = Path(target)
     if p.is_dir():
         found = sorted(p.glob("run-*.json"))
         if len(found) != 1:
-            raise RunToolError(f"{p}: expected exactly one run-*.json, found {len(found)}")
+            names = [f.name for f in found] or "nothing"
+            raise RunToolError(f"{p}: need exactly one run-*.json, found {names}; pass the one you mean")
         return found[0]
     if not p.is_file():
-        raise RunToolError(f"{p}: no such run directory or record")
+        raise RunToolError(f"{p}: no such run record or OUT directory")
     return p
+
+
+def run_dir(target: str | Path) -> Path:
+    """The OUT directory a target names: the target itself when it is a directory, else (a record file) its parent."""
+    p = Path(target)
+    return p if p.is_dir() else p.parent
 
 
 def load(target: str) -> tuple[Path, dict]:
@@ -34,10 +41,6 @@ def load(target: str) -> tuple[Path, dict]:
         return path, json.loads(path.read_text())
     except json.JSONDecodeError as e:
         raise RunToolError(f"{path}: not valid JSON ({e})") from e
-
-
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _file_entries(results: dict):
@@ -65,7 +68,7 @@ def verify(path: Path, rec: dict) -> tuple[list[str], list[str]]:
         fp = path.parent / f
         if not fp.is_file():
             problems.append(f"{label}: {f} is missing")
-        elif _sha(fp) != want:
+        elif file_sha256(fp) != want:
             problems.append(f"{label}: {f} sha256 differs from the record")
         else:
             notes.append(f"{label}: {f} ok")

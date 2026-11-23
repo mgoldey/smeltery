@@ -1,12 +1,7 @@
-import type { Page } from "@playwright/test";
-import { expect, id, test } from "./bench";
-
-async function get<T>(page: Page, path: string): Promise<T> {
-  return (await (await page.request.get(path)).json()) as T;
-}
+import { apiGet, expect, id, test } from "./bench";
 
 test("the reason list is exactly the core's vocabulary", async ({ page }) => {
-  const vocab = await get<{ reasons: string[]; statuses: string[] }>(page, "/api/decisions/vocabulary");
+  const vocab = await apiGet<{ reasons: string[]; statuses: string[] }>(page, "/api/decisions/vocabulary");
   await page.goto(`/run/${id("a_resolved")}/decisions`);
   const row = page.locator("[data-candidate]").first();
   // the options arrive with the vocabulary query, so poll rather than read the select once
@@ -20,21 +15,21 @@ test("a tie choice without a note is refused with the core's message, and nothin
   // The server stays the authority on the rule. The page no longer offers the click that would hit it -- Record is
   // held while the note is blank (see the test below) -- so this asks the route directly, the way a script or an
   // older client would, and checks the refusal still names the reason and writes nothing.
-  const before = await get<unknown[]>(page, `/api/runs/${id("d_floor")}/decisions`);
-  const d = await get<{ groups: string[][] }>(page, `/api/runs/${id("d_floor")}`);
+  const before = await apiGet<unknown[]>(page, `/api/runs/${id("d_floor")}/decisions`);
+  const d = await apiGet<{ groups: string[][] }>(page, `/api/runs/${id("d_floor")}`);
   const tied = d.groups.find((g) => g.length > 1)![0]!; // data source: the run's own tie groups
   const r = await page.request.post(`/api/runs/${id("d_floor")}/decisions`, {
     data: { candidate: tied, status: "keep", reason: "within_tie_choice", note: "   " }, // whitespace is blank: the core strips it
   });
   expect(r.status(), await r.text()).toBe(400);
   expect(await r.text()).toContain("needs a note");
-  expect(await get<unknown[]>(page, `/api/runs/${id("d_floor")}/decisions`)).toEqual(before);
+  expect(await apiGet<unknown[]>(page, `/api/runs/${id("d_floor")}/decisions`)).toEqual(before);
 });
 
 test("the server's refusal still reaches the page when it is the one to refuse", async ({ page }) => {
   // The hold on Record is only about not offering a doomed click; the red server-error path has to stay wired, or a
   // refusal the client cannot predict (an unknown candidate, a file the core will not write) would land silently.
-  const d = await get<{ analogues: string[] }>(page, `/api/runs/${id("d_floor")}`);
+  const d = await apiGet<{ analogues: string[] }>(page, `/api/runs/${id("d_floor")}`);
   const target = d.analogues[0]!;
   await page.goto(`/run/${id("d_floor")}/decisions`);
   const row = page.locator(`[data-candidate="${target}"]`);
@@ -51,8 +46,8 @@ test("the server's refusal still reaches the page when it is the one to refuse",
 });
 
 test("a decision recorded with the keyboard alone lands in the decisions file with the user from Identity", async ({ page }) => {
-  const who = await get<{ user: string }>(page, "/api/whoami");
-  const d = await get<{ survivors: string[] }>(page, `/api/runs/${id("a_resolved")}`);
+  const who = await apiGet<{ user: string }>(page, "/api/whoami");
+  const d = await apiGet<{ survivors: string[] }>(page, `/api/runs/${id("a_resolved")}`);
   const kept = d.survivors[0]!;
   await page.goto(`/run/${id("a_resolved")}/decisions`);
   const row = page.locator(`[data-candidate="${kept}"]`);
@@ -69,14 +64,14 @@ test("a decision recorded with the keyboard alone lands in the decisions file wi
   await expect(row.getByRole("button", { name: `Record decision for ${kept}` })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByTestId(`recorded-${kept}`)).toContainText(`by ${who.user}`);
-  const after = await get<{ candidate: string; status: string; reason: string; user: string }[]>(page, `/api/runs/${id("a_resolved")}/decisions`);
+  const after = await apiGet<{ candidate: string; status: string; reason: string; user: string }[]>(page, `/api/runs/${id("a_resolved")}/decisions`);
   expect(after.find((x) => x.candidate === kept)).toMatchObject({ status: "keep", reason: "cut_survivor", user: who.user });
 });
 
 test("a recorded decision can start the next round, and the new pipeline references it", async ({ page }) => {
   // The loop this app existed to support: decide, then carry the decision into the next run. Before this, the only
   // route was to leave Bench and hand-edit [decisions] file = "..." into a TOML.
-  const d = await get<{ analogues: string[] }>(page, `/api/runs/${id("a_resolved")}`);
+  const d = await apiGet<{ analogues: string[] }>(page, `/api/runs/${id("a_resolved")}`);
   const target = d.analogues[0];
   await page.goto(`/run/${id("a_resolved")}/decisions`);
   const row = page.locator(`tbody tr`).filter({ hasText: target }).first();
@@ -102,7 +97,7 @@ test("a recorded decision can start the next round, and the new pipeline referen
 test("a tie choice holds Record until a note is typed, and says which reason is waiting", async ({ page }) => {
   // The page's own lede promises a tie choice "needs a note saying why", and the core refuses one without it. Before
   // this, Record stayed live and the only way to learn the rule was a red server error.
-  const d = await get<{ groups: string[][] }>(page, `/api/runs/${id("d_floor")}`);
+  const d = await apiGet<{ groups: string[][] }>(page, `/api/runs/${id("d_floor")}`);
   const tied = d.groups.find((g) => g.length > 1)![0]!; // data source: the run's own tie groups
   await page.goto(`/run/${id("d_floor")}/decisions`);
   const row = page.locator(`[data-candidate="${tied}"]`);
@@ -125,7 +120,7 @@ test("a tie choice holds Record until a note is typed, and says which reason is 
 
 test("a bulk tie choice holds Apply until a note is typed, and says it would refuse every selected candidate", async ({ page }) => {
   // Worse than one row: the core applies a bulk decision all-or-nothing, so one blank note refused all of them.
-  const d = await get<{ analogues: string[] }>(page, `/api/runs/${id("d_floor")}`);
+  const d = await apiGet<{ analogues: string[] }>(page, `/api/runs/${id("d_floor")}`);
   const two = d.analogues.slice(0, 2);
   await page.goto(`/run/${id("d_floor")}/decisions`);
   for (const n of two) await page.getByLabel(`Select ${n}`).check();

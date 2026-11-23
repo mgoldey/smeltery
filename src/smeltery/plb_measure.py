@@ -28,12 +28,12 @@ from typing import Any
 import numpy as np
 
 from .funnel import paired_delta, resolved, unpaired_delta
-from .gates import charge_sensitivity, spearman
+from .gates import average_ranks, charge_sensitivity, spearman
 from .model import ANGSTROM_TO_BOHR, HARTREE_TO_KCAL, Candidate, Measurement
 from .pocket import DDE_NOISE_FLOOR_KCAL_MOL
+from .run_view import QUANTITY  # the same dE_int a run ranks on
 
 SCHEMA = "smeltery-plb-run/1"
-QUANTITY = "dE_int"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 # The 8 provenance keys every results file must carry in `inputs` (the plan names each).
@@ -114,11 +114,11 @@ def _array(raw: dict, ligands: list[str], n_poses: int, where: str) -> np.ndarra
 
 def validate_results(rec: dict) -> PlbResults:
     """Parse a RunRecord dict strictly; raise `PlbResultsError` on anything incomplete or inconsistent."""
-    from .record import digest
+    from .record import input_digest
 
     for k in ("campaign", "inputs", "tiers", "results", "ferric", "smeltery_version", "input_digest"):
         _need(rec, k, "record")
-    if digest({"inputs": rec["inputs"], "tiers": rec["tiers"]}) != rec["input_digest"]:
+    if input_digest(rec["inputs"], rec["tiers"]) != rec["input_digest"]:
         raise PlbResultsError("input_digest does not match the inputs and tiers (the file was edited)")
     inp, res, fer = rec["inputs"], rec["results"], rec["ferric"]
     if res.get("schema") != SCHEMA:
@@ -253,19 +253,9 @@ def load_results(path: str | Path) -> PlbResults:
 
 
 def _avg_ranks(a: np.ndarray) -> np.ndarray:
-    """Average ranks (1-based) of a 1-D array; ties share the mean rank."""
-    a = np.asarray(a, dtype=float)
-    order = np.argsort(a, kind="stable")
-    ranks = np.empty(len(a))
-    sa = a[order]
-    i = 0
-    while i < len(a):
-        j = i
-        while j + 1 < len(a) and sa[j + 1] == sa[i]:
-            j += 1
-        ranks[order[i : j + 1]] = (i + j) / 2 + 1
-        i = j + 1
-    return ranks
+    """Average ranks (1-based) of a 1-D array; ties share the mean rank: `gates.average_ranks`, the ranks
+    `gates.spearman` (the observed statistic) correlates, so the permutation null ranks the same way."""
+    return average_ranks(np.asarray(a, dtype=float))
 
 
 def pearson(x, y) -> float:

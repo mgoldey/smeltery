@@ -335,3 +335,26 @@ def test_module_docstring_table_quotes_the_pinned_cc_pvdz_value():
     de = (ref["e_dimer"] - ref["e_a_dimer_basis"] - ref["e_b_dimer_basis"]) * HARTREE_TO_KCAL
     row = re.search(r"cc-pvdz\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)", ie.__doc__)
     assert float(row.group(2)) == pytest.approx(de, abs=5e-4)
+
+
+def test_fragment_from_xyz_reads_a_complete_file(tmp_path):
+    f = tmp_path / "a.xyz"
+    f.write_text("2\nwater half\nO 0 0 0\nH 0 0 0.96\n")
+    frag = Fragment.from_xyz(f, charge=0, multiplicity=1)
+    assert frag.symbols == ["O", "H"]
+    assert frag.coords_angstrom == [(0.0, 0.0, 0.0), (0.0, 0.0, 0.96)]
+
+
+def test_fragment_from_xyz_refuses_a_truncated_file(tmp_path):
+    """A header of 3 atoms over 2 rows used to give a 2-atom fragment, and a counterpoise term for the wrong system."""
+    f = tmp_path / "cut.xyz"
+    f.write_text("3\ntruncated\nO 0 0 0\nH 0 0 0.96\n")
+    with pytest.raises(ValueError, match="header says 3 atoms, file has 2"):
+        Fragment.from_xyz(f)
+
+
+def test_fragment_from_xyz_refuses_a_short_row(tmp_path):
+    f = tmp_path / "short.xyz"
+    f.write_text("2\nshort row\nO 0 0 0\nH 0 0\n")
+    with pytest.raises(ValueError, match="expected 4 fields"):
+        Fragment.from_xyz(f)

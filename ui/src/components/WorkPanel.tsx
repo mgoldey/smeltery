@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useCanWrite } from "../api/capabilities";
 import { api, unwrap, type Schemas } from "../api/client";
 import { outName, runOfTask, taskOut } from "./runIdentity";
+import { runsQuery, tasksQuery } from "../api/queries";
 
 type Task = Schemas["Task"];
 const LIVE = new Set(["queued", "running"]);
@@ -81,10 +82,8 @@ function silenceFor(t: Task, now: number, fetchedAt: number): number | null {
  * what tells two runs of one campaign apart everywhere else in the app.
  */
 function TaskResult({ task }: { task: Task }) {
-  const runs = useRuns();
-  const out = taskOut(task.command);
+  const { out, run } = useTaskRun(task);
   if (out === undefined) return null; // not a run: a preview, or anything else the queue was given
-  const run = runOfTask(task.command, runs.data);
   const where = outName(`${out}/x`) || out;
   if (!run) {
     return (
@@ -100,11 +99,16 @@ function TaskResult({ task }: { task: Task }) {
   );
 }
 
+/** Where a task writes (`--out`), and the run it made there once the run store lists it. */
+function useTaskRun(task: Task) {
+  const runs = useRuns();
+  return { out: taskOut(task.command), run: runOfTask(task.command, runs.data) };
+}
+
 /** The run list, shared by the panel and the inspector; polled while a task may still be writing a record. */
 function useRuns() {
   return useQuery({
-    queryKey: ["runs"],
-    queryFn: () => unwrap(api.GET("/api/runs")),
+    ...runsQuery(),
     // A run's record appears only when it finishes, and the queue page is where someone waits for it.
     refetchInterval: 10_000,
   });
@@ -120,8 +124,7 @@ export function WorkPanel({
 }) {
   const [now, setNow] = useState(Date.now());
   const tasks = useQuery({
-    queryKey: ["tasks"],
-    queryFn: () => unwrap(api.GET("/api/tasks")),
+    ...tasksQuery(),
     refetchInterval: (q) =>
       (q.state.data ?? []).some((t) => LIVE.has(t.status)) ? 1500 : 10_000,
   });
@@ -255,10 +258,8 @@ export function WorkPanel({
  * click away from. It was the place with no link at all: Cancel task was the only control it offered.
  */
 function InspectorResult({ task }: { task: Task }) {
-  const runs = useRuns();
-  const out = taskOut(task.command);
+  const { out, run } = useTaskRun(task);
   if (out === undefined) return null;
-  const run = runOfTask(task.command, runs.data);
   if (!run) {
     return (
       <p className="lede" data-testid="inspector-out">
@@ -286,10 +287,7 @@ export function TaskInspector({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const tasks = useQuery({
-    queryKey: ["tasks"],
-    queryFn: () => unwrap(api.GET("/api/tasks")),
-  });
+  const tasks = useQuery(tasksQuery());
   const task = tasks.data?.find((t) => t.id === id);
   const log = useQuery({
     queryKey: ["task-log", id],

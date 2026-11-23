@@ -123,7 +123,7 @@ disagree.
 ### arm and ext
 
 `RunInput.arm` / `RunInput.ext` reach the record activity (and the frozen `pipeline_finalize`), which passes them to
-`cli.emit_core_record`, so the complete core record states them at its FIRST write, exactly as the local backend's
+`core_record.emit_core_record`, so the complete core record states them at its FIRST write, exactly as the local backend's
 `smeltery run --arm/--ext-json`. The backend also writes them to `RUN_DIR/temporal/job.json` at submit, so whoever
 settles the job later (the workflow, or the backend observing it) rebuilds the job's spec with its arm and ext and a
 failed or cancelled record carries the arm too. The refusals in `TemporalJobBackend.submit` and in

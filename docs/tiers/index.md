@@ -39,7 +39,7 @@ The issue that asked for these pages speaks of six gates per tier. The code does
 |---|---|---|---|
 | G1 | Pose validity | `src/smeltery/gates.py:require_passing_poses` | A tier run on poses that failed PoseBusters (`PoseGateError`). A candidate with no report passes unless `ctx["require_pose_report"]` is set. |
 | G2 | Common core | `src/smeltery/tiers.py:_paired` | A pair with no common core, a core below `min_core_heavy`, a timed-out search, or a partial self-mapping (`NoCommonCoreError`). |
-| G3 | Electron parity | `src/smeltery/cli.py:_check_parity` | An odd electron count at the SMILES formal charge. Run by `smeltery run` only, not by any tier. |
+| G3 | Electron parity | `src/smeltery/planning.py:_check_parity` | An odd electron count at the SMILES formal charge. Run by `smeltery run` only, not by any tier. |
 | G4 | Unmeasured floor | `src/smeltery/funnel.py:tier_floor` | A cut on a quantity whose tier floor is `None` (`UnmeasuredFloorError`). |
 | G5 | Not a free energy | `src/smeltery/funnel.py:paired_delta` | A difference of scores from a tier with `is_delta_g=False` (`IncomparableError`). |
 | G6 | Same formula | `src/smeltery/funnel.py:require_same_formula` | Ranking a per-molecule total across differing formulas (`IncomparableError`). Available to callers; neither `cut` nor the CLI calls it. |

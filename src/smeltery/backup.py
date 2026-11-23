@@ -30,6 +30,8 @@ import tempfile
 from contextlib import closing
 from pathlib import Path, PurePosixPath
 
+from .record import utc_now
+
 PREFIX = "workspace"
 MANIFEST = "MANIFEST.json"
 SKIP_DIRS = frozenset({"__pycache__", "node_modules", ".git", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
@@ -144,7 +146,7 @@ def backup(
                     files[rel] = _add_file(tar, p, f"{PREFIX}/{rel}")
             manifest = {
                 "smeltery_version": __version__,
-                "created_utc": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "created_utc": utc_now(),
                 "files": files,
             }
             blob = json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n"
@@ -161,14 +163,17 @@ def backup(
     return manifest
 
 
-def _bad_name(name: str) -> str | None:
+def unsafe_member_name(name: str, container: str = "archive", member: str = "member") -> str | None:
+    """Why `name`, a member of an untrusted archive, may not be extracted as it is (a backslash or NUL, an absolute or
+    drive path, a `..` component), or None when it is safe. `container` and `member` are the words the reason uses:
+    a backup is an "archive" of "member"s, a pipeline bundle a "bundle" of "entry"s."""
     p = PurePosixPath(name)
     if "\\" in name or "\x00" in name:
-        return "backslash or NUL in the member name"
+        return f"backslash or NUL in the {member} name"
     if p.is_absolute() or re.match(r"^[A-Za-z]:", name):
         return "absolute path"
     if ".." in p.parts:
-        return "path leaves the archive ('..')"
+        return f"path leaves the {container} ('..')"
     return None
 
 
@@ -187,7 +192,7 @@ def _stage(archive: Path, stage: Path) -> list[str]:
         manifest = None
         wanted: dict[str, tarfile.TarInfo] = {}
         for m in members:
-            why = _bad_name(m.name)
+            why = unsafe_member_name(m.name)
             if why is None and not (m.isfile() or m.isdir()):
                 why = "not a regular file (links and special files are refused)"
             if why is not None:

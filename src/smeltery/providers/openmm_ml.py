@@ -33,12 +33,12 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from ..model import PointCharge, Pose
+from ..model import KJ_PER_KCAL, NM_TO_ANGSTROM, PointCharge, Pose
 from ..structure import MissingBackend
 from .potential import PocketContextError, PotentialResult, UnsupportedChargeStateError
 
 #: kJ/mol -> kcal/mol (thermochemical calorie, 4.184 J).
-_KJ_TO_KCAL = 1.0 / 4.184
+_KJ_TO_KCAL = 1.0 / KJ_PER_KCAL
 
 #: Elements ANI-2x was parameterized for (torchani `ANI2x` docstring: "HCNOFSCl exclusively").
 ANI2X_ELEMENTS = frozenset({"H", "C", "N", "O", "F", "S", "Cl"})
@@ -118,7 +118,7 @@ class OpenMMMLAni2x:
         if charge != 0:
             raise UnsupportedChargeStateError(f"{self.name} supports net charge 0 only, not {charge}")
         ctx = self._context(tuple(pose.symbols))
-        ctx.setPositions(np.asarray(pose.coords_ang, dtype=float) / 10.0)  # Å -> nm
+        ctx.setPositions(np.asarray(pose.coords_ang, dtype=float) / NM_TO_ANGSTROM)  # Å -> nm
         state = ctx.getState(getEnergy=True, getForces=True)
         unit = self._openmm.unit
         energy = state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole) * _KJ_TO_KCAL

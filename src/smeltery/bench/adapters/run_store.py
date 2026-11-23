@@ -28,7 +28,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from smeltery.gui.results import Run, load_run
+from smeltery.run_view import Run, load_run
 
 _log = logging.getLogger(__name__)
 
