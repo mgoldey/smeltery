@@ -5,8 +5,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+from smeltery.bench.ports.task_queue import DurableRuns
 from smeltery.gui.pipeline import Pipeline
-from smeltery.run_inputs import stage_inputs
+from smeltery.run_inputs import poses_key, staged_sha256, write_staged
 
 
 def smeltery_command() -> list[str]:
@@ -17,11 +18,9 @@ def smeltery_command() -> list[str]:
 
 
 def uses_temporal(task_queue) -> bool:
-    """Bench is configured with the Temporal task queue: launch `smeltery run --temporal` on it (the subprocess
-    queue keeps the plain run, the default)."""
-    from smeltery.bench.adapters.task_queue import TemporalTaskQueue
-
-    return isinstance(task_queue, TemporalTaskQueue)
+    """The queue runs a launched run as a durable workflow (`DurableRuns`, the Temporal queue): it is launched with
+    the queue's own `run_flags()` and no limits. The subprocess queue keeps the plain run, the default."""
+    return isinstance(task_queue, DurableRuns)
 
 
 #: A long run holds several times its per-calculation memory prediction: one was measured at ~11 GB resident against
@@ -65,8 +64,6 @@ def predicted_memory_gb(text: str, base: Path, preview_dir: Path | None) -> floa
         return None
     try:
         plan = json.loads((Path(preview_dir) / "plan.json").read_text())
-        from smeltery.cli import poses_key
-
         if plan.get("status") != "ok" or plan.get("poses_key") != poses_key(tomllib.loads(text), base):
             return None
         total = ((plan.get("memory") or {}).get("estimate") or {}).get("total_gb")
@@ -78,6 +75,23 @@ def predicted_memory_gb(text: str, base: Path, preview_dir: Path | None) -> floa
 class LiveRunRefused(ValueError):
     """OUT holds a Temporal run that is still running (or whose server cannot say), or (in-process launch) a finished
     run record: nothing was written into it."""
+
+
+class ResumeRefused(ValueError):
+    """The directory cannot be resumed (it holds a finished run record, or no staged config): nothing was submitted."""
+
+
+def campaign_of(config: Path) -> str | None:
+    """The campaign name out of a staged config, for the task's name. Unreadable or absent is not an error: the
+    task gets named after its directory instead, which is still the thing the user is looking for. A config names it
+    `campaign = "..."`; a `[campaign]` table with a `name` is read too."""
+    try:
+        got = tomllib.loads(config.read_text()).get("campaign")
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    if isinstance(got, dict):
+        got = got.get("name")
+    return got if isinstance(got, str) and got else None
 
 
 class LaunchRun:
@@ -119,35 +133,64 @@ class LaunchRun:
         self._guard(out_dir, source, base, temporal=temporal)
         if command is None and not temporal and (done := sorted(out_dir.glob("run-*.json"))):
             raise LiveRunRefused(f"{out_dir} already holds the run record {done[0].name}; pick another out folder")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        staged, _ = stage_inputs(source, base, out_dir)
-        dest = out_dir / "config.toml"
-        # an unchanged config is not rewritten (a live run reads it)
-        if not dest.is_file() or dest.read_text() != staged:
-            dest.write_text(staged)
-        if command is None:
-            command = [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir)]
-            if uses_temporal(self.task_queue):  # the run itself is then a durable workflow, not one long process
-                command.append("--temporal")
-        limits = {}
-        if not uses_temporal(self.task_queue):
-            per_calc = predicted_memory_gb(source, base, preview_dir)
-            limits = {"memory_limit_gb": default_memory_limit_gb(per_calc, host_memory_gb()), "timeout_s": timeout_s}
-        task_id = self.task_queue.submit(
+        write_staged(source, base, out_dir)  # an unchanged config is not rewritten (a live run reads it)
+        per_calc = None if uses_temporal(self.task_queue) else predicted_memory_gb(source, base, preview_dir)
+        return self.task_queue.submit(
             f"run {pipeline.campaign}",
-            list(command),
+            list(command) if command is not None else self._command(out_dir),
             cwd=str(out_dir.parent),
             note=f"user={self.identity.current()} time={self.clock.now().isoformat()}",
             capped=True,
-            **limits,
+            **self._limits(per_calc, timeout_s),
         )
-        return task_id
+
+    def resume(self, out_dir: str | Path) -> str:
+        """Re-submit `smeltery run` on a run directory that stopped before it finished, on the directory's own staged
+        `config.toml`; the run reuses the checkpoint in it. Returns the task id.
+
+        `ResumeRefused` when the directory holds a run record (a finished result: overwriting it would destroy a
+        conclusion someone may have cited) or no `config.toml` (nothing to re-run; inferring one would run different
+        inputs under this directory's name). The run gets what a fresh launch gets, from the same code: the queue's
+        run flags and the same memory ceiling. There is no pipeline preview to predict from, so the ceiling is the
+        one a launch without a preview gets (the host share), and there is no wall-clock limit."""
+        out_dir = Path(out_dir)
+        if done := sorted(out_dir.glob("run-*.json")):
+            raise ResumeRefused(
+                f"{out_dir.name} already holds the run record {done[0].name}: it finished, so there is "
+                "nothing to resume. Run the pipeline again to start a new round."
+            )
+        config = out_dir / "config.toml"
+        if not config.is_file():
+            raise ResumeRefused(f"{out_dir.name} holds no config.toml, so there is no staged run in it to resume")
+        campaign = campaign_of(config)
+        return self.task_queue.submit(
+            f"run {campaign}" if campaign else f"resume {out_dir.name}",
+            self._command(out_dir),
+            cwd=str(out_dir.parent),
+            note=f"resumed by user={self.identity.current()} time={self.clock.now().isoformat()}",
+            capped=True,
+            **self._limits(None, None),
+        )
+
+    def _command(self, out_dir: Path) -> list[str]:
+        """`smeltery run OUT/config.toml --out OUT`, plus the queue's flags when the run is a durable workflow."""
+        flags = list(self.task_queue.run_flags()) if uses_temporal(self.task_queue) else []
+        return [*smeltery_command(), "run", str(out_dir / "config.toml"), "--out", str(out_dir), *flags]
+
+    def _limits(self, per_calculation_gb: float | None, timeout_s: float | None) -> dict:
+        """What a launched run is submitted with: the memory ceiling (`default_memory_limit_gb`) and the wall-clock
+        limit. None under a durable queue, whose workers bound their own work (it refuses both)."""
+        if uses_temporal(self.task_queue):
+            return {}
+        return {
+            "memory_limit_gb": default_memory_limit_gb(per_calculation_gb, host_memory_gb()),
+            "timeout_s": timeout_s,
+        }
 
     @staticmethod
     def _guard(out_dir: Path, text: str, base: Path, temporal: bool) -> None:
         """`smeltery run`'s own guard, before anything is written into OUT: a live Temporal run there is refused,
         unless this launch is `--temporal` with the same staged config (the CLI then attaches to it)."""
-        from smeltery.cli import staged_sha256
         from smeltery.temporal_run import guard_out
 
         why = guard_out(out_dir, lambda: staged_sha256(text, base), temporal)
@@ -156,5 +199,3 @@ class LaunchRun:
 
     def execute(self, *a, **kw):
         return self.run(*a, **kw)
-
-    __call__ = run

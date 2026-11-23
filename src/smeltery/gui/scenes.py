@@ -22,7 +22,7 @@ from collections.abc import Callable
 import numpy as np
 from rdkit import Chem
 
-from .results import Run, _verified_bytes, pose_indices, pose_output
+from ..run_view import Run, _verified_bytes, pose_indices, pose_output
 
 #: Receptor residues with any atom this close (Angstrom) to the candidate's pose are drawn as ball-and-stick.
 NEAR_ANGSTROM = 5.0
@@ -92,6 +92,16 @@ def _color_by_element(rep, carbon: str) -> None:
         rep.color(color=color, selector=ComponentExpression(type_symbol=symbol.upper()))
 
 
+def add_field_spheres(builder, charges, *, opacity: float) -> None:
+    """The pocket field as one sphere per point charge: colour by sign, radius growing with |q| (capped at 2 e),
+    tooltip `q = ...`. `charges` is rows of (q, x, y, z) in Angstrom, as `results.field` stores them."""
+    prims = builder.primitives(opacity=opacity, ref="field")
+    for q, x, y, z in charges:
+        color = CHARGE_POSITIVE if q > 0 else CHARGE_NEGATIVE if q < 0 else CHARGE_ZERO
+        radius = 0.3 + 0.25 * min(abs(float(q)), 2.0)
+        prims.sphere(center=(float(x), float(y), float(z)), radius=radius, color=color, tooltip=f"q = {q:+.3g} e")
+
+
 def pose_scene(
     run: Run,
     candidate: str,
@@ -159,11 +169,7 @@ def pose_scene(
 
     field = pose_output(run, "field")
     if field:
-        prims = builder.primitives(opacity=0.7, ref="field")
-        for q, x, y, z in field:
-            color = CHARGE_POSITIVE if q > 0 else CHARGE_NEGATIVE if q < 0 else CHARGE_ZERO
-            radius = 0.3 + 0.25 * min(abs(float(q)), 2.0)
-            prims.sphere(center=(float(x), float(y), float(z)), radius=radius, color=color, tooltip=f"q = {q:+.3g} e")
+        add_field_spheres(builder, field, opacity=0.7)
 
     state = builder.get_state(title=f"{candidate} pose {pose}", description=f"{run.campaign}: {candidate} pose {pose}")
     return json.loads(state.dumps(indent=None))

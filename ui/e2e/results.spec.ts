@@ -1,11 +1,7 @@
 import type { Page } from "@playwright/test";
-import { expect, id, test } from "./bench";
+import { apiGet, expect, id, test } from "./bench";
 
 type Fig = { data: { mode?: string; y?: unknown[] }[]; layout: { shapes?: { name?: string }[] } };
-
-async function api<T>(page: Page, path: string): Promise<T> {
-  return (await (await page.request.get(path)).json()) as T;
-}
 
 /** The figure as Plotly actually holds it in the page (Plotly attaches data/layout to the graph div). */
 async function rendered(page: Page, name: string): Promise<Fig> {
@@ -15,7 +11,7 @@ async function rendered(page: Page, name: string): Promise<Fig> {
 }
 
 test("the forest plot has one marker per analogue and one tick per pose, from the API's table", async ({ page }) => {
-  const table = await api<{ rows: { candidate: string; per_pose: number[] }[] }>(page, `/api/runs/${id("a_resolved")}/ddE`);
+  const table = await apiGet<{ rows: { candidate: string; per_pose: number[] }[] }>(page, `/api/runs/${id("a_resolved")}/ddE`);
   await page.goto(`/run/${id("a_resolved")}/results`);
   const fig = await rendered(page, "forest");
   // Two kinds of point share the layer: the per-pose ticks behind, one summary marker per row on top. Counting
@@ -30,7 +26,7 @@ test("the forest plot has one marker per analogue and one tick per pose, from th
 });
 
 test("a non-zero floor draws its band around each group boundary", async ({ page }) => {
-  const run = await api<{ floor: number }>(page, `/api/runs/${id("d_floor")}`);
+  const run = await apiGet<{ floor: number }>(page, `/api/runs/${id("d_floor")}`);
   expect(run.floor).toBeGreaterThan(0); // data source: the fixture run's recorded floor
   await page.goto(`/run/${id("d_floor")}/results`);
   const fig = await rendered(page, "forest");
@@ -48,7 +44,7 @@ test("tie groups carry text labels, in the plot and the table", async ({ page })
 });
 
 test("the matrix shown is the funnel's resolved matrix", async ({ page }) => {
-  const want = await api<{ names: string[]; matrix: boolean[][] }>(page, `/api/runs/${id("a_resolved")}/resolved`);
+  const want = await apiGet<{ names: string[]; matrix: boolean[][] }>(page, `/api/runs/${id("a_resolved")}/resolved`);
   await page.goto(`/run/${id("a_resolved")}/results`);
   await rendered(page, "matrix");
   const z = await page
@@ -58,7 +54,7 @@ test("the matrix shown is the funnel's resolved matrix", async ({ page }) => {
 });
 
 test("the per-pose plot draws one line per analogue pose pair", async ({ page }) => {
-  const rows = await api<{ candidate: string; pose: number }[]>(page, `/api/runs/${id("a_resolved")}/per_pose`);
+  const rows = await apiGet<{ candidate: string; pose: number }[]>(page, `/api/runs/${id("a_resolved")}/per_pose`);
   await page.goto(`/run/${id("a_resolved")}/results`);
   await rendered(page, "per_pose");
   // One drawn line per (analogue, pose) row of the API's per-pose table.

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import os
 import platform
 import subprocess
 import time
@@ -63,6 +64,8 @@ def _ferric_build() -> dict | None:
     """The engine's own build stamp, `ferric.__build__`, if it exposes one."""
     return _build_stamp("ferric")
 
+
+ferric_build = _ferric_build  # the public name, for the Temporal activities' code identity
 
 #: PEP 610 `vcs_info.vcs` values: each is also a core-record `source` kind (`<vcs>+<url>`).
 VCS_KINDS = ("git", "hg", "svn", "bzr")
@@ -163,8 +166,40 @@ def ferric_identity() -> dict:
     return package_identity("ferric")
 
 
+#: The UTC timestamp every smeltery file stamps, `YYYY-MM-DDTHH:MM:SSZ`; `decisions`, `project` and Bench read it here.
+TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def utc_now() -> str:
+    """The current UTC time as `TIME_FORMAT`."""
+    return time.strftime(TIME_FORMAT, time.gmtime())
+
+
 def digest(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def input_digest(inputs: dict, tiers: list[dict]) -> str:
+    """The identity a run record is addressed by: the hash of its inputs and its tiers' settings."""
+    return digest({"inputs": inputs, "tiers": tiers})
+
+
+def file_sha256(path: str | Path) -> str:
+    """sha256 (hex) of a file's bytes, read in 1 MiB chunks."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_text_atomic(path: str | Path, text: str) -> None:
+    """Write `text` to `path` whole, then rename it into place: a reader never sees a half-written file. The
+    temporary file sits beside `path` (same directory, so the rename is atomic) as `<name>.tmp`."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
 
 
 SCHEMA_VERSION = 1
@@ -173,6 +208,17 @@ SCHEMA_VERSION = 1
 def _canonical_sha256(d: dict) -> str:
     """sha256 of the record's canonical JSON, excluding `record_sha256` itself."""
     return digest({k: v for k, v in d.items() if k != "record_sha256"})
+
+
+def stamp_record(d: dict) -> dict:
+    """Set `d["record_sha256"]` to the hash of `d`'s canonical JSON (everything else in it); returns `d`."""
+    d["record_sha256"] = _canonical_sha256(json.loads(json.dumps(d, default=str)))
+    return d
+
+
+def dump_record(d: dict) -> str:
+    """A record dict as its file holds it."""
+    return json.dumps(d, indent=2, sort_keys=True, default=str)
 
 
 @dataclass
@@ -185,18 +231,17 @@ class RunRecord:
     ferric: dict = field(default_factory=ferric_identity)
     smeltery: dict | None = field(default_factory=smeltery_identity)
     host: dict = field(default_factory=lambda: {"node": platform.node(), "python": platform.python_version()})
-    started_utc: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    started_utc: str = field(default_factory=utc_now)
 
     @property
     def input_digest(self) -> str:
-        return digest({"inputs": self.inputs, "tiers": self.tiers})
+        return input_digest(self.inputs, self.tiers)
 
     def to_json(self) -> str:
         d = asdict(self)
         d["input_digest"] = self.input_digest
         d["schema_version"] = SCHEMA_VERSION
-        d["record_sha256"] = _canonical_sha256(json.loads(json.dumps(d, default=str)))
-        return json.dumps(d, indent=2, sort_keys=True, default=str)
+        return dump_record(stamp_record(d))
 
     @classmethod
     def from_json(cls, s: str) -> RunRecord:

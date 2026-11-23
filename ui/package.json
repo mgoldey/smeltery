@@ -26,7 +26,7 @@
     "@radix-ui/react-tabs": "^1.2.1",
     "@radix-ui/react-tooltip": "^1.4.1",
     "@rdkit/rdkit": "^2026.9.2",
-    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-query": "^5.108.0",
     "molstar": "^5.13.1",
     "openapi-fetch": "^0.17.0",
     "plotly.js-cartesian-dist-min": "^4.3.0",

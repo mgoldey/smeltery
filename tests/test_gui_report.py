@@ -265,3 +265,34 @@ def test_smeltery_report_subcommand_writes_the_report(tmp_path, capsys):
     assert cli.main(["report", str(make_run_dir(tmp_path)), "-o", str(dest)]) == 0
     assert dest.read_text().startswith("<!doctype html>")
     assert cli.main(["report", str(tmp_path / "nothing")]) == 2
+
+
+def _run_with_receptor(tmp_path, *, text="ATOM\nEND\n", sha=None, name="receptor.pdb"):
+    import hashlib
+
+    from smeltery.run_view import load_run
+
+    out = make_run_dir(tmp_path)
+    (out / "receptor.pdb").write_text(text)
+    path = next(out.glob("run-*.json"))
+    rec = json.loads(path.read_text())
+    digest = sha or hashlib.sha256((out / "receptor.pdb").read_bytes()).hexdigest()
+    rec["results"]["receptor"] = {"file": name, "sha256": digest}
+    path.write_text(json.dumps(rec))
+    return load_run(out)
+
+
+def test_read_receptor_returns_the_text_or_a_note_never_raises(tmp_path):
+    run = _run_with_receptor(tmp_path)
+    assert report._read_receptor(run, run.record["results"]["receptor"]) == ("ATOM\nEND\n", None)
+    assert report._read_receptor(run, None) == (None, None)
+
+    bad = _run_with_receptor(tmp_path / "b", sha="0" * 64)
+    assert report._read_receptor(bad, bad.record["results"]["receptor"]) == (
+        None,
+        "receptor receptor.pdb: sha256 does not match the record; not shown",
+    )
+
+    gone = _run_with_receptor(tmp_path / "c", name="missing.pdb")
+    got, note = report._read_receptor(gone, gone.record["results"]["receptor"])
+    assert got is None and note.startswith("receptor could not be read (") and note.endswith("); not shown")

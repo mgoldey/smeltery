@@ -530,22 +530,43 @@ writes to a database it refuses, so the newer Bench can still open it.
 
 ## Ports and local adapters
 
-1. RunStore - `FilesystemRunStore` (SQLite index cache over run-*.json; records win over index)
+Every port is a Protocol in `bench/ports/` and is held on `app.state`; `create_app` takes each one
+as a keyword argument and `build_app` (the one composition root) picks the local adapters.
+
+1. RunStore - `FilesystemRunStore` (an in-process cache over run-*.json keyed by each file's stat; no sqlite index, the records are the only source)
 2. ArtifactStore - `FilesystemArtifactStore` (sha256-verified bytes)
 3. Identity - `LocalIdentity` (getpass, single trusted user)
-4. Clock - `LocalClock` (UTC)
+4. Clock - `SystemClock` (UTC); comment, proposal and notebook timestamps all come from it
 5. StructureSource - `LocalStructureSource` (local file; network only with allow_network)
 6. CommentStore - `SqliteCommentStore` (anchored threads)
 7. ProjectStore - `SqliteProjectStore` (campaigns, append-only entries)
-8. TaskQueue - `SubprocessTaskQueue` / `TemporalTaskQueue`
-9. PipelineStore - `FilesystemPipelineStore` (`ROOT/pipelines/<name>/`; saves are checked against the hash of the text they were based on)
+8. TaskQueue - `SubprocessTaskQueue` / `TemporalTaskQueue`; optional beside it, `StoppableTasks` (the local queue: list and stop live tasks on shutdown) and `DurableRuns` (the Temporal queue: a run is a durable workflow)
+9. PipelineStore - `FilesystemPipelineStore` (`ROOT/pipelines/<name>/`; saves are checked against the hash of the text they were based on). The name rules are the port's: `check_pipeline_name`, `check_file_name`
 10. MethodDefaults - `FilesystemMethodDefaults` (`ROOT/.smeltery/bench/methods.toml`)
+11. PrebuiltSource - `PackagedPrebuilts` (the examples shipped in the wheel, read through `importlib.resources`)
+12. RunProgressSource - `RunProgress` (a live run's SCF counts from its checkpoint files; one per app)
+
+`adapters/workspace_root.py` is not a port: it is where `smeltery bench` with no ROOT keeps its work.
 
 ## Layering
 
-Core modules never import `smeltery.bench`. Ports declare Protocols only. Adapters are the
-only place with sqlite3, Path.home, or Temporal references, with one named exception:
-`src/smeltery/tasks.py` also imports temporalio for the Temporal task backend. A task runs once
+Enforced by `tests/bench/test_layering.py`, which reads imports with `ast` (function-local imports
+count):
+
+- Core modules (`src/smeltery/` outside `bench/` and `gui/`) never import `smeltery.bench`, and do
+  not import `smeltery.gui` or `smeltery.cli` on import, except the allowlist the test names.
+- Nothing under `src/smeltery/` but `__main__.py` imports `smeltery.cli`, even inside a function: the plan/run use
+  case a Temporal worker or a Bench handler executes is `smeltery.planning` (`build_plan`, `run_plan`) and
+  `smeltery.run_outputs` (`write_outputs`, the pose SDFs), which `smeltery.cli` re-exports.
+- `ports/` declares Protocols only and imports no adapter, router or use case.
+- `use_cases/` imports no adapter, router, FastAPI or Starlette: it owns the rules and is handed its
+  ports.
+- `adapters/` imports no router, use case, FastAPI or Starlette.
+- `api/` imports no adapter: a router reads the ports on `app.state`. What two routers share is a
+  public name in `api/common.py`; no router imports another's underscore names.
+- Adapters are the only place with sqlite3, `Path.home` or Temporal references, with named
+  exceptions: `src/smeltery/tasks.py` and `temporal_run.py` (the CLI's Temporal backends) and
+  `backup.py` (the CLI's sqlite snapshot). A task runs once
 unless it was submitted with `retries` (0-5); a dead worker's task is reported failed, never retried
 on the orchestrator's own initiative. The queue's own scheduling (which queued task starts next)
 lives in its sqlite database, not in the server process, so it survives a restart.

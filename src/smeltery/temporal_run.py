@@ -1,11 +1,11 @@
 """`smeltery run CONFIG --out OUT --temporal`: one pipeline run as a durable Temporal workflow.
 
 The pattern of `scripts/temporal_ddE.py`, applied to a whole `smeltery run`. Temporal orchestrates; it does not
-compute, and the science is the non-Temporal run's: the same plan (`cli.build_plan`), the same tier settings, the
-same pairing, cut and record (`cli.run_plan`, `cli.write_outputs`). What it adds is around each SCF:
+compute, and the science is the non-Temporal run's: the same plan (`planning.build_plan`), the same tier settings,
+the same pairing, cut and record (`planning.run_plan`, `run_outputs.write_outputs`). What it adds is around each SCF:
 
 * **The unit of work is one SCF leg**: (candidate, pose, leg, field model). A field leg is one per field model: the
-  plan's own field (named by `cli.primary_model`: its pdb2pqr force field, else "primary") and every field an active
+  plan's own field (named by `primary_model`: its pdb2pqr force field, else "primary") and every field an active
   analysis asks for through `extra_fields(plan, ctx) -> {model: [PointCharge]}`. The vacuum leg has no field model:
   it is computed once per (candidate, pose) and shared by every model (its log lines carry `field_model: null`).
 * **Each leg runs in its own child process** (`python -m smeltery.temporal_run _score`, its own process group, with
@@ -63,12 +63,25 @@ import os
 import pickle
 import signal
 import sys
-import threading
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+
+from .calc_log import (  # noqa: F401 -- the SCF log lives in `smeltery.calc_log`; re-exported, the same objects
+    _LOG_LOCK,
+    CALCS,
+    _ident,
+    append_row,
+    calcs_path,
+    dedupe,
+    primary_model,
+    read_rows,
+)
+from .record import file_sha256, utc_now, write_text_atomic
+from .temporal_defaults import DEFAULT_HOST, DEFAULT_NAMESPACE, DOCKER_COMMAND
+from .temporal_defaults import PIPELINE_QUEUE as TASK_QUEUE
 
 try:
     from temporalio import activity, workflow
@@ -81,13 +94,6 @@ try:
 except ImportError:  # pragma: no cover - the `temporal` extra is not installed
     TEMPORAL_AVAILABLE = False
 
-DEFAULT_HOST = "127.0.0.1:7233"
-TASK_QUEUE = "smeltery-pipeline"
-DOCKER_COMMAND = (
-    "docker run -d --name temporal-dev -p 7233:7233 -p 8233:8233 "
-    "temporalio/temporal:latest server start-dev --ip 0.0.0.0"
-)
-CALCS = "calcs.jsonl"
 WORK_DIR = "temporal"
 WORK_FILE = "work.json"
 MARKER = "running.json"
@@ -126,21 +132,16 @@ def server_down_message(host: str, err: object) -> str:
     )
 
 
-def sha256_file(path: str | Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def utc_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+sha256_file = file_sha256  # the one file hash, `smeltery.record.file_sha256`
 
 
 def code_identity() -> dict:
     """The build this process runs: `{"ferric": {"git_sha", "dirty"}, "smeltery": {"commit", "dirty"}}` (ferric from
     `ferric.__build__`, None where it has none; smeltery from its install, an editable one by its checkout's HEAD and
     dirty flag). Every calcs.jsonl row an activity writes carries it, so finalize can say which code measured what."""
-    from .record import _ferric_build, smeltery_identity
+    from .record import ferric_build, smeltery_identity
 
-    fb = _ferric_build()
+    fb = ferric_build()
     sm = smeltery_identity()
     ferric = {"git_sha": fb["git_sha"], "dirty": bool(fb.get("dirty"))} if fb else {"git_sha": None, "dirty": None}
     return {"ferric": ferric, "smeltery": {"commit": sm.get("commit"), "dirty": sm.get("dirty")}}
@@ -252,85 +253,6 @@ class SettleInput:
 # ------------------------------------------------------------------------------------------------ the SCF log
 
 
-_LOG_LOCK = threading.Lock()
-
-
-def calcs_path(out: str | Path, name: str = CALCS) -> Path:
-    return Path(out) / name
-
-
-def append_row(out: str | Path, row: dict, name: str = CALCS) -> None:
-    """Append one line to OUT/<name> (calcs.jsonl), fsync'd. A torn last line (no newline) is closed first, so the new
-    row is never glued onto it. A plain run's checkpoint (`smeltery.checkpoint`) appends to its own file this way."""
-    line = json.dumps(row) + "\n"
-    p = calcs_path(out, name)
-    with _LOG_LOCK:
-        fd = os.open(p, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
-        try:
-            size = os.fstat(fd).st_size
-            if size and os.pread(fd, 1, size - 1) != b"\n":
-                line = "\n" + line
-            os.write(fd, line.encode())
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
-
-def read_rows(out: str | Path, digest: str, name: str = CALCS) -> tuple[list[dict], int]:
-    """(the Temporal SCF lines of this input digest, how many unreadable lines were skipped). A torn line (a write
-    cut short) is skipped and counted, never a crash. A line of another digest, or without one (a non-Temporal run's),
-    is refused: resuming into a log of different inputs would mix two measurements. `name`: the log under OUT (a plain
-    run's checkpoint is read back the same way)."""
-    p = calcs_path(out, name)
-    if not p.is_file():
-        return [], 0
-    rows, torn = [], 0
-    for x in p.read_text().splitlines():
-        if not x.strip():
-            continue
-        try:
-            r = json.loads(x)
-        except ValueError:
-            torn += 1
-            continue
-        if not isinstance(r, dict):
-            torn += 1
-            continue
-        rows.append(r)
-    old = [r for r in rows if "leg" not in r]
-    if old:
-        raise ValueError(
-            f"{p} is the log of a --temporal run from before per-leg scores (7bdaebc): {len(old)} of its outcome "
-            "line(s) name no leg, so its scores cannot be read back leg by leg; use a fresh --out"
-        )
-    foreign = [r for r in rows if r.get("digest") != digest[:12]]
-    if foreign:
-        got = sorted({str(r.get("digest")) for r in foreign})
-        raise ValueError(
-            f"{p} holds {len(foreign)} SCF line(s) of another run (digest {got}, this run {digest[:12]}); "
-            "use a fresh --out, or remove the log to recompute"
-        )
-    return rows, torn
-
-
-def _ident(r: dict) -> tuple:
-    return (r["candidate"], int(r["pose"]), r["leg"], r.get("field_model"))
-
-
-def dedupe(rows: list[dict]) -> tuple[list[dict], int]:
-    """SCF lines unique by (candidate, pose, leg, field model, rung), the first kept; outcome lines all kept."""
-    seen, out, dup = set(), [], 0
-    for r in rows:
-        if "outcome" not in r:
-            k = (*_ident(r), int(r["rung"]))
-            if k in seen:
-                dup += 1
-                continue
-            seen.add(k)
-        out.append(r)
-    return out, dup
-
-
 def leg_state(rows: list[dict]) -> dict[tuple, dict]:
     """Per leg identity: the converged line (if any), the rungs that failed, the last outcome line, the next rung.
     A line whose convergence the ladder refuses (`refuse_false_convergence`, against the leg's lower rungs) counts
@@ -367,8 +289,6 @@ def leg_state(rows: list[dict]) -> dict[tuple, dict]:
 def field_models(plan, out: Path | None) -> tuple[dict[str, list], dict[str, str]]:
     """The plan's own field, plus each extra field an active analysis asks for (`extra_fields`); and which
     analysis asked for each extra model."""
-    from .cli import primary_model
-
     models, owner = {primary_model(plan.field): list(plan.field)}, {}
     for spec in remeasuring_analyses(plan.cfg):
         for name, charges in spec.hook.extra_fields(plan, {"log": plan.stage_log, "out_dir": out}).items():
@@ -405,12 +325,6 @@ def check_config(config: str, want: str) -> None:
         )
 
 
-def _plan_digest(plan) -> str:
-    from .record import RunRecord
-
-    return RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest
-
-
 def legs_of(plan, models) -> list[tuple[str, int, str, str | None]]:
     """Every leg identity of the plan: one vacuum leg per pose, one field leg per pose and field model."""
     out = []
@@ -430,8 +344,10 @@ def prepare_sync(inp: RunInput) -> PrepareResult:
 def _prepare(inp: RunInput):
     """`prepare_sync`, and the plan as `build_plan` left it (a copy taken before the extra fields are asked for), for
     the stages after the measurement: `CampaignRunWorkflow` builds the plan once."""
-    from .cli import _net_charge, build_plan, load_config, scf_timeout_s
+    from .config import load_config, scf_timeout_s
     from .gates import require_passing_poses
+    from .planning import build_plan
+    from .tiers import net_charge
 
     out = Path(inp.out)
     check_config(inp.config, inp.config_sha)
@@ -441,7 +357,7 @@ def _prepare(inp: RunInput):
     for c in plan.candidates:  # the tier's own pre-SCF gate, once, before any leg is scheduled
         require_passing_poses(c, {})
     built = pickle.loads(pickle.dumps(plan))  # what finalize would rebuild: before `extra_fields` touches the plan
-    digest = _plan_digest(plan)
+    digest = plan.input_digest
     rows, _ = read_rows(out, digest)  # refuses a foreign log before anything is written
     models, owner = field_models(plan, out)
     knobs = {f.name: getattr(plan.tier, f.name) for f in dataclasses.fields(plan.tier) if f.init}
@@ -453,7 +369,7 @@ def _prepare(inp: RunInput):
         "candidates": {
             c.name: {
                 "smiles": c.smiles,
-                "charge": _net_charge(c.smiles),
+                "charge": net_charge(c.smiles),
                 "poses": [{"symbols": list(p.symbols), "coords_ang": p.coords_ang.tolist()} for p in c.poses],
             }
             for c in plan.candidates
@@ -461,9 +377,7 @@ def _prepare(inp: RunInput):
         "fields": {m: [[float(q.q), *map(float, q.xyz_ang)] for q in charges] for m, charges in models.items()},
     }
     (out / WORK_DIR).mkdir(parents=True, exist_ok=True)
-    tmp = out / WORK_DIR / (WORK_FILE + ".tmp")
-    tmp.write_text(json.dumps(work))
-    os.replace(tmp, out / WORK_DIR / WORK_FILE)
+    write_text_atomic(out / WORK_DIR / WORK_FILE, json.dumps(work))
     state = leg_state(dedupe(rows)[0])
     pending, done = [], 0
     limit = scf_timeout_s(cfg)
@@ -496,7 +410,7 @@ def scf_child(inp: ScoreInput) -> dict:
     import numpy as np
 
     from .model import PointCharge, Pose
-    from .tiers import FieldInteraction
+    from .tiers import FieldInteraction, calc_entry, ferric_charges, ferric_molecule, pose_label
 
     check_config(inp.config, inp.config_sha)
     build = code_identity()  # read now, as near the import of the code that runs as can be
@@ -507,28 +421,18 @@ def scf_child(inp: ScoreInput) -> dict:
     pose = Pose(tuple(p["symbols"]), np.asarray(p["coords_ang"], dtype=float))
     charges = None
     if inp.leg == "field":
-        charges = [PointCharge(q, (x, y, z)).as_ferric_bohr() for q, x, y, z in work["fields"][inp.field_model]]
+        charges = ferric_charges(PointCharge(q, (x, y, z)) for q, x, y, z in work["fields"][inp.field_model])
     bs = ferric.BasisSet.bundled(tier.basis)
-    mol = ferric.Molecule.from_xyz_string(pose.to_xyz(f"{inp.candidate} pose {inp.pose}"), charge=c["charge"])
+    mol = ferric_molecule(ferric, pose, pose_label(inp.candidate, inp.pose), c["charge"])
     res, secs = tier.scf(ferric, mol, bs, charges, inp.rung)
-    return {
-        "converged": bool(res.converged),
-        "iterations": int(res.iterations),
-        "energy_hartree": float(res.energy),
-        "seconds": float(secs),
-        "build": build,  # the child's: it imported the code that ran this SCF
-    }
+    # the tier's own calc_log line, plus the build: the child's, as it imported the code that ran this SCF
+    return {**calc_entry(inp.candidate, inp.pose, inp.leg, res, res.energy, secs), "build": build}
 
 
 def scf_row(inp: ScoreInput, got: dict, digest: str, started_utc: str) -> dict:
-    """The calcs.jsonl line of one SCF leg the child ran (`got`, `scf_child`'s dict): the tier's row, plus its field
-    model, rung, the run's input digest, when it started and the build that ran it."""
-    from types import SimpleNamespace
-
-    from .tiers import _calc_entry
-
-    res = SimpleNamespace(converged=got["converged"], iterations=got["iterations"])
-    row = _calc_entry(inp.candidate, inp.pose, inp.leg, res, got["energy_hartree"], got["seconds"])
+    """The calcs.jsonl line of one SCF leg the child ran (`got`, `scf_child`'s dict: the tier's row and the build):
+    the tier's row, plus its field model, rung, the run's input digest, when it started and the build that ran it."""
+    row = {k: v for k, v in got.items() if k != "build"}
     row.update(field_model=inp.field_model, rung=inp.rung, digest=digest[:12])
     row.update(started_utc=started_utc, build=got.get("build"))
     return row
@@ -718,7 +622,7 @@ def _emit_record(path: Path, inp: RunInput) -> None:
     """The core record, with the job's run_id, arm and ext, at its FIRST write. For a campaign job it is written under
     the job's state lock, after checking the job is not already settled: a cancel's settle and this write cannot
     interleave, so state.json and run.json never disagree and a cancelled record is never replaced."""
-    from .cli import emit_core_record
+    from .core_record import emit_core_record
 
     def emit() -> None:
         # a durable run spans workers and resumes: no one start instant is recorded
@@ -758,7 +662,7 @@ class _Fill:
 class _Finishing:
     """What the cut leaves for the analyses and the record: the plan as measured, the record so far, the log."""
 
-    plan: Any  # cli.Plan
+    plan: Any  # planning.Plan
     rec: Any  # record.RunRecord
     rows: list
     builds: list
@@ -787,13 +691,14 @@ def cut_sync(inp: RunInput, plan, n_resumed: int = 0, stages=None) -> _Finishing
     analysis yet. Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
     import numpy as np
 
-    from .cli import StageError, allow_mixed_builds, run_plan
-    from .model import HARTREE_TO_KCAL
+    from .config import StageError, allow_mixed_builds
+    from .planning import run_plan
+    from .tiers import interaction_kcal
 
     out = Path(inp.out)
     check_config(inp.config, inp.config_sha)
     cfg = plan.cfg
-    digest = _plan_digest(plan)
+    digest = plan.input_digest
     work = _work(inp.out)
     if work["digest"] != digest:
         raise ValueError(f"the plan rebuilt for the record (digest {digest[:12]}) is not the one scored")
@@ -859,7 +764,7 @@ def cut_sync(inp: RunInput, plan, n_resumed: int = 0, stages=None) -> _Finishing
                     if model == primary:
                         failed[c.name].add(i)
                     continue
-                vals.append((fld["energy_hartree"] - vac["energy_hartree"]) * HARTREE_TO_KCAL)
+                vals.append(interaction_kcal(vac["energy_hartree"], fld["energy_hartree"]))
                 if model == primary:
                     rung_of.setdefault(c.name, [None] * len(c.poses))[i] = max(int(vac["rung"]), int(fld["rung"]))
             values[model][c.name] = vals
@@ -890,10 +795,11 @@ def cut_sync(inp: RunInput, plan, n_resumed: int = 0, stages=None) -> _Finishing
 
 
 def analysis_sync(done: _Finishing, key: str) -> None:
-    """One analysis, merged into the record so far: an ordinary one runs (`cli._run_analysis`); one that re-measured
+    """One analysis, merged into the record so far: an ordinary one runs (`_run_analysis`); one that re-measured
     under extra fields is summarized from its scored legs."""
-    from .cli import StageError, _run_analysis
+    from .config import StageError
     from .methods import active_hooks
+    from .planning import _run_analysis
 
     plan, rec = done.plan, done.rec
     spec = next((s for s in active_hooks("analysis", plan.cfg) if s.key == key), None)
@@ -919,8 +825,8 @@ def analysis_sync(done: _Finishing, key: str) -> None:
 def record_sync(done: _Finishing, inp: RunInput) -> RunSummary:
     """The run record, its pose files and calcs.jsonl (`write_outputs`), then the core record with the job's run_id,
     arm and ext (`_emit_record`). Refuses (`JobSettled`) when the run directory's job is already terminal."""
-    from .cli import write_outputs
     from .reuse import discard_progress
+    from .run_outputs import write_outputs
 
     out = Path(inp.out)
     plan, rec, rows = done.plan, done.rec, done.rows
@@ -947,7 +853,8 @@ def finalize_sync(inp: RunInput, n_resumed: int = 0) -> RunSummary:
     the plan rebuilt, the cut, every analysis, the records, in one call. The frozen `PipelineRunWorkflow`'s
     `pipeline_finalize`; `CampaignRunWorkflow` runs the same steps as one activity each, on the plan it built once.
     Refuses while any leg has an infrastructure failure (`outcome = "error"`) or no outcome at all."""
-    from .cli import build_plan, load_config
+    from .config import load_config
+    from .planning import build_plan
 
     check_config(inp.config, inp.config_sha)
     plan = build_plan(load_config(Path(inp.config)), out_dir=Path(inp.out))
@@ -1026,9 +933,7 @@ JOB_FILE = "job.json"
 def write_job_file(out: str | Path, arm: str | None, ext: dict | None) -> None:
     d = Path(out) / WORK_DIR
     d.mkdir(parents=True, exist_ok=True)
-    tmp = d / (JOB_FILE + ".tmp")
-    tmp.write_text(json.dumps({"arm": arm, "ext": dict(ext or {})}, sort_keys=True))
-    os.replace(tmp, d / JOB_FILE)
+    write_text_atomic(d / JOB_FILE, json.dumps({"arm": arm, "ext": dict(ext or {})}, sort_keys=True))
 
 
 def read_job_file(out: str | os.PathLike[str]) -> tuple[str | None, dict]:
@@ -1229,12 +1134,12 @@ if TEMPORAL_AVAILABLE:
         @activity.defn(name="campaign_plan")
         async def plan(self, inp: RunInput) -> PlanResult:
             def go() -> PlanResult:
-                from .cli import RunRecord, funnel_counts
+                from .planning import funnel_counts
                 from .reuse import RunStages
 
                 prep, plan = _prepare(inp)
                 stages = RunStages(inp.out)  # the stage log (OUT/stages.partial.jsonl): what a stopped job completed
-                stages.run_id = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, {}).input_digest[:12]
+                stages.run_id = plan.input_digest[:12]
                 stages.plan_built(plan, funnel_counts(plan))
                 ref = save_checkpoint(inp.out, {"plan": plan, "stages": stages})
                 return PlanResult(prep, analysis_order(plan.cfg), ref)
@@ -1574,7 +1479,7 @@ def workflow_id(out: str | Path, config_text: str) -> str:
     return "smeltery-run-" + h.hexdigest()[:20]
 
 
-async def connect(host: str, namespace: str = "default"):
+async def connect(host: str, namespace: str = DEFAULT_NAMESPACE):
     from temporalio.client import Client
 
     return await Client.connect(host, namespace=namespace)
@@ -1653,10 +1558,11 @@ async def start_and_wait(
     )
     marker = Path(inp.out) / WORK_DIR / MARKER
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(
+    write_text_atomic(  # whole or absent: `guard_out` reads it back
+        marker,
         json.dumps(
             {"workflow_id": wid, "host": _host_of(client), "task_queue": task_queue, "config_sha": inp.config_sha}
-        )
+        ),
     )
     log(f"workflow {wid} on {task_queue} (UI http://127.0.0.1:8233)")
     result = asyncio.ensure_future(handle.result())
@@ -1746,7 +1652,7 @@ def run_cli(
     task_queue: str,
     config_info: dict | None,
     poll_s: float = 10.0,
-    namespace: str = "default",
+    namespace: str = DEFAULT_NAMESPACE,
     run_id: str | None = None,
     arm: str | None = None,
     ext: dict | None = None,
@@ -1799,7 +1705,7 @@ def run_cli(
 
 
 def worker_cli(
-    host: str, task_queue: str, workers: int, threads_per_worker: int = 1, namespace: str = "default"
+    host: str, task_queue: str, workers: int, threads_per_worker: int = 1, namespace: str = DEFAULT_NAMESPACE
 ) -> int:
     """`smeltery temporal-worker`: 2 when the server is down."""
     if not TEMPORAL_AVAILABLE:

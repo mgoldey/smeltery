@@ -20,6 +20,8 @@ import sys
 import time
 from pathlib import Path
 
+from smeltery.run_tools import run_dir
+
 APP_FILE = Path(__file__).resolve().parent / "views" / "notebook.py"
 ENV_OUT = "SMELTERY_GUI_OUT"
 GUI_HINT = "pip install 'smeltery[gui]'"
@@ -50,7 +52,7 @@ def sibling_runs(out: Path, *, limit: int = 60) -> list[Path]:
     # `out` may be the OUT directory or a run-*.json inside it; siblings are always beside the DIRECTORY.
     # Excluding by the passed path alone would leave a record's own directory in the list, since a file
     # path never equals a directory path.
-    out_dir = out if out.is_dir() else out.parent
+    out_dir = run_dir(out)
     base = out_dir.parent
     if not base.is_dir():
         return []
@@ -70,7 +72,9 @@ def sibling_runs(out: Path, *, limit: int = 60) -> list[Path]:
 
 def decisions_path(run) -> Path:
     """`OUT/decisions-<input_digest[:12]>.json`, next to the run record (docs/gui-review.md)."""
-    return Path(run.out_dir) / f"decisions-{run.record['input_digest'][:12]}.json"
+    from smeltery.decisions import decisions_path as path_of
+
+    return path_of(run.out_dir, run.record["input_digest"])
 
 
 def new_decision_set(run):
@@ -85,12 +89,9 @@ def load_decisions(run):
     naming it (`DecisionSet.load`)."""
     from smeltery.decisions import DecisionSet
 
-    path = decisions_path(run)
-    if not path.exists():
-        return new_decision_set(run)
-    ds = DecisionSet.load(path)
-    ds.candidates = dict(run.candidates)
-    return ds
+    return DecisionSet.load_or_new(
+        decisions_path(run), campaign=run.campaign, run=run.record["input_digest"], candidates=run.candidates
+    )
 
 
 def decision_map(ds) -> dict[str, dict]:
@@ -186,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError:
         print(f"smeltery gui needs the gui extra: {GUI_HINT}", file=sys.stderr)
         return 2
-    from smeltery.gui.results import load_run
+    from smeltery.run_view import load_run
 
     try:
         run = load_run(args.out)

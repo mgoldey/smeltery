@@ -22,6 +22,7 @@ from __future__ import annotations
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from ..gates import mol_with_h
 from ..model import Candidate
 from .base import DEFAULT_EXHAUSTIVENESS, Box, DockingProvider
 
@@ -102,12 +103,12 @@ class Docking:
 
     @staticmethod
     def _embed(cand: Candidate, seed: int):
-        parsed = Chem.MolFromSmiles(cand.smiles)
-        if parsed is None:
-            raise DockingError(f"{cand.name}: unparseable SMILES {cand.smiles!r}")
-        if len(Chem.GetMolFrags(parsed)) > 1:
+        try:
+            mol = mol_with_h(cand.smiles)
+        except ValueError:
+            raise DockingError(f"{cand.name}: unparseable SMILES {cand.smiles!r}") from None
+        if len(Chem.GetMolFrags(mol)) > 1:  # hydrogens add no fragments
             raise DockingError(f"{cand.name}: not a single connected molecule")
-        mol = Chem.AddHs(parsed)
         params = AllChem.ETKDGv3()
         params.randomSeed = seed
         params.useSmallRingTorsions = True

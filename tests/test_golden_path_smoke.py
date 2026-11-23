@@ -169,18 +169,18 @@ def test_the_forcefield_openmm_path_is_declared_not_exercised():
 
 
 def test_a_mutation_is_installed_everywhere_and_fully_undone():
-    from smeltery import cli, funnel
+    from smeltery import funnel, planning
     from smeltery import tier_floor as exported
 
     before = funnel.tier_floor
-    assert cli.tier_floor is before and exported is before
+    assert planning.tier_floor is before and exported is before
     undo = MUTATIONS["G4"][0]()
-    assert funnel.tier_floor is not before and cli.tier_floor is funnel.tier_floor
+    assert funnel.tier_floor is not before and planning.tier_floor is funnel.tier_floor
     import smeltery
 
     assert smeltery.tier_floor is funnel.tier_floor, "the package re-export must see the mutation too"
     undo()
-    assert funnel.tier_floor is before and cli.tier_floor is before and smeltery.tier_floor is before
+    assert funnel.tier_floor is before and planning.tier_floor is before and smeltery.tier_floor is before
 
 
 def test_a_mutation_that_matches_no_if_is_an_error_not_a_silent_pass():

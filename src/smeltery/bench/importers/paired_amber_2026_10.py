@@ -24,7 +24,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from smeltery.record import digest
+from smeltery.record import input_digest
 
 from . import register
 
@@ -48,7 +48,7 @@ def detect(record: dict) -> bool:
 
 def convert(record: dict, original: Path) -> dict:
     res, inp = record["results"], record["inputs"]
-    if digest({"inputs": inp, "tiers": record["tiers"]}) != record["input_digest"]:
+    if input_digest(inp, record["tiers"]) != record["input_digest"]:
         raise ValueError(f"{original}: its input_digest is not the hash of its own inputs and tiers")
     paired = {n: dict(m) for n, m in res["paired_ddE_amber"].items()}
     floor = res["declared_floor"]

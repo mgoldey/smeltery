@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import json
 import re
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
+
+from ..record import utc_now
 
 StructureKind = Literal["EXPERIMENTAL", "PREDICTED"]
 
@@ -41,6 +42,11 @@ AFDB_ATTRIBUTION = (
 )
 _UNIPROT_RE = re.compile(r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2})(-\d+)?$")
 _PDB_ID_RE = re.compile(r"^[0-9][A-Za-z0-9]{3}$")
+
+
+def is_pdb_id(spec: str) -> bool:
+    """True when `spec` has the shape of a PDB id: a digit then three letters or digits (`1ABC`, `7lcj`)."""
+    return _PDB_ID_RE.match(spec) is not None
 
 
 @dataclass(frozen=True)
@@ -128,8 +134,7 @@ def plddt_from_pdb(text: str) -> tuple[tuple[int, float], ...]:
     return tuple(out)
 
 
-def _utc_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+_utc_now = utc_now  # a module global, so a test can stop the clock
 
 
 _REVDAT_RE = re.compile(r"^REVDAT\s+(\d+)\s+(\d{2}-[A-Z]{3}-\d{2})", re.M)
@@ -173,7 +178,7 @@ class PdbProvider:
                 self.last_error = f"no such file: {spec}"
                 return None
             text, source, fetched, info = path.read_text(), f"file:{path.name}", None, {}
-        elif _PDB_ID_RE.match(spec):
+        elif is_pdb_id(spec):
             url = RCSB_PDB.format(pdb_id=spec.upper())
             try:
                 text, source = self._fetch(url).decode(), url

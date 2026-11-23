@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, unwrap, type Schemas } from "../../api/client";
+import { cutOutcome, groupLabel } from "../../components/cut";
 import { Structure2D } from "../../components/Structure2D";
 import { EmptyState } from "../../components/EmptyState";
 import { Writable } from "../../components/ReadOnly";
 import { useStartNextRound } from "../../components/workspace/openFromRun";
 import { useRunId } from "./RunLayout";
+import { ddeQuery, runQuery } from "../../api/queries";
 
 type Decision = Schemas["DecisionOut"];
 type DdeRow = Schemas["DdeTable"]["rows"][number];
@@ -88,9 +90,9 @@ function Row({
           <div className="lede" data-testid={`evidence-${name}`}>
             {evidence.mean >= 0 ? "+" : ""}
             {evidence.mean.toFixed(2)} ± {evidence.sem.toFixed(2)} {unit} ·{" "}
-            {/* Three states, as on Results: an unranked run has no survivors, and calling those "not kept"
-                would state a cut outcome the run never reached. */}
-            {evidence.survivor === null ? "not ranked" : evidence.survivor ? "kept by the cut" : "not kept"}
+            {/* The cut's three states (see cutOutcome), with "kept" spelled out here: on this page it must not be
+                mistaken for the user's own keep. */}
+            {evidence.survivor === true ? "kept by the cut" : cutOutcome(evidence.survivor)}
           </div>
         ) : null}
         {/* The group, and -- when it is a tie -- who it is tied WITH. A bare "tie group 2 (no order)" told the user
@@ -236,17 +238,14 @@ function BulkBar({ runId, selected, vocab, onDone }: { runId: string; selected: 
 
 export function Decisions() {
   const runId = useRunId();
-  const detail = useQuery({ queryKey: ["run", runId], queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })) });
+  const detail = useQuery(runQuery(runId));
   const vocab = useQuery({ queryKey: ["vocab"], queryFn: () => unwrap(api.GET("/api/decisions/vocabulary")) });
   const decisions = useQuery({
     queryKey: ["decisions", runId],
     queryFn: () => unwrap(api.GET("/api/runs/{run_id}/decisions", { params: { path: { run_id: runId } } })),
   });
   // The same table Results draws its forest plot from, so the row and the plot cannot disagree.
-  const dde = useQuery({
-    queryKey: ["ddE", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/ddE", { params: { path: { run_id: runId } } })),
-  });
+  const dde = useQuery(ddeQuery(runId));
   const byCandidate = new Map((dde.data?.rows ?? []).map((r) => [r.candidate, r]));
   const d = detail.data;
   const [picked, setPicked] = useState<string[]>([]);
@@ -256,7 +255,7 @@ export function Decisions() {
   const tieOf = new Map<string, string[]>();
   d?.groups.forEach((g, i) => {
     g.forEach((n) => {
-      groupOf.set(n, g.length > 1 ? `tie group ${i + 1} (no order)` : `group ${i + 1}`);
+      groupOf.set(n, groupLabel(i, g.length));
       // The row's own view of its tie: the OTHER members, which is what makes keeping this one a judgement. A
       // single-member group is not a tie and gets nothing.
       if (g.length > 1) tieOf.set(n, g.filter((m) => m !== n));

@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from .catalog import method
+from smeltery.methods.catalog import method
+
 from .pipeline import Issue, Pipeline
 
 #: (key, label) of the six steps, in data-flow order. Ligands holds the campaign, parent, candidates and decisions,

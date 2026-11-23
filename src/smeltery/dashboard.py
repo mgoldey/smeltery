@@ -17,8 +17,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from smeltery.avogadro import export_run, launch_avogadro
-from smeltery.gui.results import load_run
+from smeltery.run_tools import run_dir
+from smeltery.run_view import load_run
 from smeltery.tasks import TemporalTaskManager as TaskManager
+from smeltery.temporal_defaults import DEFAULT_HOST
 
 
 def discover_runs(root: str | Path, *, limit: int = 500) -> list[dict[str, Any]]:
@@ -297,7 +299,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._json({"error": str(e)}, status=400)
                 return
-            out_dir = Path(run_path) if Path(run_path).is_dir() else Path(run_path).parent
+            out_dir = run_dir(run_path)
             dest = out_dir / "avogadro"
             try:
                 export_run(run, dest)
@@ -328,7 +330,7 @@ class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, root, host="127.0.0.1", port=0, task_manager=None, temporal_host="127.0.0.1:7233"):
+    def __init__(self, root, host="127.0.0.1", port=0, task_manager=None, temporal_host=DEFAULT_HOST):
         self.root = Path(root).resolve()
         self.task_manager = task_manager or TaskManager(host=temporal_host)
         super().__init__((host, port), DashboardHandler)
@@ -337,7 +339,7 @@ class DashboardServer(ThreadingHTTPServer):
         return discover_runs(self.root, limit=limit)
 
 
-def serve(root, *, host="127.0.0.1", port=0, task_manager=None, temporal_host="127.0.0.1:7233", open_browser=False):
+def serve(root, *, host="127.0.0.1", port=0, task_manager=None, temporal_host=DEFAULT_HOST, open_browser=False):
     httpd = DashboardServer(root, host=host, port=port, task_manager=task_manager, temporal_host=temporal_host)
     actual = httpd.server_address[1]
     url = f"http://{host}:{actual}"
@@ -360,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("root", nargs="?", default=".", help="directory to scan for run records")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=0)
-    ap.add_argument("--temporal-host", default="127.0.0.1:7233", help="Temporal server host")
+    ap.add_argument("--temporal-host", default=DEFAULT_HOST, help="Temporal server host")
     ap.add_argument("--open", action="store_true", help="open a browser")
     return ap
 

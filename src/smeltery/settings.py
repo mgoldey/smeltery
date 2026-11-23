@@ -31,11 +31,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from .temporal_defaults import DEFAULT_NAMESPACE
+from .temporal_defaults import PIPELINE_QUEUE as DEFAULT_PIPELINE_QUEUE
+from .temporal_defaults import TASKS_QUEUE as DEFAULT_TASK_QUEUE
+
 BACKENDS = ("local", "temporal")
 DEFAULT_TEMPORAL_ADDRESS = "localhost:7233"
-DEFAULT_NAMESPACE = "default"
-DEFAULT_TASK_QUEUE = "smeltery-tasks"
-DEFAULT_PIPELINE_QUEUE = "smeltery-pipeline"
 
 
 class SettingsError(ValueError):

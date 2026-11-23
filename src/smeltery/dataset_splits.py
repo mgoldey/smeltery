@@ -35,10 +35,11 @@ Computing a split needs pyarrow (to read the table) and, for scaffolds, RDKit; n
 
 from __future__ import annotations
 
-import hashlib
 import json
 import random
 from pathlib import Path
+
+from .record import file_sha256
 
 SCHEMA_VERSION = 1
 FORMAT = "smeltery.split"
@@ -53,12 +54,7 @@ class SplitError(ValueError):
     """A split cannot be made, or does not belong to the table it is loaded against."""
 
 
-def table_sha256(path: str | Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+table_sha256 = file_sha256  # the one file hash, `smeltery.record.file_sha256`
 
 
 def read_table(path: str | Path):

@@ -25,14 +25,12 @@ a function of its declared inputs and every downstream conclusion is suspect.
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..record import digest
+from ..record import digest, file_sha256, utc_now, write_text_atomic
 
 
 class CacheMismatchError(RuntimeError):
@@ -135,12 +133,10 @@ class Cache:
             inputs=dict(sorted(inputs.items())),
             value=value,
             blob=blob,
-            written_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            written_utc=utc_now(),
         )
-        tmp = self.path(key).with_suffix(".tmp")
-        tmp.write_text(json.dumps(e.__dict__, indent=2, sort_keys=True, default=str))
         # Atomic: a kill mid-write leaves no half-entry that would be read back as a cache hit.
-        os.replace(tmp, self.path(key))
+        write_text_atomic(self.path(key), json.dumps(e.__dict__, indent=2, sort_keys=True, default=str))
         return e
 
     def _store_blob(self, src: Path) -> Path:
@@ -159,11 +155,4 @@ class Cache:
         return {"root": str(self.root), "entries": n, "blobs": b}
 
 
-def _file_sha(p: Path) -> str:
-    import hashlib
-
-    h = hashlib.sha256()
-    with p.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+_file_sha = file_sha256

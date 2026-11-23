@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from bench.conftest import run_id_of
-from smeltery import cli
-from smeltery.run_inputs import stage_inputs
+from smeltery import cli, planning, run_inputs
+from smeltery.run_inputs import poses_key, stage_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
 BENZOIC = (ROOT / "examples" / "mwe_benzoic.toml").read_text()
@@ -53,7 +53,7 @@ def _source_run(root: Path, toml: str) -> Path:
 
 
 def test_a_hand_placed_pipeline_gets_live_estimates(client_for, monkeypatch):
-    monkeypatch.setattr(cli, "available_memory_gb", lambda: 12.5)
+    monkeypatch.setattr(planning, "available_memory_gb", lambda: 12.5)
     c, _ = client_for()
     toml = BENZOIC
     got = _post(c, toml)
@@ -76,7 +76,7 @@ def test_a_changed_step_is_named_and_the_digest_is_new(client_for):
 
 
 def test_a_docking_edit_upstream_of_poses_cannot_say(client_for, monkeypatch):
-    monkeypatch.setattr(cli, "_dock_parent", lambda *a, **k: pytest.fail("impact ran docking"))
+    monkeypatch.setattr(planning, "_dock_parent", lambda *a, **k: pytest.fail("impact ran docking"))
     c, _ = client_for()
     base = _docking_toml()
     got = _post(c, base.replace("seeds = [7]", "seeds = [8]"), base)
@@ -87,7 +87,7 @@ def test_a_docking_edit_upstream_of_poses_cannot_say(client_for, monkeypatch):
 
 
 def test_a_docking_edit_downstream_reuses_the_source_runs_poses(client_for, tmp_path, monkeypatch):
-    monkeypatch.setattr(cli, "_dock_parent", lambda *a, **k: pytest.fail("impact ran docking"))
+    monkeypatch.setattr(planning, "_dock_parent", lambda *a, **k: pytest.fail("impact ran docking"))
     base = _docking_toml()
     root = tmp_path / "runs"
     _source_run(root, base)
@@ -102,7 +102,9 @@ def test_a_docking_edit_downstream_reuses_the_source_runs_poses(client_for, tmp_
 
 def test_impact_never_runs_docking(client_for, tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(cli, "_dock_parent", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(
+        planning, "_dock_parent", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(AssertionError)
+    )
     base = _docking_toml()
     root = tmp_path / "runs"
     _source_run(root, base)
@@ -153,7 +155,7 @@ def test_preview_submits_a_plan_task_and_impact_reuses_a_finished_one(client_for
     shutil.copytree(src, prev)
     plan = {
         "digest": "d",
-        "poses_key": cli.poses_key(tomllib.loads(base), folder),
+        "poses_key": poses_key(tomllib.loads(base), folder),
         "poses": json.loads((src / "run-src.json").read_text())["results"]["poses"],
     }
     (prev / "plan.json").write_text(json.dumps(plan))
@@ -165,7 +167,7 @@ def test_preview_submits_a_plan_task_and_impact_reuses_a_finished_one(client_for
 
 
 def test_plan_out_writes_plan_json_and_pose_sdfs(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "available_memory_gb", lambda: 8.0)
+    monkeypatch.setattr(planning, "available_memory_gb", lambda: 8.0)
     cfg = tmp_path / "c.toml"
     cfg.write_text(BENZOIC)
     out = tmp_path / "prev"
@@ -177,7 +179,7 @@ def test_plan_out_writes_plan_json_and_pose_sdfs(tmp_path, monkeypatch, capsys):
     assert plan["seconds"]["predicted"] > 0 and plan["memory"]["verdict"] == "no model"
     assert set(plan["poses"]) == {"benzoic", "4-F", "4-Cl"}
     assert all((out / e["file"]).is_file() for e in plan["poses"].values())
-    assert plan["poses_key"] == cli.poses_key(tomllib.loads(BENZOIC), tmp_path)
+    assert plan["poses_key"] == poses_key(tomllib.loads(BENZOIC), tmp_path)
 
 
 def test_every_memory_result_has_one_shape(client_for):
@@ -199,7 +201,7 @@ def test_an_estimation_crash_is_an_issue_not_a_500(client_for, monkeypatch, tmp_
     def boom(*a, **k):
         raise RuntimeError("embedding failed")
 
-    monkeypatch.setattr(cli, "build_plan", boom)
+    monkeypatch.setattr(planning, "build_plan", boom)
     got = _post(c, BENZOIC)
     assert got["poses_from"] == "none" and got["seconds"]["value"] is None
     assert got["memory"]["verdict"] == "cannot say"
@@ -208,7 +210,9 @@ def test_an_estimation_crash_is_an_issue_not_a_500(client_for, monkeypatch, tmp_
     unreadable = tmp_path / "pocket.pdb"
     unreadable.mkdir()  # a path that exists as a file-like name but cannot be read as a file
     toml = _docking_toml().replace(f'{ROOT}/tests/data/pocket_pep5.pdb"', f'{unreadable}"')
-    monkeypatch.setattr(cli.hashlib, "sha256", lambda *a, **k: (_ for _ in ()).throw(OSError("unreadable input")))
+    monkeypatch.setattr(
+        run_inputs.hashlib, "sha256", lambda *a, **k: (_ for _ in ()).throw(OSError("unreadable input"))
+    )
     got = _post(c, toml, toml)
     assert got["poses_from"] == "none" and any("OSError" in i["message"] for i in got["issues"])
 

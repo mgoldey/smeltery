@@ -3,21 +3,13 @@ import { api, unwrap, type Schemas } from "../../api/client";
 import { DroppedPoses } from "../../components/DroppedPoses";
 import { VerdictBanner } from "../../components/VerdictBanner";
 import { useRunId } from "./RunLayout";
+import { droppedPosesQuery, runQuery, verdictQuery } from "../../api/queries";
 
 export function Overview() {
   const runId = useRunId();
-  const detail = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}", { params: { path: { run_id: runId } } })),
-  });
-  const verdict = useQuery({
-    queryKey: ["verdict", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/verdict", { params: { path: { run_id: runId } } })),
-  });
-  const drops = useQuery({
-    queryKey: ["dropped_poses", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/dropped_poses", { params: { path: { run_id: runId } } })),
-  });
+  const detail = useQuery(runQuery(runId));
+  const verdict = useQuery(verdictQuery(runId));
+  const drops = useQuery(droppedPosesQuery(runId));
   const d = detail.data;
   return (
     <div className="body">

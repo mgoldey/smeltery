@@ -15,7 +15,7 @@
 #   * `cut.floor` must be stated explicitly, because both tiers' `systematic_floor()` is None and `smeltery run`
 #     refuses to cut without a number (gate G4, docs/tiers/index.md). `floor = 0.0` claims NO systematic floor:
 #     it is "nothing is subtracted", not "the systematic error is zero". `floor_note` says so to the caller.
-#   * `cut.z = 2.0` is `smeltery run`'s own default for the cut (src/smeltery/cli.py, `run_plan`).
+#   * `cut.z = 2.0` is `smeltery run`'s own default for the cut (src/smeltery/planning.py, `run_plan`).
 #   * `relax_unmapped = true` relaxes only the substituent an analogue adds (MMFF94, the shared core held fixed).
 #     Without it the junction between the copied core and the new substituent is left unrelaxed, which the pose
 #     geometry gate rejects as "not this molecule"; the CLI's own config reference marks it as what a docked

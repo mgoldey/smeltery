@@ -263,7 +263,7 @@ def test_alpha_atomic_without_a_default_auxbasis_asks_for_one():
 
 def test_memory_guard():
     P.check_available_memory(0.001)
-    if BE._available_gb() is None:
+    if BE.available_memory_gb() is None:
         pytest.skip("no /proc/meminfo: memory guard is a no-op on this platform")
     with pytest.raises(MemoryError):
         P.check_available_memory(1_000_000.0)

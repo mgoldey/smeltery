@@ -15,30 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ..pdb_records import WATER_RESIDUES, iter_atoms
 from .base import Box
-
-_WATER = {"HOH", "WAT", "DOD", "TIP", "TIP3"}
-
-
-def _atoms(pdb_text: str):
-    """(record, atom name, resname, chain, resnum, element, xyz) per ATOM/HETATM line."""
-    for line in pdb_text.splitlines():
-        if not line.startswith(("ATOM", "HETATM")):
-            continue
-        try:
-            xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
-        except ValueError as e:
-            raise ValueError(f"bad coordinates in PDB line: {line!r}") from e
-        el = (line[76:78].strip() or line[12:16].strip().lstrip("0123456789")[:1]).upper()
-        yield (
-            line[:6].strip(),
-            line[12:16].strip(),
-            line[17:20].strip(),
-            line[21].strip(),
-            line[22:26].strip(),
-            el,
-            xyz,
-        )
 
 
 def box_from_coords(coords, padding: float = 8.0, min_size: float = 20.0) -> Box:
@@ -64,9 +42,9 @@ def box_from_ligand(
     caller is how a box ends up on a crystallisation additive.
     """
     het: dict[str, list] = {}
-    for rec, _n, res, _c, _num, el, xyz in _atoms(Path(pdb_path).read_text()):
-        if rec == "HETATM" and res not in _WATER and el != "H":
-            het.setdefault(res, []).append(xyz)
+    for a in iter_atoms(Path(pdb_path).read_text()):
+        if a.record == "HETATM" and a.resname not in WATER_RESIDUES and a.element != "H" and a.altloc in ("", "A"):
+            het.setdefault(a.resname, []).append(a.xyz)
     if not het:
         raise ValueError(f"{pdb_path}: no HETATM ligand found")
     if resname is None:
@@ -95,10 +73,10 @@ def box_from_residues(
             raise ValueError(f"residue {r!r} must look like 'A:42' (chain:resnum)")
         want.add(tuple(x.strip() for x in r.split(":", 1)))
     found, pts = set(), []
-    for rec, _n, _res, chain, num, el, xyz in _atoms(Path(pdb_path).read_text()):
-        if rec == "ATOM" and el != "H" and (chain, num) in want:
-            found.add((chain, num))
-            pts.append(xyz)
+    for a in iter_atoms(Path(pdb_path).read_text()):
+        if a.record == "ATOM" and a.element != "H" and a.altloc in ("", "A") and (a.chain, a.resnum) in want:
+            found.add((a.chain, a.resnum))
+            pts.append(a.xyz)
     missing = sorted(want - found)
     if missing:
         raise ValueError(f"{pdb_path}: residues not found: {[':'.join(m) for m in missing]}")

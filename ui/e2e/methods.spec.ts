@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./bench";
+import { apiGet, expect, test } from "./bench";
 
 type Method = {
   key: string;
@@ -10,7 +10,7 @@ type Method = {
 };
 
 async function methods(page: Page): Promise<Method[]> {
-  return (await (await page.request.get("/api/methods")).json()) as Method[]; // data source: the API's own list
+  return apiGet<Method[]>(page, "/api/methods"); // data source: the API's own list
 }
 
 // The server is shared by every spec: leave the workspace without defaults.

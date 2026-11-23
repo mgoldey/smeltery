@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, id, test } from "./bench";
+import { apiGet, expect, id, test } from "./bench";
 
 /**
  * Deciding, in a browser: how far through it is, what the exit carries, and what a tie group looks like at the
@@ -15,10 +15,6 @@ import { expect, id, test } from "./bench";
  * count here is read from the API at the moment the test starts. Nothing is asserted against a constant.
  */
 
-async function get<T>(page: Page, path: string): Promise<T> {
-  return (await (await page.request.get(path)).json()) as T;
-}
-
 /**
  * The run's analogues and which of them already have a decision.
  *
@@ -27,11 +23,11 @@ async function get<T>(page: Page, path: string): Promise<T> {
  * those specs start from. Picking a non-survivor keeps these tests independent of run order.
  */
 async function state(page: Page, run: string) {
-  const d = await get<{ analogues: string[]; groups: string[][]; survivors: string[] | null }>(
+  const d = await apiGet<{ analogues: string[]; groups: string[][]; survivors: string[] | null }>(
     page,
     `/api/runs/${run}`,
   );
-  const made = await get<{ candidate: string }[]>(page, `/api/runs/${run}/decisions`);
+  const made = await apiGet<{ candidate: string }[]>(page, `/api/runs/${run}/decisions`);
   const recorded = new Set(made.map((x) => x.candidate));
   const reserved = new Set(d.survivors ?? []);
   return {
@@ -169,7 +165,7 @@ test("Provenance says this round carried no decisions in, and shows the verdict 
   // The fixture runs name no `[decisions]` file, so this is the "nothing carried in" state -- which must be said in
   // words rather than left as a blank. The populated states are covered at the API in tests/bench.
   const run = id("a_resolved");
-  const detail = await get<{ decisions_in: unknown }>(page, `/api/runs/${run}`);
+  const detail = await apiGet<{ decisions_in: unknown }>(page, `/api/runs/${run}`);
   expect(detail.decisions_in).toBeNull();
   await page.goto(`/run/${run}/provenance`);
   await expect(page.getByTestId("carried-none")).toContainText("carried no decisions in");

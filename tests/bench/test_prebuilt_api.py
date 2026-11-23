@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bench.fakes import FakeIdentity, FakeTaskQueue, FixedClock
+from smeltery.bench.adapters.prebuilt_source import NOT_INPUTS
 from smeltery.bench.adapters.run_store import FilesystemRunStore
-from smeltery.bench.api.prebuilt import NOT_INPUTS
 from smeltery.bench.app import Settings, create_app
 
 NAMES = ["benzoic-pbe", "benzoic-rhf", "danuglipron-halogen", "docking", "structure"]
@@ -57,7 +57,7 @@ def test_the_route_lists_every_prebuilt_with_their_three_lines_and_the_example_v
 def test_the_route_returns_the_curated_order_not_the_alphabet(client_for):
     """`names()` sorts, which puts benzoic-pbe above benzoic-rhf; the landing page's first card must be the
     teaching example, so the route returns the order each prebuilt's gallery.toml declares."""
-    from smeltery.bench.api.prebuilt import ordered_names
+    from smeltery.bench.adapters.prebuilt_source import ordered_names
 
     c, _ = client_for()
     order = ordered_names()
@@ -68,7 +68,7 @@ def test_the_route_returns_the_curated_order_not_the_alphabet(client_for):
 
 def test_every_prebuilt_is_ranked_and_tiered_deliberately():
     """A sixth prebuilt must be given a place, not appear silently at the end of the list."""
-    from smeltery.bench.api.prebuilt import names, ordered_names, places
+    from smeltery.bench.adapters.prebuilt_source import names, ordered_names, places
 
     assert set(ordered_names()) == set(names()) == set(places())
 
@@ -76,11 +76,13 @@ def test_every_prebuilt_is_ranked_and_tiered_deliberately():
 def test_where_a_prebuilt_sits_is_declared_beside_it_not_listed_in_library_code():
     """Library code must not name a campaign target (tests/test_migration_rules.py, issue #8). A tuple of every
     shipped example here would have to, so each example declares its own rank and tier in its own folder."""
-    from smeltery.bench.api import prebuilt as P
+    from smeltery.bench.adapters import prebuilt_source
+    from smeltery.bench.api import prebuilt
 
-    source = Path(P.__file__).read_text()
-    for token in ("danuglipron", "7LCJ", "GLP1R"):
-        assert token not in source, f"{token!r} is back in library code"
+    for P in (prebuilt, prebuilt_source):
+        source = Path(P.__file__).read_text()
+        for token in ("danuglipron", "7LCJ", "GLP1R"):
+            assert token not in source, f"{token!r} is back in library code"
     for n in NAMES:  # ...and every shipped example really does carry its placement
         assert (PREBUILT / n / "gallery.toml").is_file(), n
 
@@ -158,7 +160,7 @@ def test_an_unknown_prebuilt_or_a_taken_name_is_refused(tmp_path):
 
 
 def test_copy_plan_leaves_the_imported_record_behind():
-    from smeltery.bench.api.prebuilt import copy_plan
+    from smeltery.bench.adapters.prebuilt_source import copy_plan
 
     plan = copy_plan("danuglipron-halogen")
     assert not [r for r in plan if r.split("/")[0] == "imported"]
@@ -168,7 +170,7 @@ def test_copy_plan_leaves_the_imported_record_behind():
 def test_copy_plan_leaves_a_temporal_runs_scratch_and_live_marker_behind():
     """A --temporal run keeps OUT/temporal/ (its poses and fields) and OUT/temporal/running.json (the workflow it
     belongs to) while it runs: a copy holds the example run's record and log, never those."""
-    from smeltery.bench.api.prebuilt import _copied, copy_plan
+    from smeltery.bench.adapters.prebuilt_source import _copied, copy_plan
 
     assert _copied("run/calcs.jsonl") and _copied("run/run-abc.json") and _copied("run/inputs/x/y.pdb")
     assert not _copied("run/temporal/work.json") and not _copied("run/temporal/running.json")
@@ -179,7 +181,7 @@ def test_copy_plan_leaves_a_temporal_runs_scratch_and_live_marker_behind():
 
 def test_the_guard_refuses_a_prebuilt_nobody_ranked(monkeypatch):
     """A sixth folder in the wheel is a deliberate decision about the landing page, not a silent sixth row."""
-    from smeltery.bench.api import prebuilt as P
+    from smeltery.bench.adapters import prebuilt_source as P
 
     monkeypatch.setattr(P, "names", lambda: [*NAMES, "sixth"])
     with pytest.raises(RuntimeError, match="ships no gallery.toml"):
@@ -187,7 +189,7 @@ def test_the_guard_refuses_a_prebuilt_nobody_ranked(monkeypatch):
 
 
 def test_the_guard_refuses_a_variant_pointing_at_a_variant(monkeypatch):
-    from smeltery.bench.api import prebuilt as P
+    from smeltery.bench.adapters import prebuilt_source as P
 
     real = P._place
     monkeypatch.setattr(
@@ -201,7 +203,7 @@ def test_the_guard_refuses_a_variant_pointing_at_a_variant(monkeypatch):
 
 def test_the_guard_refuses_two_prebuilts_claiming_one_rank(monkeypatch):
     """Two examples at the same rank would order themselves by whatever sorted() happened to do."""
-    from smeltery.bench.api import prebuilt as P
+    from smeltery.bench.adapters import prebuilt_source as P
 
     real = P._place
     monkeypatch.setattr(
@@ -215,7 +217,7 @@ def test_the_guard_refuses_two_prebuilts_claiming_one_rank(monkeypatch):
 
 def test_the_guard_refuses_a_placement_that_is_not_a_tier(monkeypatch, tmp_path):
     """gallery.toml is data in the wheel, so a typo in it must be reported, not silently accepted."""
-    from smeltery.bench.api import prebuilt as P
+    from smeltery.bench.adapters import prebuilt_source as P
 
     bad = tmp_path / "benzoic-rhf"
     bad.mkdir()

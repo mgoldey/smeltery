@@ -19,6 +19,10 @@ import numpy as np
 # runtime and fails if the two ever diverge.
 ANGSTROM_TO_BOHR = 1.0 / 0.52917721092
 HARTREE_TO_KCAL = 627.5094740631
+R_KCAL_MOL_K = 8.31446261815324 / 4184.0  # CODATA 2018 exact R, J/(mol K) -> kcal/(mol K)
+ROOM_TEMPERATURE_K = 298.15
+KJ_PER_KCAL = 4.184  # thermochemical calorie (exact by definition); OpenMM reports kJ/mol
+NM_TO_ANGSTROM = 10.0  # GROMACS and OpenMM hold nanometres; everything else here is Angstrom
 
 
 @dataclass(frozen=True)

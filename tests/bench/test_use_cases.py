@@ -6,28 +6,15 @@ import tomllib
 import pytest
 from gui_fixture import make_run_dir
 
-from bench.fakes import FakeArtifactStore, FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock, _task
-from smeltery.bench.use_cases.edit_pipeline import EditPipeline
+from bench.fakes import FakeArtifactStore, FakeIdentity, FakeRunStore, FakeTaskQueue, FixedClock
 from smeltery.bench.use_cases.launch_run import LaunchRun
-from smeltery.bench.use_cases.list_work import ListWork
-from smeltery.bench.use_cases.read_run import ReadRun
 from smeltery.bench.use_cases.record_decision import RecordDecision
 from smeltery.gui.pipeline import Pipeline
-
-
-def test_read_run_returns_the_ddE_table_in_cut_order(run_dir):
-    out = ReadRun(FakeRunStore(run_dir), FakeArtifactStore(run_dir / ".art")).execute(run_dir)
-    assert [r["candidate"] for r in out.ddE] == ["4-F", "4-Cl", "4-Br"]
 
 
 @pytest.fixture
 def run_dir(tmp_path):
     return make_run_dir(tmp_path)
-
-
-def test_list_work_passes_the_status_filter_through():
-    q = FakeTaskQueue(tasks=[_task("a", "succeeded"), _task("b", "running")])
-    assert [t.id for t in ListWork(q).execute(status="running")] == ["b"]
 
 
 def test_record_decision_refuses_a_tie_choice_without_a_note(run_dir):
@@ -74,13 +61,6 @@ def pipeline():
     p.stage("pocket").params["site"] = [{"q": 1.0, "atom": 3, "from_atom": 4, "distance": 3.0}]
     p.set("cut", keep=1, floor=0.0)
     return p
-
-
-def test_edit_pipeline_returns_every_issue_not_just_the_first(pipeline):
-    # need pipeline with two problems; just call check
-    issues = EditPipeline().check(pipeline)
-    # may be 0; ensure method exists
-    assert isinstance(issues, list)
 
 
 def test_compare_arms_differences_each_key_a_minus_b(two_run_dirs):
@@ -264,14 +244,14 @@ def test_a_launched_run_is_capped_with_a_memory_limit_and_no_timeout_by_default(
 
 
 def test_a_launched_run_takes_its_memory_limit_from_a_matching_preview(tmp_path, pipeline, monkeypatch):
-    from smeltery import cli
     from smeltery.bench.use_cases import launch_run
+    from smeltery.run_inputs import poses_key
 
     monkeypatch.setattr(launch_run, "host_memory_gb", lambda: 64.0)
     preview = tmp_path / "preview"
     preview.mkdir()
     text = pipeline.to_toml()
-    key = cli.poses_key(__import__("tomllib").loads(text), tmp_path)
+    key = poses_key(__import__("tomllib").loads(text), tmp_path)
     plan = {"status": "ok", "poses_key": key, "memory": {"estimate": {"total_gb": 1.5}}}
     (preview / "plan.json").write_text(json.dumps(plan))
     q = FakeTaskQueue()
@@ -338,7 +318,7 @@ def test_next_round_carries_the_decisions_file_and_keeps_the_config_comments(tmp
 
 
 def test_next_round_leaves_the_rejected_candidate_in_the_candidates_table(tmp_path):
-    # the engine drops it (cli._apply_decisions) and records what it excluded; we do not rewrite the chemistry
+    # the engine drops it (planning._apply_decisions) and records what it excluded; we do not rewrite the chemistry
     made = _plan(tmp_path, decisions=_decisions(**{"4_Cl": "reject"}), decisions_name="d.json")
     assert '4-Cl = "OC(=O)c1ccc(Cl)cc1"' in made.toml
 
@@ -346,7 +326,7 @@ def test_next_round_leaves_the_rejected_candidate_in_the_candidates_table(tmp_pa
 def test_next_round_does_not_resurrect_a_candidate_rejected_in_an_earlier_round(tmp_path):
     """Round 3 must not pose what round 1 rejected.
 
-    The run record's `inputs.candidates` is written after `cli._apply_decisions`, so an earlier round's reject is
+    The run record's `inputs.candidates` is written after `planning._apply_decisions`, so an earlier round's reject is
     already gone from it while the config text still lists the molecule. Building the new candidate set from the
     record, and the new decisions file from this round's decisions alone, let that molecule back in: nothing named
     it any more, and `[decisions] file` had just been repointed at the new file.

@@ -11,7 +11,7 @@ values (`Measurement.from_samples`, the funnel's estimator), the paired ddE and 
   found by the recorded tier name in `tier_registry` and rebuilt from the recorded settings; no tier name is
   hard-coded here. A tier that cannot be rebuilt from its record (it needs a provider object) falls back to the
   class's `QUANTITY` and the record's own `results.units`, with the floor reported as unresolved, never as zero.
-  A quantity declared by two tiers belongs to the later one, as in `cli.per_pose_results`.
+  A quantity declared by two tiers belongs to the later one, as in `planning.per_pose_results`.
 * **Two floors, kept apart.** `score_floor` is what the TIER declares for `score_quantity` (null while unmeasured,
   and `score_floor_source` says which kind of null). `paired_ddE_floor` is the floor the CUT used, from
   `inputs.floor`; with an unmeasured tier floor that is the config's explicit value, and `paired_ddE_floor_source`
@@ -57,10 +57,10 @@ from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
+from . import run_view as R
 from .decisions import DecisionSet
-from .gui import results as R
 from .model import Measurement
-from .record import digest
+from .record import digest, file_sha256
 
 #: Bump when a column is added, renamed, removed or changes type. Stored in the file's metadata.
 #: 2: `family` and `core_record_sha256` added; `run_id` is the core record's run_id (was always `input_digest[:12]`).
@@ -79,9 +79,8 @@ BASIS_UNRECORDED = "unrecorded"  # a mixed-build run: a row of this candidate ca
 #: needs no attestation-schema: it reads the file as JSON and hashes its bytes, nothing more.
 CORE_RECORD = Path("attestation") / "run.json"
 
-#: The per-pose quantity the funnel cuts on. Mirrors `cli.QUANTITY` (a test pins them equal): importing it
-#: here would pull the whole run machinery in for one string.
-CUT_QUANTITY = "dE_int"
+#: The per-pose quantity the funnel cuts on (`smeltery.run_view.QUANTITY`).
+CUT_QUANTITY = R.QUANTITY
 
 GRAIN = "one row per (ligand, target, tier)"
 FORMATS = ("parquet", "arrow")
@@ -349,7 +348,7 @@ def core_record_ref(legacy_path: str | Path) -> CoreRef | None:
     mine = [d for d in obj.get("data") or [] if d.get("name") == legacy_path.name and d.get("role") == "output"]
     if not mine:
         return None  # the core record of another legacy record in the same directory
-    legacy_sha = hashlib.sha256(legacy_path.read_bytes()).hexdigest()
+    legacy_sha = file_sha256(legacy_path)
     if mine[0].get("sha256") != legacy_sha:
         raise ExportError(
             f"{core} lists {legacy_path.name} with sha256 {mine[0].get('sha256')}, but the file's is {legacy_sha}: "

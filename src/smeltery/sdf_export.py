@@ -1,38 +1,32 @@
 """Export a finished run as enriched pose SDFs: the run's own pose records plus the cut, gate and decision results.
 
-The run-time pose SDFs (`cli.write_pose_sdfs`) are sha256-pinned artefacts and are never touched; this reads them
-(through `gui.results.pose_sdf`, which checks the hash) and writes a new text. Decisions are made after the run, so they
-can only live here. `smeltery export-sdf OUT [--out FILE]` and the Bench route `/api/runs/{idx}/export.sdf` use it."""
+The run-time pose SDFs (`run_outputs.write_pose_sdfs`) are sha256-pinned artefacts and are never touched; this reads
+them (through `gui.results.pose_sdf`, which checks the hash) and writes a new text. Decisions are made after the run,
+so they can only live here. `smeltery export-sdf OUT [--out FILE]` and the Bench route `/api/runs/{idx}/export.sdf`
+use it."""
 
 from __future__ import annotations
 
 import argparse
 import io
-import re
 import sys
 from pathlib import Path
 
 from rdkit import Chem
 
-from .decisions import DecisionSet
-from .gui import results as R
-
-
-def _line(value: object) -> str:
-    """A property value on one line: a newline would end the SDF value (a blank line, the whole property)."""
-    return re.sub(r"\s*\n\s*", " ", str(value)).strip()
+from . import run_view as R
+from .decisions import DecisionSet, decisions_path
+from .decisions import sdf_line as _line
 
 
 def _num(x: float) -> str:
     return f"{x:.10g}"
 
 
-def decisions_path(run: R.Run) -> Path:
-    return Path(run.out_dir) / f"decisions-{run.record['input_digest'][:12]}.json"
-
-
 def load_decisions(run: R.Run) -> DecisionSet | None:
-    p = decisions_path(run)
+    """The run's decisions file, or None when there is none: the export then carries no decision properties (an
+    empty set would read as "decided nothing", which is not what an absent file says)."""
+    p = decisions_path(run.out_dir, run.record["input_digest"])
     return DecisionSet.load(p) if p.is_file() else None
 
 

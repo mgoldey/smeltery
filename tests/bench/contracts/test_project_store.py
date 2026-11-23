@@ -18,9 +18,24 @@ def pstore(request, bench_tmp):
     return request.param[1](bench_tmp)
 
 
+def _entry(campaign_id, title, body, supersedes=None):
+    from smeltery.project import NotebookEntry, make_entry_id, utc_now
+
+    when = utc_now()
+    return NotebookEntry(
+        id=make_entry_id(campaign_id, title, when),
+        campaign_id=campaign_id,
+        title=title,
+        body=body,
+        author="mg",
+        created_at=when,
+        supersedes=supersedes,
+    )
+
+
 def test_an_entry_is_append_only(pstore):
     c = pstore.create_campaign(name="cdk2")
-    e = pstore.add_entry(c.id, title="first", body="b", author="mg")
+    e = pstore.add_entry(_entry(c.id, "first", "b"))
     with pytest.raises(ValueError):
         if hasattr(pstore, "edit_entry"):
             pstore.edit_entry(e.id, body="changed")
@@ -30,8 +45,8 @@ def test_an_entry_is_append_only(pstore):
 
 def test_a_correction_is_a_new_entry_that_supersedes(pstore):
     c = pstore.create_campaign(name="cdk2")
-    e1 = pstore.add_entry(c.id, title="first", body="b", author="mg")
-    e2 = pstore.add_entry(c.id, title="correction", body="b2", author="mg", supersedes=e1.id)
+    e1 = pstore.add_entry(_entry(c.id, "first", "b"))
+    e2 = pstore.add_entry(_entry(c.id, "correction", "b2", supersedes=e1.id))
     assert [x.id for x in pstore.entries(c.id)] == [e1.id, e2.id]
     assert e2.supersedes == e1.id
 

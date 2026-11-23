@@ -60,8 +60,8 @@ print(p.to_toml())  # the config `smeltery run` reads; refuses (PipelineError) w
 3. Knob types.
 4. Advice: PoseBusters without `relax_unmapped` (a warning), and strain recorded with nothing rejected (a note). A cut
    without an explicit floor while the tier's floor is unmeasured is an error.
-5. `smeltery.cli.validate_config` on the compiled config. The GUI keeps no second copy of the config rules, so a
-   pipeline that checks clean is one the CLI accepts.
+5. `smeltery.config.validate_config` (re-exported as `smeltery.cli.validate_config`) on the compiled config. The GUI
+   keeps no second copy of the config rules, so a pipeline that checks clean is one the CLI accepts.
 
 `Pipeline.from_config` / `from_toml` read a config back. Every file in `examples/*.toml` round-trips unchanged
 (`tests/test_gui_pipeline.py`). `view()` returns one row per stage in execution order, including the implicit

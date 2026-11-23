@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from smeltery.bench.adapters._sqlite import add_column, migrate, open_db
+from smeltery.bench.ports.clock import Clock, SystemClock
 from smeltery.bench.ports.comment_store import Comment
+from smeltery.decisions import TIME_FORMAT
 
 
 def _add_comment_columns(con) -> None:
@@ -25,8 +27,28 @@ _STEPS = (
 SCHEMA_VERSION = len(_STEPS)
 
 
+#: The column order `_comment` unpacks; every SELECT and the INSERT use it.
+_COLUMNS = "id,run,anchor_type,anchor_id,author,body,created_at,parent_id,anchor"
+
+
+def _comment(row) -> Comment:
+    cid, run, anchor_type, anchor_id, author, body, created, parent, anchor = row
+    return Comment(
+        id=cid,
+        run=run,
+        anchor_type=anchor_type,
+        anchor_id=anchor_id,
+        author=author,
+        body=body,
+        created_at=datetime.strptime(created, TIME_FORMAT).replace(tzinfo=timezone.utc),
+        parent_id=parent,
+        anchor_text=anchor or "",
+    )
+
+
 class SqliteCommentStore:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, clock: Clock | None = None):
+        self._clock = clock or SystemClock()
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
@@ -38,81 +60,36 @@ class SqliteCommentStore:
         with open_db(self.db_path, wal=True) as con:
             migrate(con, _STEPS)
 
-    def add(self, anchor_type=None, anchor_id=None, author="", body="", *, parent_id=None, run=None, anchor=None, **kw):
-        if anchor is not None and anchor_type is None and run is None:
-            # bench style: run + anchor
-            pass
-        if run is not None and anchor_type is None:
-            anchor_type = "run"
-            anchor_id = run
+    def add(self, *, run, author, body, anchor=None, parent_id=None):
         if anchor is None:
-            anchor = kw.pop("anchor", None)
-        if run is None:
-            run = kw.pop("run", None)
-        if body == "" and "body" in kw:
-            body = kw.pop("body")
-        if author == "" and "author" in kw:
-            author = kw.pop("author")
-        if anchor_type is None:
-            anchor_type = kw.pop("anchor_type", "run")
-        if anchor_id is None:
-            anchor_id = kw.pop("anchor_id", run)
-        if anchor is None:
-            anchor = f"{anchor_type}:{anchor_id}" if anchor_type and anchor_id else (anchor_id or "")
-        # bench style: if run given, store run and anchor string
-        store_run = run
-        if run is not None:
-            anchor_type = "run"
-            anchor_id = run
+            anchor = f"run:{run}"
         cid = uuid.uuid4().hex[:12]
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = self._clock.now().strftime(TIME_FORMAT)
         with self._conn() as con:
             con.execute(
-                "INSERT INTO comments (id,run,anchor_type,anchor_id,author,body,created_at,parent_id,anchor) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
-                (cid, store_run, anchor_type, anchor_id, author, body, now, parent_id, anchor),
+                f"INSERT INTO comments ({_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?)",
+                (cid, run, "run", run, author, body, now, parent_id, anchor),
             )
             con.commit()
         return Comment(
             id=cid,
-            run=store_run,
-            anchor_type=anchor_type,
-            anchor_id=anchor_id,
+            run=run,
+            anchor_type="run",
+            anchor_id=run,
             author=author,
             body=body,
-            created_at=datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc),
+            created_at=datetime.strptime(now, TIME_FORMAT).replace(tzinfo=timezone.utc),
             parent_id=parent_id,
             anchor_text=anchor,
         )
 
     def for_run(self, run):
         with self._conn() as con:
-            rows = con.execute(
-                "SELECT id,run,anchor_type,anchor_id,author,body,created_at,parent_id,anchor "
-                "FROM comments WHERE run=? ORDER BY created_at",
-                (run,),
-            ).fetchall()
-        out = []
-        for r in rows:
-            cid, runv, at, aid, author, body, created, parent, anch = r  # noqa: E501
-            dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            out.append(
-                Comment(
-                    id=cid,
-                    run=runv,
-                    anchor_type=at,
-                    anchor_id=aid,
-                    author=author,
-                    body=body,
-                    created_at=dt,
-                    parent_id=parent,
-                    anchor_text=anch or "",
-                )
-            )  # noqa: E501
-        return out
+            rows = con.execute(f"SELECT {_COLUMNS} FROM comments WHERE run=? ORDER BY created_at", (run,)).fetchall()
+        return [_comment(r) for r in rows]
 
     def list(self, anchor_type=None, anchor_id=None):
-        q = "SELECT id,run,anchor_type,anchor_id,author,body,created_at,parent_id,anchor FROM comments"
+        q = f"SELECT {_COLUMNS} FROM comments"
         params = []
         conds = []
         if anchor_type is not None:
@@ -126,43 +103,9 @@ class SqliteCommentStore:
         q += " ORDER BY created_at"
         with self._conn() as con:
             rows = con.execute(q, params).fetchall()
-        out = []
-        for r in rows:
-            cid, runv, at, aid, author, body, created, parent, anch = r  # noqa: E501
-            dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            out.append(
-                Comment(
-                    id=cid,
-                    run=runv,
-                    anchor_type=at,
-                    anchor_id=aid,
-                    author=author,
-                    body=body,
-                    created_at=dt,
-                    parent_id=parent,
-                    anchor_text=anch or "",
-                )
-            )  # noqa: E501
-        return out
+        return [_comment(r) for r in rows]
 
     def get(self, comment_id):
         with self._conn() as con:
-            row = con.execute(
-                "SELECT id,run,anchor_type,anchor_id,author,body,created_at,parent_id,anchor FROM comments WHERE id=?",
-                (comment_id,),
-            ).fetchone()
-        if not row:
-            return None
-        cid, runv, at, aid, author, body, created, parent, anch = row
-        dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        return Comment(
-            id=cid,
-            run=runv,
-            anchor_type=at,
-            anchor_id=aid,
-            author=author,
-            body=body,
-            created_at=dt,
-            parent_id=parent,
-            anchor_text=anch or "",
-        )  # noqa: E501
+            row = con.execute(f"SELECT {_COLUMNS} FROM comments WHERE id=?", (comment_id,)).fetchone()
+        return _comment(row) if row else None

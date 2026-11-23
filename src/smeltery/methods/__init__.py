@@ -7,13 +7,13 @@ hierarchy (`rung`, `role`), which step of the pipeline drawing holds it (`step`)
 them), the tier it runs, whether every pipeline needs it (`required`) or it excludes another (`exclusive`), and a
 `hook` of its slot's protocol.
 
-Everything that used to list methods by hand derives from `registry()`: the GUI catalog (`smeltery.gui.catalog`),
-the execution order and steps (`smeltery.gui.pipeline`, `smeltery.gui.steps`), the CLI's top-level keys and section
-validation (`smeltery.cli`) and input staging (`smeltery.run_inputs`). Today's methods are registrations in
+Everything that used to list methods by hand derives from `registry()`: the method catalog (`smeltery.methods.catalog`),
+the execution order and steps (`smeltery.gui.pipeline`, `smeltery.gui.steps`), the config's top-level keys and section
+validation (`smeltery.config`) and input staging (`smeltery.run_inputs`). Today's methods are registrations in
 `smeltery.methods.builtin`, loaded the first time `registry()` is called.
 
-Slots with a hook protocol, consulted by `smeltery.cli.build_plan` / `run_plan` when the method's section is in the
-config and its `hook` is set (a builtin with `hook=None` keeps its own code path in `smeltery.cli`):
+Slots with a hook protocol, consulted by `smeltery.planning.build_plan` / `run_plan` when the method's section is in the
+config and its `hook` is set (a builtin with `hook=None` keeps its own code path in `smeltery.planning`):
 
 * `pose_source`: `PoseSource.parent_poses(cfg, parent, ctx)` gives the parent's poses; analogues are paired to them.
 * `field_source`: `FieldSource.field(cfg, parent, ctx)` gives the point charges.
@@ -30,10 +30,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from .catalog import method_from_spec  # imports nothing but dataclasses; reads the registry only when called
+
 if TYPE_CHECKING:
     from ..model import Candidate, PointCharge, Pose
 
-#: Execution slots. `None` (no slot) is a stage whose code lives in `smeltery.cli` (gates, pairing, the cut).
+#: Execution slots. `None` (no slot) is a stage whose code lives in `smeltery.planning` (gates, pairing, the cut).
 SLOTS = ("pose_source", "field_source", "measure", "analysis")
 
 #: The steps of the pipeline drawing (`smeltery.gui.steps`) a method may be placed in.
@@ -76,10 +78,10 @@ class MethodSpec:
     """One method, declared once. See the module docstring for what derives from each field.
 
     `knobs` is the dataclass whose init fields are the section's knobs (a tier's own class, so defaults cannot
-    drift); `params` are typed knobs for a form (`smeltery.gui.catalog.Param`), derived from `knobs` when empty.
+    drift); `params` are typed knobs for a form (`smeltery.methods.catalog.Param`), derived from `knobs` when empty.
     `validate(cfg)` replaces the generic section check (a table whose keys are the knobs; no `exclusive` method's
     section beside it) for a method whose rules are more than its keys; it is called for every config, present or
-    not, and raises `smeltery.cli.ConfigError`. `order` is the method's place in `smeltery run`'s execution order;
+    not, and raises `smeltery.config.ConfigError`. `order` is the method's place in `smeltery run`'s execution order;
     a wired method has one, an unwired method has none.
     """
 
@@ -192,8 +194,6 @@ def register(spec: MethodSpec) -> MethodSpec:
             raise ValueError(f"method {spec.key!r}: section [{spec.section}] is already {other.key!r}'s")
         if spec.gate_key is not None and other.gate_key == spec.gate_key:
             raise ValueError(f"method {spec.key!r}: gate {spec.gate_key!r} is already {other.key!r}'s")
-    from ..gui.catalog import method_from_spec
-
     method_from_spec(spec)  # the catalog's own checks, now rather than when a GUI first draws it
     _REGISTRY[spec.key] = spec
     _VERSION += 1

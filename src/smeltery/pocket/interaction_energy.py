@@ -39,6 +39,7 @@ import numpy as np
 
 from ..gates import BOND_SLACK_ANG, MIN_ATOM_SEPARATION_ANG
 from ..model import HARTREE_TO_KCAL, PointCharge
+from ..structure import parse_xyz
 from ._ferric import ferric
 
 #: Point charges within this distance (Angstrom) of any QM atom are dropped, as `embed_ligand` does: a field taken from
@@ -83,13 +84,8 @@ class Fragment:
 
     @classmethod
     def from_xyz(cls, path: str | Path, charge: int = 0, multiplicity: int = 1) -> Fragment:
-        lines = Path(path).read_text().splitlines()
-        n = int(lines[0].split()[0])
-        syms, xyz = [], []
-        for line in lines[2 : 2 + n]:
-            p = line.split()
-            syms.append(p[0])
-            xyz.append((float(p[1]), float(p[2]), float(p[3])))
+        s = parse_xyz(path)
+        syms, xyz = list(s.symbols), list(s.coords)
         return cls(symbols=syms, coords_angstrom=xyz, charge=charge, multiplicity=multiplicity)
 
     @property

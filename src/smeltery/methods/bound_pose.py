@@ -27,9 +27,11 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 
+from ..config import ConfigError, _validate_section
 from ..model import Candidate, Pose
 from ..tiers import PairedPoses, _mol_with_h, _rigid_jitter
-from . import MethodSpec, register
+from . import MethodSpec, register, registry
+from .catalog import Param
 
 
 @dataclass(frozen=True)
@@ -160,25 +162,22 @@ def _pairing_knobs(k: BoundPoseKnobs) -> dict:
 def _validate(cfg: dict) -> None:
     """`[bound_pose]`: a table of its knobs with `file` and `seed` set, beside no `[docking]` (nor `[structure]`, which
     docks); the counts are whole numbers and the jitters non-negative."""
-    from .. import cli
-    from . import registry
-
     if "bound_pose" not in cfg:
         return
-    cli._validate_section(registry()["bound_pose"], cfg)  # a table, its knobs only, not beside [docking]
+    _validate_section(registry()["bound_pose"], cfg)  # a table, its knobs only, not beside [docking]
     s = cfg["bound_pose"]
     if "structure" in cfg:
-        raise cli.ConfigError("[bound_pose] gives the parent's poses; [structure] docks the parent: keep one")
+        raise ConfigError("[bound_pose] gives the parent's poses; [structure] docks the parent: keep one")
     for key in ("file", "seed"):
         if key not in s:
-            raise cli.ConfigError(f"[bound_pose] needs {key!r}")
+            raise ConfigError(f"[bound_pose] needs {key!r}")
     if not isinstance(s["file"], str) or not s["file"]:
-        raise cli.ConfigError("[bound_pose] file must be a path (a string)")
+        raise ConfigError("[bound_pose] file must be a path (a string)")
 
     def whole(key: str, low: int) -> None:
         v = s.get(key, low)
         if not isinstance(v, int) or isinstance(v, bool) or v < low:
-            raise cli.ConfigError(f"[bound_pose] {key} must be an integer >= {low}, got {v!r}")
+            raise ConfigError(f"[bound_pose] {key} must be an integer >= {low}, got {v!r}")
 
     whole("seed", 0)
     whole("n_poses", 1)
@@ -186,18 +185,16 @@ def _validate(cfg: dict) -> None:
     for key in ("jitter_deg", "jitter_ang"):
         v = s.get(key, 0.0)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
-            raise cli.ConfigError(f"[bound_pose] {key} must be a number >= 0, got {v!r}")
+            raise ConfigError(f"[bound_pose] {key} must be a number >= 0, got {v!r}")
     poses = cfg.get("poses", {})
     want = _pairing_knobs(BoundPoseKnobs(**s)).get("first_pose_index", 0)
     if (
         isinstance(poses, dict) and poses.get("first_pose_index", want) != want
     ):  # a planned config carries [bound_pose]'s
-        raise cli.ConfigError(f"[poses] first_pose_index is set by [bound_pose] skip_first (to {want}); leave it out")
+        raise ConfigError(f"[poses] first_pose_index is set by [bound_pose] skip_first (to {want}); leave it out")
 
 
 def register_methods() -> None:
-    from ..gui.catalog import Param
-
     register(
         MethodSpec(
             "bound_pose",

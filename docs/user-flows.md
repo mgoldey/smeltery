@@ -53,8 +53,9 @@ context — is a design question, not a defect list, and is not settled here.
 Two facts a design will have to start from, both read from the code:
 
 - **A gate-failed candidate leaves no geometry.** `_run_gates` records every per-pose verdict "whether or not
-  a gate then rejects" (`cli.py:780`), so the *reasoning* survives — but the gate runs at `cli.py:809` and
-  pose SDFs are written at `cli.py:1315`, and a `StageError` in between stops the run first. Showing a cut
+  a gate then rejects" (`smeltery/planning.py`), so the *reasoning* survives — but the gate runs inside
+  `build_plan` and pose SDFs are written later by `write_outputs` (`smeltery/run_outputs.py`), and a `StageError` in
+  between stops the run first. Showing a cut
   candidate in situ means persisting poses before the gate rejects.
 - **A cut candidate's later gates never ran.** Once PoseBusters rejects, the later gates are skipped and are
   "simply absent from `results`". So strain and affinity are missing *because they were never evaluated*, not

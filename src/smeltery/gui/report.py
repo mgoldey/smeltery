@@ -22,14 +22,15 @@ data the scripts read is JSON in a `<script type="application/json">` block with
 from __future__ import annotations
 
 import argparse
-import hashlib
 import html
 import json
 import math
 import sys
-import time
 from importlib import metadata
 from pathlib import Path
+
+from smeltery.record import utc_now
+from smeltery.run_view import QUANTITY
 
 from .limits import floor_statement, load_limits
 
@@ -47,7 +48,6 @@ SRI = {
     MOLSTAR_CSS: "sha384-D+V6b5rE0GHUfqRo0agsDJDSHDL0nCHDP4pdeWPVF/BoNpV+CGVWfNxyxyd/lDxN",
 }
 
-QUANTITY = "dE_int"
 _WITHIN = "no order within group"
 
 
@@ -117,15 +117,16 @@ def _unranked_reason(groups: list[list[str]], keep: int) -> str:
 def _read_receptor(run, rec: object) -> tuple[str | None, str | None]:
     if not rec:
         return None, None
+    from smeltery.run_view import receptor_pdb
+
     try:
-        p = Path(rec["file"])
-        p = p if p.is_absolute() else run.out_dir / p
-        data = p.read_bytes()
-        if hashlib.sha256(data).hexdigest() != rec["sha256"]:
-            return None, f"receptor {rec['file']}: sha256 does not match the record; not shown"
-        return data.decode(), None
-    except (OSError, KeyError, TypeError, UnicodeDecodeError) as e:
+        return receptor_pdb(run), None
+    except (KeyError, TypeError, UnicodeDecodeError) as e:
         return None, f"receptor could not be read ({e}); not shown"
+    except ValueError as e:  # run_view wraps an unreadable file in ValueError (cause: the OSError); else sha256
+        if isinstance(e.__cause__, OSError):
+            return None, f"receptor could not be read ({e.__cause__}); not shown"
+        return None, f"receptor {rec['file']}: sha256 does not match the record; not shown"
 
 
 def report_data(
@@ -140,7 +141,7 @@ def report_data(
     `comments` (`anchor`, `author`, `time`, `body`) and `decisions` (`candidate`, `status`, `reason`, `note`, `user`,
     `time`) are the judgement layered on the run; None (the CLI) leaves that section out, an empty list says there
     are none."""
-    from . import results
+    from smeltery import run_view as results
 
     rec = run.record
     res = rec.get("results", {})
@@ -180,7 +181,7 @@ def report_data(
     else:
         ferric_s = "" if ferric is None else str(ferric)
 
-    unit = (res.get("units") or {}).get(QUANTITY, "kcal/mol")
+    unit = run.unit
     return {
         "campaign": run.campaign,
         "parent": run.parent,
@@ -218,7 +219,7 @@ def report_data(
         # A caller that renders the same report twice -- the download and the archived snapshot -- must get
         # the same bytes, so it passes one stamp for both. Second resolution means two unpinned renders
         # straddling a tick differ by a digit, which is a byte difference and no real difference at all.
-        "generated_utc": generated_utc or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "generated_utc": generated_utc or utc_now(),
     }
 
 
@@ -844,7 +845,7 @@ def write_report(
 
 def main(argv: list[str] | None = None) -> int:
     """`smeltery report RUN_OR_OUT [-o report.html]`. Exit 0 on success, 2 when the run cannot be loaded."""
-    from . import results
+    from smeltery import run_view as results
 
     ap = argparse.ArgumentParser(prog="smeltery report", description="Write a self-contained HTML report of a run.")
     ap.add_argument("run", type=Path, help="a run-*.json, or an OUT directory holding exactly one")

@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from ..floor import DIFFERENCE, Floor
 from ..funnel import resolved
 from ..model import Measurement
-from .results import Run, ddE_table
+from ..run_view import QUANTITY, Run, ddE_table
 
 #: Below this many molecules an arm's "median" is a draw, not a summary, and no difference involving
 #: it is resolvable. `funnel.resolved` takes the same position: a Measurement with n < 2 never resolves.
@@ -114,7 +114,7 @@ class Comparison:
     #: Multiplier on the SEM, as in `funnel.cut`. 2.0 is the funnel's own default.
     z: float = 2.0
     unit: str = "kcal/mol"
-    quantity: str = "dE_int"
+    quantity: str = QUANTITY
     notes: list[str] = field(default_factory=list)
 
     @classmethod
@@ -126,7 +126,7 @@ class Comparison:
         label_a: str,
         label_b: str,
         floor: Floor | float | None = None,
-        quantity: str = "dE_int",
+        quantity: str = QUANTITY,
     ) -> Comparison:
         """Each arm is {key: Run}. Takes every analogue's paired mean from `ddE_table`, so the per-run
         pairing against that run's own parent is kept and only the summaries are compared."""
@@ -146,7 +146,7 @@ class Comparison:
         label_b: str,
         floor: Floor | float | None = None,
         unit: str = "kcal/mol",
-        quantity: str = "dE_int",
+        quantity: str = QUANTITY,
     ) -> Comparison:
         return cls(label_a, label_b, dict(values_a), dict(values_b), floor=floor, unit=unit, quantity=quantity)
 

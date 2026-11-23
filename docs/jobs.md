@@ -75,7 +75,7 @@ compared on (`best_paired_ddE`, `mean_paired_ddE`; [core-record.md](core-record.
 `terminal_record` already carries the spec's arm into a failed or cancelled record.
 
 `SMELTERY_BACKEND=temporal` carries both the same way: they travel in the workflow's input (`RunInput.arm`,
-`RunInput.ext`) to its record stage, which hands them to the same `cli.emit_core_record`, so the complete record
+`RunInput.ext`) to its record stage, which hands them to the same `core_record.emit_core_record`, so the complete record
 states them at its first write; `RUN_DIR/temporal/job.json` keeps them beside the config, so a failed or cancelled
 record (written by the workflow or by a look) carries the arm too. `smeltery run --temporal --arm NAME --ext-json
 JSON` works for the same reason. `smeltery al` ([active-learning.md](active-learning.md)) is the one caller that

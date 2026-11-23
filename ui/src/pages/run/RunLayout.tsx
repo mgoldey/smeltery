@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { NavLink, Outlet, useParams } from "react-router-dom";
 import { useCapabilities } from "../../api/capabilities";
-import { api, runByRef, unwrap } from "../../api/client";
 import { Shell } from "../../components/Shell";
+import { commentsQuery, proposalsQuery, useRunDigest } from "../../api/queries";
 
 /**
  * The Run area's tabs: views OF this run, in the order you read them.
@@ -45,22 +45,9 @@ export function useRunId(): string {
  * would be a worse signal than a tab that says nothing.
  */
 function useWaiting(runId: string | undefined): number | undefined {
-  const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => unwrap(api.GET("/api/runs")),
-    enabled: runId !== undefined,
-  });
-  const digest = runByRef(runs.data, runId)?.digest ?? undefined;
-  const proposals = useQuery({
-    queryKey: ["proposals", digest],
-    queryFn: () => unwrap(api.GET("/api/proposals", { params: { query: { run: digest ?? "" } } })),
-    enabled: digest !== undefined,
-  });
-  const comments = useQuery({
-    queryKey: ["comments", runId],
-    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/comments", { params: { path: { run_id: runId ?? "" } } })),
-    enabled: runId !== undefined,
-  });
+  const { digest } = useRunDigest(runId);
+  const proposals = useQuery({ ...proposalsQuery(digest), enabled: digest !== undefined });
+  const comments = useQuery({ ...commentsQuery(runId), enabled: runId !== undefined });
   if (proposals.data === undefined || comments.data === undefined) return undefined;
   return proposals.data.length + comments.data.length;
 }

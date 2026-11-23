@@ -1,17 +1,17 @@
 import type { Page } from "@playwright/test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, fixture, id, IDX, newPipeline, openWorkspace, replaceToml, test } from "./bench";
+import { apiGet, expect, fixture, id, IDX, newPipeline, openWorkspace, replaceToml, test } from "./bench";
 
 type Doc = { toml: string; sha256: string; ok: boolean; issues: { level: string; stage: string | null; message: string }[] };
 type Catalog = { methods: Record<string, { key: string; label: string }> };
 
 async function doc(page: Page, name: string): Promise<Doc> {
-  return (await (await page.request.get(`/api/pipelines/${name}`)).json()) as Doc;
+  return apiGet<Doc>(page, `/api/pipelines/${name}`);
 }
 
 async function catalog(page: Page): Promise<Catalog> {
-  return (await (await page.request.get("/api/catalog")).json()) as Catalog;
+  return apiGet<Catalog>(page, "/api/catalog");
 }
 
 /** The run's pipeline with an explicit, commented n_poses, so a Keep can be compared line by line. */

@@ -49,6 +49,14 @@ export function run(name: keyof typeof IDX): FixtureRun {
   return r;
 }
 
+/** GET an API route from inside a test and return its JSON body, failing the test on a non-2xx answer so a broken
+ * route reads as that, not as a confusing mismatch further down. */
+export async function apiGet<T>(page: Page, path: string): Promise<T> {
+  const res = await page.request.get(path);
+  expect(res.ok(), `GET ${path}: ${res.status()} ${await res.text()}`).toBe(true);
+  return (await res.json()) as T;
+}
+
 /** Every test runs offline: a request to any host other than localhost is aborted, and fails the test. */
 export const test = base.extend<{ noExternal: string[] }>({
   noExternal: [

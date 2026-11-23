@@ -6,56 +6,29 @@ import { api, unwrap, type Schemas } from "../api/client";
 import { Shell } from "../components/Shell";
 import { EmptyState } from "../components/EmptyState";
 import { Limits } from "../components/Limits";
+import { paramText, parseParam } from "../components/paramValue";
 import { pipelineHref } from "../components/runIdentity";
+import { runsQuery } from "../api/queries";
 
 type Method = Schemas["MethodInfo"];
 type Param = Schemas["MethodParam"];
 
 const muted = { color: "var(--ink-muted)" } as const;
 
-/** What a text box holds for a value, and back. Empty text means "no workspace default". */
-function show(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  return Array.isArray(v) ? v.join(", ") : String(v);
-}
+/** Methods' own wording for a refused default: it names the setting, since the card shows several at once. */
+const REFUSED: Record<string, string> = {
+  int: "must be a whole number",
+  float: "must be a number",
+  bool: "must be true or false",
+  vec3: "needs three numbers",
+  int_list: "needs whole numbers, comma separated",
+};
 
 function parse(p: Param, text: string): { value: unknown } | { error: string } {
-  const t = text.trim();
-  const nums = (s: string) => s.split(",").map((x) => Number(x.trim()));
-  switch (p.kind) {
-    case "int":
-      return /^-?\d+$/.test(t)
-        ? { value: Number(t) }
-        : { error: `${p.name} must be a whole number` };
-    case "float":
-      return t !== "" && Number.isFinite(Number(t))
-        ? { value: Number(t) }
-        : { error: `${p.name} must be a number` };
-    case "bool":
-      return t === "true" || t === "false"
-        ? { value: t === "true" }
-        : { error: `${p.name} must be true or false` };
-    case "vec3": {
-      const v = nums(t);
-      return v.length === 3 && v.every(Number.isFinite)
-        ? { value: v }
-        : { error: `${p.name} needs three numbers` };
-    }
-    case "int_list": {
-      const v = nums(t);
-      return v.every(Number.isInteger)
-        ? { value: v }
-        : { error: `${p.name} needs whole numbers, comma separated` };
-    }
-    case "str_list":
-      return {
-        value: t
-          .split(",")
-          .map((x) => x.trim())
-          .filter(Boolean),
-      };
-    default:
-      return { value: t };
+  try {
+    return { value: parseParam(p.kind, text) };
+  } catch {
+    return { error: `${p.name} ${REFUSED[p.kind] ?? "is not valid"}` };
   }
 }
 
@@ -64,7 +37,7 @@ function differs(p: Param): boolean {
   return (
     p.kind !== "sites" &&
     p.workspace_default != null &&
-    show(p.workspace_default) !== show(p.default)
+    paramText(p.workspace_default) !== paramText(p.default)
   );
 }
 
@@ -72,13 +45,10 @@ function MethodCard({ m }: { m: Method }) {
   const qc = useQueryClient();
   // "Used by" links into the pipeline editor, where the step views read a run. Without `?run=` each of them says
   // the step has not run, so the link that is meant to show this method at work shows nothing of it.
-  const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => unwrap(api.GET("/api/runs")),
-  });
+  const runs = useQuery(runsQuery());
   const editable = m.params.filter((p) => p.kind !== "sites");
   const saved = Object.fromEntries(
-    editable.map((p) => [p.name, show(p.workspace_default)]),
+    editable.map((p) => [p.name, paramText(p.workspace_default)]),
   );
   const [draft, setDraft] = useState<Record<string, string>>(saved);
   const [problem, setProblem] = useState<string | null>(null);
@@ -196,7 +166,7 @@ function MethodCard({ m }: { m: Method }) {
               >
                 <td className="mono">{p.name}</td>
                 <td className="mono" data-cell="default">
-                  {show(p.default) || (p.required ? "required" : "unset")}
+                  {paramText(p.default) || (p.required ? "required" : "unset")}
                 </td>
                 <td>
                   {p.kind === "sites" ? (

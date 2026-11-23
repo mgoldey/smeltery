@@ -2,10 +2,12 @@ import { useCanWrite, useCapabilities } from "../api/capabilities";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { NavLink, useMatch, useSearchParams } from "react-router-dom";
-import { api, runByRef, unwrap } from "../api/client";
+import { runByRef } from "../api/client";
 // Not RunLayout's useRunId: RunLayout imports Shell, so that would be a cycle. The id comes from this file's own
 // useLocation, which already matches the route.
 import { useOpenRunPipeline } from "./workspace/openFromRun";
+import { pipelineUrl } from "./runIdentity";
+import { runsQuery, whoamiQuery } from "../api/queries";
 
 /**
  * Where the page is: a run (its stable id), or a pipeline and the run it was opened from (`?run=<id>`). A pipeline
@@ -24,8 +26,7 @@ function useLocation() {
 function useCurrentRun() {
   const { runId } = useLocation();
   const q = useQuery({
-    queryKey: ["runs"],
-    queryFn: () => unwrap(api.GET("/api/runs")),
+    ...runsQuery(),
     enabled: runId !== undefined,
   });
   return runByRef(q.data, runId);
@@ -88,7 +89,7 @@ function OpenRunPipeline({ runId }: { runId: string }) {
 }
 
 export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNode }) {
-  const who = useQuery({ queryKey: ["whoami"], queryFn: () => unwrap(api.GET("/api/whoami")) });
+  const who = useQuery(whoamiQuery());
   const { readOnly } = useCapabilities();
   const { runId, runMatch, pipeline } = useLocation();
   const [search] = useSearchParams();
@@ -107,7 +108,7 @@ export function Shell({ children, tabs }: { children: ReactNode; tabs?: ReactNod
               needs no disabled form -- it is reachable whatever the page is about. */}
           <NavLink to="/structure">Structure</NavLink>
           {pipeline ? (
-            <NavLink to={`/pipelines/${pipeline}?${search.toString()}`} className="active" aria-current="page">
+            <NavLink to={`${pipelineUrl(pipeline)}?${search.toString()}`} className="active" aria-current="page">
               Pipeline · {pipeline}
             </NavLink>
           ) : null}

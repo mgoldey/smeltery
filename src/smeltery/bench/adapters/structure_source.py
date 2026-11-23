@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from smeltery.providers.structure import AfdbProvider, PdbProvider
+from smeltery.providers.structure import AfdbProvider, PdbProvider, is_pdb_id
 
 
 class LocalStructureSource:
@@ -13,26 +13,27 @@ class LocalStructureSource:
         self.root.mkdir(parents=True, exist_ok=True)
         self.allow_network = allow_network
 
-    def fetch(self, ref: str, *, allow_network: bool | None = None) -> Path:
+    def _network(self, ref: str, allow_network: bool | None, refusal: dict[str, str]):
+        """The one ladder for a ref that is not a local file: a PDB id, else an AFDB accession. Returns
+        (provider, result); the provider is kept so a caller can read `last_error` when the result is None."""
         an = self.allow_network if allow_network is None else allow_network
+        kind, prov = ("pdb", PdbProvider()) if is_pdb_id(ref) else ("afdb", AfdbProvider())
+        if not an:
+            raise PermissionError(refusal[kind])
+        return prov, prov.predict(ref)
+
+    def fetch(self, ref: str, *, allow_network: bool | None = None) -> Path:
         p = Path(ref)
         if p.exists():
             return p.resolve()
-        if len(ref) == 4 and ref.isalnum():
-            if not an:
-                raise PermissionError("network disabled: cannot fetch PDB id")
-            prov = PdbProvider()
-            res = prov.predict(ref)
-            if res is None:
-                raise ValueError(prov.last_error or "fetch failed")
-            out = self.root / f"{ref}.pdb"
-            out.write_text(res.text)
-            return out
-        # UniProt / AFDB
-        if not an:
-            raise PermissionError("network disabled: cannot fetch UniProt accession")
-        prov = AfdbProvider()
-        res = prov.predict(ref)
+        prov, res = self._network(
+            ref,
+            allow_network,
+            {
+                "pdb": "network disabled: cannot fetch PDB id",
+                "afdb": "network disabled: cannot fetch UniProt accession",
+            },
+        )
         if res is None:
             raise ValueError(getattr(prov, "last_error", None) or "fetch failed")
         out = self.root / f"{ref}.pdb"
@@ -40,15 +41,6 @@ class LocalStructureSource:
         return out
 
     def fetch_result(self, ref: str, *, allow_network: bool | None = None):
-        an = self.allow_network if allow_network is None else allow_network
-        p = Path(ref)
-        if p.exists():
-            prov = PdbProvider()
-            return prov.predict(str(p))
-        if len(ref) == 4 and ref.isalnum():
-            if not an:
-                raise PermissionError("network disabled")
+        if Path(ref).exists():
             return PdbProvider().predict(ref)
-        if not an:
-            raise PermissionError("network disabled")
-        return AfdbProvider().predict(ref)
+        return self._network(ref, allow_network, {"pdb": "network disabled", "afdb": "network disabled"})[1]
