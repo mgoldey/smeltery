@@ -26,13 +26,13 @@
     "@radix-ui/react-tabs": "^1.2.1",
     "@radix-ui/react-tooltip": "^1.4.1",
     "@rdkit/rdkit": "^2026.9.2",
-    "@tanstack/react-query": "^5.108.0",
+    "@tanstack/react-query": "^5.108.4",
     "molstar": "^5.13.1",
     "openapi-fetch": "^0.17.0",
     "plotly.js-cartesian-dist-min": "^4.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.5"
+    "react-router-dom": "^7.18.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
@@ -52,8 +52,8 @@
     "openapi-typescript": "^7.13.0",
     "pngjs": "^6.0.0",
     "typescript": "~5.9.3",
-    "typescript-eslint": "8.73.0",
+    "typescript-eslint": "8.74.0",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
