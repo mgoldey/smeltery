@@ -239,6 +239,9 @@ def _validate_cut(cfg: dict) -> None:
     n_analogues = len(cfg["candidates"]) - 1
     if not isinstance(cut_cfg.get("keep"), int) or not 1 <= cut_cfg["keep"] <= n_analogues:
         raise ConfigError(f"[cut] keep must be an integer in 1..{n_analogues} (the number of analogues)")
+    mp = cut_cfg.get("min_pairs")
+    if mp is not None and (not isinstance(mp, int) or isinstance(mp, bool) or mp < 2):
+        raise ConfigError("[cut] min_pairs must be an integer >= 2 (one pair has no standard error)")
 
 
 def _validate_pocket(cfg: dict) -> None:

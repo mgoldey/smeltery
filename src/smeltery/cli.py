@@ -287,6 +287,15 @@ def format_table(plan: Plan, out: dict) -> str:
         lines.append(f"decisions {Path(plan.decisions_in['file']).name}: rejected before the run: {excl}")
     lines.append(f"floor {plan.floor:g} kcal/mol, from {plan.floor_source}; z={res.z:g}")
     lines.append("tie groups (no order within a group): " + " | ".join(", ".join(g) for g in res.groups))
+    pairing = out.get("pairing")
+    if pairing:  # failed SCFs dropped poses: n per analogue, and every drop with its reason (never silent)
+        req = max(pairing["requested_poses"].values())
+        lines.append(
+            f"paired poses per analogue (of {req} requested; at least {pairing['min_pairs']} to rank): "
+            + ", ".join(f"{k} {v}" for k, v in pairing["n_pairs"].items())
+        )
+        for d in out.get("dropped") or []:
+            lines.append(f"dropped: {d['candidate']} pose {d['pose']} ({d['leg']}): {d['reason']}")
     if res.unranked_at_boundary:
         lines.append("UNRANKED: " + "; ".join(res.notes))
     else:

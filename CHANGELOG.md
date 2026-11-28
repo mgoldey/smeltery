@@ -23,6 +23,17 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   dataset export gains `smeltery.generation` file metadata for such runs, `GET /api/runs/{id}/attrition` serves the
   stages and the rejections, and the Bench Results page shows "Where candidates were lost". Records with no generation
   step are unchanged.
+- Per-pose SCF resilience (docs/superpowers/specs/2026-11-28-scf-resilience-design.md, docs/troubleshooting.md). The
+  danuglipron halogen scan never gave a paired ddE because 7 SCFs failed on F and Cl analogues and a failed SCF stopped
+  the run. `[field_interaction]` takes `on_scf_failure = "drop"` (default `"raise"`, unchanged): a pose that fails
+  every rung of the bounded remedy ladder (now at most 5 rungs, and a new `guess = "minao" | "hcore"` knob; ferric has
+  no damping option; `tiers.DEFAULT_SCF_LADDER` is a ready ladder) is recorded and never retried, a failed vacuum leg
+  skips its field leg, and a plain run pairs over the poses that converged for both the analogue and the parent. The
+  record gains `results.dropped_poses`, `pose_index`, `pairing` (poses requested, `n_pairs` per analogue, each failed
+  pair with its reasons) and the run prints a `dropped:` line per failure. `[cut] min_pairs` (default 3 after a drop):
+  an analogue with fewer pairs is listed under `results.cut_unrankable`, and the cut claims no survivors. `paired_delta`
+  now refuses a non-finite per-pose value instead of differencing it. A finished SCF, failures included, stays in the
+  checkpoint, so a rerun does not repeat it. `[charge_sensitivity]` refuses a plain run with dropped poses.
 - A pinned compatible set and a ferric compatibility matrix (roadmap 46, docs/compatibility.md,
   docs/superpowers/specs/2026-11-20-compat-matrix-design.md). `compat/stack.toml` pins ferric, attestation-schema and
   mcp for smeltery's environment (equal to uv.lock's, enforced by tests/test_compat_stack.py) and attestation by full

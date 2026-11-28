@@ -193,11 +193,15 @@ climbs on its own, and every `calcs.jsonl` line carries its rung. Each entry mus
 | `diis_size` | int | >= 1 |
 | `level_shift` | float | >= 0 |
 | `soscf` | bool | |
+| `guess` | string | one of `minao`, `hcore` (the initial guess) |
 
 Refused, because each changes the quantity measured, so a value from that rung would not be the same measurement
 as one from rung 0: `energy_conv` (changes the precision of the reported energy), `density_conv` (same), `smearing`
 (fractional occupations change the state whose energy is reported). Any other key is an unknown override and is
-refused. Empty `remedies` (the default) is the tier without a ladder.
+refused. Empty `remedies` (the default) is the tier without a ladder. At most 5 rungs. A plain run (no
+`--temporal`) takes the same ladder and, with `[field_interaction] on_scf_failure = "drop"`, the same pairwise drop;
+see [troubleshooting](troubleshooting.md#an-scf-does-not-converge-a-pose-is-dropped-or-the-run-stops). `[cut]
+min_pairs` applies here too: after a drop an analogue with fewer pairs is not ranked (default 3).
 
 ## Resume
 
