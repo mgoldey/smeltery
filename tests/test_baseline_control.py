@@ -71,8 +71,10 @@ def sub(tmp_path, name):
 
 
 def untimed(text):
-    """A record's bytes with the wall-clock `seconds` of each stage zeroed: the one thing two runs never share."""
+    """A record's bytes with the wall-clock `seconds` of each stage and its ISO timestamps zeroed: what two runs never
+    share (the timestamps differ whenever the runs straddle a second boundary, which CI did hit)."""
     text = re.sub(r'"seconds": [0-9.eE+-]+', '"seconds": 0', text)
+    text = re.sub(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", "1970-01-01T00:00:00Z", text)
     return re.sub(r'"record_sha256": "[0-9a-f]+"', '"record_sha256": ""', text)  # a hash of the seconds too
 
 
