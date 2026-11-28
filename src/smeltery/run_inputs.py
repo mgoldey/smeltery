@@ -18,8 +18,9 @@ from smeltery.config import ConfigError, OutGuardRefused
 from smeltery.methods import registry
 from smeltery.record import file_sha256
 
-#: Input files the config names outside any method's section: the decisions JSON (an input of the Ligands step).
-_OTHER_INPUT_PATHS: tuple[tuple[str, str], ...] = (("decisions", "file"),)
+#: Input files the config names outside any method's section: the decisions JSON (an input of the Ligands step) and the
+#: generation JSON (`smeltery.generate.record`), so a run that read either re-runs from its own directory.
+_OTHER_INPUT_PATHS: tuple[tuple[str, str], ...] = (("decisions", "file"), ("generation", "file"))
 
 
 def input_paths() -> tuple[tuple[str, str], ...]:
