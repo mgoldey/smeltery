@@ -41,8 +41,9 @@ values (`Measurement.from_samples`, the funnel's estimator), the paired ddE and 
   process that finalized the run, not the one that measured), and no `ferric_version` (a build stamp has none).
 
 File-level key-value metadata (`smeltery.*`): `schema_version`, `units` (JSON quantity -> unit, a list when runs
-disagree), `smiles_form`, `runs`, `grain`, `generator`. pyarrow is the optional `dataset` extra; `export_rows` needs
-nothing beyond the core install.
+disagree), `smiles_form`, `runs`, `grain`, `generator`, and `generation` only when a run had a generation step
+(the generator's counts per closed rejection reason; docs/generators.md). pyarrow is the optional `dataset` extra;
+`export_rows` needs nothing beyond the core install.
 """
 
 from __future__ import annotations
@@ -409,6 +410,9 @@ def run_rows(path: str | Path, *, canonicalize: bool = True) -> list[dict]:
         "smeltery_dirty": smeltery.get("dirty"),
         **_ferric_columns(ferric, BASIS_RUN),
     }
+    generated = next((r for r in res.get("funnel") or [] if r.get("kind") == "generate"), None)
+    if generated is not None:  # only a run with a generation step: other runs' rows keep their exact keys
+        base["generation"] = {k: generated[k] for k in GENERATION_SUMMARY_KEYS if k in generated}
     rows = []
     for name, recorded in run.candidates.items():
         values = per_pose.get(name)
@@ -603,8 +607,13 @@ def arrow_schema(metadata_: dict[str, str] | None = None):
     return pa.schema([pa.field(n, t) for n, t in fields], metadata=meta)
 
 
+#: The generate row's counts a dataset carries (not the rejected SMILES: those stay in the run record).
+GENERATION_SUMMARY_KEYS = ("generator", "candidates_in", "candidates_out", "rejected_by_reason", "rejected_total")
+
+
 def file_metadata(rows: list[dict]) -> dict[str, str]:
-    """The `smeltery.*` key-value metadata for `rows`."""
+    """The `smeltery.*` key-value metadata for `rows`. `smeltery.generation` (run_id -> the generator's raw count,
+    returned count and rejections per closed reason) is present only when some run had a generation step."""
     units: dict[str, set[str]] = {}
     for r in rows:
         for s in r["scores"]:
@@ -613,6 +622,7 @@ def file_metadata(rows: list[dict]) -> dict[str, str]:
         version = metadata.version("smeltery")
     except metadata.PackageNotFoundError:
         version = "unknown"
+    generation = {r["run_id"]: r["generation"] for r in reversed(rows) if "generation" in r}
     return {
         "smeltery.schema_version": str(SCHEMA_VERSION),
         "smeltery.units": json.dumps(
@@ -622,6 +632,11 @@ def file_metadata(rows: list[dict]) -> dict[str, str]:
         "smeltery.runs": json.dumps(list(dict.fromkeys(r["run_id"] for r in rows))),
         "smeltery.grain": GRAIN,
         "smeltery.generator": f"smeltery {version}",
+        **(
+            {"smeltery.generation": json.dumps(dict(reversed(generation.items())), sort_keys=True)}
+            if generation
+            else {}
+        ),
     }
 
 

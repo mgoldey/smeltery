@@ -405,6 +405,77 @@ def run_dropped_poses(request: Request, run_id: str) -> PoseDrops:
     )
 
 
+class AttritionStage(BaseModel):
+    stage: str
+    kind: str
+    candidates_in: int | None
+    candidates_out: int | None
+    #: an unranked cut passes everyone on because it could not order them; `candidates_out` is then None
+    unranked: bool
+
+
+class RejectedMolecule(BaseModel):
+    index: int
+    reason: str
+    detail: str
+    smiles: str | None
+
+
+class ReasonCount(BaseModel):
+    reason: str
+    count: int
+
+
+class GenerationAttrition(BaseModel):
+    """What the generator lost before the funnel saw anything (`results.funnel`'s `generate` row). `rejected` is
+    capped: `rejected_listed` of `rejected_total` are present, the counts per reason are complete."""
+
+    generator: str | None
+    n_raw: int
+    n_returned: int
+    by_reason: list[ReasonCount]
+    rejected_total: int
+    rejected_listed: int
+    rejected: list[RejectedMolecule]
+
+
+class Attrition(BaseModel):
+    """Where candidates were lost, in run order. `generation` is None for a run with no generation step, whose
+    stages are then the funnel's own and nearly flat: gates stop a run rather than drop candidates."""
+
+    stages: list[AttritionStage]
+    generation: GenerationAttrition | None
+
+
+@router.get("/runs/{run_id}/attrition", response_model=Attrition)
+def run_attrition(request: Request, run_id: str) -> Attrition:
+    r = run(request, run_id)
+    rows = R.funnel_rows(r)
+    stages = [
+        AttritionStage(
+            stage=str(f.get("stage")),
+            kind=str(f.get("kind")),
+            candidates_in=f.get("candidates_in"),
+            candidates_out=f.get("candidates_out"),
+            unranked=bool(f.get("unranked")),
+        )
+        for f in rows
+    ]
+    g = R.generation_row(r)
+    generation = None
+    if g is not None:
+        generation = GenerationAttrition(
+            generator=g.get("generator"),
+            n_raw=int(g["candidates_in"]),
+            n_returned=int(g["candidates_out"]),
+            by_reason=[ReasonCount(reason=k, count=int(v)) for k, v in (g.get("rejected_by_reason") or {}).items()],
+            rejected_total=int(g.get("rejected_total") or 0),
+            rejected_listed=int(g.get("rejected_listed") or 0),
+            rejected=[RejectedMolecule.model_validate(x) for x in g.get("rejected") or []],
+        )
+    return Attrition(stages=stages, generation=generation)
+
+
 @router.get("/runs/{run_id}/pose_atoms", response_model=M.PoseAtoms)
 def run_pose_atoms(request: Request, run_id: str, candidate: str) -> M.PoseAtoms:
     """Atom symbols in the order of the candidate's pose SDF -- the order `[[pocket.site]]` indexes. Read from the

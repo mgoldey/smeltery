@@ -47,6 +47,13 @@ export const perPoseQuery = (id: string) =>
     queryFn: () => unwrap(api.GET("/api/runs/{run_id}/per_pose", { params: { path: { run_id: id } } })),
   });
 
+/** Where candidates were lost per stage, with the generator's rejections when the run had a generation step. */
+export const attritionQuery = (id: string) =>
+  queryOptions({
+    queryKey: ["attrition", id],
+    queryFn: () => unwrap(api.GET("/api/runs/{run_id}/attrition", { params: { path: { run_id: id } } })),
+  });
+
 export const droppedPosesQuery = (id: string) =>
   queryOptions({
     queryKey: ["dropped_poses", id],

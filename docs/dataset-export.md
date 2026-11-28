@@ -48,7 +48,7 @@ Single-sample standard errors are null (they are NaN in memory).
 Key-value metadata on the Parquet file and the Arrow schema: `smeltery.schema_version` (`3`; bumped when a column is
 added, renamed, removed or retyped -- 2 added `family` and `core_record_sha256` and took `run_id` from the core record), `smeltery.units` (JSON `{quantity: unit}`, a list of units where runs disagree;
 includes `ddE`), `smeltery.smiles_form`, `smeltery.runs` (the run ids, in order), `smeltery.grain` and
-`smeltery.generator`. The schema is built once in `arrow_schema()` and is identical for every export, whatever the
+`smeltery.generator`, plus `smeltery.generation` (JSON, run id -> the generator's raw and returned counts and rejections per closed reason; no SMILES) only when some exported run had a `[generation]` step -- no column changes, so files without one are byte-identical. The schema is built once in `arrow_schema()` and is identical for every export, whatever the
 runs contain, so files of different runs concatenate (`tests/test_dataset_export.py` pins it across all five prebuilt
 runs).
 

@@ -781,6 +781,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/attrition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Attrition */
+        get: operations["run_attrition_api_runs__run_id__attrition_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/bundle.zip": {
         parameters: {
             query?: never;
@@ -1528,6 +1545,29 @@ export interface components {
              */
             path: string;
         };
+        /**
+         * Attrition
+         * @description Where candidates were lost, in run order. `generation` is None for a run with no generation step, whose
+         *     stages are then the funnel's own and nearly flat: gates stop a run rather than drop candidates.
+         */
+        Attrition: {
+            generation: components["schemas"]["GenerationAttrition"] | null;
+            /** Stages */
+            stages: components["schemas"]["AttritionStage"][];
+        };
+        /** AttritionStage */
+        AttritionStage: {
+            /** Candidates In */
+            candidates_in: number | null;
+            /** Candidates Out */
+            candidates_out: number | null;
+            /** Kind */
+            kind: string;
+            /** Stage */
+            stage: string;
+            /** Unranked */
+            unranked: boolean;
+        };
         /** BlankPipeline */
         BlankPipeline: {
             /** Campaign */
@@ -1977,6 +2017,27 @@ export interface components {
             };
             /** Rows */
             rows: components["schemas"]["GateRow"][];
+        };
+        /**
+         * GenerationAttrition
+         * @description What the generator lost before the funnel saw anything (`results.funnel`'s `generate` row). `rejected` is
+         *     capped: `rejected_listed` of `rejected_total` are present, the counts per reason are complete.
+         */
+        GenerationAttrition: {
+            /** By Reason */
+            by_reason: components["schemas"]["ReasonCount"][];
+            /** Generator */
+            generator: string | null;
+            /** N Raw */
+            n_raw: number;
+            /** N Returned */
+            n_returned: number;
+            /** Rejected */
+            rejected: components["schemas"]["RejectedMolecule"][];
+            /** Rejected Listed */
+            rejected_listed: number;
+            /** Rejected Total */
+            rejected_total: number;
         };
         /** Impact */
         Impact: {
@@ -2872,6 +2933,24 @@ export interface components {
             smiles: string;
             /** Symbols */
             symbols: string[];
+        };
+        /** ReasonCount */
+        ReasonCount: {
+            /** Count */
+            count: number;
+            /** Reason */
+            reason: string;
+        };
+        /** RejectedMolecule */
+        RejectedMolecule: {
+            /** Detail */
+            detail: string;
+            /** Index */
+            index: number;
+            /** Reason */
+            reason: string;
+            /** Smiles */
+            smiles: string | null;
         };
         /** RejectedRow */
         RejectedRow: {
@@ -5375,6 +5454,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    run_attrition_api_runs__run_id__attrition_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attrition"];
                 };
             };
             /** @description Validation Error */

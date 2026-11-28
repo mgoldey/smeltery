@@ -10,7 +10,8 @@ import { PlotlyFigure } from "../../components/PlotlyFigure";
 import { VerdictBanner } from "../../components/VerdictBanner";
 import { useScheme } from "../../styles/scheme";
 import { useRunId } from "./RunLayout";
-import { ddeQuery, figureQuery, perPoseQuery, verdictQuery } from "../../api/queries";
+import { Attrition } from "../../components/Attrition";
+import { attritionQuery, ddeQuery, figureQuery, perPoseQuery, verdictQuery } from "../../api/queries";
 
 function useFigure(runId: string, name: "forest" | "matrix" | "per_pose" | "per_pose_values", enabled: boolean) {
   const theme = useScheme();
@@ -29,6 +30,7 @@ export function Results() {
   const perPose = useFigure(runId, "per_pose", ok);
   const perPoseValues = useFigure(runId, "per_pose_values", ok && !pairs);
   const rows = useQuery({ ...perPoseQuery(runId), enabled: ok });
+  const attrition = useQuery({ ...attritionQuery(runId), enabled: ok });
   const sizes = groupSizes(table.data?.rows ?? []);
 
   return (
@@ -46,6 +48,8 @@ export function Results() {
         {ok && table.isPending ? <p className="empty-state">Reading the paired ΔΔE table…</p> : null}
         {ok && table.data ? (
           <>
+            {attrition.isError ? <p className="empty-state">The attrition could not be read: {attrition.error.message}</p> : null}
+            <Attrition data={attrition.data} />
             <h2>Paired ΔΔE against the parent</h2>
             <p className="lede">
               Mean ± {table.data.z}·SEM per analogue. Candidates the cut could not separate share a band and a label; their
