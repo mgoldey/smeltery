@@ -127,7 +127,18 @@ config error: refusing to cut on 'dE_int': tier '...' has not measured its syste
 
 Both measurement tiers have an unmeasured floor today, so the config must state `[cut] floor` in
 kcal/mol; the run record then says the floor came from the config. Also `[cut] keep must be an
-integer in 1..N (the number of analogues)` when `keep` is out of range. See
+integer in 1..N (the number of analogues)` when `keep` is out of range.
+
+To see the evidence that exists for choosing it, pool the stored charge-model sensitivities:
+
+```bash
+smeltery floor measure benchmarks/plb/results/cdk2_sto3g.json benchmarks/plb/results/tyk2_sto3g_charmm36.json --provisional
+```
+
+It prints each system's floor (cdk2 1.26, tyk2 0.67 kcal/mol today) and the pooled summary, and `--provisional` asks
+for a default. It refuses with exit 3 until at least 3 systems agree within 1.5x; with two it says so and writes no
+default. The floors are lower bounds from one charge-model pair, so a number you set yourself is still not a
+measured floor. A default, when the evidence supports one, is labelled `PROVISIONAL, NOT MEASURED`. See
 [glossary.md](glossary.md) (floor, tie group) and [limits.md](limits.md).
 
 ### A path in the config does not exist
