@@ -478,7 +478,7 @@ def data(legacy: dict, legacy_name: str, legacy_sha256: str) -> list[dict]:
     for key in sorted(config.get("inputs") or {}):
         entry = config["inputs"][key] or {}
         add(entry.get("copy"), entry.get("sha256"), "input")
-    for key in ("receptor", "decisions_in"):
+    for key in ("receptor", "decisions_in", "generation_in"):
         entry = results.get(key) or {}
         add(entry.get("file"), entry.get("sha256"), "input")
     for tier in legacy.get("tiers") or []:
@@ -540,6 +540,11 @@ def core_fields(
     ext["inputs"] = legacy.get("inputs") or {}  # derived from the config by the plan: smeltery's, not the config
     if "reuse" in results:  # stage reuse (smeltery.reuse): which stages were reused, from which run; no core slot
         ext["reuse"] = results["reuse"]
+    generated = next((r for r in results.get("funnel") or [] if r.get("kind") == "generate"), None)
+    if (
+        generated is not None
+    ):  # generator rejections (smeltery.generate.record): counts per closed reason, capped SMILES
+        ext["generation"] = {k: v for k, v in generated.items() if k not in ("stage", "kind")}
     if config is None:
         ext["config_unobserved"] = config_unobserved or "the campaign config the run read is not known"
     return {

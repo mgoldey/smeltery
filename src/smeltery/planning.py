@@ -23,8 +23,9 @@ from rdkit import Chem
 from .config import ConfigError, StageError, gate_keys
 from .cost import available_memory_gb
 from .decisions import DecisionSet
-from .funnel import cut, paired_delta, tier_floor, unpaired_delta
+from .funnel import DEFAULT_MIN_PAIRS, cut, paired_delta, tier_floor, unpaired_delta
 from .gates import PoseGateError, check_candidate_poses, require_passing_poses
+from .generate.record import GenerationFileError, generation_block, load_generation
 from .methods import Analysis, FieldSource, Measure, MethodSpec, PoseSource, active, active_hooks, registry
 from .model import Candidate, PointCharge
 from .pocket import load_pocket
@@ -60,6 +61,7 @@ class Plan:
     stage_log: list = dataclasses.field(default_factory=list)  # one dict per stage: its name and a summary line
     receptor_pdb: Path | None = None  # a receptor .pdb in the poses' frame, when one exists
     decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
+    generation_in: dict | None = None  # {"file", "sha256", "block"} when [generation] was given
     gate_results: dict = dataclasses.field(default_factory=dict)  # results["gates"]: per-pose gate results that ran
     stage_seconds: dict = dataclasses.field(default_factory=dict)  # this plan's wall time per stage (`_stage`)
     structure_fetch: dict | None = None  # results["structure_fetch"]: when [structure] was fetched (not an input)
@@ -81,6 +83,8 @@ class Plan:
             inputs["field"] = [(c.q, c.xyz_ang) for c in self.field]
         if self.decisions_in is not None:  # only when given, so configs without [decisions] keep their digests
             inputs["decisions"] = {"sha256": self.decisions_in["sha256"]}
+        if self.generation_in is not None:  # likewise: configs without [generation] keep their digests
+            inputs["generation"] = {"sha256": self.generation_in["sha256"]}
         return inputs
 
     @property
@@ -96,6 +100,20 @@ class Plan:
 
 def _canonical(smiles: str) -> str:
     return Chem.MolToSmiles(Chem.MolFromSmiles(smiles))
+
+
+def _read_generation(cfg: dict) -> dict | None:
+    """Read `[generation] file` (smeltery.generate.record) for the record, or None without the section."""
+    if "generation" not in cfg:
+        return None
+    path = _resolve(cfg, cfg["generation"]["file"])
+    if not path.is_file():
+        raise ConfigError(f"[generation] file {str(path)!r} does not exist")
+    try:
+        doc = load_generation(path)
+    except GenerationFileError as e:
+        raise ConfigError(f"[generation] {e}") from e
+    return {"file": str(path.resolve()), "sha256": file_digest(path), "block": generation_block(doc)}
 
 
 def _apply_decisions(cfg: dict) -> tuple[dict, dict | None]:
@@ -480,6 +498,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     network fetch of the structure providers (tests inject committed fixtures).
     """
     cfg, decisions_in = _apply_decisions(cfg)
+    generation_in = _read_generation(cfg)
     cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
@@ -529,6 +548,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     receptor = pocket_path if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
     plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
+    plan.generation_in = generation_in
     plan.gate_results = gate_results
     plan.stage_seconds = stage_seconds
     plan.structure_fetch = prepared.fetch if prepared is not None else None
@@ -556,6 +576,20 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
     """
     n = len(plan.candidates)
     rows = []
+    if plan.generation_in is not None:  # the only stage that loses molecules before the funnel sees them
+        block = plan.generation_in["block"]
+        rows.append(
+            {
+                "stage": "generate",
+                "kind": "generate",
+                "candidates_in": block["n_raw"],
+                "candidates_out": block["n_returned"],
+                **{
+                    k: block[k]
+                    for k in ("generator", "rejected_by_reason", "rejected_total", "rejected_listed", "rejected")
+                },
+            }
+        )
     for e in plan.stage_log:
         rows.append({k: e[k] for k in ("stage", "kind", "candidates_in", "candidates_out")})
         if e["stage"] == "pocket":  # parity runs right after the pocket, before the recorded gates
@@ -618,6 +652,64 @@ def _paired_parent(plan: Plan, c: Candidate, pose_index: dict[str, list[int]] | 
     return view
 
 
+def drop_failed_poses(plan: Plan, failures: list[dict]) -> tuple[dict[str, list[int]], list[dict], dict]:
+    """Pair over the poses that converged for BOTH legs of a pair, in place, and say what was dropped.
+
+    `failures` (`FieldInteraction.failures`): one entry per pose leg that failed every rung. A pose that failed for the
+    parent is dropped for every analogue; one that failed for an analogue is dropped for that analogue and the parent's
+    value at that pose is not in its ddE. Every candidate's poses and per-pose lists are compacted to the kept poses
+    (the `--temporal` runner's own rule), so pose i still pairs with pose i. Returns (`pose_index`: kept ORIGINAL pose
+    indices per candidate, `dropped_poses`: the failures with who they dropped, `pairing`: the n_poses accounting),
+    the three recorded under `results.pose_index`, `results.dropped_poses` and `results.pairing`."""
+    parent = plan.parent
+    failed: dict[str, set[int]] = {c.name: set() for c in plan.candidates}
+    for f in failures:
+        failed[f["candidate"]].add(int(f["pose"]))
+    requested = {c.name: len(c.poses) for c in plan.candidates}
+    pose_index = {parent.name: [i for i in range(requested[parent.name]) if i not in failed[parent.name]]}
+    for c in plan.candidates:
+        if c is not parent:
+            gone = failed[c.name] | failed[parent.name]
+            pose_index[c.name] = [i for i in range(requested[c.name]) if i not in gone]
+    dropped = [
+        {
+            **f,
+            "dropped_with": [c.name for c in plan.candidates]
+            if f["candidate"] == parent.name
+            else [parent.name, f["candidate"]],
+        }
+        for f in failures
+    ]
+    empty = [k for k, v in pose_index.items() if not v]
+    if empty:
+        raise StageError(f"stage 'pairing' failed: every pose of {', '.join(empty)} was dropped", stage="pairing")
+    failed_pairs = []
+    for c in plan.candidates:
+        if c is parent:
+            continue
+        for i in range(requested[c.name]):
+            if i in pose_index[c.name]:
+                continue
+            why = [
+                {"candidate": f["candidate"], "leg": f["leg"], "reason": f["reason"]}
+                for f in failures
+                if int(f["pose"]) == i and f["candidate"] in (c.name, parent.name)
+            ]
+            failed_pairs.append({"analogue": c.name, "pose": i, "failed": why})
+    for c in plan.candidates:
+        keep = pose_index[c.name]
+        n = requested[c.name]
+        c.per_pose = {q: [v[i] for i in keep] if len(v) == n else v for q, v in c.per_pose.items()}
+        c.poses = [c.poses[i] for i in keep]
+        c.receptor_flex = [c.receptor_flex[i] for i in keep] if len(c.receptor_flex) == n else c.receptor_flex
+    pairing = {
+        "requested_poses": {c.name: requested[c.name] for c in plan.candidates},
+        "n_pairs": {c.name: len(pose_index[c.name]) for c in plan.candidates if c is not parent},
+        "failed_pairs": failed_pairs,
+    }
+    return pose_index, dropped, pairing
+
+
 def run_plan(
     plan: Plan,
     measure=None,
@@ -658,6 +750,27 @@ def run_plan(
         _stage(plan.tier.name, lambda: measure(plan))
     else:  # the Temporal runner's measurement, from its log: logged as a completed stage like any other
         stages.measure(plan, lambda: _stage(plan.tier.name, lambda: measure(plan)))
+    failures = list(getattr(plan.tier, "failures", None) or []) if measure is None else []
+    dropped: list[dict] = []
+    pairing: dict | None = None
+    if failures:  # `on_scf_failure = "drop"`: pair over what converged for both legs of each pair, and say so
+        if partial or pose_index:
+            raise StageError(
+                "stage 'pairing' failed: SCFs failed with on_scf_failure = 'drop', which a partial run "
+                "(--only-candidate) cannot pair; run the whole campaign (the finished SCFs are in the checkpoint "
+                "and are not recomputed)",
+                stage="pairing",
+            )
+        remeasuring = [s.key for s in active_hooks("analysis", plan.cfg) if hasattr(s.hook, "extra_fields")]
+        if remeasuring:
+            raise StageError(
+                f"stage 'pairing' failed: {len(failures)} SCF(s) failed and the poses were dropped pairwise, but "
+                f"{remeasuring} re-measure every pose and cannot pair over different pose sets; rerun with them "
+                "removed, or with --temporal (the finished SCFs are in the checkpoint and are not recomputed)",
+                stage="pairing",
+            )
+        pose_index, dropped, pairing = drop_failed_poses(plan, failures)
+        pairing["min_pairs"] = plan.cfg["cut"].get("min_pairs", DEFAULT_MIN_PAIRS)
     analogues = [c for c in plan.candidates if c is not plan.parent]
     if partial:
         paired = {}
@@ -669,13 +782,21 @@ def run_plan(
     else:
         paired = {c.name: paired_delta(_paired_parent(plan, c, pose_index), c, QUANTITY) for c in analogues}
         unpaired = {c.name: unpaired_delta(_paired_parent(plan, c, pose_index), c, QUANTITY) for c in analogues}
-        res = cut(paired, keep=plan.cfg["cut"]["keep"], z=plan.cfg["cut"].get("z", 2.0), floor=plan.floor)
+        min_pairs = plan.cfg["cut"].get("min_pairs", DEFAULT_MIN_PAIRS if pose_index else None)
+        res = cut(
+            paired,
+            keep=plan.cfg["cut"]["keep"],
+            z=plan.cfg["cut"].get("z", 2.0),
+            floor=plan.floor,
+            min_pairs=min_pairs,
+        )
         results: dict[str, object] = {
             "paired_ddE": {
                 k: {"mean": v.mean, "sem": v.sem, "n": v.n, "per_pose": v.per_pose} for k, v in paired.items()
             },
             "unpaired_sem": {k: v.sem for k, v in unpaired.items()},
             "cut": {"groups": res.groups, "survivors": res.survivors, "unranked": res.unranked_at_boundary},
+            **({"cut_unrankable": res.unrankable} if res.unrankable else {}),
             "stages": plan.stage_log,
             "funnel": funnel_counts(plan, res),
         }
@@ -684,6 +805,9 @@ def run_plan(
     results["candidate_order"] = [c.name for c in plan.candidates]
     if pose_index:  # only after a pairwise drop, so ordinary records keep their shape
         results["pose_index"] = {k: list(v) for k, v in pose_index.items()}
+    if dropped:  # a plain run's own drops; the Temporal runner adds its `dropped_poses` after run_plan
+        results["dropped_poses"] = dropped
+        results["pairing"] = pairing
     # (analogue atom, parent atom) pairs copied exactly from the parent's pose: the core a view draws solid
     results["pose_maps"] = {k: [list(p) for p in v] for k, v in plan.poses.scaffold_maps.items()}
     results["per_pose"], results["units"] = per_pose_results(plan)
@@ -695,6 +819,8 @@ def run_plan(
     )
     if plan.decisions_in is not None:
         results["decisions_in"] = dict(plan.decisions_in)
+    if plan.generation_in is not None:
+        results["generation_in"] = {k: plan.generation_in[k] for k in ("file", "sha256")}
     if plan.structure_fetch is not None:  # a wall-clock time: in results, never in inputs (the digest)
         results["structure_fetch"] = dict(plan.structure_fetch)
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)
@@ -703,7 +829,7 @@ def run_plan(
             if spec.key in skip_analyses:
                 continue
             _run_analysis(spec, plan, rec, {"measure": measure, "log": plan.stage_log}, stages)
-    return rec, {"paired": paired, "unpaired": unpaired, "cut": res}
+    return rec, {"paired": paired, "unpaired": unpaired, "cut": res, "dropped": dropped, "pairing": pairing}
 
 
 def _run_analysis(spec: MethodSpec, plan: Plan, rec: RunRecord, ctx: dict, stages=None) -> None:

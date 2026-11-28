@@ -624,9 +624,37 @@ def refuse_false_convergence(row: dict, earlier: list[dict]) -> dict:
 
 #: `run_rhf` knobs a remedy rung may override, with their types: they change how the SCF reaches its solution, not
 #: which solution it reports.
-REMEDY_KEYS: dict[str, type] = {"max_iter": int, "diis": str, "diis_size": int, "level_shift": float, "soscf": bool}
+REMEDY_KEYS: dict[str, type] = {
+    "max_iter": int,
+    "diis": str,
+    "diis_size": int,
+    "level_shift": float,
+    "soscf": bool,
+    "guess": str,
+}
 #: The DIIS flavours ferric's `run_rhf(diis=...)` accepts (a string; True is a TypeError there).
 DIIS_KINDS = ("pulay", "adiis", "ediis")
+#: The initial guesses ferric's `run_rhf(guess=...)` accepts for a rung ("sad" is its alias of "minao", so it adds
+#: nothing). A different guess changes where the SCF starts, not which solution it reports; a rung that lands on
+#: another state is caught by `refuse_false_convergence`, which compares the energies of the leg's rungs.
+GUESS_KINDS = ("minao", "hcore")
+#: The string-valued knobs and the values each takes.
+REMEDY_CHOICES: dict[str, tuple[str, ...]] = {"diis": DIIS_KINDS, "guess": GUESS_KINDS}
+#: The longest ladder (remedy rungs after rung 0). A failed SCF of this system costs hours of CPU (docs/benchmarks/
+#: danuglipron_halogen.md: 5,000 to 7,500 CPU-s each), so a ladder is bounded and a pose is never retried endlessly.
+MAX_REMEDY_RUNGS = 5
+#: What `FieldInteraction(on_scf_failure=...)` takes: "raise" stops the tier on a pose that fails every rung (the
+#: default, and the behaviour before the option); "drop" records that pose's failure and goes on.
+ON_SCF_FAILURE = ("raise", "drop")
+#: A deterministic escalation ladder for a pose that does not converge, built only from knobs ferric's `run_rhf`
+#: takes (`ferric.run_rhf.__doc__`, 0.1.0rc10): more iterations, then ADIIS with a level shift, then a different
+#: initial guess with a larger shift and second-order steps. ferric has no damping option. No rung touches a
+#: threshold or the occupations (`REMEDY_REFUSED`). Opt in: `remedies = DEFAULT_SCF_LADDER`.
+DEFAULT_SCF_LADDER: tuple[dict, ...] = (
+    {"max_iter": 400},
+    {"diis": "adiis", "level_shift": 0.5, "max_iter": 400},
+    {"diis": "adiis", "guess": "hcore", "level_shift": 1.0, "soscf": True, "max_iter": 400},
+)
 #: Knobs a remedy may NOT override, and why: each changes the quantity being measured, so a value from that rung
 #: would not be the same measurement as a value from rung 0.
 REMEDY_REFUSED: dict[str, str] = {
@@ -642,6 +670,11 @@ def check_remedies(remedies) -> list[dict]:
     Rung 0 is the tier's own settings; rung k (k >= 1) is rung 0 with `remedies[k - 1]` applied on top."""
     if not isinstance(remedies, (list, tuple)):
         raise ValueError("remedies must be a list of tables of run_rhf knob overrides")
+    if len(remedies) > MAX_REMEDY_RUNGS:
+        raise ValueError(
+            f"remedies has {len(remedies)} rungs; at most {MAX_REMEDY_RUNGS} (a failing SCF costs hours, so the "
+            "ladder is bounded)"
+        )
     out = []
     for k, r in enumerate(remedies, start=1):
         if not isinstance(r, dict) or not r:
@@ -656,8 +689,8 @@ def check_remedies(remedies) -> list[dict]:
                 raise ValueError(f"remedies rung {k}: unknown override {key!r}; allowed: {sorted(REMEDY_KEYS)}")
             want = REMEDY_KEYS[key]
             if want is str:
-                if v not in DIIS_KINDS:
-                    raise ValueError(f"remedies rung {k}: diis = {v!r} is not one of {list(DIIS_KINDS)}")
+                if v not in REMEDY_CHOICES[key]:
+                    raise ValueError(f"remedies rung {k}: {key} = {v!r} is not one of {list(REMEDY_CHOICES[key])}")
                 continue
             ok = isinstance(v, bool) if want is bool else (isinstance(v, (int, float)) and not isinstance(v, bool))
             if want is int and ok:
@@ -682,7 +715,13 @@ class FieldInteraction:
     in order when the SCF before it did not converge (`result.converged`). Each leg (vacuum, field) of a pose climbs
     on its own; the pose's value records the higher of its two legs' rungs in `per_pose["scf_rung"]`, and each SCF
     its own rung in the calc log. Empty (the default) is exactly the tier without a ladder: same settings, same
-    record.
+    record. The ladder is bounded (`MAX_REMEDY_RUNGS`) and deterministic: a leg is tried once per rung, never again.
+
+    `on_scf_failure` says what a pose that fails every rung does. "raise" (the default) stops the tier with a
+    RuntimeError, as before. "drop" records the failure in `failures` (candidate, pose, leg, reason, rungs tried),
+    puts NaN at that pose in `per_pose["dE_int"]` (and `scf_rung`), skips the field leg of a pose whose vacuum leg
+    failed (it would not be reported), and goes on; `planning.run_plan` then pairs over the poses that converged for
+    both the analogue and the parent, and records what was dropped and why. A failure is never silent.
     """
 
     basis: str = "sto-3g"
@@ -690,13 +729,19 @@ class FieldInteraction:
     density_conv: float = 1e-8
     max_iter: int | None = None  # None leaves ferric's default; a value is passed to both SCFs of every pose
     remedies: list[dict] = field(default_factory=list)
+    on_scf_failure: str = "raise"
     name: str = "field_interaction"
     field_provenance: dict | None = None  # set from a `PocketField` in `run`: file digest, pdb2pqr30 version, cutoff
     #: One dict per SCF of the last `run` (candidate, pose, leg, converged, iterations, energy_hartree, seconds).
     calc_log: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
+    #: One dict per pose leg that failed every rung in the last `run` ("drop" only): candidate, pose, leg, outcome,
+    #: reason, rungs_tried.
+    failures: list[dict] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.remedies = check_remedies(self.remedies)
+        if self.on_scf_failure not in ON_SCF_FAILURE:
+            raise ValueError(f"on_scf_failure = {self.on_scf_failure!r} is not one of {list(ON_SCF_FAILURE)}")
 
     def settings(self) -> dict:
         s = {
@@ -710,6 +755,8 @@ class FieldInteraction:
         }
         if self.remedies:  # only when set, so configs without a ladder keep their digests
             s["remedies"] = [dict(r) for r in self.remedies]
+        if self.on_scf_failure != "raise":  # likewise: the numbers do not change, what a failure does does
+            s["on_scf_failure"] = self.on_scf_failure
         return s
 
     def produces(self) -> dict[str, str]:
@@ -791,6 +838,26 @@ class FieldInteraction:
             earlier.append(row)
         return _NotConverged(res), rung
 
+    def _fail(self, cand: str, pose: int, leg: str, res, rung: int) -> None:
+        """Record one leg that failed every rung: what the engine said at the last rung and what the ladder refused."""
+        last = self.calc_log[-1] if self.calc_log else {}
+        bits = [f"SCF did not converge on any of {rung + 1} rung(s)"]
+        exit_reason = getattr(res, "exit_reason", None)
+        if exit_reason is not None:
+            bits.append(f"engine exit_reason {exit_reason!r} at the last rung")
+        if last.get("refused"):
+            bits.append(str(last["refused"]))
+        self.failures.append(
+            {
+                "candidate": cand,
+                "pose": pose,
+                "leg": leg,
+                "outcome": "not_converged",
+                "reason": "; ".join(bits),
+                "rungs_tried": list(range(rung + 1)),
+            }
+        )
+
     def run(self, candidates: list[Candidate], ctx: dict) -> None:
         for cand in candidates:
             require_passing_poses(cand, ctx)
@@ -798,14 +865,25 @@ class FieldInteraction:
 
         charges, bs, checkpoint = _field_context(self, ferric, ctx)  # checkpoint: smeltery.checkpoint, or None
         self.calc_log = []
+        self.failures = []
         for cand in candidates:
             vals, rungs = [], []
             charge = _net_charge(cand.smiles)  # the SMILES' formal charges: never score an ion as a neutral molecule
             for i, pose in enumerate(cand.poses):
                 mol = ferric_molecule(ferric, pose, pose_label(cand.name, i), charge)
                 vac, vr = self._climb(ferric, mol, bs, None, cand.name, i, "vacuum", checkpoint)
+                if self.on_scf_failure == "drop" and not vac.converged:
+                    self._fail(cand.name, i, "vacuum", vac, vr)  # the field leg is not run: its value would not be used
+                    vals.append(float("nan"))
+                    rungs.append(float("nan"))
+                    continue
                 fld, fr = self._climb(ferric, mol, bs, charges, cand.name, i, "field", checkpoint)
                 if not (vac.converged and fld.converged):
+                    if self.on_scf_failure == "drop" and not fld.converged:
+                        self._fail(cand.name, i, "field", fld, fr)
+                        vals.append(float("nan"))
+                        rungs.append(float("nan"))
+                        continue
                     raise RuntimeError(f"{cand.name} pose {i}: SCF did not converge")
                 vals.append(interaction_kcal(vac.energy, fld.energy))
                 rungs.append(float(max(vr, fr)))

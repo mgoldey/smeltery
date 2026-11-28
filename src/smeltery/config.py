@@ -22,12 +22,13 @@ from .methods import MethodSpec, active_hooks, by_slot, registry
 from .tiers import FieldDftInteraction, FieldInteraction, check_remedies
 
 #: Top-level keys that are inputs of the pipeline, not a method's section (the Ligands step, and the gate switches).
-OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions", "run"}
+OWN_TOP_KEYS = {"campaign", "parent", "candidates", "gates", "decisions", "generation", "run"}
 #: `[run]`: how the run executes, not what it measures (not an input: it never moves the digest).
 RUN_KEYS = {"scf_timeout_s", "allow_mixed_builds"}
 #: `[run] scf_timeout_s` default: one SCF leg (vacuum or field, one rung) is ended after this long under `--temporal`.
 SCF_TIMEOUT_S = 14400
 DECISIONS_KEYS = {"file"}
+GENERATION_KEYS = {"file"}
 SITE_KEYS = {"q", "atom", "from_atom", "distance"}
 
 
@@ -160,6 +161,7 @@ def validate_config(cfg: dict) -> dict:
             )
     _validate_gates(cfg)
     _validate_decisions(cfg)
+    _validate_generation(cfg)
     _validate_run(cfg)
     return cfg
 
@@ -237,6 +239,9 @@ def _validate_cut(cfg: dict) -> None:
     n_analogues = len(cfg["candidates"]) - 1
     if not isinstance(cut_cfg.get("keep"), int) or not 1 <= cut_cfg["keep"] <= n_analogues:
         raise ConfigError(f"[cut] keep must be an integer in 1..{n_analogues} (the number of analogues)")
+    mp = cut_cfg.get("min_pairs")
+    if mp is not None and (not isinstance(mp, int) or isinstance(mp, bool) or mp < 2):
+        raise ConfigError("[cut] min_pairs must be an integer >= 2 (one pair has no standard error)")
 
 
 def _validate_pocket(cfg: dict) -> None:
@@ -353,6 +358,17 @@ def _validate_decisions(cfg: dict) -> None:
     _check_keys("[decisions]", d, DECISIONS_KEYS)
     if not isinstance(d.get("file"), str) or not d["file"]:
         raise ConfigError("[decisions] file is required: the path of a decisions JSON (smeltery.decisions)")
+
+
+def _validate_generation(cfg: dict) -> None:
+    if "generation" not in cfg:
+        return
+    g = cfg["generation"]
+    if not isinstance(g, dict):
+        raise ConfigError("[generation] must be a table")
+    _check_keys("[generation]", g, GENERATION_KEYS)
+    if not isinstance(g.get("file"), str) or not g["file"]:
+        raise ConfigError("[generation] file is required: the path of a generation JSON (smeltery.generate.record)")
 
 
 def _validate_gates(cfg: dict) -> None:

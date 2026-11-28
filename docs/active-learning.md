@@ -48,6 +48,42 @@ smeltery al run --loop demo --target pocket.pdb --reference-smiles "CCO" \
   --pool alcohols.smi --seed 0 --iterations 3 --batch 2 --out runs/demo
 ```
 
+### The uncertainty-aware proposer
+
+`--acquisition` swaps the random draw for `smeltery.al_proposers.UncertaintyProposer`, which fits a Gaussian process
+(Tanimoto kernel on Morgan count fingerprints, each score weighted by its SEM) to the scored history and picks the
+unscored pool members with the best acquisition value. It needs only numpy; without RDKit it falls back to hashed
+SMILES 3-grams.
+
+```sh
+smeltery al run --loop demo --target pocket.pdb --reference-smiles "CCO" \
+  --pool candidates.smi --acquisition lcb --seed 0 --iterations 5 --batch 8 --out runs/demo
+```
+
+- `--acquisition lcb` (lower confidence bound, `mean - kappa*sd`, `--kappa` default 1), `ei` (expected improvement) or
+  `random` (the same proposer without a model, as a control). Scores are minimised.
+- The first iteration, with no scored history, is the same seeded draw `PoolProposer` makes. A batch is chosen
+  greedily with fantasised outcomes so it spreads out. Scored molecules, the reference and duplicates are never
+  re-proposed.
+- Deterministic given `--seed` and the history. The seed is recorded as `proposer_seeds = {"uncertainty": seed}`, and
+  the acquisition, kappa, xi and featurizer in the proposer identity's `params`.
+- From Python: `UncertaintyProposer(pool, seed=0, acquisition="ei", generator=fn)` also takes a
+  `generator(rng, k) -> SMILES` that adds fresh candidates each iteration. `--proposer module:Class` instantiates a
+  class; `smeltery.al_proposers:UncertaintyProposer` with no pool proposes nothing, so use `--acquisition` or your own
+  module.
+
+Measured on a synthetic landscape (`tests/test_al_proposers.py`: 312 molecules, additive substituent effects, a
+fake scorer, 20 seeds, batch 4), the mean best score so far after iterations 1 to 6 was:
+
+| proposer | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| `PoolProposer` (random) | -0.847 | -1.321 | -1.486 | -1.639 | -1.639 | -1.749 |
+| `lcb` | -0.847 | -1.522 | -1.894 | -2.153 | -2.291 | -2.299 |
+| `ei` | -0.847 | -1.526 | -1.994 | -2.249 | -2.276 | -2.295 |
+
+The optimum is -2.299. This landscape is learnable by construction; it shows the machinery works, not how much it
+helps on the funnel's real surface, which has not been measured.
+
 ## Cost and the budget
 
 Each screen is priced by the same cost model the MCP tools use ([mcp.md](mcp.md)); `--budget CPU_H` is a ceiling on

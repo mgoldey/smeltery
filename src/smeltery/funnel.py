@@ -20,6 +20,12 @@ if TYPE_CHECKING:  # keep the funnel importable without RDKit
     from .tiers import Tier
 
 
+#: Fewest paired poses a measurement needs to be ranked after a failed SCF dropped poses (`cut(min_pairs=)`). Two pairs
+#: give a standard error from one degree of freedom, which no z-bar can honestly use; three is the smallest count with a
+#: spread worth quoting. Declared, not measured: `[cut] min_pairs` overrides it.
+DEFAULT_MIN_PAIRS = 3
+
+
 class IncomparableError(ValueError):
     """Raised when asked to rank quantities that are not comparable."""
 
@@ -72,6 +78,12 @@ def paired_delta(parent: Candidate, analogue: Candidate, quantity: str, tier: Ti
     a = analogue.per_pose[quantity]
     if len(p) != len(a):
         raise ValueError(f"{analogue.name}: {len(a)} poses vs parent's {len(p)}; cannot pair")
+    bad = [i for i, (x, y) in enumerate(zip(a, p, strict=True)) if not (np.isfinite(x) and np.isfinite(y))]
+    if bad:  # a failed pose carries NaN; differencing it would spread the NaN into the mean, or hide it
+        raise ValueError(
+            f"{analogue.name}: {quantity!r} is not finite at pose(s) {bad} (a failed SCF?); drop those poses pairwise "
+            "(planning.run_plan does, and records them) rather than difference them"
+        )
     samples = np.asarray(a) - np.asarray(p)
     if tier is None:
         return Measurement.from_samples(samples)
@@ -108,6 +120,9 @@ class CutResult:
     z: float
     floor: float
     notes: list[str] = field(default_factory=list)
+    #: Candidates left out of the ranking because too few paired poses survived (`cut(min_pairs=...)`): name -> why.
+    #: While any exist the stage claims no survivors: a candidate that cannot be measured cannot be called worse.
+    unrankable: dict[str, str] = field(default_factory=dict)
 
 
 def resolved(a: Measurement, b: Measurement, z: float, floor: float) -> bool:
@@ -132,6 +147,7 @@ def cut(
     tier: Tier | None = None,
     quantity: str | None = None,
     sensitivity: SensitivityReport | None = None,
+    min_pairs: int | None = None,
 ) -> CutResult:
     """Cut to `keep` survivors. With `tier` and `quantity`, the floor is the tier's
     own systematic floor and an unmeasured one raises `UnmeasuredFloorError`;
@@ -144,7 +160,20 @@ def cut(
     quadrature sum: the tier's floor may already include charge-model error, so
     adding the two in quadrature could double-count, and max never lets the cut
     resolve a pair that either source says is unresolved. With tier=, the
-    report must be for the same `quantity`."""
+    report must be for the same `quantity`.
+
+    `min_pairs`: a measurement from fewer paired poses than this (a partial result after failed SCFs) is not
+    ranked. It is listed in `CutResult.unrankable` with its n, and the cut then returns no survivors and
+    `unranked_at_boundary=True`: the stage cannot say a candidate it could not measure is not among the best. None
+    (the default) ranks every measurement, as before."""
+    unrankable: dict[str, str] = {}
+    if min_pairs is not None:
+        unrankable = {
+            k: f"{v.n} paired pose(s) survived, fewer than the {min_pairs} required to rank"
+            for k, v in measurements.items()
+            if v.n < min_pairs
+        }
+        measurements = {k: v for k, v in measurements.items() if k not in unrankable}
     if tier is not None:
         if quantity is None or floor != 0.0:
             raise ValueError("with tier=, pass quantity= and no explicit floor=")
@@ -157,6 +186,18 @@ def cut(
         if tier is not None and sensitivity.quantity != quantity:
             raise ValueError(f"sensitivity report is for {sensitivity.quantity!r}, not {quantity!r}")
         floor = max(floor, sensitivity.floor)
+    if unrankable:
+        done = cut(measurements, keep, z, floor, min_pairs=None) if measurements else None
+        groups = done.groups if done is not None else []
+        return CutResult(
+            groups,
+            None,
+            True,
+            z,
+            floor,
+            [f"{k}: {why}; no survivors are claimed" for k, why in unrankable.items()] + (done.notes if done else []),
+            unrankable,
+        )
     order = sorted(measurements, key=lambda k: measurements[k].mean)
     groups: list[list[str]] = []
     for name in order:

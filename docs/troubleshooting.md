@@ -29,6 +29,36 @@ above. `scripts/dev-check.sh` runs the tests against a labelled ferric stub inst
 Set `OPENBLAS_NUM_THREADS=1`. ferric parallelizes with Rayon, and BLAS threads on top of that
 oversubscribe the machine. See the measured costs in [limits.md](limits.md).
 
+### An SCF does not converge (a pose is dropped, or the run stops)
+
+By default a pose whose SCF fails stops the run, naming the pose. Two settings turn that into a recorded, bounded
+policy (design: [the 2026-11-28 spec](superpowers/specs/2026-11-28-scf-resilience-design.md)):
+
+```toml
+[field_interaction]
+# tried once each, in order, when a leg does not converge; at most 5 rungs; no threshold or smearing may change
+remedies = [
+  { max_iter = 400 },
+  { diis = "adiis", level_shift = 0.5, max_iter = 400 },
+  { diis = "adiis", guess = "hcore", level_shift = 1.0, soscf = true, max_iter = 400 },
+]
+on_scf_failure = "drop"      # default "raise"
+
+[cut]
+min_pairs = 3                # default 3 once any pose is dropped
+```
+
+The same ladder is `smeltery.tiers.DEFAULT_SCF_LADDER`. It uses only what ferric's `run_rhf` takes (`max_iter`, `diis`,
+`level_shift`, `soscf`, `guess`); ferric has no damping option. A pose that still fails after the last rung is
+dropped for its pair, never retried, and recorded: the paired ddE is taken over the poses that converged for **both**
+the analogue and the parent (a parent failure drops that pose for every analogue). The record carries
+`results.dropped_poses` (candidate, pose, leg, reason, rungs tried, who it dropped), `results.pose_index` (kept
+original pose indices), `results.pairing` (poses requested, `n_pairs` per analogue, each failed pair with its reasons)
+and each analogue's `paired_ddE.n`. An analogue with fewer than `min_pairs` pairs is not ranked: the cut names it under
+`results.cut_unrankable`, claims no survivors and reports `unranked`. If every pose of a candidate fails the run stops
+(exit 3). Finished SCFs, failures included, are in `calcs.partial.jsonl`, so a rerun does not repeat them.
+`[charge_sensitivity]` re-measures every pose and refuses a run where poses were dropped; use `--temporal`.
+
 ### A missing optional extra
 
 ```text
@@ -127,7 +157,18 @@ config error: refusing to cut on 'dE_int': tier '...' has not measured its syste
 
 Both measurement tiers have an unmeasured floor today, so the config must state `[cut] floor` in
 kcal/mol; the run record then says the floor came from the config. Also `[cut] keep must be an
-integer in 1..N (the number of analogues)` when `keep` is out of range. See
+integer in 1..N (the number of analogues)` when `keep` is out of range.
+
+To see the evidence that exists for choosing it, pool the stored charge-model sensitivities:
+
+```bash
+smeltery floor measure benchmarks/plb/results/cdk2_sto3g.json benchmarks/plb/results/tyk2_sto3g_charmm36.json --provisional
+```
+
+It prints each system's floor (cdk2 1.26, tyk2 0.67 kcal/mol today) and the pooled summary, and `--provisional` asks
+for a default. It refuses with exit 3 until at least 3 systems agree within 1.5x; with two it says so and writes no
+default. The floors are lower bounds from one charge-model pair, so a number you set yourself is still not a
+measured floor. A default, when the evidence supports one, is labelled `PROVISIONAL, NOT MEASURED`. See
 [glossary.md](glossary.md) (floor, tie group) and [limits.md](limits.md).
 
 ### A path in the config does not exist

@@ -24,6 +24,8 @@
 
 `max_iter=None` leaves ferric's own iteration limit in force. In ferric 0.1.0rc7 that limit is 100: one measured field SCF of a 70-atom ligand in 6,458 charges stopped at 100 iterations unconverged and converged in 111 with `max_iter=200` (`benchmarks/danuglipron_halogen/ch3_diag/order_diag.json`). A value is passed to every SCF of the tier, vacuum and field.
 
+`on_scf_failure` ("raise" by default) and `remedies` (a bounded ladder of `run_rhf` overrides, `guess` among them) are in `settings()` only when set. With `on_scf_failure = "drop"` a pose that fails every rung gets NaN in `per_pose["dE_int"]` and an entry in `FieldInteraction.failures` (candidate, pose, leg, reason, rungs tried); `smeltery run` then pairs over the poses that converged for both legs and records the drops (`docs/troubleshooting.md`). The tier never retries a rung.
+
 ## Cost
 
 - **Cost:** 14.9 s; **Unit of work:** one pose, vacuum RHF plus field RHF; **System:** benzoic acid, 15 atoms, 51 basis functions, 36 SCF iterations in total, ferric 0.1.0 at commit 8637a5d, `RAYON_NUM_THREADS=1`, median of 5 repeats (14.0 to 16.3 s); **Basis:** STO-3G only; **Source:** `src/smeltery/data/cost_measurements.json`, produced by `scripts/measure_cost.py`
@@ -40,7 +42,7 @@
 ## Systematic floor
 
 - **Floor (`dE_int`):** UNMEASURED
-- `systematic_floor("dE_int")` returns `None` with the comment "charge-model / basis sensitivity not yet measured" (`src/smeltery/tiers.py`). `gates.charge_sensitivity` computes the charge-model part per run, and the `[charge_sensitivity]` method (`docs/methods.md`, `src/smeltery/methods/charge_sensitivity.py`) repeats a measurement under a second pdb2pqr force field and reports it in `results.charge_sensitivity`; it is not a stored number, and this page records no measured value.
+- `systematic_floor("dE_int")` returns `None` with the comment "charge-model / basis sensitivity not yet measured" (`src/smeltery/tiers.py`). `gates.charge_sensitivity` computes the charge-model part per run, and the `[charge_sensitivity]` method (`docs/methods.md`, `src/smeltery/methods/charge_sensitivity.py`) repeats a measurement under a second pdb2pqr force field and reports it in `results.charge_sensitivity`; it is not a stored number, and this page records no measured value. `smeltery floor measure` (`src/smeltery/floor_measure.py`) recomputes the sensitivity from stored per-pose energies of any number of PLB-style systems and pools them; with the two systems stored it refuses to give a default, so the floor stays UNMEASURED.
 - Related, and not this tier's floor: the pose-ensemble ddE noise floor, **ddE noise floor:** 4.07 kcal/mol (`smeltery.pocket.DDE_NOISE_FLOOR_KCAL_MOL`). It is SEM·√2 at n = 100 poses of an UNPAIRED difference of two independently embedded ensembles, from a per-pose sd of 28.75 kcal/mol on danuglipron in 7LCJ (`experiments/danuglipron/RESULTS.md`, M13 table; cited as M4 to M14 in `src/smeltery/pocket/binding_energy.py`). It is pose-sampling noise, not a systematic error of RHF/STO-3G, and the record does not establish that its `pose_fit` quantity is this tier's `dE_int`. Paired differences have a smaller SEM: 0.221 to 0.615 kcal/mol for F-for-H and Cl-for-H on one paracetamol-like molecule with MMFF energies in the gas phase, recorded as provisional (`experiments/danuglipron/RESULTS.md`, M17). Not measured for this tier.
 
 ## Not licensed to claim

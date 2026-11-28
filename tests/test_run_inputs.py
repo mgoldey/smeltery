@@ -47,8 +47,11 @@ def test_the_input_paths_are_the_ones_the_run_reads():
         ("structure", "spec"),
         ("pocket", "file"),
         ("docking", "receptor"),
+        ("baseline", "labels"),
+        ("baseline", "mmgbsa_file"),
         ("bound_pose", "file"),
         ("decisions", "file"),
+        ("generation", "file"),
     )
 
 
@@ -183,3 +186,17 @@ def test_staging_does_not_change_the_docking_example_digest(tmp_path):
     out = tmp_path / "out"
     assert main(["run", str(ex), "--plan", "--out", str(out)]) == 0
     assert _digest(ex) == _digest(out / "config.toml")
+
+
+def test_a_generation_file_is_staged_into_the_run_so_it_replays_from_its_own_directory(tmp_path):
+    """`[generation] file` is an input like `[decisions] file`: copied by hash, the staged config points at the copy."""
+    src, cfg = _write(tmp_path)
+    (src / "data" / "gen.json").write_text(json.dumps({"generator": "fake", "n_in": 1}))
+    cfg.write_text(cfg.read_text() + '\n[generation]\nfile = "data/gen.json"\n')
+    text, staged = stage_inputs(cfg.read_text(), src, tmp_path / "out")
+    want = hashlib.sha256((src / "data" / "gen.json").read_bytes()).hexdigest()
+    assert staged["generation.file"]["sha256"] == want
+    assert tomllib.loads(text)["generation"]["file"] == f"inputs/{want}/gen.json"
+    assert (tmp_path / "out" / staged["generation.file"]["copy"]).read_bytes() == (
+        src / "data" / "gen.json"
+    ).read_bytes()

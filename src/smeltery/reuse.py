@@ -456,6 +456,8 @@ class RunStages:
                 for q, values in (hit.output.get("per_pose") or {}).get(c.name, {}).items():
                     c.per_pose[q] = list(values)
             tier.calc_log = [dict(r) for r in hit.output.get("calc_log") or []]
+            if hasattr(tier, "failures"):  # failed SCFs of a reused measurement are still failed SCFs
+                tier.failures = [dict(r) for r in hit.output.get("scf_failures") or []]
             self._prev_output = hit.output_digest
             self._done(self._reused(entry, hit))
             return
@@ -470,6 +472,8 @@ class RunStages:
             },
             "calc_log": _plain(list(getattr(tier, "calc_log", None) or [])),
         }
+        if getattr(tier, "failures", None):  # only when there are some, so ordinary stage digests keep their value
+            output["scf_failures"] = _plain(list(tier.failures))
         entry["output_digest"] = self._prev_output = sha(output)
         if cacheable and sha(tier.settings()) == sha(settings):  # settings that changed while running: not reusable
             self._store(key, doc, tier.name, output)

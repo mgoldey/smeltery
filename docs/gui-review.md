@@ -14,7 +14,7 @@ secondary sources and was not checked against a primary one.
 |---|---|---|
 | Ranked result | `results.paired_ddE` (mean, SEM, n, per-pose differences), `results.cut` (groups, survivors, unranked) | None |
 | Uncertainty | SEM per candidate; the floor and its source in `inputs.floor` | None |
-| Attrition | `results.funnel` and `results.stages` | Gates stop the run rather than drop candidates, so this view is nearly flat. Real attrition comes from generator rejections (`GenerationResult.rejected`, closed `REASONS`), which a run record does not yet hold |
+| Attrition | `results.funnel` and `results.stages`; with `[generation]`, a leading `generate` row (raw outputs in, candidates out, a count per closed rejection reason, at most 50 rejected SMILES). Served by `GET /api/runs/{id}/attrition` and shown on the Bench Results page | Gates stop the run rather than drop candidates, so a run with no generation step is still nearly flat: its record never saw the generator. A generator's `generation.json` is named in the config ([generators.md](generators.md#recording-rejections-in-a-run)) |
 | Per-pose view | Paired differences only | The raw per-pose `dE_int` of each candidate is not recorded, so parent-to-analogue paired lines cannot be drawn |
 | 3D poses | None | **The record holds no geometry.** Poses exist only in memory during a run. Docking and structure stages write the receptor under `<out>/structure/` but not the ligand poses |
 | Liabilities | `properties.RdkitAlertProvider` (rank-only; CANNOT_DISCRIMINATE) | Not part of a run |
@@ -108,7 +108,7 @@ borrows from LiveDesign and Design Hub and uses the generators' existing idea of
    - raw per-pose values per candidate;
    - pose files: one SDF per candidate under `<out>/poses/` with per-pose properties, each identified by sha256 in the
      record;
-   - generator rejections, when a generator ran.
+   - generator rejections, when a generator ran (done: `[generation]`, see above).
 
    This also produces the SDF that DataWarrior, PyMOL and Maestro read.
 2. **`smeltery.gui.results` and `smeltery.gui.decisions`**, with no toolkit, following the pattern of

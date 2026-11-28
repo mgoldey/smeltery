@@ -61,7 +61,8 @@ _EXTRA_KNOBS: dict[str, tuple[str, str, str]] = {
         "[]",
         "list of tables, optional -- SCF settings tried in order when a leg does not converge; rung 0 is the "
         "settings above. Allowed keys: max_iter (int), diis (pulay|adiis|ediis), diis_size (int), "
-        "level_shift (float), soscf (bool). A rung that loosens a threshold or smears is refused: it would change "
+        "level_shift (float), soscf (bool), guess (minao|hcore); at most 5 rungs. A rung that loosens a threshold "
+        "or smears is refused: it would change "
         'the quantity measured. Example: remedies = [{ diis = "adiis", level_shift = 0.5 }]',
     ),
 }
