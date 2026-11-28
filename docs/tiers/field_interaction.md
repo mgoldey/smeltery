@@ -24,6 +24,8 @@
 
 `max_iter=None` leaves ferric's own iteration limit in force. In ferric 0.1.0rc7 that limit is 100: one measured field SCF of a 70-atom ligand in 6,458 charges stopped at 100 iterations unconverged and converged in 111 with `max_iter=200` (`benchmarks/danuglipron_halogen/ch3_diag/order_diag.json`). A value is passed to every SCF of the tier, vacuum and field.
 
+`on_scf_failure` ("raise" by default) and `remedies` (a bounded ladder of `run_rhf` overrides, `guess` among them) are in `settings()` only when set. With `on_scf_failure = "drop"` a pose that fails every rung gets NaN in `per_pose["dE_int"]` and an entry in `FieldInteraction.failures` (candidate, pose, leg, reason, rungs tried); `smeltery run` then pairs over the poses that converged for both legs and records the drops (`docs/troubleshooting.md`). The tier never retries a rung.
+
 ## Cost
 
 - **Cost:** 14.9 s; **Unit of work:** one pose, vacuum RHF plus field RHF; **System:** benzoic acid, 15 atoms, 51 basis functions, 36 SCF iterations in total, ferric 0.1.0 at commit 8637a5d, `RAYON_NUM_THREADS=1`, median of 5 repeats (14.0 to 16.3 s); **Basis:** STO-3G only; **Source:** `src/smeltery/data/cost_measurements.json`, produced by `scripts/measure_cost.py`

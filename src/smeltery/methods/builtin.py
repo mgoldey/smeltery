@@ -87,7 +87,7 @@ def _memory_dft() -> str:
 
 
 def builtin_specs() -> list[MethodSpec]:
-    from ..tiers import FieldDftInteraction, FieldInteraction, PairedPoses
+    from ..tiers import ON_SCF_FAILURE, FieldDftInteraction, FieldInteraction, PairedPoses
 
     return [
         MethodSpec(
@@ -285,7 +285,19 @@ def builtin_specs() -> list[MethodSpec]:
             validate=_config_check("_validate_measurement"),
             cost_model=_cost_rhf,
             summary="dE_int = E(in field) - E(vacuum) per pose: a difference, so it compares across formulas.",
-            params=params_from_dataclass(FieldInteraction, {"basis": "ferric basis set name", **_SCF_HELP}),
+            params=tuple(
+                Param(
+                    q.name,
+                    "choice",
+                    q.default,
+                    choices=ON_SCF_FAILURE,
+                    help="what a pose that fails every remedy rung does: raise stops the run; drop records it and "
+                    "pairs over the poses that converged for both legs (cut min_pairs guards the count)",
+                )
+                if q.name == "on_scf_failure"
+                else q
+                for q in params_from_dataclass(FieldInteraction, {"basis": "ferric basis set name", **_SCF_HELP})
+            ),
             # Required, but satisfied by its alternative: a pipeline measures dE_int with RHF or with KS-DFT.
             exclusive=("field_dft_interaction",),
         ),
@@ -385,6 +397,12 @@ def builtin_specs() -> list[MethodSpec]:
                 Param("keep", "int", required=True, help="analogues to keep (1..number of analogues)"),
                 Param("z", "float", 2.0, help="resolution in standard errors"),
                 Param("floor", "float", optional=True, help="kcal/mol; required while the tier's floor is unmeasured"),
+                Param(
+                    "min_pairs",
+                    "int",
+                    optional=True,
+                    help="fewest paired poses to rank an analogue once failed SCFs dropped poses (default 3 then)",
+                ),
             ),
         ),
     ]
