@@ -276,3 +276,21 @@ traceback; it is not recorded as a measured outcome.
 Its extra SCF lines go to `calcs.jsonl` with `field_model` set to the model name (and their `rung`), and the record
 keeps only their count (see [bench.md](bench.md#provenance-and-lineage)). Under `--temporal` the extra field legs
 share the vacuum leg with the primary field ([temporal-runs.md](temporal-runs.md)).
+
+## `[baseline]`: the baseline control
+
+`methods/baseline.py`, statistics in `baseline.py`. An `analysis` in the `empirical` rung, step `cut`, order 160. Off unless the section is in the config: then the run, its digest and its record bytes are exactly what they were without the method. On, it runs after the cut, reads `results.paired_ddE`, and writes `results.baseline` and nothing else.
+
+```toml
+[baseline]
+labels = "labels.csv"     # optional; name,value per analogue, the sign of ddE (higher = worse binding)
+logp = true               # Crippen logP of each analogue (default true)
+mmgbsa = false            # MM/GBSA ddG, only if its packages are installed
+mmgbsa_file = "mm.csv"    # or ddG_MM per analogue computed elsewhere (scripts/plb_mmgbsa.py)
+seed = 20261010
+n_boot = 10000            # at least 200
+```
+
+`labels` and `mmgbsa_file` are `name,value` lines (comma, tab or space; `#` comments; one header line allowed) and are input files: staged, and in the digest by content. Only ranks are used, so any monotone scale works. With no `labels` the baselines are computed and recorded and no comparison is made. Analogues without a label are listed under `unlabelled`; labels for names not in the run under `labels_not_in_run`.
+
+Per baseline (`results.baseline.baselines.<crippen_logp|mmgbsa>`): `status` (`computed` or `skipped` with `reason`), `n`, `values`, `rho_baseline`, `rho_ddE`, `delta_rho`, `delta_rho_ci95`, `bootstrap`, `rho_baseline_vs_ddE`, `underpowered`, `verdict`, `verdict_key`. `results.baseline.detectable` is the smallest significant |rho| and the power at a true r = 0.7 for the labelled n (exact permutation null, as L4 and L8); `results.baseline.verdict` joins the per-baseline phrases. The phrases and what each licenses are in [tiers/index.md](tiers/index.md#baseline-control).

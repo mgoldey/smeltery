@@ -31,3 +31,7 @@ system or one model pair, and says so.
 |---|---|---|---|---|
 | U1 | Missing ligand-pocket dielectric screening | UNMEASURED for COSMO and PCM with the pocket inside the dielectric (uniform eps is L10, ligand-only-cavity PCM is L14, nearest-atom distance-dependent charge scaling is L16) | issue #28 | That the bare point-charge field's ddE is quantitatively comparable to experiment |
 | U2 | On-target liabilities | UNMEASURED, target-specific | issue #35 | A substitution objective where the liability is the target's own function |
+
+## Checking these on your own campaign
+
+L5 and L15 are measured on two PLB series. A campaign with experimental labels can run the same comparison on its own series: `[baseline]` (opt-in; see [methods.md](methods.md#baseline-the-baseline-control) and [tiers/index.md](tiers/index.md#baseline-control)) records Crippen logP and, where its packages or a precomputed file are available, MM/GBSA, with Delta-rho against ddE, a paired bootstrap CI, the smallest significant |rho| and the power at this n (the L4 and L8 logic), and a verdict phrase. It forbids the same claims the rows above do: "indistinguishable" is not "equivalent", "n too small to conclude" is not "does not track", and one campaign's verdict is not a limit of the method.
