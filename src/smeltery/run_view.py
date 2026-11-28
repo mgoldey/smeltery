@@ -275,6 +275,12 @@ def funnel_rows(run: Run) -> list[dict]:
     return [dict(r) for r in run.record["results"]["funnel"]]
 
 
+def generation_row(run: Run) -> dict | None:
+    """The funnel's `generate` row (raw outputs in, candidates returned out, rejections per closed reason and the
+    capped list of rejected molecules), or None for a run with no generation step."""
+    return next((dict(r) for r in run.record["results"]["funnel"] if r.get("kind") == "generate"), None)
+
+
 def _resolve(run: Run, file: str) -> Path:
     p = Path(file)
     return p if p.is_absolute() else run.out_dir / p

@@ -1,6 +1,7 @@
 """Where candidates were lost: one bar per stage, in run order, at the count that stage passed on. Gates pass
 everyone or stop the run, so most steps are flat; the cut counts analogues only (the parent is the reference), and
-an UNRANKED cut dropped nobody."""
+an UNRANKED cut dropped nobody. A run with a generation step starts at the `generate` row: raw outputs in, candidates
+returned out, so the first bar shows what the generator lost."""
 
 from __future__ import annotations
 

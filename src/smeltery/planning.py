@@ -25,6 +25,7 @@ from .cost import available_memory_gb
 from .decisions import DecisionSet
 from .funnel import cut, paired_delta, tier_floor, unpaired_delta
 from .gates import PoseGateError, check_candidate_poses, require_passing_poses
+from .generate.record import GenerationFileError, generation_block, load_generation
 from .methods import Analysis, FieldSource, Measure, MethodSpec, PoseSource, active, active_hooks, registry
 from .model import Candidate, PointCharge
 from .pocket import load_pocket
@@ -60,6 +61,7 @@ class Plan:
     stage_log: list = dataclasses.field(default_factory=list)  # one dict per stage: its name and a summary line
     receptor_pdb: Path | None = None  # a receptor .pdb in the poses' frame, when one exists
     decisions_in: dict | None = None  # {"file", "sha256", "excluded"} when [decisions] was given
+    generation_in: dict | None = None  # {"file", "sha256", "block"} when [generation] was given
     gate_results: dict = dataclasses.field(default_factory=dict)  # results["gates"]: per-pose gate results that ran
     stage_seconds: dict = dataclasses.field(default_factory=dict)  # this plan's wall time per stage (`_stage`)
     structure_fetch: dict | None = None  # results["structure_fetch"]: when [structure] was fetched (not an input)
@@ -81,6 +83,8 @@ class Plan:
             inputs["field"] = [(c.q, c.xyz_ang) for c in self.field]
         if self.decisions_in is not None:  # only when given, so configs without [decisions] keep their digests
             inputs["decisions"] = {"sha256": self.decisions_in["sha256"]}
+        if self.generation_in is not None:  # likewise: configs without [generation] keep their digests
+            inputs["generation"] = {"sha256": self.generation_in["sha256"]}
         return inputs
 
     @property
@@ -96,6 +100,20 @@ class Plan:
 
 def _canonical(smiles: str) -> str:
     return Chem.MolToSmiles(Chem.MolFromSmiles(smiles))
+
+
+def _read_generation(cfg: dict) -> dict | None:
+    """Read `[generation] file` (smeltery.generate.record) for the record, or None without the section."""
+    if "generation" not in cfg:
+        return None
+    path = _resolve(cfg, cfg["generation"]["file"])
+    if not path.is_file():
+        raise ConfigError(f"[generation] file {str(path)!r} does not exist")
+    try:
+        doc = load_generation(path)
+    except GenerationFileError as e:
+        raise ConfigError(f"[generation] {e}") from e
+    return {"file": str(path.resolve()), "sha256": file_digest(path), "block": generation_block(doc)}
 
 
 def _apply_decisions(cfg: dict) -> tuple[dict, dict | None]:
@@ -480,6 +498,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     network fetch of the structure providers (tests inject committed fixtures).
     """
     cfg, decisions_in = _apply_decisions(cfg)
+    generation_in = _read_generation(cfg)
     cands = [Candidate(n, s) for n, s in cfg["candidates"].items()]
     parent = next(c for c in cands if c.name == cfg["parent"])
     log: list = []
@@ -529,6 +548,7 @@ def build_plan(cfg: dict, out_dir: Path | None = None, fetch=None) -> Plan:
     receptor = pocket_path if pocket_path is not None and pocket_path.suffix.lower() == ".pdb" else None
     plan = Plan(cfg, cands, parent, field, poses, tier, floor, source, before, after, extra, log)
     plan.receptor_pdb, plan.decisions_in = receptor, decisions_in
+    plan.generation_in = generation_in
     plan.gate_results = gate_results
     plan.stage_seconds = stage_seconds
     plan.structure_fetch = prepared.fetch if prepared is not None else None
@@ -556,6 +576,20 @@ def funnel_counts(plan: Plan, res=None) -> list[dict]:
     """
     n = len(plan.candidates)
     rows = []
+    if plan.generation_in is not None:  # the only stage that loses molecules before the funnel sees them
+        block = plan.generation_in["block"]
+        rows.append(
+            {
+                "stage": "generate",
+                "kind": "generate",
+                "candidates_in": block["n_raw"],
+                "candidates_out": block["n_returned"],
+                **{
+                    k: block[k]
+                    for k in ("generator", "rejected_by_reason", "rejected_total", "rejected_listed", "rejected")
+                },
+            }
+        )
     for e in plan.stage_log:
         rows.append({k: e[k] for k in ("stage", "kind", "candidates_in", "candidates_out")})
         if e["stage"] == "pocket":  # parity runs right after the pocket, before the recorded gates
@@ -695,6 +729,8 @@ def run_plan(
     )
     if plan.decisions_in is not None:
         results["decisions_in"] = dict(plan.decisions_in)
+    if plan.generation_in is not None:
+        results["generation_in"] = {k: plan.generation_in[k] for k in ("file", "sha256")}
     if plan.structure_fetch is not None:  # a wall-clock time: in results, never in inputs (the digest)
         results["structure_fetch"] = dict(plan.structure_fetch)
     rec = RunRecord(plan.cfg["campaign"], plan.inputs, plan.tiers, results)

@@ -16,6 +16,13 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
   MEASURED`, lists its systems) only with at least 3 systems within 1.5x; with the two that exist it refuses (exit 3).
   No third system was measured, `FieldInteraction.systematic_floor` is still None, and docs/limits.md gains U3, not an
   L-row.
+- Generator rejections in the run record (docs/superpowers/specs/2026-11-28-generator-rejections-in-the-record.md). A
+  config's `[generation] file` (written by `smeltery.generate.record.write_generation`) adds a leading `generate` row to
+  `results.funnel` -- raw outputs in, candidates out, a count per closed rejection reason, at most 50 rejected SMILES --
+  plus `results.generation_in` and `ext.smeltery.generation` in the core record (the frozen schema is untouched). The
+  dataset export gains `smeltery.generation` file metadata for such runs, `GET /api/runs/{id}/attrition` serves the
+  stages and the rejections, and the Bench Results page shows "Where candidates were lost". Records with no generation
+  step are unchanged.
 - A pinned compatible set and a ferric compatibility matrix (roadmap 46, docs/compatibility.md,
   docs/superpowers/specs/2026-11-20-compat-matrix-design.md). `compat/stack.toml` pins ferric, attestation-schema and
   mcp for smeltery's environment (equal to uv.lock's, enforced by tests/test_compat_stack.py) and attestation by full

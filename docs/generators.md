@@ -235,3 +235,25 @@ model pose with jittered ones.
 `SMELTERY_SBDD_DIR`, `SMELTERY_SBDD_CKPT` and `SMELTERY_SBDD_POCKET` are set (`SMELTERY_SBDD_DEVICE` is optional).
 It asserts that 4 raw outputs came back and that the provenance records the checkpoint hash and the DiffSBDD
 commit; it does not require any sample to be accepted.
+
+## Recording rejections in a run
+
+What a generator rejected is lost to a run record unless it is handed over. Write the result's rejections and name the
+file in the config, as `[decisions]` does:
+
+```python
+from smeltery.generate.record import write_generation
+
+write_generation("generation.json", result, generator=gen.name)
+```
+
+```toml
+[generation]
+file = "generation.json"   # relative to the config's directory; read and validated before anything is posed
+```
+
+The run then holds a leading `generate` row in `results.funnel` (raw outputs in, candidates returned out, a count for
+every closed reason above, zero included, and at most 50 rejected molecules with reason and SMILES), `results.generation_in`
+(the file and its sha256), and the same block under `ext.smeltery.generation` in the core record. The file is an input:
+it moves `input_digest`. A config without `[generation]` is unchanged. Design:
+`docs/superpowers/specs/2026-11-28-generator-rejections-in-the-record.md`.
