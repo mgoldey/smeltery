@@ -8,6 +8,14 @@ pull requests; numbers refer to issues or pull requests on the smeltery tracker.
 ## [Unreleased]
 
 ### Added
+- `smeltery floor measure RESULTS... [--models A B] [--json OUT] [--provisional]` (`smeltery.floor_measure`,
+  docs/superpowers/specs/2026-11-28-measure-field-floor-design.md): the charge-model sensitivity floor of the paired
+  ddE from stored per-pose energies of any number of PLB-style systems, pooled (per-system floors, max, median, min,
+  spread, df-weighted shift SD). It reproduces L6 (cdk2 1.257) and L11 (tyk2 0.667 kcal/mol) from the committed
+  results. `--provisional` returns a `ProvisionalFloor` (`measured` always False, source begins `PROVISIONAL, NOT
+  MEASURED`, lists its systems) only with at least 3 systems within 1.5x; with the two that exist it refuses (exit 3).
+  No third system was measured, `FieldInteraction.systematic_floor` is still None, and docs/limits.md gains U3, not an
+  L-row.
 - A pinned compatible set and a ferric compatibility matrix (roadmap 46, docs/compatibility.md,
   docs/superpowers/specs/2026-11-20-compat-matrix-design.md). `compat/stack.toml` pins ferric, attestation-schema and
   mcp for smeltery's environment (equal to uv.lock's, enforced by tests/test_compat_stack.py) and attestation by full

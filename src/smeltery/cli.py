@@ -396,6 +396,7 @@ VIEWERS = {
     "central": "smeltery.dashboard",
     "avogadro": "smeltery.avogadro",
     "golden": "smeltery.golden",
+    "floor": "smeltery.floor_measure",
     "bench": "smeltery.bench.app",
     "target": "smeltery.target_file",
     "verify-run": "smeltery.run_tools:verify_run",
@@ -471,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("central", help="alias for dashboard")
     sub.add_parser("avogadro", help="export a run and open it in Avogadro 2 (smeltery avogadro OUT --help)")
     sub.add_parser("golden", help="golden-path helpers: init | open | bundle")
+    sub.add_parser("floor", help="FieldInteraction floor evidence (smeltery floor measure RESULTS...; docs/limits.md)")
     sub.add_parser("bench", help="Bench web app (smeltery bench ROOT --help)")
     sub.add_parser("serve", help="Bench, configured by SMELTERY_* env vars (smeltery serve --help)")
     sub.add_parser("mcp", help="serve the screening tools to an MCP client over stdio (docs/mcp.md; `mcp` extra)")
