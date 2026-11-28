@@ -57,6 +57,23 @@ The issue that asked for these pages speaks of six gates per tier. The code does
 - A number is quoted with its system, and with its basis where the cost depends on one. The campaign split inverts between STO-3G and def2-svp: docking is 72.7% of the run at STO-3G and 39.8% at def2-svp (`src/smeltery/cost.py`).
 - Measurements recorded for these pages are in `measurements.json`, written by `scripts/measure_tier_costs.py`. The site is plain Markdown; no site generator or deployment is configured.
 
+## Baseline control
+
+None of the tiers above is licensed to claim it ranks a series better than a baseline that costs seconds: on PLB tyk2 a single-snapshot MM/GBSA ranked better than ddE (L15), and on PLB cdk2 Crippen logP was at least as good (L5). A campaign with experimental labels can ask for the comparison on its own series with `[baseline]` ([methods.md](../methods.md#baseline-the-baseline-control)); it is off unless the section is in the config, and it runs after the cut, so it cannot change a ranking, a survivor or any other key of the record.
+
+It writes `results.baseline`: per baseline the Spearman rho against the labels, rho of ddE, Delta-rho = rho(baseline) - rho(ddE) with a paired bootstrap 95% CI (the same ligand resample for both correlations, the statistic of L15), and one verdict phrase. The phrases, and when each is used:
+
+| Phrase | When |
+|---|---|
+| `n too small to conclude` | fewer than 5 labelled analogues: no Spearman rho is significant at that n (the exact permutation logic behind L4 and L8) |
+| `does not beat the logP baseline: the baseline ranks this series better` | the CI of Delta-rho excludes 0, above |
+| `indistinguishable from the logP baseline at this n` | the CI contains 0; always followed by "not evidence they are equivalent" |
+| `ranks this series better than the logP baseline; one series, not a general claim` | the CI excludes 0, below |
+| `no experimental labels: ...` | no `labels` file: baselines are recorded, nothing is compared |
+| `undefined: ...` | ddE or the baseline is constant across the labelled analogues |
+
+A verdict at n below the power threshold (80% at a true r = 0.7, L4: n = 8 gives about 40%, L8: n = 12 about 68%) carries `underpowered: smallest significant |rho| ..., about P% power`, with the numbers for that n. MM/GBSA is used only from `mmgbsa_file` or when openmm, openmmforcefields, openff-toolkit and `sqm` are already installed; otherwise it is recorded as skipped with the missing packages named. This build has no in-process MM/GBSA engine, so with the packages present and no file it is skipped as well, and says so. Source: `src/smeltery/baseline.py`, `tests/test_baseline_control.py`.
+
 ## Adding a tier
 
 Put the class in a module listed in `smeltery.tier_registry.TIER_MODULES` (or add the module there), then add `docs/tiers/<name>.md` with the same sections as the pages above and a row in the table. The tests say which part is missing.
