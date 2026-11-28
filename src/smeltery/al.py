@@ -111,8 +111,8 @@ def load_proposer(ref: str) -> Proposer:
         obj = getattr(module, attr)
     except AttributeError as e:
         raise AlError(f"proposer {attr!r} is not in module {module_name!r}") from e
-    if not hasattr(obj, "propose") and callable(obj):
-        obj = obj()
+    if isinstance(obj, type) or (not hasattr(obj, "propose") and callable(obj)):
+        obj = obj()  # a class (its `propose` is unbound until instantiated) or a zero-arg factory
     if not hasattr(obj, "propose"):
         raise AlError(f"proposer {ref!r} has no propose(history, n) method")
     return obj
@@ -129,13 +129,19 @@ def proposer_identity(proposer: Proposer, ref: str | None) -> dict:
             source_sha256 = hashlib.sha256(Path(module_file).read_bytes()).hexdigest()
         except OSError:
             source_sha256 = None
-    return {
+    identity = {
         "ref": ref,
         "module": type(proposer).__module__,
         "class": type(proposer).__name__,
         "version": getattr(module, "__version__", None),
         "source_sha256": source_sha256,
     }
+    # a proposer that exposes `params` (its non-seed settings, JSON scalars) has them recorded too; absent otherwise,
+    # so every existing proposer's identity is unchanged
+    params = getattr(proposer, "params", None)
+    if isinstance(params, Mapping):
+        identity["params"] = {str(k): v for k, v in params.items() if isinstance(v, str | int | float | bool | None)}
+    return identity
 
 
 def _proposer_seeds(proposer: Proposer) -> dict[str, int]:
@@ -533,7 +539,15 @@ def al_main(argv: list[str] | None = None, env: Mapping[str, str] | None = None)
     run.add_argument("--reference-name", default="reference")
     run.add_argument("--proposer", default=None, help="module:object of a Proposer (propose(history, n) -> [SMILES])")
     run.add_argument("--pool", default=None, help="a file of SMILES (one per line) for the built-in PoolProposer")
-    run.add_argument("--seed", type=int, default=0, help="PoolProposer seed (with --pool)")
+    run.add_argument("--seed", type=int, default=0, help="seed for the --pool proposer (PoolProposer or acquisition)")
+    run.add_argument(
+        "--acquisition",
+        choices=("lcb", "ei", "random"),
+        default=None,
+        help="with --pool: choose by an uncertainty-aware GP (smeltery.al_proposers.UncertaintyProposer) using lower "
+        "confidence bound or expected improvement; 'random' is that proposer without a model. Default: PoolProposer",
+    )
+    run.add_argument("--kappa", type=float, default=1.0, help="LCB exploration weight (with --acquisition lcb)")
     run.add_argument("--iterations", type=int, required=True)
     run.add_argument("--batch", type=int, required=True, help="candidates proposed per iteration")
     run.add_argument("--budget", type=float, default=None, help="total predicted CPU-hours for the whole loop")
@@ -548,14 +562,29 @@ def al_main(argv: list[str] | None = None, env: Mapping[str, str] | None = None)
     if args.proposer and args.pool:
         print("smeltery al: pass either --proposer or --pool, not both", file=sys.stderr)
         return 2
+    if args.acquisition and not args.pool:
+        print("smeltery al: --acquisition needs --pool FILE (the candidates to choose among)", file=sys.stderr)
+        return 2
     try:
         if args.proposer:
             proposer: Proposer = load_proposer(args.proposer)
             proposer_ref = args.proposer
         elif args.pool:
             pool = [line.strip() for line in Path(args.pool).read_text().splitlines() if line.strip()]
-            proposer = PoolProposer(pool, seed=args.seed)
-            proposer_ref = None
+            if args.acquisition:
+                from .al_proposers import UncertaintyProposer
+
+                proposer = UncertaintyProposer(
+                    pool,
+                    seed=args.seed,
+                    acquisition=args.acquisition,
+                    kappa=args.kappa,
+                    exclude=[args.reference_smiles],
+                )
+                proposer_ref = "smeltery.al_proposers:UncertaintyProposer"
+            else:
+                proposer = PoolProposer(pool, seed=args.seed)
+                proposer_ref = None
         else:
             print("smeltery al: a proposer is required (--proposer module:obj or --pool FILE)", file=sys.stderr)
             return 2
